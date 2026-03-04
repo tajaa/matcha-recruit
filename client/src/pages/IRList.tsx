@@ -94,6 +94,7 @@ export function IRList() {
   // Anonymous reporting
   const [anonLink, setAnonLink] = useState<string | null>(null);
   const [anonEnabled, setAnonEnabled] = useState(false);
+  const [anonUsed, setAnonUsed] = useState(false);
   const [anonLoading, setAnonLoading] = useState(false);
   const [anonCopied, setAnonCopied] = useState(false);
 
@@ -134,11 +135,14 @@ export function IRList() {
     fetchIncidents();
   }, [fetchIncidents]);
 
+  const appOrigin = 'https://hey-matcha.com';
+
   // Load anonymous reporting status
   useEffect(() => {
-    irIncidents.getAnonymousReportingStatus().then((res) => {
-      setAnonLink(res.token ? `${window.location.origin}/report/${res.token}` : null);
+    irIncidents.getAnonymousReportingStatus().then((res: any) => {
+      setAnonLink(res.token ? `${appOrigin}/report/${res.token}` : null);
       setAnonEnabled(res.enabled);
+      setAnonUsed(res.used ?? false);
     }).catch(() => {});
   }, []);
 
@@ -146,8 +150,9 @@ export function IRList() {
     setAnonLoading(true);
     try {
       const res = await irIncidents.generateAnonymousReportingToken();
-      setAnonLink(`${window.location.origin}/report/${res.token}`);
+      setAnonLink(`${appOrigin}/report/${res.token}`);
       setAnonEnabled(true);
+      setAnonUsed(false);
     } catch { /* ignore */ }
     setAnonLoading(false);
   };
@@ -157,8 +162,9 @@ export function IRList() {
     setAnonLoading(true);
     try {
       const res = await irIncidents.generateAnonymousReportingToken();
-      setAnonLink(`${window.location.origin}/report/${res.token}`);
+      setAnonLink(`${appOrigin}/report/${res.token}`);
       setAnonEnabled(true);
+      setAnonUsed(false);
     } catch { /* ignore */ }
     setAnonLoading(false);
   };
@@ -266,6 +272,11 @@ export function IRList() {
           <div className="flex items-center gap-2">
             <Shield size={14} className="text-zinc-500" />
             <span className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Anonymous Reporting</span>
+            {anonUsed && (
+              <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-orange-500/10 text-orange-400 border border-orange-500/20">
+                Used
+              </span>
+            )}
           </div>
           {!anonEnabled ? (
             <button
@@ -310,9 +321,11 @@ export function IRList() {
           </div>
         )}
         <p className="text-[10px] text-zinc-600 mt-2 font-mono">
-          {anonEnabled
-            ? 'Share this link with employees. Reporter identity is never stored.'
-            : 'Allow employees to report incidents anonymously via a shareable link.'}
+          {!anonEnabled
+            ? 'Allow employees to report incidents anonymously via a shareable link.'
+            : anonUsed
+              ? 'This link has been used. Regenerate to create a new single-use link.'
+              : 'Share this link — it can only be used once. Reporter identity is never stored.'}
         </p>
       </div>
 

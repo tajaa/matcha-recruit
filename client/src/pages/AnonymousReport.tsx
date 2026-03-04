@@ -7,6 +7,7 @@ const API_BASE = (import.meta.env.VITE_API_URL || '/api').replace(/\/api$/, '');
 export function AnonymousReport() {
   const { token } = useParams<{ token: string }>();
   const [valid, setValid] = useState<boolean | null>(null);
+  const [used, setUsed] = useState(false);
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   // Honeypot — hidden from real users
@@ -18,7 +19,10 @@ export function AnonymousReport() {
   useEffect(() => {
     if (!token) return;
     fetch(`${API_BASE}/api/report/${token}`)
-      .then((res) => setValid(res.ok))
+      .then((res) => {
+        if (res.status === 410) { setUsed(true); setValid(false); }
+        else setValid(res.ok);
+      })
       .catch(() => setValid(false));
   }, [token]);
 
@@ -62,6 +66,19 @@ export function AnonymousReport() {
     return (
       <div className="min-h-screen bg-zinc-950 flex items-center justify-center">
         <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse font-mono">Validating...</div>
+      </div>
+    );
+  }
+
+  // Already used
+  if (used) {
+    return (
+      <div className="min-h-screen bg-zinc-950 flex items-center justify-center p-6">
+        <div className="max-w-md w-full text-center space-y-4">
+          <AlertTriangle size={32} className="text-orange-400 mx-auto" />
+          <h1 className="text-xl font-bold text-white uppercase tracking-wide">Link Already Used</h1>
+          <p className="text-sm text-zinc-500">This reporting link has already been used to submit a report. Please contact your administrator for a new link.</p>
+        </div>
       </div>
     );
   }

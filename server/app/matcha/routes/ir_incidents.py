@@ -491,13 +491,17 @@ async def get_anonymous_reporting_status(
     if company_id is None:
         raise HTTPException(status_code=404, detail="Company not found")
     async with get_connection() as conn:
-        token = await conn.fetchval(
-            "SELECT report_email_token FROM companies WHERE id = $1",
+        row = await conn.fetchrow(
+            "SELECT report_email_token, report_token_used_at FROM companies WHERE id = $1",
             company_id,
         )
-    if not token:
-        return {"token": None, "enabled": False}
-    return {"token": token, "enabled": True}
+    if not row or not row["report_email_token"]:
+        return {"token": None, "enabled": False, "used": False}
+    return {
+        "token": row["report_email_token"],
+        "enabled": True,
+        "used": row["report_token_used_at"] is not None,
+    }
 
 
 @router.post("/anonymous-reporting/generate")
@@ -511,11 +515,11 @@ async def generate_anonymous_reporting_token(
     token = secrets.token_hex(6)
     async with get_connection() as conn:
         await conn.execute(
-            "UPDATE companies SET report_email_token = $1 WHERE id = $2",
+            "UPDATE companies SET report_email_token = $1, report_token_used_at = NULL WHERE id = $2",
             token,
             company_id,
         )
-    return {"token": token, "enabled": True}
+    return {"token": token, "enabled": True, "used": False}
 
 
 @router.delete("/anonymous-reporting/disable")

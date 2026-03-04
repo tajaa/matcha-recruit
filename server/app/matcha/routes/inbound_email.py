@@ -59,16 +59,18 @@ class AnonymousReportRequest(BaseModel):
 async def validate_report_token(token: str):
     """Check that a token is valid so the form can show an error early."""
     async with get_connection() as conn:
-        exists = await conn.fetchval(
+        row = await conn.fetchrow(
             """
-            SELECT 1 FROM companies
+            SELECT report_token_used_at FROM companies
             WHERE report_email_token = $1
               AND COALESCE((enabled_features->>'incidents')::boolean, false) = true
             """,
             token.lower(),
         )
-    if not exists:
+    if not row:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
+    if row["report_token_used_at"] is not None:
+        raise HTTPException(status_code=410, detail="This reporting link has already been used")
     return {"valid": True}
 
 
@@ -88,12 +90,15 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
     # Look up company by token
     async with get_connection() as conn:
         company = await conn.fetchrow(
-            "SELECT id, name, enabled_features FROM companies WHERE report_email_token = $1",
+            "SELECT id, name, enabled_features, report_token_used_at FROM companies WHERE report_email_token = $1",
             token.lower(),
         )
 
     if not company:
         raise HTTPException(status_code=404, detail="Invalid reporting link")
+
+    if company["report_token_used_at"] is not None:
+        raise HTTPException(status_code=410, detail="This reporting link has already been used")
 
     # Check incidents feature
     features = company.get("enabled_features")
@@ -126,6 +131,13 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
             "Anonymous",
             company_id,
             "anonymous-report",
+        )
+
+    # Mark token as used
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE companies SET report_token_used_at = NOW() WHERE report_email_token = $1",
+            token.lower(),
         )
 
     if row:
