@@ -11,7 +11,7 @@ from typing import Optional, Any, AsyncGenerator
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, HTTPException, Depends, Query, status
+from fastapi import APIRouter, Body, HTTPException, Depends, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
@@ -2969,10 +2969,10 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
                    title, description, current_value, numeric_value,
                    source_url, source_name, effective_date, expiration_date,
                    previous_value, last_changed_at, last_verified_at, is_bookmarked,
-                   created_at, updated_at
+                   sort_order, created_at, updated_at
             FROM jurisdiction_requirements
             WHERE jurisdiction_id = $1
-            ORDER BY category, title
+            ORDER BY category, sort_order, title
         """, jurisdiction_id)
 
         legislation = await conn.fetch("""
@@ -3033,6 +3033,7 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
                     "last_changed_at": fmt_date(r["last_changed_at"]),
                     "last_verified_at": fmt_date(r["last_verified_at"]),
                     "is_bookmarked": r["is_bookmarked"],
+                    "sort_order": r["sort_order"],
                     "updated_at": fmt_date(r["updated_at"]),
                 }
                 for r in requirements
@@ -3106,7 +3107,7 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
                   title, description, current_value, numeric_value,
                   source_url, source_name, effective_date, expiration_date,
                   previous_value, last_changed_at, last_verified_at, is_bookmarked,
-                  created_at, updated_at
+                  sort_order, created_at, updated_at
     """
 
     async with get_connection() as conn:
@@ -3135,6 +3136,7 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         "last_changed_at": fmt_date(row["last_changed_at"]),
         "last_verified_at": fmt_date(row["last_verified_at"]),
         "is_bookmarked": row["is_bookmarked"],
+        "sort_order": row["sort_order"],
         "updated_at": fmt_date(row["updated_at"]),
     }
 
@@ -3163,7 +3165,8 @@ async def list_bookmarked_requirements():
                    jr.jurisdiction_name, jr.title, jr.description, jr.current_value,
                    jr.numeric_value, jr.source_url, jr.source_name, jr.effective_date,
                    jr.expiration_date, jr.previous_value, jr.last_changed_at,
-                   jr.last_verified_at, jr.is_bookmarked, jr.created_at, jr.updated_at,
+                   jr.last_verified_at, jr.is_bookmarked, jr.sort_order,
+                   jr.created_at, jr.updated_at,
                    j.id AS jurisdiction_id, j.city, j.state
             FROM jurisdiction_requirements jr
             JOIN jurisdictions j ON j.id = jr.jurisdiction_id
@@ -3194,12 +3197,37 @@ async def list_bookmarked_requirements():
             "last_changed_at": fmt_date(r["last_changed_at"]),
             "last_verified_at": fmt_date(r["last_verified_at"]),
             "is_bookmarked": r["is_bookmarked"],
+            "sort_order": r["sort_order"],
             "updated_at": fmt_date(r["updated_at"]),
             "city": r["city"],
             "state": r["state"],
         }
         for r in rows
     ]
+
+
+@router.put("/jurisdictions/requirements/reorder", dependencies=[Depends(require_admin)])
+async def reorder_requirements(body: dict[str, Any] = Body(...)):
+    """Bulk-update sort_order for jurisdiction requirements."""
+    order = body.get("order")
+    if not order or not isinstance(order, list):
+        raise HTTPException(status_code=400, detail="'order' must be a non-empty list")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            updated = 0
+            for item in order:
+                rid = item.get("id")
+                sort_order = item.get("sort_order")
+                if rid is None or sort_order is None:
+                    continue
+                result = await conn.execute(
+                    "UPDATE jurisdiction_requirements SET sort_order = $1, updated_at = NOW() WHERE id = $2",
+                    sort_order, UUID(rid),
+                )
+                if result and result.endswith("1"):
+                    updated += 1
+    return {"updated": updated}
 
 
 def _to_sse(event: dict[str, Any]) -> str:

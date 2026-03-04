@@ -2736,6 +2736,12 @@ async def init_db():
             ON structured_data_cache(state, jurisdiction_level, category)
         """)
 
+        # Add sort_order column for manual reordering
+        await conn.execute("""
+            ALTER TABLE jurisdiction_requirements
+            ADD COLUMN IF NOT EXISTS sort_order INTEGER NOT NULL DEFAULT 0
+        """)
+
         # Add source_tier column to jurisdiction_requirements
         await conn.execute("""
             ALTER TABLE jurisdiction_requirements

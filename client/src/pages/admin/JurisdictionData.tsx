@@ -6,6 +6,9 @@ import {
   Bookmark, BookmarkCheck
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { useQueryClient } from '@tanstack/react-query';
 import { useJurisdictionData } from '../../hooks/useJurisdictionData';
 import { useIndustryProfiles } from '../../hooks/useIndustryProfiles';
@@ -799,6 +802,114 @@ const LEVEL_COLORS: Record<string, { border: string; bg: string; label: string }
   city: { border: 'border-l-emerald-500', bg: 'bg-emerald-500/10', label: 'text-emerald-600 dark:text-emerald-400' },
 };
 
+function SortableRequirementCard({ req, t, colors, isEditing, editForm, setEditForm, saving, saveEditing, cancelEditing, startEditing, toggleBookmark }: {
+  req: JurisdictionRequirement;
+  t: typeof LT;
+  colors: { border: string; bg: string; label: string };
+  isEditing: boolean;
+  editForm: { title: string; description: string; current_value: string; effective_date: string; source_url: string; source_name: string };
+  setEditForm: React.Dispatch<React.SetStateAction<typeof editForm>>;
+  saving: boolean;
+  saveEditing: () => void;
+  cancelEditing: () => void;
+  startEditing: (req: JurisdictionRequirement) => void;
+  toggleBookmark: (e: React.MouseEvent, reqId: string) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: req.id, disabled: isEditing });
+  const style = { transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : undefined, zIndex: isDragging ? 10 : undefined };
+
+  if (isEditing) {
+    return (
+      <div ref={setNodeRef} style={style} className={`${t.innerEl} border-l-[3px] ${colors.border} p-3 space-y-2 ring-1 ring-blue-500/40`}>
+        <div className="space-y-2">
+          <div>
+            <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Title</label>
+            <input value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
+              className={`w-full text-sm px-2 py-1 rounded ${t.select}`} />
+          </div>
+          <div>
+            <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Current Value</label>
+            <input value={editForm.current_value} onChange={e => setEditForm(f => ({ ...f, current_value: e.target.value }))}
+              className={`w-full text-sm px-2 py-1 rounded ${t.select}`} />
+          </div>
+          <div>
+            <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Description / Applicability Notes</label>
+            <textarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
+              rows={3} className={`w-full text-xs px-2 py-1 rounded ${t.select} resize-y`} />
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Effective Date</label>
+              <input type="date" value={editForm.effective_date} onChange={e => setEditForm(f => ({ ...f, effective_date: e.target.value }))}
+                className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+            </div>
+            <div>
+              <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Source Name</label>
+              <input value={editForm.source_name} onChange={e => setEditForm(f => ({ ...f, source_name: e.target.value }))}
+                className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+            </div>
+          </div>
+          <div>
+            <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Source URL</label>
+            <input value={editForm.source_url} onChange={e => setEditForm(f => ({ ...f, source_url: e.target.value }))}
+              className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
+          </div>
+        </div>
+        <div className="flex items-center gap-2 pt-1">
+          <button onClick={saveEditing} disabled={saving}
+            className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition">
+            {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Update
+          </button>
+          <button onClick={cancelEditing}
+            className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition ${t.btnGhost} ${t.innerEl}`}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}
+      className={`${t.innerEl} border-l-[3px] ${colors.border} p-3 space-y-1 cursor-pointer group relative`} onClick={() => startEditing(req)}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-1.5">
+          <button {...listeners} onClick={e => e.stopPropagation()}
+            className={`cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-60 transition ${t.textMuted} -ml-1 touch-none`}
+            title="Drag to reorder">
+            <GripVertical className="w-3.5 h-3.5" />
+          </button>
+          <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
+        </div>
+        <div className="flex items-center gap-1.5 flex-shrink-0">
+          <button onClick={e => toggleBookmark(e, req.id)} title={req.is_bookmarked ? 'Remove bookmark' : 'Bookmark for review'}
+            className={`transition ${req.is_bookmarked ? 'text-amber-500' : `opacity-0 group-hover:opacity-60 ${t.textMuted}`}`}>
+            {req.is_bookmarked ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+          </button>
+          <Pencil className={`w-3 h-3 opacity-0 group-hover:opacity-60 transition ${t.textMuted}`} />
+          {req.source_url && (
+            <a href={req.source_url} target="_blank" rel="noopener noreferrer"
+              className={`${t.btnGhost} transition`} title="View source"
+              onClick={e => e.stopPropagation()}>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          )}
+        </div>
+      </div>
+      {req.current_value && (
+        <div className={`text-sm ${t.textDim}`}>{req.current_value}</div>
+      )}
+      {req.description && (
+        <p className={`text-xs ${t.textFaint} leading-relaxed`}>{req.description}</p>
+      )}
+      <div className={`flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono ${t.textFaint}`}>
+        {req.source_name && <span>Source: {req.source_name}</span>}
+        {req.effective_date && <span>Effective: {formatDate(req.effective_date)}</span>}
+      </div>
+    </div>
+  );
+}
+
 function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfileEditor, preemptionRules, onDetailUpdate }: {
   t: typeof LT; detail: JurisdictionDetail | null; loading: boolean; onClose: () => void;
   profiles: IndustryProfile[]; onOpenProfileEditor: () => void;
@@ -810,6 +921,24 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
   const [editingReqId, setEditingReqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: '', description: '', current_value: '', effective_date: '', source_url: '', source_name: '' });
   const [saving, setSaving] = useState(false);
+
+  const handleDragEnd = useCallback((event: DragEndEvent, levelReqs: JurisdictionRequirement[]) => {
+    if (!detail) return;
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIndex = levelReqs.findIndex(r => r.id === active.id);
+    const newIndex = levelReqs.findIndex(r => r.id === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    const reordered = arrayMove(levelReqs, oldIndex, newIndex);
+    const orderPayload = reordered.map((r, i) => ({ id: r.id, sort_order: i }));
+    // Optimistic update
+    const updatedMap = new Map(orderPayload.map(o => [o.id, o.sort_order]));
+    onDetailUpdate({
+      ...detail,
+      requirements: detail.requirements.map(r => updatedMap.has(r.id) ? { ...r, sort_order: updatedMap.get(r.id)! } : r),
+    });
+    api.adminJurisdictions.reorderRequirements(orderPayload).catch(err => console.error('Reorder failed', err));
+  }, [detail, onDetailUpdate]);
 
   const toggleBookmark = useCallback(async (e: React.MouseEvent, reqId: string) => {
     e.stopPropagation();
@@ -928,6 +1057,12 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
       const level = req.jurisdiction_level || 'unknown';
       if (!map[cat][level]) map[cat][level] = [];
       map[cat][level].push(req);
+    }
+    // Sort within each level by sort_order, then title
+    for (const cat of Object.keys(map)) {
+      for (const level of Object.keys(map[cat])) {
+        map[cat][level].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.title.localeCompare(b.title));
+      }
     }
 
     if (!selectedProfile) return map;
@@ -1212,86 +1347,18 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                         </div>
 
                         {reqs && reqs.length > 0 ? (
-                          <div className="space-y-1.5">
-                            {reqs.map(req => editingReqId === req.id ? (
-                              <div key={req.id} className={`${t.innerEl} border-l-[3px] ${colors.border} p-3 space-y-2 ring-1 ring-blue-500/40`}>
-                                <div className="space-y-2">
-                                  <div>
-                                    <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Title</label>
-                                    <input value={editForm.title} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))}
-                                      className={`w-full text-sm px-2 py-1 rounded ${t.select}`} />
-                                  </div>
-                                  <div>
-                                    <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Current Value</label>
-                                    <input value={editForm.current_value} onChange={e => setEditForm(f => ({ ...f, current_value: e.target.value }))}
-                                      className={`w-full text-sm px-2 py-1 rounded ${t.select}`} />
-                                  </div>
-                                  <div>
-                                    <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Description / Applicability Notes</label>
-                                    <textarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
-                                      rows={3} className={`w-full text-xs px-2 py-1 rounded ${t.select} resize-y`} />
-                                  </div>
-                                  <div className="grid grid-cols-2 gap-2">
-                                    <div>
-                                      <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Effective Date</label>
-                                      <input type="date" value={editForm.effective_date} onChange={e => setEditForm(f => ({ ...f, effective_date: e.target.value }))}
-                                        className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
-                                    </div>
-                                    <div>
-                                      <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Source Name</label>
-                                      <input value={editForm.source_name} onChange={e => setEditForm(f => ({ ...f, source_name: e.target.value }))}
-                                        className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <label className={`text-[10px] font-medium ${t.textMuted} block mb-0.5`}>Source URL</label>
-                                    <input value={editForm.source_url} onChange={e => setEditForm(f => ({ ...f, source_url: e.target.value }))}
-                                      className={`w-full text-xs px-2 py-1 rounded ${t.select}`} />
-                                  </div>
-                                </div>
-                                <div className="flex items-center gap-2 pt-1">
-                                  <button onClick={saveEditing} disabled={saving}
-                                    className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 transition">
-                                    {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />} Update
-                                  </button>
-                                  <button onClick={cancelEditing}
-                                    className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition ${t.btnGhost} ${t.innerEl}`}>
-                                    Cancel
-                                  </button>
-                                </div>
+                          <DndContext collisionDetection={closestCenter} onDragEnd={e => handleDragEnd(e, reqs)}>
+                            <SortableContext items={reqs.map(r => r.id)} strategy={verticalListSortingStrategy}>
+                              <div className="space-y-1.5">
+                                {reqs.map(req => (
+                                  <SortableRequirementCard key={req.id} req={req} t={t} colors={colors}
+                                    isEditing={editingReqId === req.id} editForm={editForm} setEditForm={setEditForm}
+                                    saving={saving} saveEditing={saveEditing} cancelEditing={cancelEditing}
+                                    startEditing={startEditing} toggleBookmark={toggleBookmark} />
+                                ))}
                               </div>
-                            ) : (
-                              <div key={req.id} className={`${t.innerEl} border-l-[3px] ${colors.border} p-3 space-y-1 cursor-pointer group`} onClick={() => startEditing(req)}>
-                                <div className="flex items-start justify-between gap-2">
-                                  <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
-                                  <div className="flex items-center gap-1.5 flex-shrink-0">
-                                    <button onClick={e => toggleBookmark(e, req.id)} title={req.is_bookmarked ? 'Remove bookmark' : 'Bookmark for review'}
-                                      className={`transition ${req.is_bookmarked ? 'text-amber-500' : `opacity-0 group-hover:opacity-60 ${t.textMuted}`}`}>
-                                      {req.is_bookmarked ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
-                                    </button>
-                                    <Pencil className={`w-3 h-3 opacity-0 group-hover:opacity-60 transition ${t.textMuted}`} />
-                                    {req.source_url && (
-                                      <a href={req.source_url} target="_blank" rel="noopener noreferrer"
-                                        className={`${t.btnGhost} transition`} title="View source"
-                                        onClick={e => e.stopPropagation()}>
-                                        <ExternalLink className="w-3.5 h-3.5" />
-                                      </a>
-                                    )}
-                                  </div>
-                                </div>
-                                {req.current_value && (
-                                  <div className={`text-sm ${t.textDim}`}>{req.current_value}</div>
-                                )}
-                                {req.description && (
-                                  <p className={`text-xs ${t.textFaint} leading-relaxed`}>{req.description}</p>
-                                )}
-                                <div className={`flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono ${t.textFaint}`}>
-                                  {req.source_name && <span>Source: {req.source_name}</span>}
-                                  {req.effective_date && <span>Effective: {formatDate(req.effective_date)}</span>}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
+                            </SortableContext>
+                          </DndContext>
                         ) : (
                           <div className={`${t.innerEl} border-l-[3px] ${colors.border} p-2.5 opacity-40`}>
                             <span className={`text-xs italic ${t.textFaint}`}>No {level}-level rules</span>
