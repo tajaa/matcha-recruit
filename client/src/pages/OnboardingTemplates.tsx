@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getAccessToken } from '../api/client';
 import { Plus, X, Edit2, Trash2, CheckCircle, FileText, Laptop, GraduationCap, Settings, AlertTriangle, RotateCcw } from 'lucide-react';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
@@ -29,11 +30,78 @@ const CATEGORIES = [
   { value: 'documents', label: 'Documents', icon: FileText, color: 'text-blue-400' },
   { value: 'equipment', label: 'Equipment', icon: Laptop, color: 'text-purple-400' },
   { value: 'training', label: 'Training', icon: GraduationCap, color: 'text-amber-400' },
-  { value: 'admin', label: 'Admin', icon: Settings, color: 'text-zinc-400 light:text-black/70' },
+  { value: 'admin', label: 'Admin', icon: Settings, color: 'text-zinc-400' },
   { value: 'return_to_work', label: 'Return to Work', icon: RotateCcw, color: 'text-emerald-400' },
 ];
 
+const LT = {
+  card: 'bg-stone-100 rounded-2xl',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  textDim: 'text-stone-600',
+  border: 'border-stone-200',
+  input: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:outline-none focus:border-stone-400',
+  select: 'bg-white border border-stone-300 text-zinc-900 rounded-xl focus:outline-none focus:border-stone-400',
+  textarea: 'bg-stone-50 border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:outline-none focus:border-stone-400 resize-none',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  btnGhost: 'text-stone-500 hover:text-zinc-900',
+  btnDanger: 'text-stone-400 hover:text-red-600',
+  modalBg: 'bg-stone-100 rounded-2xl',
+  modalHeader: 'border-b border-stone-200',
+  tabActive: 'border-zinc-900 text-zinc-900',
+  tabInactive: 'border-transparent text-stone-400 hover:text-stone-600 hover:border-stone-400',
+  rowBg: 'bg-stone-50',
+  rowHover: 'hover:bg-stone-100',
+  rowBorder: 'bg-stone-200 border border-stone-200',
+  emptyBorder: 'border border-dashed border-stone-300 bg-stone-100',
+  badge: 'bg-stone-200 text-stone-500 border border-stone-200',
+  label: 'text-stone-500',
+  checkboxCls: 'w-4 h-4 bg-white border border-stone-300 rounded',
+  alertError: 'bg-red-50 border border-red-200 rounded-xl',
+  alertErrorText: 'text-red-700',
+  actionBtn: 'text-stone-400 hover:text-zinc-900 hover:bg-stone-200',
+  actionBtnDanger: 'text-stone-400 hover:text-red-600 hover:bg-red-50',
+  toggleActive: 'text-emerald-600 hover:bg-emerald-50',
+  toggleInactive: 'text-stone-400 hover:bg-stone-200',
+} as const;
+
+const DK = {
+  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  input: 'bg-zinc-900 border border-zinc-800 text-white rounded-xl placeholder:text-zinc-600 focus:outline-none focus:border-white/20',
+  select: 'bg-zinc-900 border border-zinc-800 text-white rounded-xl focus:outline-none focus:border-white/20',
+  textarea: 'bg-zinc-900 border border-zinc-800 text-white rounded-xl placeholder:text-zinc-600 focus:outline-none focus:border-white/20 resize-none',
+  btnPrimary: 'bg-white text-black hover:bg-zinc-200',
+  btnGhost: 'text-zinc-500 hover:text-white',
+  btnDanger: 'text-zinc-400 hover:text-red-400',
+  modalBg: 'bg-zinc-950 border border-zinc-800 rounded-2xl',
+  modalHeader: 'border-b border-white/10',
+  tabActive: 'border-white text-white',
+  tabInactive: 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-800',
+  rowBg: 'bg-zinc-950',
+  rowHover: 'hover:bg-zinc-900',
+  rowBorder: 'bg-white/10 border border-white/10',
+  emptyBorder: 'border border-dashed border-white/10 bg-white/5',
+  badge: 'bg-zinc-800 text-zinc-500 border border-zinc-700',
+  label: 'text-zinc-500',
+  checkboxCls: 'w-4 h-4 bg-zinc-900 border border-zinc-800 rounded',
+  alertError: 'bg-red-500/10 border border-red-500/20 rounded-xl',
+  alertErrorText: 'text-red-400',
+  actionBtn: 'text-zinc-400 hover:text-white hover:bg-zinc-800',
+  actionBtnDanger: 'text-zinc-400 hover:text-red-400 hover:bg-red-500/10',
+  toggleActive: 'text-emerald-400 hover:bg-emerald-500/10',
+  toggleInactive: 'text-zinc-500 hover:bg-zinc-800',
+} as const;
+
 export default function OnboardingTemplates() {
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
+
   const [templates, setTemplates] = useState<OnboardingTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -180,7 +248,7 @@ export default function OnboardingTemplates() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-xs text-zinc-500 light:text-black/60 uppercase tracking-wider animate-pulse">Loading templates...</div>
+        <div className={`text-xs ${t.textMuted} uppercase tracking-wider animate-pulse`}>Loading templates...</div>
       </div>
     );
   }
@@ -188,10 +256,10 @@ export default function OnboardingTemplates() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/10 pb-8">
+      <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b ${t.border} pb-8`}>
         <div>
-          <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-white light:text-black uppercase text-center sm:text-left">Onboarding Templates</h1>
-          <p className="text-xs text-zinc-500 light:text-black/60 mt-2 font-mono tracking-wide uppercase text-center sm:text-left">
+          <h1 className={`text-3xl md:text-4xl font-bold tracking-tighter ${t.textMain} uppercase text-center sm:text-left`}>Onboarding Templates</h1>
+          <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase text-center sm:text-left`}>
             Manage tasks assigned to new employees
           </p>
         </div>
@@ -208,7 +276,7 @@ export default function OnboardingTemplates() {
             });
             setShowModal(true);
           }}
-          className="flex items-center justify-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors w-full sm:w-auto"
+          className={`flex items-center justify-center gap-2 px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors w-full sm:w-auto`}
         >
           <Plus size={14} />
           Add Template
@@ -217,14 +285,14 @@ export default function OnboardingTemplates() {
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded p-4 flex items-center justify-between gap-4">
+        <div className={`${t.alertError} p-4 flex items-center justify-between gap-4`}>
           <div className="flex items-center gap-3">
-            <AlertTriangle className="text-red-400 shrink-0" size={16} />
-            <p className="text-sm text-red-400 font-mono">{error}</p>
+            <AlertTriangle className={`${t.alertErrorText} shrink-0`} size={16} />
+            <p className={`text-sm ${t.alertErrorText} font-mono`}>{error}</p>
           </div>
           <button
             onClick={() => setError(null)}
-            className="text-xs text-red-400 hover:text-red-300 uppercase tracking-wider font-bold shrink-0"
+            className={`text-xs ${t.alertErrorText} uppercase tracking-wider font-bold shrink-0`}
           >
             Dismiss
           </button>
@@ -232,16 +300,14 @@ export default function OnboardingTemplates() {
       )}
 
       {/* Category filter */}
-      <div className="border-b border-white/10 -mx-4 px-4 sm:mx-0 sm:px-0">
+      <div className={`border-b ${t.border} -mx-4 px-4 sm:mx-0 sm:px-0`}>
         <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">
           {[{ value: '', label: 'All' }, ...CATEGORIES].map((cat) => (
             <button
               key={cat.value}
               onClick={() => setCategoryFilter(cat.value)}
               className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
-                categoryFilter === cat.value
-                  ? 'border-white text-white light:text-black'
-                  : 'border-transparent text-zinc-500 light:text-black/60 hover:text-zinc-300 light:text-black/80 hover:border-zinc-800'
+                categoryFilter === cat.value ? t.tabActive : t.tabInactive
               }`}
             >
               {cat.label}
@@ -252,12 +318,12 @@ export default function OnboardingTemplates() {
 
       {/* Templates grouped by category */}
       {templates.length === 0 ? (
-        <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
-          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner flex items-center justify-center">
-            <CheckCircle size={24} className="text-zinc-600" />
+        <div className={`text-center py-24 ${t.emptyBorder} rounded-2xl`}>
+          <div className={`w-16 h-16 mx-auto mb-6 rounded-full ${t.card} flex items-center justify-center`}>
+            <CheckCircle size={24} className={t.textFaint} />
           </div>
-          <h3 className="text-white light:text-black text-sm font-bold mb-1 uppercase tracking-wide">Create your first template</h3>
-          <p className="text-zinc-500 light:text-black/60 text-xs mb-6 font-mono uppercase">You haven't defined any onboarding tasks yet. Build your first checklist to get started.</p>
+          <h3 className={`${t.textMain} text-sm font-bold mb-1 uppercase tracking-wide`}>Create your first template</h3>
+          <p className={`${t.textMuted} text-xs mb-6 font-mono uppercase`}>You haven't defined any onboarding tasks yet. Build your first checklist to get started.</p>
         </div>
       ) : (
         <div className="space-y-8">
@@ -269,48 +335,46 @@ export default function OnboardingTemplates() {
               <div key={cat.value}>
                 <div className="flex items-center gap-2 mb-4">
                   <cat.icon size={16} className={cat.color} />
-                  <h2 className="text-sm font-bold uppercase tracking-wider text-white light:text-black">{cat.label}</h2>
-                  <span className="text-xs text-zinc-500 light:text-black/60 font-mono">({categoryTemplates.length})</span>
+                  <h2 className={`text-sm font-bold uppercase tracking-wider ${t.textMain}`}>{cat.label}</h2>
+                  <span className={`text-xs ${t.textMuted} font-mono`}>({categoryTemplates.length})</span>
                 </div>
-                <div className="space-y-px bg-white/10 border border-white/10">
+                <div className={`space-y-px ${t.rowBorder} rounded-2xl overflow-hidden`}>
                   {categoryTemplates.map((template) => (
                     <div
                       key={template.id}
-                      className={`group bg-zinc-950 light:bg-black/[0.02] hover:bg-zinc-900 light:bg-black/[0.03] transition-colors p-4 flex flex-col sm:flex-row sm:items-center gap-4 ${
+                      className={`group ${t.rowBg} ${t.rowHover} transition-colors p-4 flex flex-col sm:flex-row sm:items-center gap-4 ${
                         !template.is_active ? 'opacity-50' : ''
                       }`}
                     >
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-bold text-white light:text-black truncate">{template.title}</p>
+                          <p className={`text-sm font-bold ${t.textMain} truncate`}>{template.title}</p>
                           {!template.is_active && (
-                            <span className="text-[10px] px-2 py-0.5 bg-zinc-800 light:bg-black/[0.05] text-zinc-500 light:text-black/60 uppercase tracking-wider rounded">
+                            <span className={`text-[10px] px-2 py-0.5 ${t.badge} uppercase tracking-wider rounded-lg`}>
                               Inactive
                             </span>
                           )}
                         </div>
                         {template.description && (
-                          <p className="text-xs text-zinc-500 light:text-black/60 truncate mt-1">{template.description}</p>
+                          <p className={`text-xs ${t.textMuted} truncate mt-1`}>{template.description}</p>
                         )}
                       </div>
-                      <div className="flex items-center justify-between sm:justify-end gap-4 md:gap-8 border-t border-white/5 pt-3 sm:border-0 sm:pt-0">
+                      <div className={`flex items-center justify-between sm:justify-end gap-4 md:gap-8 border-t ${t.border} pt-3 sm:border-0 sm:pt-0`}>
                         <div className="text-left sm:text-right">
-                          <p className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-wider">Due</p>
-                          <p className="text-xs text-zinc-400 light:text-black/70 font-mono">{template.due_days} days</p>
+                          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>Due</p>
+                          <p className={`text-xs ${t.textDim} font-mono`}>{template.due_days} days</p>
                         </div>
                         <div className="text-left sm:text-right">
-                          <p className="text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-wider">Assigned to</p>
-                          <p className="text-xs text-zinc-400 light:text-black/70">
+                          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>Assigned to</p>
+                          <p className={`text-xs ${t.textDim}`}>
                             {template.is_employee_task ? 'Employee' : 'HR/Manager'}
                           </p>
                         </div>
                         <div className="flex items-center gap-1">
                           <button
                             onClick={() => handleToggleActive(template)}
-                            className={`p-2 rounded transition-colors ${
-                              template.is_active
-                                ? 'text-emerald-400 hover:bg-emerald-500/10'
-                                : 'text-zinc-500 light:text-black/60 hover:bg-zinc-800 light:bg-black/[0.05]'
+                            className={`p-2 rounded-lg transition-colors ${
+                              template.is_active ? t.toggleActive : t.toggleInactive
                             }`}
                             title={template.is_active ? 'Deactivate' : 'Activate'}
                           >
@@ -318,14 +382,14 @@ export default function OnboardingTemplates() {
                           </button>
                           <button
                             onClick={() => openEditModal(template)}
-                            className="p-2 text-zinc-400 light:text-black/70 hover:text-white light:text-black hover:bg-zinc-800 light:bg-black/[0.05] rounded transition-colors"
+                            className={`p-2 ${t.actionBtn} rounded-lg transition-colors`}
                             title="Edit"
                           >
                             <Edit2 size={16} />
                           </button>
                           <button
                             onClick={() => handleDelete(template.id)}
-                            className="p-2 text-zinc-400 light:text-black/70 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                            className={`p-2 ${t.actionBtnDanger} rounded-lg transition-colors`}
                             title="Delete"
                           >
                             <Trash2 size={16} />
@@ -343,15 +407,15 @@ export default function OnboardingTemplates() {
 
       {/* Add/Edit Modal */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg bg-zinc-950 light:bg-black/[0.02] border border-zinc-800 shadow-2xl rounded-sm">
-            <div className="flex items-center justify-between p-6 border-b border-white/10">
-              <h3 className="text-xl font-bold text-white light:text-black uppercase tracking-tight">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className={`w-full max-w-lg ${t.modalBg} shadow-2xl`}>
+            <div className={`flex items-center justify-between p-6 ${t.modalHeader}`}>
+              <h3 className={`text-xl font-bold ${t.textMain} uppercase tracking-tight`}>
                 {editingTemplate ? 'Edit Template' : 'Add Template'}
               </h3>
               <button
                 onClick={() => setShowModal(false)}
-                className="text-zinc-500 light:text-black/60 hover:text-white light:text-black transition-colors"
+                className={`${t.btnGhost} transition-colors`}
               >
                 <X size={20} />
               </button>
@@ -359,7 +423,7 @@ export default function OnboardingTemplates() {
 
             <form onSubmit={handleSubmit} className="p-8 space-y-6">
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60 mb-1.5">
+                <label className={`block text-[10px] uppercase tracking-wider ${t.label} mb-1.5`}>
                   Title <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -367,31 +431,31 @@ export default function OnboardingTemplates() {
                   required
                   value={formData.title}
                   onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                  className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
+                  className={`w-full px-3 py-2 ${t.input} text-sm transition-colors`}
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60 mb-1.5">
+                <label className={`block text-[10px] uppercase tracking-wider ${t.label} mb-1.5`}>
                   Description
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={3}
-                  className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors resize-none"
+                  className={`w-full px-3 py-2 ${t.textarea} text-sm transition-colors`}
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60 mb-1.5">
+                  <label className={`block text-[10px] uppercase tracking-wider ${t.label} mb-1.5`}>
                     Category
                   </label>
                   <select
                     value={formData.category}
                     onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                    className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
+                    className={`w-full px-3 py-2 ${t.select} text-sm transition-colors`}
                   >
                     {CATEGORIES.map((cat) => (
                       <option key={cat.value} value={cat.value}>
@@ -401,7 +465,7 @@ export default function OnboardingTemplates() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60 mb-1.5">
+                  <label className={`block text-[10px] uppercase tracking-wider ${t.label} mb-1.5`}>
                     Due (days from start)
                   </label>
                   <input
@@ -409,7 +473,7 @@ export default function OnboardingTemplates() {
                     min="0"
                     value={formData.due_days}
                     onChange={(e) => setFormData({ ...formData, due_days: parseInt(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-white light:text-black text-sm focus:outline-none focus:border-white/20 transition-colors"
+                    className={`w-full px-3 py-2 ${t.input} text-sm transition-colors`}
                   />
                 </div>
               </div>
@@ -420,25 +484,25 @@ export default function OnboardingTemplates() {
                   id="is_employee_task"
                   checked={formData.is_employee_task}
                   onChange={(e) => setFormData({ ...formData, is_employee_task: e.target.checked })}
-                  className="w-4 h-4 bg-zinc-900 light:bg-black/[0.03] border border-zinc-800 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner rounded"
+                  className={t.checkboxCls}
                 />
-                <label htmlFor="is_employee_task" className="text-sm text-zinc-400 light:text-black/70">
+                <label htmlFor="is_employee_task" className={`text-sm ${t.textDim}`}>
                   Employee completes this task (vs HR/Manager)
                 </label>
               </div>
 
-              <div className="flex justify-end gap-3 pt-6 border-t border-white/10">
+              <div className={`flex justify-end gap-3 pt-6 border-t ${t.border}`}>
                 <button
                   type="button"
                   onClick={() => setShowModal(false)}
-                  className="px-4 py-2 text-zinc-500 light:text-black/60 hover:text-white light:text-black text-xs font-bold uppercase tracking-wider transition-colors"
+                  className={`px-4 py-2 ${t.btnGhost} text-xs font-bold uppercase tracking-wider transition-colors`}
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={submitting}
-                  className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                  className={`px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50`}
                 >
                   {submitting ? 'Saving...' : editingTemplate ? 'Update' : 'Create'}
                 </button>

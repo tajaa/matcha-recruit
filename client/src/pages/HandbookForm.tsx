@@ -15,6 +15,7 @@ import type {
 } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { getWizardHelperCopy, type WizardCardKind } from '../features/handbook-wizard/helperGuidance';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 
 const US_STATES = [
   'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
@@ -78,6 +79,74 @@ const QUICK_SIGNAL_FIELDS: Array<{ key: keyof CompanyHandbookProfile; label: str
 const MISSING_BOILERPLATE_COVERAGE_ERROR = 'Missing required state boilerplate coverage';
 const WIZARD_DRAFT_AUTOSAVE_MS = 5000;
 const HANDBOOK_WIZARD_RETURN_PATH = '/app/matcha/handbook/new';
+
+const LT = {
+  pageBg: 'bg-stone-300',
+  panelBg: 'bg-stone-200/60 border border-stone-200',
+  textMain: 'text-zinc-900',
+  textBody: 'text-stone-600',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-stone-400',
+  border: 'border-stone-300',
+  borderLight: 'border-stone-200',
+  inputBg: 'bg-white border border-stone-300 text-zinc-900 focus:outline-none focus:border-stone-400',
+  textareaBg: 'bg-stone-50 border border-stone-300 text-zinc-900 focus:outline-none focus:border-stone-400',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  btnSecondary: 'border border-stone-300 text-stone-600 hover:text-zinc-900',
+  btnGhost: 'text-stone-500 hover:text-zinc-900',
+  label: 'text-stone-500',
+  pillBg: 'bg-stone-200 border border-stone-200 text-stone-600',
+  toggleOff: 'bg-stone-200 text-stone-500 hover:text-stone-700',
+  alertAmber: 'text-amber-700 border border-amber-300 bg-amber-50',
+  alertRed: 'text-red-700 border border-red-300 bg-red-50',
+  progressDone: 'bg-zinc-900',
+  progressPending: 'bg-stone-300',
+  dividerT: 'border-t border-stone-200',
+  closeBtnCls: 'text-stone-400 hover:text-zinc-900',
+  deleteBtn: 'text-red-600 hover:text-red-700',
+  helperBg: 'border border-emerald-300 bg-emerald-50',
+  helperHeader: 'text-emerald-700',
+  helperText: 'text-emerald-600',
+  helperBody: 'text-stone-600',
+  fileUploadBorder: 'border-stone-300 text-stone-500 hover:text-zinc-900',
+  selectedBtn: 'bg-zinc-900 text-zinc-50 border-zinc-900',
+  unselectedBtn: 'bg-stone-200 text-stone-500 border-stone-300 hover:border-stone-400',
+  recoveryBtn: 'border border-red-400/40 bg-red-100 text-red-700 hover:text-red-900',
+} as const;
+
+const DK = {
+  pageBg: 'bg-zinc-950',
+  panelBg: 'bg-zinc-900/40 border border-white/10',
+  textMain: 'text-white',
+  textBody: 'text-zinc-300',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-400',
+  border: 'border-white/20',
+  borderLight: 'border-white/10',
+  inputBg: 'bg-zinc-900 border border-white/20 text-white focus:outline-none focus:border-white/50',
+  textareaBg: 'bg-zinc-950 border border-white/20 text-white focus:outline-none focus:border-white/50',
+  btnPrimary: 'bg-white text-black hover:bg-zinc-200',
+  btnSecondary: 'border border-white/20 text-zinc-300 hover:text-white',
+  btnGhost: 'text-zinc-500 hover:text-white',
+  label: 'text-zinc-500',
+  pillBg: 'bg-zinc-950 border border-white/15 text-zinc-300',
+  toggleOff: 'bg-zinc-900 text-zinc-400 hover:text-zinc-200',
+  alertAmber: 'text-amber-300/90 border border-amber-500/30 bg-amber-500/10',
+  alertRed: 'text-red-400 border border-red-500/30 bg-red-500/10',
+  progressDone: 'bg-white',
+  progressPending: 'bg-white/15',
+  dividerT: 'border-t border-white/10',
+  closeBtnCls: 'text-zinc-500 hover:text-white',
+  deleteBtn: 'text-red-400 hover:text-red-300',
+  helperBg: 'border border-emerald-500/25 bg-emerald-500/5',
+  helperHeader: 'text-emerald-300',
+  helperText: 'text-emerald-300/90',
+  helperBody: 'text-zinc-200',
+  fileUploadBorder: 'border-white/20 text-zinc-300 hover:text-white',
+  selectedBtn: 'bg-white text-black border-white',
+  unselectedBtn: 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40',
+  recoveryBtn: 'border border-red-400/40 bg-red-500/10 text-red-200 hover:text-white',
+} as const;
 
 interface CustomSectionDraft {
   title: string;
@@ -180,6 +249,8 @@ export function HandbookForm() {
   const isEditing = !!id;
   const isWizard = !isEditing;
   const navigate = useNavigate();
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
 
   const [title, setTitle] = useState('');
   const [mode, setMode] = useState<HandbookMode>('single_state');
@@ -1042,7 +1113,7 @@ export function HandbookForm() {
   if (isWizard && !wizardDraftLoaded) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading draft...</div>
+        <div className={`text-xs ${t.textMuted} uppercase tracking-wider`}>Loading draft...</div>
       </div>
     );
   }
@@ -1050,7 +1121,7 @@ export function HandbookForm() {
   if (loading && isEditing && !title) {
     return (
       <div className="flex items-center justify-center py-12">
-        <div className="text-xs text-zinc-500 uppercase tracking-wider">Loading handbook...</div>
+        <div className={`text-xs ${t.textMuted} uppercase tracking-wider`}>Loading handbook...</div>
       </div>
     );
   }
@@ -1058,12 +1129,12 @@ export function HandbookForm() {
   const renderBasicsStep = () => (
     <>
       <div className="space-y-4">
-        <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Handbook Title</label>
+        <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Handbook Title</label>
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           placeholder="e.g. 2026 Employee Handbook"
           required
         />
@@ -1071,7 +1142,7 @@ export function HandbookForm() {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="space-y-2">
-          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Handbook Type</label>
+          <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Handbook Type</label>
           <select
             value={mode}
             onChange={(e) => {
@@ -1081,7 +1152,7 @@ export function HandbookForm() {
                 setSelectedStates(selectedStates.slice(0, 1));
               }
             }}
-            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+            className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           >
             <option value="single_state">Single-State</option>
             <option value="multi_state">Multi-State</option>
@@ -1089,16 +1160,16 @@ export function HandbookForm() {
         </div>
 
         <div className="space-y-2">
-          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Source</label>
+          <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Source</label>
           {isEditing ? (
-            <div className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-zinc-300 text-sm">
+            <div className={`w-full px-3 py-2 ${t.inputBg} text-sm`}>
               {sourceType === 'template' ? 'Template Builder' : 'Uploaded File'}
             </div>
           ) : (
             <select
               value={sourceType}
               onChange={(e) => setSourceType(e.target.value as HandbookSourceType)}
-              className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+              className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
             >
               <option value="template">Template Builder</option>
               <option value="upload">Upload Existing Handbook</option>
@@ -1107,11 +1178,11 @@ export function HandbookForm() {
         </div>
 
         <div className="space-y-2">
-          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Industry</label>
+          <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Industry</label>
           <select
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
-            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+            className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           >
             {INDUSTRY_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -1124,18 +1195,18 @@ export function HandbookForm() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="space-y-2">
-          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Sub-Industry / Business Model</label>
+          <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Sub-Industry / Business Model</label>
           <input
             type="text"
             value={subIndustry}
             onChange={(e) => setSubIndustry(e.target.value)}
             placeholder="e.g. SaaS payroll platform, urgent care clinics, franchise restaurants"
-            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+            className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           />
         </div>
         <div className="space-y-2">
-          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Policy Pack Focus</label>
-          <div className="min-h-[42px] px-3 py-2 bg-zinc-900 border border-white/20 text-sm text-zinc-200">
+          <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Policy Pack Focus</label>
+          <div className={`min-h-[42px] px-3 py-2 ${t.inputBg} text-sm`}>
             {industryPlaybook.focus}
           </div>
         </div>
@@ -1258,7 +1329,7 @@ export function HandbookForm() {
 
   const renderScopeStep = () => (
     <div className="space-y-3">
-      <label className="block text-[10px] uppercase tracking-wider text-zinc-500">
+      <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>
         {mode === 'single_state' ? 'Select State' : 'Select States'}
       </label>
       <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
@@ -1271,8 +1342,8 @@ export function HandbookForm() {
               onClick={() => toggleState(state)}
               className={`px-2 py-1 text-[10px] font-mono border transition-colors ${
                 selected
-                  ? 'bg-white text-black border-white'
-                  : 'bg-zinc-900 text-zinc-400 border-white/20 hover:border-white/40'
+                  ? t.selectedBtn
+                  : t.unselectedBtn
               }`}
             >
               {state}
@@ -1280,7 +1351,7 @@ export function HandbookForm() {
           );
         })}
       </div>
-      <p className="text-[10px] text-zinc-500 font-mono">
+      <p className={`text-[10px] ${t.textMuted} font-mono`}>
         Compliance locations found: {locationsStates.length > 0 ? locationsStates.join(', ') : 'none'}.
       </p>
     </div>
@@ -1289,41 +1360,41 @@ export function HandbookForm() {
   const renderCompanyStep = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
       <div className="space-y-2">
-        <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Company Legal Name</label>
+        <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Company Legal Name</label>
         <input
           type="text"
           value={profile.legal_name}
           onChange={(e) => setProfileField('legal_name', e.target.value)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           required
         />
       </div>
       <div className="space-y-2">
-        <label className="block text-[10px] uppercase tracking-wider text-zinc-500">DBA (optional)</label>
+        <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>DBA (optional)</label>
         <input
           type="text"
           value={profile.dba || ''}
           onChange={(e) => setProfileField('dba', e.target.value || null)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
         />
       </div>
       <div className="space-y-2">
-        <label className="block text-[10px] uppercase tracking-wider text-zinc-500">CEO or President</label>
+        <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>CEO or President</label>
         <input
           type="text"
           value={profile.ceo_or_president}
           onChange={(e) => setProfileField('ceo_or_president', e.target.value)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           required
         />
       </div>
       <div className="space-y-2">
-        <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Headcount</label>
+        <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Headcount</label>
         <input
           type="number"
           value={profile.headcount ?? ''}
           onChange={(e) => setProfileField('headcount', e.target.value ? Number(e.target.value) : null)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           min={0}
         />
       </div>
@@ -1333,19 +1404,19 @@ export function HandbookForm() {
   const renderWorkforceStep = () => (
     <>
       <div className="space-y-3">
-        <p className="text-[10px] uppercase tracking-widest text-zinc-500">
+        <p className={`text-[10px] uppercase tracking-widest ${t.textMuted}`}>
           Answer each question with Yes or No
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border border-white/10 bg-zinc-900/40 p-4">
+        <div className={`grid grid-cols-1 md:grid-cols-2 gap-3 ${t.panelBg} p-4`}>
         {boolFields.map((field) => (
-          <label key={field.key} className="flex items-center justify-between text-xs text-zinc-300">
+          <label key={field.key} className={`flex items-center justify-between text-xs ${t.textBody}`}>
             <span>{field.label}</span>
-            <div className="inline-flex border border-white/20 text-[10px] uppercase tracking-wider">
+            <div className={`inline-flex border ${t.border} text-[10px] uppercase tracking-wider`}>
               <button
                 type="button"
                 onClick={() => setProfileField(field.key, false)}
                 className={`px-2 py-1 transition-colors ${
-                  !Boolean(profile[field.key]) ? 'bg-white text-black' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                  !Boolean(profile[field.key]) ? t.selectedBtn : t.toggleOff
                 }`}
               >
                 No
@@ -1354,7 +1425,7 @@ export function HandbookForm() {
                 type="button"
                 onClick={() => setProfileField(field.key, true)}
                 className={`px-2 py-1 transition-colors ${
-                  Boolean(profile[field.key]) ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+                  Boolean(profile[field.key]) ? 'bg-emerald-500 text-white' : t.toggleOff
                 }`}
               >
                 Yes
@@ -1366,10 +1437,10 @@ export function HandbookForm() {
       </div>
 
       {sourceType === 'upload' && (
-        <div className="space-y-3 border border-white/10 bg-zinc-900/40 p-4">
-          <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Upload Handbook Document</label>
+        <div className={`space-y-3 ${t.panelBg} p-4`}>
+          <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Upload Handbook Document</label>
           <div className="flex items-center gap-3">
-            <label className="px-3 py-2 border border-white/20 text-xs uppercase tracking-wider text-zinc-300 hover:text-white cursor-pointer">
+            <label className={`px-3 py-2 border ${t.fileUploadBorder} text-xs uppercase tracking-wider cursor-pointer`}>
               Select File
               <input
                 type="file"
@@ -1378,12 +1449,12 @@ export function HandbookForm() {
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
             </label>
-            {file && <span className="text-xs text-zinc-400 truncate">{file.name}</span>}
+            {file && <span className={`text-xs ${t.textFaint} truncate`}>{file.name}</span>}
             {file && (
               <button
                 type="button"
                 onClick={() => setFile(null)}
-                className="text-zinc-500 hover:text-red-400"
+                className={t.closeBtnCls}
               >
                 <X size={14} />
               </button>
@@ -1392,7 +1463,7 @@ export function HandbookForm() {
               type="button"
               onClick={handleSourceFileUpload}
               disabled={!file}
-              className="ml-auto px-3 py-2 bg-white text-black text-xs uppercase tracking-wider disabled:opacity-50 flex items-center gap-1"
+              className={`ml-auto px-3 py-2 ${t.btnPrimary} text-xs uppercase tracking-wider disabled:opacity-50 flex items-center gap-1`}
             >
               <Upload size={12} />
               Upload
@@ -1407,47 +1478,47 @@ export function HandbookForm() {
       )}
 
       {sourceType === 'template' && (
-        <div className="space-y-3 border border-white/10 bg-zinc-900/40 p-4">
+        <div className={`space-y-3 ${t.panelBg} p-4`}>
           <div className="flex items-center justify-between">
-            <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Custom Company Sections</label>
+            <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Custom Company Sections</label>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={handleGenerateGuidedDraft}
                 disabled={guidedLoading}
-                className="px-2 py-1 border border-white/20 text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider disabled:opacity-50"
+                className={`px-2 py-1 ${t.btnSecondary} text-[10px] uppercase tracking-wider disabled:opacity-50`}
               >
                 {guidedLoading ? 'Updating...' : 'Refresh Pack'}
               </button>
               <button
                 type="button"
                 onClick={() => setCustomSections((prev) => [...prev, { title: '', content: '' }])}
-                className="text-xs text-zinc-300 hover:text-white uppercase tracking-wider flex items-center gap-1"
+                className={`text-xs ${t.textBody} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} uppercase tracking-wider flex items-center gap-1`}
               >
                 <Plus size={12} />
                 Add Section
               </button>
             </div>
           </div>
-          <p className="text-[11px] text-zinc-500">
+          <p className={`text-[11px] ${t.textMuted}`}>
             Boilerplate comes from the Business Profile policy pack. Use custom sections for company-specific rules or exceptions.
             {guidedQuestions.length > 0 ? ` ${unansweredGuidedCount} follow-up question(s) still open.` : ''}
           </p>
-          <p className="text-[11px] text-amber-300/90 border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          <p className={`text-[11px] ${t.alertAmber} px-3 py-2`}>
             Custom sections are not statutory boilerplate. Your team is legally responsible for custom culture and policy language.
           </p>
           {guidedSummary && (
-            <p className="text-xs text-zinc-300 leading-relaxed">{guidedSummary}</p>
+            <p className={`text-xs ${t.textBody} leading-relaxed`}>{guidedSummary}</p>
           )}
           {guidedError && (
             <p className="text-xs text-red-400">{guidedError}</p>
           )}
           {guidedQuestions.length > 0 && (
-            <div className="space-y-2 border border-white/10 bg-zinc-950/60 p-3">
-              <p className="text-[10px] uppercase tracking-widest text-zinc-500">Open Follow-up Questions</p>
+            <div className={`space-y-2 border ${t.borderLight} ${isLight ? 'bg-stone-100/60' : 'bg-zinc-950/60'} p-3`}>
+              <p className={`text-[10px] uppercase tracking-widest ${t.textMuted}`}>Open Follow-up Questions</p>
               {guidedQuestions.map((question) => (
                 <div key={question.id} className="space-y-1">
-                  <label className="text-xs text-zinc-300">
+                  <label className={`text-xs ${t.textBody}`}>
                     {question.question}
                     {question.required ? <span className="text-amber-400"> *</span> : null}
                   </label>
@@ -1459,7 +1530,7 @@ export function HandbookForm() {
                       setGuidedAnswers((prev) => ({ ...prev, [question.id]: value }));
                     }}
                     placeholder={question.placeholder || 'Add your answer'}
-                    className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-xs focus:outline-none focus:border-white/50"
+                    className={`w-full px-3 py-2 ${t.inputBg} text-xs`}
                   />
                 </div>
               ))}
@@ -1467,18 +1538,18 @@ export function HandbookForm() {
                 type="button"
                 onClick={handleGenerateGuidedDraft}
                 disabled={guidedLoading}
-                className="text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider underline underline-offset-4"
+                className={`text-[10px] ${t.textBody} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} uppercase tracking-wider underline underline-offset-4`}
               >
                 Apply follow-up answers
               </button>
             </div>
           )}
           {customSections.length === 0 ? (
-            <p className="text-xs text-zinc-500">No custom sections added.</p>
+            <p className={`text-xs ${t.textMuted}`}>No custom sections added.</p>
           ) : (
             <div className="space-y-3">
               {customSections.map((section, index) => (
-                <div key={index} className="border border-white/10 p-3 space-y-2">
+                <div key={index} className={`border ${t.borderLight} p-3 space-y-2`}>
                   <input
                     type="text"
                     value={section.title}
@@ -1486,7 +1557,7 @@ export function HandbookForm() {
                       setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, title: e.target.value } : item)))
                     }
                     placeholder="Section title"
-                    className="w-full px-3 py-2 bg-zinc-950 border border-white/20 text-white text-sm"
+                    className={`w-full px-3 py-2 ${t.textareaBg} text-sm`}
                   />
                   <textarea
                     value={section.content}
@@ -1494,12 +1565,12 @@ export function HandbookForm() {
                       setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, content: e.target.value } : item)))
                     }
                     placeholder="Section content"
-                    className="w-full px-3 py-2 bg-zinc-950 border border-white/20 text-white text-sm min-h-[90px] resize-y"
+                    className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[90px] resize-y`}
                   />
                   <button
                     type="button"
                     onClick={() => setCustomSections((prev) => prev.filter((_, i) => i !== index))}
-                    className="text-[10px] text-red-400 hover:text-red-300 uppercase tracking-wider"
+                    className={`text-[10px] ${t.deleteBtn} uppercase tracking-wider`}
                   >
                     Remove
                   </button>
@@ -1523,49 +1594,49 @@ export function HandbookForm() {
     });
 
     return (
-      <div className="border border-white/10 bg-zinc-900/40 p-5 space-y-4">
+      <div className={`${t.panelBg} p-5 space-y-4`}>
         <div className="flex items-center gap-2 text-emerald-400 text-sm">
           <CheckCircle2 size={16} />
           Ready to create handbook
         </div>
-        <div className="text-xs text-zinc-300 space-y-2">
-          <div><span className="text-zinc-500">Title:</span> {title || 'N/A'}</div>
-          <div><span className="text-zinc-500">Type:</span> {mode === 'multi_state' ? 'Multi-State' : 'Single-State'}</div>
-          <div><span className="text-zinc-500">Source:</span> {sourceType === 'template' ? 'Template Builder' : 'Uploaded File'}</div>
-          <div><span className="text-zinc-500">Industry:</span> {selectedIndustryLabel}</div>
-          <div><span className="text-zinc-500">Sub-Industry:</span> {subIndustry || 'N/A'}</div>
-          <div><span className="text-zinc-500">States:</span> {selectedStates.join(', ') || 'N/A'}</div>
-          <div><span className="text-zinc-500">Legal Name:</span> {profile.legal_name || 'N/A'}</div>
-          <div><span className="text-zinc-500">CEO/President:</span> {profile.ceo_or_president || 'N/A'}</div>
-          <div><span className="text-zinc-500">Headcount:</span> {profile.headcount ?? 'N/A'}</div>
+        <div className={`text-xs ${t.textBody} space-y-2`}>
+          <div><span className={t.textMuted}>Title:</span> {title || 'N/A'}</div>
+          <div><span className={t.textMuted}>Type:</span> {mode === 'multi_state' ? 'Multi-State' : 'Single-State'}</div>
+          <div><span className={t.textMuted}>Source:</span> {sourceType === 'template' ? 'Template Builder' : 'Uploaded File'}</div>
+          <div><span className={t.textMuted}>Industry:</span> {selectedIndustryLabel}</div>
+          <div><span className={t.textMuted}>Sub-Industry:</span> {subIndustry || 'N/A'}</div>
+          <div><span className={t.textMuted}>States:</span> {selectedStates.join(', ') || 'N/A'}</div>
+          <div><span className={t.textMuted}>Legal Name:</span> {profile.legal_name || 'N/A'}</div>
+          <div><span className={t.textMuted}>CEO/President:</span> {profile.ceo_or_president || 'N/A'}</div>
+          <div><span className={t.textMuted}>Headcount:</span> {profile.headcount ?? 'N/A'}</div>
           {sourceType === 'template' && (
             <>
-              <div><span className="text-zinc-500">Policy Pack:</span> {guidedSummary ? 'Generated' : 'Not generated yet'}</div>
-              <div><span className="text-zinc-500">Open Follow-ups:</span> {guidedQuestions.length > 0 ? unansweredGuidedCount : 0}</div>
+              <div><span className={t.textMuted}>Policy Pack:</span> {guidedSummary ? 'Generated' : 'Not generated yet'}</div>
+              <div><span className={t.textMuted}>Open Follow-ups:</span> {guidedQuestions.length > 0 ? unansweredGuidedCount : 0}</div>
             </>
           )}
           {sourceType === 'upload' && (
-            <div><span className="text-zinc-500">Uploaded File:</span> {uploadedFilename || 'None'}</div>
+            <div><span className={t.textMuted}>Uploaded File:</span> {uploadedFilename || 'None'}</div>
           )}
           {sourceType === 'template' && (
-            <div><span className="text-zinc-500">Custom Sections:</span> {customSections.filter((s) => s.title.trim()).length}</div>
+            <div><span className={t.textMuted}>Custom Sections:</span> {customSections.filter((s) => s.title.trim()).length}</div>
           )}
           {sourceType === 'template' && (
-            <div className="text-amber-300">
-              <span className="text-zinc-500">Liability Notice:</span> Matcha supplies state/city boilerplate; custom sections are employer-authored and require your legal review.
+            <div className={isLight ? 'text-amber-700' : 'text-amber-300'}>
+              <span className={t.textMuted}>Liability Notice:</span> Matcha supplies state/city boilerplate; custom sections are employer-authored and require your legal review.
             </div>
           )}
         </div>
-        <div className="border border-emerald-500/25 bg-emerald-500/5 px-3 py-3 space-y-2">
-          <p className="text-[10px] uppercase tracking-widest text-emerald-300">Helper Guidance</p>
-          <div className="text-[11px] text-zinc-200">
-            <span className="text-emerald-300/90">What this means:</span> {reviewHelperCopy.meaning}
+        <div className={`${t.helperBg} px-3 py-3 space-y-2`}>
+          <p className={`text-[10px] uppercase tracking-widest ${t.helperHeader}`}>Helper Guidance</p>
+          <div className={`text-[11px] ${t.helperBody}`}>
+            <span className={t.helperText}>What this means:</span> {reviewHelperCopy.meaning}
           </div>
-          <div className="text-[11px] text-zinc-200">
-            <span className="text-emerald-300/90">Appropriate answer:</span> {reviewHelperCopy.goodAnswer}
+          <div className={`text-[11px] ${t.helperBody}`}>
+            <span className={t.helperText}>Appropriate answer:</span> {reviewHelperCopy.goodAnswer}
           </div>
-          <div className="text-[11px] text-zinc-300">
-            <span className="text-zinc-500">What to avoid:</span> {reviewHelperCopy.avoid}
+          <div className={`text-[11px] ${t.textBody}`}>
+            <span className={t.textMuted}>What to avoid:</span> {reviewHelperCopy.avoid}
           </div>
         </div>
       </div>
@@ -1590,25 +1661,25 @@ export function HandbookForm() {
     });
 
     const shell = (content: ReactNode) => (
-      <div className="border border-white/10 bg-zinc-900/40 p-5 space-y-4">
+      <div className={`${t.panelBg} p-5 space-y-4`}>
         <div className="space-y-2">
-          <p className="text-[10px] uppercase tracking-widest text-zinc-500">{CREATE_STEPS[card.step]}</p>
-          <h2 className="text-lg text-white tracking-tight">
+          <p className={`text-[10px] uppercase tracking-widest ${t.textMuted}`}>{CREATE_STEPS[card.step]}</p>
+          <h2 className={`text-lg ${t.textMain} tracking-tight`}>
             {card.title}
             {card.required ? <span className="text-amber-400"> *</span> : null}
           </h2>
-          {card.description ? <p className="text-xs text-zinc-400">{card.description}</p> : null}
+          {card.description ? <p className={`text-xs ${t.textFaint}`}>{card.description}</p> : null}
         </div>
-        <div className="border border-emerald-500/25 bg-emerald-500/5 px-3 py-3 space-y-2">
-          <p className="text-[10px] uppercase tracking-widest text-emerald-300">Helper Guidance</p>
-          <div className="text-[11px] text-zinc-200">
-            <span className="text-emerald-300/90">What this means:</span> {helperCopy.meaning}
+        <div className={`${t.helperBg} px-3 py-3 space-y-2`}>
+          <p className={`text-[10px] uppercase tracking-widest ${t.helperHeader}`}>Helper Guidance</p>
+          <div className={`text-[11px] ${t.helperBody}`}>
+            <span className={t.helperText}>What this means:</span> {helperCopy.meaning}
           </div>
-          <div className="text-[11px] text-zinc-200">
-            <span className="text-emerald-300/90">Appropriate answer:</span> {helperCopy.goodAnswer}
+          <div className={`text-[11px] ${t.helperBody}`}>
+            <span className={t.helperText}>Appropriate answer:</span> {helperCopy.goodAnswer}
           </div>
-          <div className="text-[11px] text-zinc-300">
-            <span className="text-zinc-500">What to avoid:</span> {helperCopy.avoid}
+          <div className={`text-[11px] ${t.textBody}`}>
+            <span className={t.textMuted}>What to avoid:</span> {helperCopy.avoid}
           </div>
         </div>
         {content}
@@ -1621,7 +1692,7 @@ export function HandbookForm() {
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           placeholder="e.g. 2026 Employee Handbook"
           required
         />
@@ -1641,8 +1712,8 @@ export function HandbookForm() {
             }}
             className={`px-4 py-3 border text-left transition-colors ${
               mode === 'single_state'
-                ? 'bg-white text-black border-white'
-                : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+                ? t.selectedBtn
+                : t.unselectedBtn
             }`}
           >
             <div className="text-xs font-semibold uppercase tracking-wider">Single-State</div>
@@ -1653,8 +1724,8 @@ export function HandbookForm() {
             onClick={() => setMode('multi_state')}
             className={`px-4 py-3 border text-left transition-colors ${
               mode === 'multi_state'
-                ? 'bg-white text-black border-white'
-                : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+                ? t.selectedBtn
+                : t.unselectedBtn
             }`}
           >
             <div className="text-xs font-semibold uppercase tracking-wider">Multi-State</div>
@@ -1672,8 +1743,8 @@ export function HandbookForm() {
             onClick={() => setSourceType('template')}
             className={`px-4 py-3 border text-left transition-colors ${
               sourceType === 'template'
-                ? 'bg-white text-black border-white'
-                : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+                ? t.selectedBtn
+                : t.unselectedBtn
             }`}
           >
             <div className="text-xs font-semibold uppercase tracking-wider">Template Builder</div>
@@ -1684,8 +1755,8 @@ export function HandbookForm() {
             onClick={() => setSourceType('upload')}
             className={`px-4 py-3 border text-left transition-colors ${
               sourceType === 'upload'
-                ? 'bg-white text-black border-white'
-                : 'bg-zinc-900 text-zinc-300 border-white/20 hover:border-white/40'
+                ? t.selectedBtn
+                : t.unselectedBtn
             }`}
           >
             <div className="text-xs font-semibold uppercase tracking-wider">Upload Existing Handbook</div>
@@ -1701,7 +1772,7 @@ export function HandbookForm() {
           <select
             value={industry}
             onChange={(e) => setIndustry(e.target.value)}
-            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+            className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           >
             {INDUSTRY_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -1709,12 +1780,12 @@ export function HandbookForm() {
               </option>
             ))}
           </select>
-          <p className="text-xs text-zinc-300">{industryPlaybook.focus}</p>
+          <p className={`text-xs ${t.textBody}`}>{industryPlaybook.focus}</p>
           <div className="flex flex-wrap gap-2">
             {industryPlaybook.boilerplate.map((item) => (
               <span
                 key={item}
-                className="px-2 py-1 border border-white/15 bg-zinc-950 text-[10px] uppercase tracking-wider text-zinc-300"
+                className={`px-2 py-1 ${t.pillBg} text-[10px] uppercase tracking-wider`}
               >
                 {item}
               </span>
@@ -1731,7 +1802,7 @@ export function HandbookForm() {
           value={subIndustry}
           onChange={(e) => setSubIndustry(e.target.value)}
           placeholder="e.g. smoothie shop, franchise cafe, coffee kiosk"
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
         />
       );
     }
@@ -1749,8 +1820,8 @@ export function HandbookForm() {
                   onClick={() => toggleState(state)}
                   className={`px-2 py-1 text-[10px] font-mono border transition-colors ${
                     selected
-                      ? 'bg-white text-black border-white'
-                      : 'bg-zinc-900 text-zinc-400 border-white/20 hover:border-white/40'
+                      ? t.selectedBtn
+                      : t.unselectedBtn
                   }`}
                 >
                   {state}
@@ -1758,7 +1829,7 @@ export function HandbookForm() {
               );
             })}
           </div>
-          <p className="text-[10px] text-zinc-500 font-mono">
+          <p className={`text-[10px] ${t.textMuted} font-mono`}>
             Compliance locations found: {locationsStates.length > 0 ? locationsStates.join(', ') : 'none'}.
           </p>
         </div>
@@ -1771,7 +1842,7 @@ export function HandbookForm() {
           type="text"
           value={profile.legal_name}
           onChange={(e) => setProfileField('legal_name', e.target.value)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           required
         />
       );
@@ -1783,7 +1854,7 @@ export function HandbookForm() {
           type="text"
           value={profile.dba || ''}
           onChange={(e) => setProfileField('dba', e.target.value || null)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           placeholder="Optional DBA"
         />
       );
@@ -1795,7 +1866,7 @@ export function HandbookForm() {
           type="text"
           value={profile.ceo_or_president}
           onChange={(e) => setProfileField('ceo_or_president', e.target.value)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           required
         />
       );
@@ -1807,7 +1878,7 @@ export function HandbookForm() {
           type="number"
           value={profile.headcount ?? ''}
           onChange={(e) => setProfileField('headcount', e.target.value ? Number(e.target.value) : null)}
-          className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+          className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           min={0}
           placeholder="Optional"
         />
@@ -1817,12 +1888,12 @@ export function HandbookForm() {
     if (card.kind === 'profile_bool' && card.profileKey) {
       const enabled = Boolean(profile[card.profileKey]);
       return shell(
-        <div className="inline-flex border border-white/20 text-[10px] uppercase tracking-wider">
+        <div className={`inline-flex border ${t.border} text-[10px] uppercase tracking-wider`}>
           <button
             type="button"
             onClick={() => setProfileField(card.profileKey!, false)}
             className={`px-4 py-2 transition-colors ${
-              !enabled ? 'bg-white text-black' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+              !enabled ? t.selectedBtn : t.toggleOff
             }`}
           >
             No
@@ -1831,7 +1902,7 @@ export function HandbookForm() {
             type="button"
             onClick={() => setProfileField(card.profileKey!, true)}
             className={`px-4 py-2 transition-colors ${
-              enabled ? 'bg-emerald-500 text-white' : 'bg-zinc-900 text-zinc-400 hover:text-zinc-200'
+              enabled ? 'bg-emerald-500 text-white' : t.toggleOff
             }`}
           >
             Yes
@@ -1846,7 +1917,7 @@ export function HandbookForm() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <Sparkles size={14} className="text-amber-300" />
-              <span className="text-[10px] uppercase tracking-wider text-zinc-400">
+              <span className={`text-[10px] uppercase tracking-wider ${t.textFaint}`}>
                 Gemini-guided policy generation
               </span>
             </div>
@@ -1854,18 +1925,18 @@ export function HandbookForm() {
               type="button"
               onClick={handleGenerateGuidedDraft}
               disabled={guidedLoading}
-              className="px-3 py-1.5 bg-white text-black text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+              className={`px-3 py-1.5 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider disabled:opacity-50`}
             >
               {guidedLoading ? 'Building...' : guidedSummary ? 'Refresh Policy Pack' : 'Build Policy Pack'}
             </button>
           </div>
-          <p className="text-[11px] text-zinc-500">
+          <p className={`text-[11px] ${t.textMuted}`}>
             Matcha uses Gemini Flash guided prompts to draft baseline boilerplate for the selected states/cities.
           </p>
-          <p className="text-[11px] text-amber-300/90 border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          <p className={`text-[11px] ${t.alertAmber} px-3 py-2`}>
             Matcha supplies statutory boilerplate only. Company-authored culture or custom policy language remains your responsibility.
           </p>
-          <div className="text-[11px] text-zinc-400">
+          <div className={`text-[11px] ${t.textFaint}`}>
             {guidedQuestions.length > 0 ? (
               <span>
                 {answeredGuidedCount}/{guidedQuestions.length} follow-up answers completed
@@ -1876,7 +1947,7 @@ export function HandbookForm() {
               <span>No policy pack generated yet.</span>
             )}
           </div>
-          {guidedSummary ? <p className="text-xs text-zinc-300 leading-relaxed">{guidedSummary}</p> : null}
+          {guidedSummary ? <p className={`text-xs ${t.textBody} leading-relaxed`}>{guidedSummary}</p> : null}
           {guidedError ? <p className="text-xs text-red-400">{guidedError}</p> : null}
         </div>
       );
@@ -1888,7 +1959,7 @@ export function HandbookForm() {
       const currentFollowupIndex = guidedQuestions.findIndex((item) => item.id === question.id) + 1;
       return shell(
         <div className="space-y-3">
-          <p className="text-[11px] text-zinc-500">
+          <p className={`text-[11px] ${t.textMuted}`}>
             Follow-up {currentFollowupIndex} of {guidedQuestions.length}
           </p>
           <input
@@ -1899,13 +1970,13 @@ export function HandbookForm() {
               setGuidedAnswers((prev) => ({ ...prev, [question.id]: value }));
             }}
             placeholder={question.placeholder || 'Add your answer'}
-            className="w-full px-3 py-2 bg-zinc-900 border border-white/20 text-white text-sm focus:outline-none focus:border-white/50"
+            className={`w-full px-3 py-2 ${t.inputBg} text-sm`}
           />
           <button
             type="button"
             onClick={handleGenerateGuidedDraft}
             disabled={guidedLoading}
-            className="text-[10px] text-zinc-300 hover:text-white uppercase tracking-wider underline underline-offset-4"
+            className={`text-[10px] ${t.textBody} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} uppercase tracking-wider underline underline-offset-4`}
           >
             {guidedLoading ? 'Updating...' : 'Apply answer to draft'}
           </button>
@@ -1918,28 +1989,28 @@ export function HandbookForm() {
       return shell(
         <div className="space-y-3">
           <div className="flex items-center justify-between">
-            <label className="block text-[10px] uppercase tracking-wider text-zinc-500">Custom Company Sections</label>
+            <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>Custom Company Sections</label>
             <button
               type="button"
               onClick={() => setCustomSections((prev) => [...prev, { title: '', content: '' }])}
-              className="text-xs text-zinc-300 hover:text-white uppercase tracking-wider flex items-center gap-1"
+              className={`text-xs ${t.textBody} ${isLight ? 'hover:text-zinc-900' : 'hover:text-white'} uppercase tracking-wider flex items-center gap-1`}
             >
               <Plus size={12} />
               Add Section
             </button>
           </div>
-          <p className="text-[11px] text-zinc-500">
+          <p className={`text-[11px] ${t.textMuted}`}>
             These sections are optional and employer-authored. Use them for culture or non-statutory company rules.
           </p>
-          <p className="text-[11px] text-amber-300/90 border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+          <p className={`text-[11px] ${t.alertAmber} px-3 py-2`}>
             Custom content is not legal boilerplate. Your team is responsible for legal review and final policy ownership.
           </p>
           {customSections.length === 0 ? (
-            <p className="text-xs text-zinc-500">No custom sections added.</p>
+            <p className={`text-xs ${t.textMuted}`}>No custom sections added.</p>
           ) : (
             <div className="space-y-3">
               {customSections.map((section, index) => (
-                <div key={index} className="border border-white/10 p-3 space-y-2">
+                <div key={index} className={`border ${t.borderLight} p-3 space-y-2`}>
                   <input
                     type="text"
                     value={section.title}
@@ -1947,7 +2018,7 @@ export function HandbookForm() {
                       setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, title: e.target.value } : item)))
                     }
                     placeholder="Section title"
-                    className="w-full px-3 py-2 bg-zinc-950 border border-white/20 text-white text-sm"
+                    className={`w-full px-3 py-2 ${t.textareaBg} text-sm`}
                   />
                   <textarea
                     value={section.content}
@@ -1955,12 +2026,12 @@ export function HandbookForm() {
                       setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, content: e.target.value } : item)))
                     }
                     placeholder="Section content"
-                    className="w-full px-3 py-2 bg-zinc-950 border border-white/20 text-white text-sm min-h-[90px] resize-y"
+                    className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[90px] resize-y`}
                   />
                   <button
                     type="button"
                     onClick={() => setCustomSections((prev) => prev.filter((_, i) => i !== index))}
-                    className="text-[10px] text-red-400 hover:text-red-300 uppercase tracking-wider"
+                    className={`text-[10px] ${t.deleteBtn} uppercase tracking-wider`}
                   >
                     Remove
                   </button>
@@ -1976,7 +2047,7 @@ export function HandbookForm() {
       return shell(
         <div className="space-y-3">
           <div className="flex items-center gap-3">
-            <label className="px-3 py-2 border border-white/20 text-xs uppercase tracking-wider text-zinc-300 hover:text-white cursor-pointer">
+            <label className={`px-3 py-2 border ${t.fileUploadBorder} text-xs uppercase tracking-wider cursor-pointer`}>
               Select File
               <input
                 type="file"
@@ -1985,12 +2056,12 @@ export function HandbookForm() {
                 onChange={(e) => setFile(e.target.files?.[0] || null)}
               />
             </label>
-            {file && <span className="text-xs text-zinc-400 truncate">{file.name}</span>}
+            {file && <span className={`text-xs ${t.textFaint} truncate`}>{file.name}</span>}
             {file && (
               <button
                 type="button"
                 onClick={() => setFile(null)}
-                className="text-zinc-500 hover:text-red-400"
+                className={t.closeBtnCls}
               >
                 <X size={14} />
               </button>
@@ -1999,7 +2070,7 @@ export function HandbookForm() {
               type="button"
               onClick={handleSourceFileUpload}
               disabled={!file}
-              className="ml-auto px-3 py-2 bg-white text-black text-xs uppercase tracking-wider disabled:opacity-50 flex items-center gap-1"
+              className={`ml-auto px-3 py-2 ${t.btnPrimary} text-xs uppercase tracking-wider disabled:opacity-50 flex items-center gap-1`}
             >
               <Upload size={12} />
               Upload
@@ -2010,7 +2081,7 @@ export function HandbookForm() {
               Uploaded: {uploadedFilename || 'handbook'}
             </div>
           ) : (
-            <div className="text-[11px] text-zinc-500">No file uploaded yet.</div>
+            <div className={`text-[11px] ${t.textMuted}`}>No file uploaded yet.</div>
           )}
         </div>
       );
@@ -2035,20 +2106,21 @@ export function HandbookForm() {
   };
 
   return (
+    <div className={`min-h-screen ${t.pageBg} px-4 py-10`}>
     <div className="max-w-4xl mx-auto space-y-10">
       <div className="flex items-start justify-between">
         <div>
           <button
             onClick={() => navigate(-1)}
-            className="text-xs text-zinc-500 hover:text-white mb-4 flex items-center gap-1 uppercase tracking-wider"
+            className={`text-xs ${t.btnGhost} mb-4 flex items-center gap-1 uppercase tracking-wider`}
           >
             <ChevronLeft size={12} />
             Back
           </button>
-          <h1 className="text-3xl font-light tracking-tight text-white">
+          <h1 className={`text-3xl font-light tracking-tight ${t.textMain}`}>
             {isEditing ? 'Edit Handbook' : 'Create Handbook'}
           </h1>
-          <p className="text-sm text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+          <p className={`text-sm ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>
             {isEditing ? 'Update handbook scope and employer settings' : 'Step-by-step handbook setup wizard'}
           </p>
           {isWizard && (
@@ -2060,7 +2132,7 @@ export function HandbookForm() {
       </div>
 
       {isWizard && (
-        <div data-tour="handbook-wizard-progress" className="border border-white/10 bg-zinc-900/40 p-4">
+        <div data-tour="handbook-wizard-progress" className="border border-white/10 bg-zinc-900 rounded-2xl p-4">
           <div className="flex items-center justify-between text-[10px] uppercase tracking-widest text-zinc-500 mb-3">
             <span>Step {wizardCurrentStep + 1} of {CREATE_STEPS.length}</span>
             <span>
@@ -2108,14 +2180,14 @@ export function HandbookForm() {
         {renderActiveFormContent()}
 
         {error && (
-          <div className="text-red-400 text-xs font-medium px-4 py-3 border border-red-500/30 bg-red-500/10 rounded-sm space-y-2">
+          <div className={`text-xs font-medium px-4 py-3 ${t.alertRed} rounded-sm space-y-2`}>
             <p>{error}</p>
             {showsMissingCoverageRecovery && (
               <div className="flex flex-wrap gap-2 mt-1">
                 <button
                   type="button"
                   onClick={() => { void openComplianceFromRecovery(); }}
-                  className="px-3 py-1.5 border border-red-400/40 bg-red-500/10 text-red-200 hover:text-white text-[10px] uppercase tracking-wider"
+                  className={`px-3 py-1.5 ${t.recoveryBtn} text-[10px] uppercase tracking-wider`}
                 >
                   Sync Compliance Coverage →
                 </button>
@@ -2124,7 +2196,7 @@ export function HandbookForm() {
           </div>
         )}
 
-        <div className="flex justify-between gap-4 pt-6 border-t border-white/10">
+        <div className={`flex justify-between gap-4 pt-6 ${t.dividerT}`}>
           <button
             type="button"
             onClick={
@@ -2132,7 +2204,7 @@ export function HandbookForm() {
                 ? (wizardCardIndex === 0 ? () => navigate(-1) : goToPrevWizardCard)
                 : () => navigate(-1)
             }
-            className="px-6 py-2 text-zinc-500 hover:text-white text-xs font-medium uppercase tracking-wider transition-colors flex items-center gap-1"
+            className={`px-6 py-2 ${t.btnGhost} text-xs font-medium uppercase tracking-wider transition-colors flex items-center gap-1`}
           >
             <ChevronLeft size={12} />
             {isWizard && wizardCardIndex > 0 ? 'Previous' : 'Cancel'}
@@ -2143,7 +2215,7 @@ export function HandbookForm() {
               <button
                 type="button"
                 onClick={goToNextWizardCard}
-                className="px-8 py-2 bg-white hover:bg-zinc-200 text-black rounded-sm text-xs font-medium uppercase tracking-wider transition-colors flex items-center gap-1"
+                className={`px-8 py-2 ${t.btnPrimary} rounded-sm text-xs font-medium uppercase tracking-wider transition-colors flex items-center gap-1`}
               >
                 Next
                 <ChevronRight size={12} />
@@ -2152,7 +2224,7 @@ export function HandbookForm() {
               <button
                 type="submit"
                 disabled={loading}
-                className="px-8 py-2 bg-white hover:bg-zinc-200 text-black rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50"
+                className={`px-8 py-2 ${t.btnPrimary} rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50`}
               >
                 {loading ? 'Creating...' : 'Create Handbook'}
               </button>
@@ -2161,13 +2233,14 @@ export function HandbookForm() {
             <button
               type="submit"
               disabled={loading}
-              className="px-8 py-2 bg-white hover:bg-zinc-200 text-black rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50"
+              className={`px-8 py-2 ${t.btnPrimary} rounded-sm text-xs font-medium uppercase tracking-wider transition-colors disabled:opacity-50`}
             >
               {loading ? 'Saving...' : 'Update Handbook'}
             </button>
           )}
         </div>
       </form>
+    </div>
     </div>
   );
 }

@@ -2,6 +2,39 @@ import { useState, useEffect } from 'react';
 import { onboarding } from '../api/client';
 import type { OnboardingNotificationSettings as Settings } from '../api/client';
 import { X } from 'lucide-react';
+import { useIsLightMode } from '../hooks/useIsLightMode';
+
+const LT = {
+  card: 'bg-stone-100 rounded-2xl',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  border: 'border-stone-200',
+  input: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:outline-none focus:border-stone-400',
+  numberInput: 'w-20 bg-white border border-stone-300 text-xs text-zinc-900 px-3 py-2 text-center rounded-xl focus:outline-none focus:border-stone-400',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  label: 'text-stone-500',
+  pill: 'border border-stone-200 bg-stone-200 text-stone-600',
+  pillClose: 'text-stone-400 hover:text-zinc-900',
+  alertError: 'border border-red-300 bg-red-50 text-red-700',
+  alertSuccess: 'border border-emerald-300 bg-emerald-50 text-emerald-700',
+} as const;
+
+const DK = {
+  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  border: 'border-white/10',
+  input: 'bg-zinc-900 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:outline-none focus:border-white/20',
+  numberInput: 'w-20 bg-zinc-900 border border-white/10 text-xs text-zinc-200 px-3 py-2 text-center rounded-xl focus:outline-none focus:border-white/30',
+  btnPrimary: 'bg-white text-black hover:bg-zinc-200',
+  label: 'text-zinc-500',
+  pill: 'border border-white/10 bg-zinc-800 text-zinc-300',
+  pillClose: 'text-zinc-500 hover:text-white',
+  alertError: 'border border-red-500/30 bg-red-950/20 text-red-300',
+  alertSuccess: 'border border-emerald-500/30 bg-emerald-950/20 text-emerald-300',
+} as const;
 
 const DEFAULTS: Settings = {
   email_enabled: true,
@@ -13,6 +46,9 @@ const DEFAULTS: Settings = {
 };
 
 export default function OnboardingNotificationSettings() {
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
+
   const [settings, setSettings] = useState<Settings>(DEFAULTS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -79,7 +115,7 @@ export default function OnboardingNotificationSettings() {
 
   if (loading) {
     return (
-      <p className="text-xs text-zinc-500 light:text-black/60 font-mono uppercase tracking-wider animate-pulse py-8 text-center">
+      <p className={`text-xs ${t.textMuted} font-mono uppercase tracking-wider animate-pulse py-8 text-center`}>
         Loading notification settings...
       </p>
     );
@@ -88,22 +124,22 @@ export default function OnboardingNotificationSettings() {
   return (
     <div className="space-y-6 max-w-2xl">
       {error && (
-        <div className="border border-red-500/30 bg-red-950/20 px-4 py-3 text-xs text-red-300">
+        <div className={`${t.alertError} px-4 py-3 text-xs rounded-xl`}>
           {error}
         </div>
       )}
       {success && (
-        <div className="border border-emerald-500/30 bg-emerald-950/20 px-4 py-3 text-xs text-emerald-300">
+        <div className={`${t.alertSuccess} px-4 py-3 text-xs rounded-xl`}>
           {success}
         </div>
       )}
 
       {/* Email notifications toggle */}
-      <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4">
+      <div className={`${t.card} p-5 space-y-4`}>
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">Email Notifications</h3>
-            <p className="text-[10px] text-zinc-500 light:text-black/60 mt-1">
+            <h3 className={`text-xs font-bold uppercase tracking-widest ${t.textMain}`}>Email Notifications</h3>
+            <p className={`text-[10px] ${t.textMuted} mt-1`}>
               Send email reminders and escalation alerts for onboarding tasks.
             </p>
           </div>
@@ -113,7 +149,7 @@ export default function OnboardingNotificationSettings() {
             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors ${
               settings.email_enabled
                 ? 'bg-emerald-600 border-emerald-500/50'
-                : 'bg-zinc-700 border-zinc-600'
+                : `${isLight ? 'bg-stone-300 border-stone-300' : 'bg-zinc-700 border-zinc-600'}`
             }`}
           >
             <span
@@ -126,10 +162,10 @@ export default function OnboardingNotificationSettings() {
       </div>
 
       {/* HR Escalation Emails */}
-      <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4">
+      <div className={`${t.card} p-5 space-y-4`}>
         <div>
-          <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">HR Escalation Emails</h3>
-          <p className="text-[10px] text-zinc-500 light:text-black/60 mt-1">
+          <h3 className={`text-xs font-bold uppercase tracking-widest ${t.textMain}`}>HR Escalation Emails</h3>
+          <p className={`text-[10px] ${t.textMuted} mt-1`}>
             These addresses receive alerts when tasks are escalated to HR.
           </p>
         </div>
@@ -141,12 +177,12 @@ export default function OnboardingNotificationSettings() {
             onChange={(e) => setEmailInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addEmail(); } }}
             placeholder="hr@company.com"
-            className="flex-1 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 placeholder-zinc-600 focus:outline-none focus:border-white/30"
+            className={`flex-1 ${t.input} text-xs px-3 py-2`}
           />
           <button
             type="button"
             onClick={addEmail}
-            className="px-4 py-2 bg-white text-black text-[10px] font-bold uppercase tracking-wider hover:bg-zinc-200"
+            className={`px-4 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl`}
           >
             Add
           </button>
@@ -157,13 +193,13 @@ export default function OnboardingNotificationSettings() {
             {settings.hr_escalation_emails.map((email) => (
               <span
                 key={email}
-                className="inline-flex items-center gap-1.5 border border-white/10 bg-zinc-800 light:bg-black/[0.05] px-2.5 py-1 text-[11px] text-zinc-300 light:text-black/80"
+                className={`inline-flex items-center gap-1.5 ${t.pill} px-2.5 py-1 text-[11px] rounded-lg`}
               >
                 {email}
                 <button
                   type="button"
                   onClick={() => removeEmail(email)}
-                  className="text-zinc-500 light:text-black/60 hover:text-white light:text-black"
+                  className={t.pillClose}
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -174,17 +210,17 @@ export default function OnboardingNotificationSettings() {
       </div>
 
       {/* Timing Settings */}
-      <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-5">
+      <div className={`${t.card} p-5 space-y-5`}>
         <div>
-          <h3 className="text-xs font-bold uppercase tracking-widest text-white light:text-black">Timing</h3>
-          <p className="text-[10px] text-zinc-500 light:text-black/60 mt-1">
+          <h3 className={`text-xs font-bold uppercase tracking-widest ${t.textMain}`}>Timing</h3>
+          <p className={`text-[10px] ${t.textMuted} mt-1`}>
             Configure when reminders and escalations are triggered.
           </p>
         </div>
 
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-4">
-            <label className="text-[11px] text-zinc-400 light:text-black/70">Remind before due date (days)</label>
+            <label className={`text-[11px] ${t.textFaint}`}>Remind before due date (days)</label>
             <input
               type="number"
               min={1}
@@ -196,12 +232,12 @@ export default function OnboardingNotificationSettings() {
                   reminder_days_before_due: Math.max(1, Math.min(7, parseInt(e.target.value) || 1)),
                 }))
               }
-              className="w-20 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className={t.numberInput}
             />
           </div>
 
           <div className="flex items-center justify-between gap-4">
-            <label className="text-[11px] text-zinc-400 light:text-black/70">Escalate to manager after (days overdue)</label>
+            <label className={`text-[11px] ${t.textFaint}`}>Escalate to manager after (days overdue)</label>
             <input
               type="number"
               min={1}
@@ -213,12 +249,12 @@ export default function OnboardingNotificationSettings() {
                   escalate_to_manager_after_days: Math.max(1, parseInt(e.target.value) || 1),
                 }))
               }
-              className="w-20 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className={t.numberInput}
             />
           </div>
 
           <div className="flex items-center justify-between gap-4">
-            <label className="text-[11px] text-zinc-400 light:text-black/70">Escalate to HR after (days overdue)</label>
+            <label className={`text-[11px] ${t.textFaint}`}>Escalate to HR after (days overdue)</label>
             <input
               type="number"
               min={1}
@@ -230,7 +266,7 @@ export default function OnboardingNotificationSettings() {
                   escalate_to_hr_after_days: Math.max(1, parseInt(e.target.value) || 1),
                 }))
               }
-              className="w-20 bg-zinc-900 light:bg-black/[0.03] border border-white/10 light:bg-black/[0.03] light:border-black/[0.05] light:shadow-inner text-xs text-zinc-200 light:text-black/90 px-3 py-2 text-center focus:outline-none focus:border-white/30"
+              className={t.numberInput}
             />
           </div>
         </div>
@@ -242,7 +278,7 @@ export default function OnboardingNotificationSettings() {
           type="button"
           onClick={handleSave}
           disabled={saving}
-          className="px-6 py-2.5 bg-white text-black text-[10px] font-bold uppercase tracking-wider hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed"
+          className={`px-6 py-2.5 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50 disabled:cursor-not-allowed`}
         >
           {saving ? 'Saving...' : 'Save Settings'}
         </button>

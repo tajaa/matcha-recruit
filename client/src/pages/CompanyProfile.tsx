@@ -4,6 +4,7 @@ import { Building, Upload, Check, AlertTriangle, MapPin, Settings, Briefcase, He
 import { useAuth } from '../context/AuthContext';
 import { getAccessToken, provisioning } from '../api/client';
 import { FeatureGuideTrigger } from '../features/feature-guides';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 import type { ClientProfile, GoogleWorkspaceConnectionStatus } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -60,33 +61,87 @@ interface CompanyData {
   ai_guidance_notes: string | null;
 }
 
-function getGoogleBadge(status: GoogleWorkspaceConnectionStatus | null, loading: boolean) {
-  if (loading) {
-    return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
-  }
-  if (!status || status.status === 'disconnected') {
-    return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900/70 text-zinc-300' };
-  }
-  if (status.status === 'connected') {
-    return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
-  }
-  if (status.status === 'error') {
-    return { label: 'Needs Attention', tone: 'border-red-500/40 bg-red-950/30 text-red-200' };
-  }
-  return { label: status.status.toUpperCase(), tone: 'border-amber-500/40 bg-amber-950/30 text-amber-200' };
-}
+const LT = {
+  section: 'border border-stone-200 bg-stone-100 rounded-2xl',
+  sectionHeader: 'p-6 border-b border-stone-200 flex items-center gap-3',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  textDim: 'text-stone-600',
+  border: 'border-stone-200',
+  input: 'w-full bg-white border border-stone-300 px-4 py-3 text-sm text-zinc-900 placeholder-stone-400 rounded-xl focus:outline-none focus:border-stone-400 transition-colors',
+  select: 'w-full bg-white border border-stone-300 px-4 py-3 text-sm text-zinc-900 rounded-xl focus:outline-none focus:border-stone-400 transition-colors appearance-none',
+  textarea: 'w-full bg-stone-50 border border-stone-300 px-4 py-3 text-sm text-zinc-900 placeholder-stone-400 rounded-xl focus:outline-none focus:border-stone-400 transition-colors resize-none',
+  label: 'block text-[10px] uppercase tracking-[0.2em] text-stone-500 font-bold mb-2',
+  helper: 'text-[10px] text-stone-400 mt-1.5',
+  sectionTitle: 'text-xs font-bold text-zinc-900 uppercase tracking-[0.2em]',
+  sectionIcon: 'w-4 h-4 text-stone-400',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  btnSecondary: 'border border-stone-300 text-stone-600 hover:text-zinc-900',
+  btnGhost: 'text-stone-400 hover:text-zinc-900',
+  alertError: 'bg-red-50 border border-red-200 rounded-xl',
+  alertErrorText: 'text-red-700',
+  logoBg: 'border border-stone-200 bg-stone-200',
+  logoPlaceholder: 'text-stone-400',
+  logoHelper: 'text-stone-400',
+  logoUploadBtn: 'border border-stone-300 hover:bg-zinc-900 hover:text-white text-stone-600',
+  tipCard: 'border border-stone-200 bg-stone-100 rounded-2xl',
+  tipText: 'text-stone-500',
+  tipStrong: 'text-zinc-900',
+  profileBadge: 'border border-emerald-300 bg-emerald-50 text-emerald-700',
+  badgeChecking: 'border-stone-300 bg-stone-200 text-stone-600',
+  badgeDisconnected: 'border-stone-300 bg-stone-200 text-stone-600',
+  badgeConnected: 'border-emerald-300 bg-emerald-50 text-emerald-700',
+  badgeError: 'border-red-300 bg-red-50 text-red-700',
+  badgeDefault: 'border-amber-300 bg-amber-50 text-amber-700',
+  googleDetail: 'text-stone-500',
+  googleValue: 'text-zinc-900',
+} as const;
 
-const inputClass = "w-full bg-zinc-950 border border-white/10 px-4 py-3 text-sm text-white placeholder-zinc-600 focus:outline-none focus:border-white/30 transition-colors";
-const selectClass = `${inputClass} appearance-none`;
-const textareaClass = `${inputClass} resize-none`;
-const labelClass = "block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-2";
-const helperClass = "text-[10px] text-zinc-600 mt-1.5";
+const DK = {
+  section: 'border border-white/10 bg-zinc-900/30 rounded-2xl',
+  sectionHeader: 'p-6 border-b border-white/10 flex items-center gap-3',
+  textMain: 'text-white',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  input: 'w-full bg-zinc-950 border border-white/10 px-4 py-3 text-sm text-white placeholder-zinc-600 rounded-xl focus:outline-none focus:border-white/30 transition-colors',
+  select: 'w-full bg-zinc-950 border border-white/10 px-4 py-3 text-sm text-white rounded-xl focus:outline-none focus:border-white/30 transition-colors appearance-none',
+  textarea: 'w-full bg-zinc-950 border border-white/10 px-4 py-3 text-sm text-white placeholder-zinc-600 rounded-xl focus:outline-none focus:border-white/30 transition-colors resize-none',
+  label: 'block text-[10px] uppercase tracking-[0.2em] text-zinc-500 font-bold mb-2',
+  helper: 'text-[10px] text-zinc-600 mt-1.5',
+  sectionTitle: 'text-xs font-bold text-white uppercase tracking-[0.2em]',
+  sectionIcon: 'w-4 h-4 text-zinc-500',
+  btnPrimary: 'bg-white text-black hover:bg-zinc-200',
+  btnSecondary: 'border border-white/10 text-zinc-400 hover:text-white',
+  btnGhost: 'text-zinc-500 hover:text-white',
+  alertError: 'bg-red-500/10 border border-red-500/20 rounded-xl',
+  alertErrorText: 'text-red-400',
+  logoBg: 'border border-white/10 bg-zinc-950',
+  logoPlaceholder: 'text-zinc-600',
+  logoHelper: 'text-zinc-600',
+  logoUploadBtn: 'border border-white/20 hover:bg-white hover:text-black text-zinc-400',
+  tipCard: 'border border-white/10 bg-zinc-900/30 rounded-2xl',
+  tipText: 'text-zinc-400',
+  tipStrong: 'text-zinc-300',
+  profileBadge: 'border border-emerald-500/20 bg-emerald-900/10 text-emerald-400',
+  badgeChecking: 'border-zinc-700 bg-zinc-900/70 text-zinc-300',
+  badgeDisconnected: 'border-zinc-700 bg-zinc-900/70 text-zinc-300',
+  badgeConnected: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200',
+  badgeError: 'border-red-500/40 bg-red-950/30 text-red-200',
+  badgeDefault: 'border-amber-500/40 bg-amber-950/30 text-amber-200',
+  googleDetail: 'text-zinc-400',
+  googleValue: 'text-zinc-200',
+} as const;
 
 export function CompanyProfile() {
   const navigate = useNavigate();
   const { profile } = useAuth();
   const clientProfile = profile as ClientProfile | null;
   const companyId = clientProfile?.company_id;
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
 
   const [company, setCompany] = useState<CompanyData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -256,7 +311,6 @@ export function CompanyProfile() {
     setLogoUploading(true);
     setError(null);
 
-    // Show preview immediately
     const reader = new FileReader();
     reader.onload = (ev) => setLogoPreview(ev.target?.result as string);
     reader.readAsDataURL(file);
@@ -282,7 +336,6 @@ export function CompanyProfile() {
       setCompany((prev) => prev ? { ...prev, logo_url: url } : prev);
     } catch (err: any) {
       setError(err.message || 'Failed to upload logo');
-      // Revert preview on error
       setLogoPreview(company?.logo_url || null);
     } finally {
       setLogoUploading(false);
@@ -304,14 +357,20 @@ export function CompanyProfile() {
     companyValues !== (company?.company_values || '') ||
     aiGuidanceNotes !== (company?.ai_guidance_notes || '');
 
-  const googleBadge = getGoogleBadge(googleStatus, loadingGoogle);
+  const googleBadge = (() => {
+    if (loadingGoogle) return { label: 'Checking', tone: t.badgeChecking };
+    if (!googleStatus || googleStatus.status === 'disconnected') return { label: 'Not Connected', tone: t.badgeDisconnected };
+    if (googleStatus.status === 'connected') return { label: 'Connected', tone: t.badgeConnected };
+    if (googleStatus.status === 'error') return { label: 'Needs Attention', tone: t.badgeError };
+    return { label: googleStatus.status.toUpperCase(), tone: t.badgeDefault };
+  })();
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
         <div className="flex flex-col items-center gap-3">
           <div className="w-2 h-2 rounded-full bg-matcha-500 animate-pulse" />
-          <span className="text-xs text-zinc-500 font-mono uppercase tracking-wider">Loading</span>
+          <span className={`text-xs ${t.textMuted} font-mono uppercase tracking-wider`}>Loading</span>
         </div>
       </div>
     );
@@ -320,14 +379,14 @@ export function CompanyProfile() {
   return (
     <div className="space-y-12 animate-in fade-in duration-500">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-6 border-b border-white/10 pb-8">
+      <div className={`flex flex-col sm:flex-row sm:items-end justify-between gap-6 border-b ${t.border} pb-8`}>
         <div className="text-center sm:text-left">
           <div className="flex items-center gap-3 mb-2 justify-center sm:justify-start">
-            <div className="px-2 py-1 border border-emerald-500/20 bg-emerald-900/10 text-emerald-400 text-[9px] uppercase tracking-widest font-mono rounded">
+            <div className={`px-2 py-1 ${t.profileBadge} text-[9px] uppercase tracking-widest font-mono rounded-lg`}>
               Company Profile
             </div>
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold tracking-tighter text-white uppercase break-all">
+          <h1 className={`text-4xl md:text-5xl font-bold tracking-tighter ${t.textMain} uppercase break-all`}>
             {company?.name || 'Company'}
           </h1>
         </div>
@@ -336,11 +395,11 @@ export function CompanyProfile() {
             <button
               onClick={handleSave}
               disabled={saving}
-              className="flex items-center gap-2 px-5 py-2.5 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className={`flex items-center gap-2 px-5 py-2.5 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
             >
               {saving ? (
                 <>
-                  <span className="w-3 h-3 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                  <span className="w-3 h-3 border-2 border-current/20 border-t-current rounded-full animate-spin" />
                   Saving...
                 </>
               ) : (
@@ -361,10 +420,10 @@ export function CompanyProfile() {
 
       {/* Error banner */}
       {error && (
-        <div className="flex items-center gap-3 p-4 bg-red-500/10 border border-red-500/20">
-          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-          <p className="text-sm text-red-400">{error}</p>
-          <button onClick={() => setError(null)} className="ml-auto text-red-400 hover:text-red-300 text-xs uppercase tracking-wider">
+        <div className={`flex items-center gap-3 p-4 ${t.alertError}`}>
+          <AlertTriangle className={`w-4 h-4 ${t.alertErrorText} shrink-0`} />
+          <p className={`text-sm ${t.alertErrorText}`}>{error}</p>
+          <button onClick={() => setError(null)} className={`ml-auto ${t.alertErrorText} text-xs uppercase tracking-wider`}>
             Dismiss
           </button>
         </div>
@@ -374,180 +433,107 @@ export function CompanyProfile() {
         {/* Main column */}
         <div className="lg:col-span-2 space-y-8">
           {/* Section 1: Company Information */}
-          <div data-tour="company-info-form" className="border border-white/10 bg-zinc-900/30">
-            <div className="p-6 border-b border-white/10 flex items-center gap-3">
-              <Building className="w-4 h-4 text-zinc-500" />
-              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Company Information</h2>
+          <div data-tour="company-info-form" className={t.section}>
+            <div className={t.sectionHeader}>
+              <Building className={t.sectionIcon} />
+              <h2 className={t.sectionTitle}>Company Information</h2>
             </div>
             <div className="p-6 space-y-6">
-              {/* Name */}
               <div>
-                <label className={labelClass}>Company Name</label>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className={inputClass}
-                  placeholder="Enter company name"
-                />
+                <label className={t.label}>Company Name</label>
+                <input type="text" value={name} onChange={(e) => setName(e.target.value)} className={t.input} placeholder="Enter company name" />
               </div>
-
-              {/* Industry + Size row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div>
-                  <label className={labelClass}>Industry</label>
-                  <select value={industry} onChange={(e) => setIndustry(e.target.value)} className={selectClass}>
+                  <label className={t.label}>Industry</label>
+                  <select value={industry} onChange={(e) => setIndustry(e.target.value)} className={t.select}>
                     <option value="">Select industry</option>
-                    {INDUSTRIES.map((ind) => (
-                      <option key={ind} value={ind}>{ind}</option>
-                    ))}
+                    {INDUSTRIES.map((ind) => (<option key={ind} value={ind}>{ind}</option>))}
                   </select>
                 </div>
                 <div>
-                  <label className={labelClass}>Company Size</label>
-                  <select value={size} onChange={(e) => setSize(e.target.value)} className={selectClass}>
+                  <label className={t.label}>Company Size</label>
+                  <select value={size} onChange={(e) => setSize(e.target.value)} className={t.select}>
                     <option value="">Select size</option>
-                    {SIZES.map((s) => (
-                      <option key={s.value} value={s.value}>{s.label}</option>
-                    ))}
+                    {SIZES.map((s) => (<option key={s.value} value={s.value}>{s.label}</option>))}
                   </select>
                 </div>
               </div>
-
-              {/* Headquarters row */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                 <div>
-                  <label className={labelClass}>Headquarters State</label>
-                  <select value={headquartersState} onChange={(e) => setHeadquartersState(e.target.value)} className={selectClass}>
+                  <label className={t.label}>Headquarters State</label>
+                  <select value={headquartersState} onChange={(e) => setHeadquartersState(e.target.value)} className={t.select}>
                     <option value="">Select state</option>
-                    {US_STATES.map((s) => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
+                    {US_STATES.map((s) => (<option key={s} value={s}>{s}</option>))}
                   </select>
-                  <p className={helperClass}>Used for jurisdiction-aware legal guidance</p>
+                  <p className={t.helper}>Used for jurisdiction-aware legal guidance</p>
                 </div>
                 <div>
-                  <label className={labelClass}>Headquarters City</label>
-                  <input
-                    type="text"
-                    value={headquartersCity}
-                    onChange={(e) => setHeadquartersCity(e.target.value)}
-                    className={inputClass}
-                    placeholder="e.g. San Francisco"
-                  />
-                  <p className={helperClass}>City-level wage and tax guidance</p>
+                  <label className={t.label}>Headquarters City</label>
+                  <input type="text" value={headquartersCity} onChange={(e) => setHeadquartersCity(e.target.value)} className={t.input} placeholder="e.g. San Francisco" />
+                  <p className={t.helper}>City-level wage and tax guidance</p>
                 </div>
               </div>
-
-              {/* Work Arrangement */}
               <div>
-                <label className={labelClass}>Work Arrangement</label>
-                <select value={workArrangement} onChange={(e) => setWorkArrangement(e.target.value)} className={selectClass}>
+                <label className={t.label}>Work Arrangement</label>
+                <select value={workArrangement} onChange={(e) => setWorkArrangement(e.target.value)} className={t.select}>
                   <option value="">Select arrangement</option>
-                  {WORK_ARRANGEMENTS.map((w) => (
-                    <option key={w.value} value={w.value}>{w.label}</option>
-                  ))}
+                  {WORK_ARRANGEMENTS.map((w) => (<option key={w.value} value={w.value}>{w.label}</option>))}
                 </select>
-                <p className={helperClass}>Affects offer letter and onboarding language</p>
+                <p className={t.helper}>Affects offer letter and onboarding language</p>
               </div>
             </div>
           </div>
 
           {/* Section 2: Employment & Compensation */}
-          <div className="border border-white/10 bg-zinc-900/30">
-            <div className="p-6 border-b border-white/10 flex items-center gap-3">
-              <Briefcase className="w-4 h-4 text-zinc-500" />
-              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Employment & Compensation</h2>
+          <div className={t.section}>
+            <div className={t.sectionHeader}>
+              <Briefcase className={t.sectionIcon} />
+              <h2 className={t.sectionTitle}>Employment & Compensation</h2>
             </div>
             <div className="p-6 space-y-6">
-              {/* Default Employment Type */}
               <div>
-                <label className={labelClass}>Default Employment Type</label>
-                <select
-                  value={defaultEmploymentType}
-                  onChange={(e) => setDefaultEmploymentType(e.target.value)}
-                  className={selectClass}
-                >
+                <label className={t.label}>Default Employment Type</label>
+                <select value={defaultEmploymentType} onChange={(e) => setDefaultEmploymentType(e.target.value)} className={t.select}>
                   <option value="">Select type</option>
-                  {EMPLOYMENT_TYPES.map((t) => (
-                    <option key={t.value} value={t.value}>{t.label}</option>
-                  ))}
+                  {EMPLOYMENT_TYPES.map((et) => (<option key={et.value} value={et.value}>{et.label}</option>))}
                 </select>
-                <p className={helperClass}>Pre-fills offer letters with this employment type</p>
+                <p className={t.helper}>Pre-fills offer letters with this employment type</p>
               </div>
-
-              {/* Compensation Notes */}
               <div>
-                <label className={labelClass}>Compensation Notes</label>
-                <textarea
-                  value={compensationNotes}
-                  onChange={(e) => setCompensationNotes(e.target.value)}
-                  className={textareaClass}
-                  rows={3}
-                  placeholder="e.g. Paid bi-weekly. Equity vesting over 4 years with 1-year cliff. Annual bonus target 10-15%."
-                />
-                <p className={helperClass}>Pay frequency, equity, and bonus structure for offer letter guidance</p>
+                <label className={t.label}>Compensation Notes</label>
+                <textarea value={compensationNotes} onChange={(e) => setCompensationNotes(e.target.value)} className={t.textarea} rows={3} placeholder="e.g. Paid bi-weekly. Equity vesting over 4 years with 1-year cliff. Annual bonus target 10-15%." />
+                <p className={t.helper}>Pay frequency, equity, and bonus structure for offer letter guidance</p>
               </div>
-
-              {/* Benefits Summary */}
               <div>
-                <label className={labelClass}>Benefits Summary</label>
-                <textarea
-                  value={benefitsSummary}
-                  onChange={(e) => setBenefitsSummary(e.target.value)}
-                  className={textareaClass}
-                  rows={4}
-                  placeholder="e.g. Medical, dental, vision (100% employee, 75% dependents). 401(k) with 4% match. $500/yr learning stipend."
-                />
-                <p className={helperClass}>Standard benefits package — pre-fills offer letters automatically</p>
+                <label className={t.label}>Benefits Summary</label>
+                <textarea value={benefitsSummary} onChange={(e) => setBenefitsSummary(e.target.value)} className={t.textarea} rows={4} placeholder="e.g. Medical, dental, vision (100% employee, 75% dependents). 401(k) with 4% match. $500/yr learning stipend." />
+                <p className={t.helper}>Standard benefits package — pre-fills offer letters automatically</p>
               </div>
-
-              {/* PTO Policy Summary */}
               <div>
-                <label className={labelClass}>PTO Policy Summary</label>
-                <textarea
-                  value={ptoPolicySummary}
-                  onChange={(e) => setPtoPolicySummary(e.target.value)}
-                  className={textareaClass}
-                  rows={3}
-                  placeholder="e.g. Unlimited PTO with 2-week minimum. 10 company holidays. 12 weeks parental leave."
-                />
-                <p className={helperClass}>PTO overview for offer letters and onboarding documents</p>
+                <label className={t.label}>PTO Policy Summary</label>
+                <textarea value={ptoPolicySummary} onChange={(e) => setPtoPolicySummary(e.target.value)} className={t.textarea} rows={3} placeholder="e.g. Unlimited PTO with 2-week minimum. 10 company holidays. 12 weeks parental leave." />
+                <p className={t.helper}>PTO overview for offer letters and onboarding documents</p>
               </div>
             </div>
           </div>
 
           {/* Section 3: Culture & AI Guidance */}
-          <div className="border border-white/10 bg-zinc-900/30">
-            <div className="p-6 border-b border-white/10 flex items-center gap-3">
-              <Heart className="w-4 h-4 text-zinc-500" />
-              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Culture & AI Guidance</h2>
+          <div className={t.section}>
+            <div className={t.sectionHeader}>
+              <Heart className={t.sectionIcon} />
+              <h2 className={t.sectionTitle}>Culture & AI Guidance</h2>
             </div>
             <div className="p-6 space-y-6">
-              {/* Company Values */}
               <div>
-                <label className={labelClass}>Company Values</label>
-                <textarea
-                  value={companyValues}
-                  onChange={(e) => setCompanyValues(e.target.value)}
-                  className={textareaClass}
-                  rows={4}
-                  placeholder="e.g. Move fast, own outcomes. Default to transparency. Customers come first. Disagree and commit."
-                />
-                <p className={helperClass}>Sets the tone for reviews, workbooks, and onboarding content</p>
+                <label className={t.label}>Company Values</label>
+                <textarea value={companyValues} onChange={(e) => setCompanyValues(e.target.value)} className={t.textarea} rows={4} placeholder="e.g. Move fast, own outcomes. Default to transparency. Customers come first. Disagree and commit." />
+                <p className={t.helper}>Sets the tone for reviews, workbooks, and onboarding content</p>
               </div>
-
-              {/* AI Guidance Notes */}
               <div>
-                <label className={labelClass}>AI Guidance Notes</label>
-                <textarea
-                  value={aiGuidanceNotes}
-                  onChange={(e) => setAiGuidanceNotes(e.target.value)}
-                  className={textareaClass}
-                  rows={4}
-                  placeholder='e.g. Always mention our 90-day review period in offer letters. Use "team member" instead of "employee". Include our diversity commitment in all onboarding documents.'
-                />
-                <p className={helperClass}>
+                <label className={t.label}>AI Guidance Notes</label>
+                <textarea value={aiGuidanceNotes} onChange={(e) => setAiGuidanceNotes(e.target.value)} className={t.textarea} rows={4} placeholder='e.g. Always mention our 90-day review period in offer letters. Use "team member" instead of "employee". Include our diversity commitment in all onboarding documents.' />
+                <p className={t.helper}>
                   Special instructions for the AI — anything written here will be included in every AI-generated document
                 </p>
               </div>
@@ -555,38 +541,38 @@ export function CompanyProfile() {
           </div>
 
           {/* Locations */}
-          <div className="border border-white/10 bg-zinc-900/30">
-            <div className="p-6 border-b border-white/10 flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <MapPin className="w-4 h-4 text-zinc-500" />
-                <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Business Locations</h2>
+          <div className={t.section}>
+            <div className="p-6 border-b flex items-center justify-between" style={{}}>
+              <div className={`flex items-center gap-3 border-0 ${t.border}`}>
+                <MapPin className={t.sectionIcon} />
+                <h2 className={t.sectionTitle}>Business Locations</h2>
               </div>
               <button
                 onClick={() => navigate('/app/matcha/compliance')}
-                className="text-[10px] uppercase tracking-[0.2em] text-zinc-400 hover:text-white transition-colors border border-white/10 px-3 py-1.5"
+                className={`text-[10px] uppercase tracking-[0.2em] ${t.btnSecondary} px-3 py-1.5 rounded-lg transition-colors`}
               >
                 Manage in Compliance
               </button>
             </div>
             <div className="p-6">
-              <p className="text-sm text-zinc-500">
+              <p className={`text-sm ${t.textMuted}`}>
                 Business locations are managed through the Compliance page, where you can add shops, track jurisdiction requirements, and order compliance posters.
               </p>
             </div>
           </div>
 
-          <div data-tour="company-setup-card" className="border border-white/10 bg-zinc-900/30">
-            <div className="p-6 border-b border-white/10 flex items-center justify-between gap-3">
+          <div data-tour="company-setup-card" className={t.section}>
+            <div className={`p-6 border-b ${t.border} flex items-center justify-between gap-3`}>
               <div className="flex items-center gap-3">
-                <Settings className="w-4 h-4 text-zinc-500" />
-                <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Setup & Integrations</h2>
+                <Settings className={t.sectionIcon} />
+                <h2 className={t.sectionTitle}>Setup & Integrations</h2>
               </div>
-              <span className={`rounded border px-2 py-1 text-[10px] uppercase tracking-wider ${googleBadge.tone}`}>
+              <span className={`rounded-lg border px-2 py-1 text-[10px] uppercase tracking-wider ${googleBadge.tone}`}>
                 {googleBadge.label}
               </span>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-zinc-500">
+              <p className={`text-sm ${t.textMuted}`}>
                 Configure Google Workspace once here, then automatically provision employee accounts during onboarding.
               </p>
 
@@ -594,16 +580,16 @@ export function CompanyProfile() {
                 <p className="text-xs text-red-300">Status check failed: {googleStatusError}</p>
               )}
 
-              <div data-tour="company-google-status" className="space-y-1 text-[11px] text-zinc-400">
-                <p>Mode: <span className="text-zinc-200">{googleStatus?.mode || 'not configured'}</span></p>
-                <p>Domain: <span className="text-zinc-200">{googleStatus?.domain || 'not set'}</span></p>
-                <p>Auto-provision: <span className="text-zinc-200">{googleStatus?.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
+              <div data-tour="company-google-status" className={`space-y-1 text-[11px] ${t.googleDetail}`}>
+                <p>Mode: <span className={t.googleValue}>{googleStatus?.mode || 'not configured'}</span></p>
+                <p>Domain: <span className={t.googleValue}>{googleStatus?.domain || 'not set'}</span></p>
+                <p>Auto-provision: <span className={t.googleValue}>{googleStatus?.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
               </div>
 
               <button
                 data-tour="company-google-configure-btn"
                 onClick={() => navigate('/app/matcha/google-workspace')}
-                className="px-4 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+                className={`px-4 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
               >
                 Configure Google Workspace
               </button>
@@ -616,11 +602,11 @@ export function CompanyProfile() {
               <button
                 onClick={handleSave}
                 disabled={saving}
-                className="flex items-center gap-2 px-6 py-3 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className={`flex items-center gap-2 px-6 py-3 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
               >
                 {saving ? (
                   <>
-                    <span className="w-3 h-3 border-2 border-black/20 border-t-black rounded-full animate-spin" />
+                    <span className="w-3 h-3 border-2 border-current/20 border-t-current rounded-full animate-spin" />
                     Saving...
                   </>
                 ) : (
@@ -634,39 +620,26 @@ export function CompanyProfile() {
 
         {/* Logo Sidebar */}
         <div className="space-y-8">
-          <div data-tour="company-logo-card" className="border border-white/10 bg-zinc-900/30">
-            <div className="p-6 border-b border-white/10">
-              <h2 className="text-xs font-bold text-white uppercase tracking-[0.2em]">Company Logo</h2>
+          <div data-tour="company-logo-card" className={t.section}>
+            <div className={`p-6 border-b ${t.border}`}>
+              <h2 className={t.sectionTitle}>Company Logo</h2>
             </div>
             <div className="p-6 flex flex-col items-center">
-              {/* Logo Preview */}
-              <div className="w-40 h-40 border border-white/10 bg-zinc-950 flex items-center justify-center mb-6 overflow-hidden">
+              <div className={`w-40 h-40 ${t.logoBg} flex items-center justify-center mb-6 overflow-hidden rounded-xl`}>
                 {logoPreview ? (
-                  <img
-                    src={logoPreview}
-                    alt="Company logo"
-                    className="w-full h-full object-contain"
-                  />
+                  <img src={logoPreview} alt="Company logo" className="w-full h-full object-contain" />
                 ) : (
-                  <div className="flex flex-col items-center gap-2 text-zinc-600">
+                  <div className={`flex flex-col items-center gap-2 ${t.logoPlaceholder}`}>
                     <Building className="w-10 h-10" />
                     <span className="text-[10px] uppercase tracking-wider">No logo</span>
                   </div>
                 )}
               </div>
-
-              {/* Upload Button */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                onChange={handleLogoUpload}
-                className="hidden"
-              />
+              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleLogoUpload} className="hidden" />
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={logoUploading}
-                className="flex items-center gap-2 px-4 py-2 border border-white/20 hover:bg-white hover:text-black text-xs font-mono uppercase tracking-widest transition-all disabled:opacity-50"
+                className={`flex items-center gap-2 px-4 py-2 ${t.logoUploadBtn} text-xs font-mono uppercase tracking-widest rounded-xl transition-all disabled:opacity-50`}
               >
                 {logoUploading ? (
                   <>
@@ -680,27 +653,27 @@ export function CompanyProfile() {
                   </>
                 )}
               </button>
-              <p className="text-[10px] text-zinc-600 mt-3 text-center">
+              <p className={`text-[10px] ${t.logoHelper} mt-3 text-center`}>
                 PNG, JPG or SVG. Max 5MB.
               </p>
             </div>
           </div>
 
           {/* Profile completion sidebar hint */}
-          <div className="border border-white/10 bg-zinc-900/30 p-6">
-            <h3 className="text-xs font-bold text-white uppercase tracking-[0.2em] mb-3">AI Profile Tips</h3>
-            <ul className="space-y-2.5 text-[11px] text-zinc-400">
+          <div className={`${t.tipCard} p-6`}>
+            <h3 className={`${t.sectionTitle} mb-3`}>AI Profile Tips</h3>
+            <ul className={`space-y-2.5 text-[11px] ${t.tipText}`}>
               <li className="flex gap-2">
                 <span className="text-emerald-500 mt-0.5">&#x2022;</span>
-                <span>Add your <strong className="text-zinc-300">headquarters state</strong> so offer letters use the right legal defaults</span>
+                <span>Add your <strong className={t.tipStrong}>headquarters state</strong> so offer letters use the right legal defaults</span>
               </li>
               <li className="flex gap-2">
                 <span className="text-emerald-500 mt-0.5">&#x2022;</span>
-                <span>Fill in <strong className="text-zinc-300">benefits</strong> and <strong className="text-zinc-300">PTO</strong> to skip repetitive questions in chat</span>
+                <span>Fill in <strong className={t.tipStrong}>benefits</strong> and <strong className={t.tipStrong}>PTO</strong> to skip repetitive questions in chat</span>
               </li>
               <li className="flex gap-2">
                 <span className="text-emerald-500 mt-0.5">&#x2022;</span>
-                <span>Use <strong className="text-zinc-300">AI guidance notes</strong> for custom rules like probation periods or preferred terminology</span>
+                <span>Use <strong className={t.tipStrong}>AI guidance notes</strong> for custom rules like probation periods or preferred terminology</span>
               </li>
             </ul>
           </div>
