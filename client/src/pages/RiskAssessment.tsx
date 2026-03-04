@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Sparkles } from 'lucide-react';
+import { RefreshCw, Sparkles, HelpCircle } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics } from '../types';
 import { riskAssessment, erCopilot } from '../api/client';
@@ -27,6 +27,15 @@ const DIMENSION_META: Record<string, { label: string; weight: string }> = {
 };
 
 const DIMENSION_ORDER = ['compliance', 'incidents', 'er_cases', 'workforce', 'legislative'] as const;
+
+const DIMENSION_HELP: Record<string, string> = {
+  overall: 'The weighted composite of all five dimension scores. Higher means more exposure. Weights: Compliance 30%, Incidents 25%, ER Cases 25%, Workforce 15%, Legislative 5%.',
+  compliance: 'Measures regulatory compliance gaps across your locations — minimum wage violations, missing postings, and jurisdiction-specific requirements. Contributes 30% of the overall score.',
+  incidents: 'Tracks workplace safety and behavioral incident frequency, severity, and resolution time. Contributes 25% of the overall score.',
+  er_cases: 'Evaluates open employee relations cases, escalation patterns, and unresolved disputes. Contributes 25% of the overall score.',
+  workforce: 'Assesses workforce-level risks like turnover concentration, onboarding gaps, and headcount exposure. Contributes 15% of the overall score.',
+  legislative: 'Monitors upcoming legislation and regulatory changes that could impact your operations. Contributes 5% of the overall score.',
+};
 
 const PRIORITY_COLOR: Record<string, { badge: string }> = {
   critical: { badge: 'bg-red-500/10 text-red-400 border border-red-500/20' },
@@ -109,6 +118,17 @@ function hasEmployeeComplianceAlerts(dim: DimensionResult): boolean {
   return (
     typeof rawData.minimum_wage_violation_employee_count === 'number'
     && rawData.minimum_wage_violation_employee_count > 0
+  );
+}
+
+function HelpTooltip({ text }: { text: string }) {
+  return (
+    <span className="relative group/help inline-flex">
+      <HelpCircle className="w-3 h-3 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity cursor-help" />
+      <span className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-56 px-3 py-2 text-[10px] leading-relaxed text-zinc-300 bg-zinc-900 border border-white/10 shadow-xl opacity-0 group-hover/help:opacity-100 transition-opacity z-50">
+        {text}
+      </span>
+    </span>
   );
 }
 
@@ -305,8 +325,11 @@ export default function RiskAssessment() {
           {/* Overall score */}
           <div className="grid grid-cols-5 gap-px bg-white/10 border border-white/10">
             {/* Big number */}
-            <div className="col-span-2 bg-zinc-950 p-8 flex flex-col justify-between">
-              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Overall Risk Score</div>
+            <div className="col-span-2 bg-zinc-950 p-8 flex flex-col justify-between group">
+              <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold flex items-center gap-1.5">
+                Overall Risk Score
+                <HelpTooltip text={DIMENSION_HELP.overall} />
+              </div>
               <div className="flex items-end gap-4 mt-4">
                 <span className={`text-8xl font-light font-mono ${BAND_COLOR[data.overall_band].text}`}>
                   {data.overall_score}
@@ -327,8 +350,11 @@ export default function RiskAssessment() {
               const meta = DIMENSION_META[key];
               const c = BAND_COLOR[dim.band];
               return (
-                <div key={key} className="bg-zinc-950 p-6 flex flex-col justify-between">
-                  <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{meta.label}</div>
+                <div key={key} className="bg-zinc-950 p-6 flex flex-col justify-between group">
+                  <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
+                    {meta.label}
+                    <HelpTooltip text={DIMENSION_HELP[key]} />
+                  </div>
                   <div className={`text-3xl font-light font-mono mt-2 ${c.text}`}>{dim.score}</div>
                   <div className="mt-3 space-y-2">
                     <div className="text-[9px] text-zinc-600 uppercase tracking-widest">{meta.weight} weight</div>
