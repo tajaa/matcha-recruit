@@ -937,12 +937,13 @@ export function Layout() {
             </div>
           </div>
         </div>
-        {showFeatureManager && (
-          <PlatformFeatureManager
-            onClose={() => setShowFeatureManager(false)}
-          />
-        )}
       </aside>
+
+      {showFeatureManager && (
+        <PlatformFeatureManager
+          onClose={() => setShowFeatureManager(false)}
+        />
+      )}
 
       {/* Mobile Header - visible only on mobile */}
       <nav className="md:hidden fixed top-0 inset-x-0 z-50 bg-zinc-950/80 backdrop-blur-md border-b border-white/10">
