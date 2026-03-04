@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Sparkles, HelpCircle } from 'lucide-react';
+import { RefreshCw, Sparkles, HelpCircle, Plus, Check, X, ChevronDown, ChevronRight } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics } from '../types';
+import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser } from '../types';
 import { riskAssessment, erCopilot } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -250,6 +250,12 @@ function formatStatus(status: string): string {
 }
 
 function ActionItems({ data }: { data: RiskAssessmentResult }) {
+  const [items, setItems] = useState<RiskActionItem[]>([]);
+  const [closedItems, setClosedItems] = useState<RiskActionItem[]>([]);
+  const [users, setUsers] = useState<AssignableUser[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [adding, setAdding] = useState<string | null>(null);
+
   const violations: EmployeeViolation[] = (() => {
     const raw = data.dimensions.compliance?.raw_data?.employee_violations;
     if (!Array.isArray(raw)) return [];
@@ -267,66 +273,229 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
     );
   })();
 
-  if (violations.length === 0 && cases.length === 0) return null;
+  const fetchItems = useCallback(async () => {
+    try {
+      const [open, all] = await Promise.all([
+        riskAssessment.listActionItems('open'),
+        riskAssessment.listActionItems('all'),
+      ]);
+      setItems(open);
+      setClosedItems(all.filter(i => i.status !== 'open'));
+    } catch { /* silently fail */ }
+  }, []);
+
+  const fetchUsers = useCallback(async () => {
+    try {
+      setUsers(await riskAssessment.getAssignableUsers());
+    } catch { /* silently fail */ }
+  }, []);
+
+  useEffect(() => { fetchItems(); fetchUsers(); }, [fetchItems, fetchUsers]);
+
+  const trackedRefs = new Set(items.map(i => i.source_ref).filter(Boolean));
+  const closedRefs = new Set(closedItems.map(i => i.source_ref).filter(Boolean));
+
+  const suggestedViolations = violations.filter(v => !trackedRefs.has(v.employee_name) && !closedRefs.has(v.employee_name));
+  const suggestedCases = cases.filter(c => !trackedRefs.has(c.case_id) && !closedRefs.has(c.case_id));
+
+  const addItem = async (title: string, description: string, sourceType: 'wage_violation' | 'er_case', sourceRef: string) => {
+    const key = `${sourceType}:${sourceRef}`;
+    setAdding(key);
+    try {
+      await riskAssessment.createActionItem({ title, description, source_type: sourceType, source_ref: sourceRef });
+      await fetchItems();
+    } catch { /* silently fail */ }
+    setAdding(null);
+  };
+
+  const updateItem = async (id: string, update: { assigned_to?: string | null; due_date?: string | null; status?: 'open' | 'completed' | 'dismissed' }) => {
+    try {
+      await riskAssessment.updateActionItem(id, update);
+      await fetchItems();
+    } catch { /* silently fail */ }
+  };
+
+  const hasSuggestions = suggestedViolations.length > 0 || suggestedCases.length > 0;
+  const hasItems = items.length > 0;
+  const hasHistory = closedItems.length > 0;
+
+  if (!hasSuggestions && !hasItems && !hasHistory) return null;
 
   return (
     <div>
       <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mb-4">Action Items</div>
-      <div className="bg-zinc-900 border border-white/10 rounded-2xl divide-y divide-white/10 overflow-hidden">
-        {violations.length > 0 && (
-          <div className="p-5">
-            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Wage Compliance</div>
-            <div className="flex flex-col gap-2">
-              {violations.map((v, i) => {
-                const isLarge = v.shortfall >= 10000;
-                const location =
-                  v.location_city && v.location_state
-                    ? `${v.location_city}, ${v.location_state}`
-                    : v.location_state || 'Unknown';
-                const rateLabel = v.pay_classification === 'exempt' ? 'salary' : 'hourly rate';
-                return (
-                  <div key={i} className="flex items-start gap-3 text-[11px]">
-                    <span
-                      className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${isLarge ? 'bg-red-500' : 'bg-amber-500'}`}
-                    />
-                    <span className="text-zinc-400">
-                      <span className="text-zinc-200">{v.employee_name}</span>
-                      {`'s ${rateLabel} is `}
-                      <span className="font-mono text-red-400">{formatCurrency(v.pay_rate)}</span>
-                      {' but the minimum for '}
-                      <span className="text-zinc-300">{location}</span>
-                      {' is '}
-                      <span className="font-mono text-zinc-300">{formatCurrency(v.threshold)}</span>
-                      <span className="text-zinc-600">{` (gap: ${formatCurrency(v.shortfall)})`}</span>
-                    </span>
+      <div className="space-y-4">
+
+        {/* Suggested (auto-detected) items */}
+        {hasSuggestions && (
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl divide-y divide-white/10 overflow-hidden">
+            {suggestedViolations.length > 0 && (
+              <div className="p-5">
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Suggested — Wage Compliance</div>
+                <div className="flex flex-col gap-2">
+                  {suggestedViolations.map((v, i) => {
+                    const isLarge = v.shortfall >= 10000;
+                    const location = v.location_city && v.location_state ? `${v.location_city}, ${v.location_state}` : v.location_state || 'Unknown';
+                    const rateLabel = v.pay_classification === 'exempt' ? 'salary' : 'hourly rate';
+                    const addKey = `wage_violation:${v.employee_name}`;
+                    return (
+                      <div key={i} className="flex items-center gap-3 text-[11px]">
+                        <button
+                          onClick={() => addItem(
+                            `${v.employee_name} below minimum wage`,
+                            `${v.employee_name}'s ${rateLabel} is ${formatCurrency(v.pay_rate)} but the minimum for ${location} is ${formatCurrency(v.threshold)} (gap: ${formatCurrency(v.shortfall)})`,
+                            'wage_violation',
+                            v.employee_name,
+                          )}
+                          disabled={adding === addKey}
+                          className="shrink-0 w-5 h-5 flex items-center justify-center rounded bg-white/5 hover:bg-emerald-500/20 text-zinc-600 hover:text-emerald-400 transition-colors disabled:opacity-40"
+                          title="Track this item"
+                        >
+                          <Plus size={12} />
+                        </button>
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isLarge ? 'bg-red-500' : 'bg-amber-500'}`} />
+                        <span className="text-zinc-400">
+                          <span className="text-zinc-200">{v.employee_name}</span>
+                          {`'s ${rateLabel} is `}
+                          <span className="font-mono text-red-400">{formatCurrency(v.pay_rate)}</span>
+                          {' — min '}
+                          <span className="font-mono text-zinc-300">{formatCurrency(v.threshold)}</span>
+                          <span className="text-zinc-600">{` (gap: ${formatCurrency(v.shortfall)})`}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {suggestedCases.length > 0 && (
+              <div className="p-5">
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Suggested — Open ER Cases</div>
+                <div className="flex flex-col gap-2">
+                  {suggestedCases.map((c) => {
+                    const isPending = c.status === 'pending_determination';
+                    const addKey = `er_case:${c.case_id}`;
+                    return (
+                      <div key={c.case_id} className="flex items-center gap-3 text-[11px]">
+                        <button
+                          onClick={() => addItem(
+                            `ER case: ${c.title}`,
+                            `Case '${c.title}' is ${formatStatus(c.status)}${c.category ? ` · ${formatStatus(c.category)}` : ''}`,
+                            'er_case',
+                            c.case_id,
+                          )}
+                          disabled={adding === addKey}
+                          className="shrink-0 w-5 h-5 flex items-center justify-center rounded bg-white/5 hover:bg-emerald-500/20 text-zinc-600 hover:text-emerald-400 transition-colors disabled:opacity-40"
+                          title="Track this item"
+                        >
+                          <Plus size={12} />
+                        </button>
+                        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isPending ? 'bg-red-500' : 'bg-amber-500'}`} />
+                        <span className="text-zinc-400">
+                          <span className="text-zinc-200">'{c.title}'</span>
+                          {` is ${formatStatus(c.status)}`}
+                          {c.category && <span className="text-zinc-600">{` · ${formatStatus(c.category)}`}</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Tracked (persisted) items */}
+        {hasItems && (
+          <div className="bg-zinc-900 border border-white/10 rounded-2xl divide-y divide-white/10 overflow-hidden">
+            <div className="p-5">
+              <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Tracked Items</div>
+              <div className="flex flex-col gap-3">
+                {items.map((item) => (
+                  <div key={item.id} className="flex items-start gap-3 text-[11px]">
+                    <div className="flex shrink-0 gap-1 mt-0.5">
+                      <button
+                        onClick={() => updateItem(item.id, { status: 'completed' })}
+                        className="w-5 h-5 flex items-center justify-center rounded bg-white/5 hover:bg-emerald-500/20 text-zinc-600 hover:text-emerald-400 transition-colors"
+                        title="Complete"
+                      >
+                        <Check size={12} />
+                      </button>
+                      <button
+                        onClick={() => updateItem(item.id, { status: 'dismissed' })}
+                        className="w-5 h-5 flex items-center justify-center rounded bg-white/5 hover:bg-red-500/20 text-zinc-600 hover:text-red-400 transition-colors"
+                        title="Dismiss"
+                      >
+                        <X size={12} />
+                      </button>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-zinc-200">{item.title}</div>
+                      {item.description && <div className="text-zinc-500 mt-0.5">{item.description}</div>}
+                      <div className="flex items-center gap-3 mt-2">
+                        <select
+                          value={item.assigned_to ?? ''}
+                          onChange={(e) => updateItem(item.id, { assigned_to: e.target.value || null })}
+                          className="bg-zinc-800 border border-white/10 rounded px-2 py-1 text-[10px] text-zinc-300 outline-none"
+                        >
+                          <option value="">Unassigned</option>
+                          {users.map(u => (
+                            <option key={u.id} value={u.id}>{u.name}</option>
+                          ))}
+                        </select>
+                        <input
+                          type="date"
+                          value={item.due_date ?? ''}
+                          onChange={(e) => updateItem(item.id, { due_date: e.target.value || null })}
+                          className="bg-zinc-800 border border-white/10 rounded px-2 py-1 text-[10px] text-zinc-300 outline-none"
+                        />
+                        <span className={`text-[9px] uppercase tracking-widest font-bold px-1.5 py-0.5 rounded ${
+                          item.source_type === 'wage_violation'
+                            ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                            : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                        }`}>
+                          {item.source_type === 'wage_violation' ? 'Wage' : 'ER Case'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </div>
           </div>
         )}
-        {cases.length > 0 && (
-          <div className="p-5">
-            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Open ER Cases</div>
-            <div className="flex flex-col gap-2">
-              {cases.map((c) => {
-                const isPending = c.status === 'pending_determination';
-                return (
-                  <div key={c.case_id} className="flex items-start gap-3 text-[11px]">
-                    <span
-                      className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${isPending ? 'bg-red-500' : 'bg-amber-500'}`}
-                    />
-                    <span className="text-zinc-400">
-                      <span className="text-zinc-200">'{c.title}'</span>
-                      {` is ${formatStatus(c.status)}`}
-                      {c.category && (
-                        <span className="text-zinc-600">{` · ${formatStatus(c.category)}`}</span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
+
+        {/* History (completed & dismissed) */}
+        {hasHistory && (
+          <div>
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="flex items-center gap-1.5 text-[10px] text-stone-500 uppercase tracking-widest font-bold hover:text-zinc-900 transition-colors mb-2"
+            >
+              {showHistory ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              Completed & Dismissed ({closedItems.length})
+            </button>
+            {showHistory && (
+              <div className="bg-zinc-900 border border-white/10 rounded-2xl p-5">
+                <div className="flex flex-col gap-2">
+                  {closedItems.map((item) => (
+                    <div key={item.id} className="flex items-start gap-3 text-[11px] opacity-60">
+                      <span className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${
+                        item.status === 'completed' ? 'bg-emerald-500' : 'bg-zinc-600'
+                      }`} />
+                      <div className="flex-1 min-w-0">
+                        <span className="text-zinc-400 line-through">{item.title}</span>
+                        <div className="flex items-center gap-2 mt-0.5 text-[9px] text-zinc-600">
+                          <span className="uppercase tracking-widest font-bold">{item.status}</span>
+                          {item.assigned_to_name && <span>· {item.assigned_to_name}</span>}
+                          {item.closed_at && <span>· {new Date(item.closed_at).toLocaleDateString()}</span>}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

@@ -162,6 +162,10 @@ import type {
   PosterOrderUpdate,
   AvailablePoster,
   RiskAssessmentResult,
+  RiskActionItem,
+  RiskActionItemCreate,
+  RiskActionItemUpdate,
+  AssignableUser,
   } from '../types';
 import type {
   Lead,
@@ -3715,6 +3719,14 @@ export const riskAssessment = {
     request('/risk-assessment'),
   getRecommendations: (): Promise<RiskAssessmentResult> =>
     request('/risk-assessment?include_recommendations=true'),
+  listActionItems: (status?: string): Promise<RiskActionItem[]> =>
+    request(`/risk-assessment/action-items${status ? `?status=${status}` : ''}`),
+  createActionItem: (data: RiskActionItemCreate): Promise<RiskActionItem> =>
+    request('/risk-assessment/action-items', { method: 'POST', body: JSON.stringify(data) }),
+  updateActionItem: (id: string, data: RiskActionItemUpdate): Promise<RiskActionItem> =>
+    request(`/risk-assessment/action-items/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  getAssignableUsers: (): Promise<AssignableUser[]> =>
+    request('/risk-assessment/assignable-users'),
 };
 
 // Combined API object for convenient imports

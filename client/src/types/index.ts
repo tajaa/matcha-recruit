@@ -2718,3 +2718,40 @@ export interface RiskAssessmentResult {
   report?: string | null;
   recommendations?: RiskRecommendation[] | null;
 }
+
+// Risk Action Items
+export interface RiskActionItem {
+  id: string;
+  title: string;
+  description: string | null;
+  source_type: 'wage_violation' | 'er_case';
+  source_ref: string | null;
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  due_date: string | null;
+  status: 'open' | 'completed' | 'dismissed';
+  created_by: string | null;
+  created_at: string;
+  closed_at: string | null;
+}
+
+export interface RiskActionItemCreate {
+  title: string;
+  description?: string;
+  source_type: 'wage_violation' | 'er_case';
+  source_ref?: string;
+  assigned_to?: string;
+  due_date?: string;
+}
+
+export interface RiskActionItemUpdate {
+  assigned_to?: string | null;
+  due_date?: string | null;
+  status?: 'open' | 'completed' | 'dismissed';
+}
+
+export interface AssignableUser {
+  id: string;
+  name: string;
+  email: string;
+}
