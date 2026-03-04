@@ -4,10 +4,107 @@ import { getAccessToken, provisioning, onboardingDraft } from '../api/client';
 import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 import type { GoogleWorkspaceConnectionStatus } from '../types';
 import OnboardingAgentConsole from '../components/OnboardingAgentConsole';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+const LT = {
+  pageBg: 'bg-stone-300',
+  card: 'bg-stone-100 rounded-2xl border border-stone-200',
+  innerEl: 'bg-stone-200/60 rounded-xl border border-stone-200',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  textDim: 'text-stone-600',
+  border: 'border-stone-200',
+  borderTab: 'border-stone-400/40',
+  divide: 'divide-stone-200',
+  tabActive: 'border-zinc-900 text-zinc-900',
+  tabInactive: 'border-transparent text-stone-500 hover:text-stone-700 hover:border-stone-400',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  btnSecondary: 'border border-stone-300 text-stone-500 hover:text-zinc-900 hover:border-stone-400',
+  btnSecondaryActive: 'border-stone-400 text-zinc-900 bg-stone-200',
+  modalBg: 'bg-stone-100 border border-stone-200 shadow-2xl rounded-2xl',
+  modalHeader: 'border-b border-stone-200',
+  modalFooter: 'border-t border-stone-200',
+  inputCls: 'bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors',
+  batchInputCls: 'bg-white border border-stone-300 text-zinc-900 rounded-lg',
+  rowHover: 'hover:bg-stone-50',
+  emptyBorder: 'border border-dashed border-stone-300 bg-stone-100 rounded-2xl',
+  emptyIcon: 'bg-stone-200 border border-stone-300',
+  alertWarn: 'border border-amber-300 bg-amber-50',
+  alertWarnText: 'text-amber-700',
+  alertError: 'bg-red-50 border border-red-300',
+  alertErrorText: 'text-red-700',
+  wizardActive: 'border-zinc-900 text-zinc-50 bg-zinc-900',
+  wizardInactive: 'border-stone-300 text-stone-400',
+  separator: 'bg-stone-300',
+  progressBg: 'bg-stone-300',
+  closeBtnCls: 'text-stone-400 hover:text-zinc-900 transition-colors',
+  cancelBtn: 'text-stone-500 hover:text-zinc-900',
+  chevron: 'text-stone-400 group-hover:text-stone-600',
+  dropdownBg: 'bg-stone-100 border border-stone-200 shadow-xl',
+  dropdownItem: 'text-stone-600 hover:bg-stone-50 hover:text-zinc-900',
+  avatar: 'bg-zinc-900 text-zinc-50',
+  genPreview: 'bg-stone-200/60 border border-stone-300 text-stone-600',
+  tableHeader: 'bg-stone-200 text-stone-500',
+  resultSuccess: 'border border-emerald-300 bg-emerald-50',
+  resultFail: 'border border-red-300 bg-red-50',
+  uploadZone: 'border-stone-400 bg-white hover:border-stone-500',
+  uploadZoneDrag: 'border-emerald-500 bg-emerald-50',
+  uploadZoneDone: 'border-emerald-400 bg-emerald-50',
+  resultCard: 'bg-white border border-stone-200',
+} as const;
+
+const DK = {
+  pageBg: 'bg-zinc-950',
+  card: 'bg-zinc-900/50 rounded-2xl border border-white/10',
+  innerEl: 'bg-zinc-800/60 rounded-xl border border-white/10',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  borderTab: 'border-white/10',
+  divide: 'divide-white/10',
+  tabActive: 'border-zinc-100 text-zinc-100',
+  tabInactive: 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-600',
+  btnPrimary: 'bg-zinc-100 text-zinc-900 hover:bg-white',
+  btnSecondary: 'border border-white/10 text-zinc-500 hover:text-zinc-100 hover:border-white/20',
+  btnSecondaryActive: 'border-white/20 text-zinc-100 bg-zinc-800',
+  modalBg: 'bg-zinc-900 border border-white/10 shadow-2xl rounded-2xl',
+  modalHeader: 'border-b border-white/10',
+  modalFooter: 'border-t border-white/10',
+  inputCls: 'bg-zinc-800 border border-white/10 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-white/20 placeholder:text-zinc-600 transition-colors',
+  batchInputCls: 'bg-zinc-800 border border-white/10 text-zinc-100 rounded-lg',
+  rowHover: 'hover:bg-white/5',
+  emptyBorder: 'border border-dashed border-white/10 bg-zinc-900/30 rounded-2xl',
+  emptyIcon: 'bg-zinc-800 border border-white/10',
+  alertWarn: 'border border-amber-500/30 bg-amber-950/30',
+  alertWarnText: 'text-amber-400',
+  alertError: 'bg-red-950/30 border border-red-500/30',
+  alertErrorText: 'text-red-400',
+  wizardActive: 'border-zinc-100 text-zinc-900 bg-zinc-100',
+  wizardInactive: 'border-zinc-700 text-zinc-600',
+  separator: 'bg-zinc-700',
+  progressBg: 'bg-zinc-700',
+  closeBtnCls: 'text-zinc-500 hover:text-zinc-100 transition-colors',
+  cancelBtn: 'text-zinc-500 hover:text-zinc-100',
+  chevron: 'text-zinc-600 group-hover:text-zinc-400',
+  dropdownBg: 'bg-zinc-900 border border-white/10 shadow-xl',
+  dropdownItem: 'text-zinc-400 hover:bg-white/5 hover:text-zinc-100',
+  avatar: 'bg-zinc-700 text-zinc-100',
+  genPreview: 'bg-zinc-800/60 border border-white/10 text-zinc-400',
+  tableHeader: 'bg-zinc-800 text-zinc-500',
+  resultSuccess: 'border border-emerald-500/30 bg-emerald-950/40',
+  resultFail: 'border border-red-500/30 bg-red-950/40',
+  uploadZone: 'border-zinc-600 bg-zinc-800 hover:border-zinc-500',
+  uploadZoneDrag: 'border-emerald-500/50 bg-emerald-950/20',
+  uploadZoneDone: 'border-emerald-500/40 bg-emerald-950/20',
+  resultCard: 'bg-zinc-800 border border-white/10',
+} as const;
 
 interface Employee {
   id: string;
@@ -196,6 +293,8 @@ type EmployeeEmptyState = {
 };
 
 export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' | 'directory' }) {
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
@@ -419,21 +518,16 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   ]);
 
   const googleAutoProvisionBadge = () => {
+    const defaultTone = isLight ? 'bg-stone-200 text-stone-600 border-stone-300' : 'bg-zinc-800 text-zinc-400 border-zinc-700';
     if (googleWorkspaceStatusLoading) {
-      return {
-        label: 'Loading',
-        tone: 'bg-stone-200 text-stone-600 border-stone-300',
-      };
+      return { label: 'Loading', tone: defaultTone };
     }
     if (
       !googleWorkspaceStatus ||
       !googleWorkspaceStatus.connected ||
       googleWorkspaceStatus.status === 'disconnected'
     ) {
-      return {
-        label: 'Disconnected',
-        tone: 'bg-stone-200 text-stone-600 border-stone-300',
-      };
+      return { label: 'Disconnected', tone: defaultTone };
     }
     if (
       googleWorkspaceStatus.status === 'error' ||
@@ -640,32 +734,21 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   };
 
   const getStatusBadge = (employee: Employee) => {
+    const base = 'inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold';
+    const neutral = isLight ? 'bg-stone-200 text-stone-600 border border-stone-300' : 'bg-zinc-800 text-zinc-400 border border-zinc-700';
+    const muted = isLight ? 'bg-stone-200 text-stone-500 border border-stone-300' : 'bg-zinc-800 text-zinc-500 border border-zinc-700';
     if (employee.termination_date) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold bg-stone-200 text-stone-600 border border-stone-300">
-          <UserX size={10} /> Terminated
-        </span>
-      );
+      return <span className={`${base} ${neutral}`}><UserX size={10} /> Terminated</span>;
     }
     if (employee.user_id) {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold bg-emerald-50 text-emerald-700 border border-emerald-300">
-          <CheckCircle size={10} /> Active
-        </span>
-      );
+      const active = isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-300' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30';
+      return <span className={`${base} ${active}`}><CheckCircle size={10} /> Active</span>;
     }
     if (employee.invitation_status === 'pending') {
-      return (
-        <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold bg-amber-50 text-amber-700 border border-amber-300">
-          <Clock size={10} /> Invited
-        </span>
-      );
+      const invited = isLight ? 'bg-amber-50 text-amber-700 border border-amber-300' : 'bg-amber-950/40 text-amber-400 border border-amber-500/30';
+      return <span className={`${base} ${invited}`}><Clock size={10} /> Invited</span>;
     }
-    return (
-      <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold bg-stone-200 text-stone-500 border border-stone-300">
-        <Mail size={10} /> Not Invited
-      </span>
-    );
+    return <span className={`${base} ${muted}`}><Mail size={10} /> Not Invited</span>;
   };
 
   const US_STATES = [
@@ -841,7 +924,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-xs text-stone-500 uppercase tracking-wider animate-pulse">Loading directory...</div>
+        <div className={`text-xs ${t.textMuted} uppercase tracking-wider animate-pulse`}>Loading directory...</div>
       </div>
     );
   }
@@ -906,7 +989,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       : Plus;
 
   const wrapperClass = mode === 'directory'
-    ? '-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen bg-stone-300'
+    ? `-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`
     : '';
 
   return (
@@ -918,19 +1001,19 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           <>
             <div>
               <div className="flex items-center gap-3 justify-center lg:justify-start">
-                <h1 className="text-3xl md:text-4xl font-bold tracking-tighter text-zinc-900 uppercase">Employees</h1>
+                <h1 className={`text-3xl md:text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>Employees</h1>
                 <FeatureGuideTrigger guideId="employees" />
               </div>
-              <p className="text-xs text-stone-500 mt-2 font-mono tracking-wide uppercase text-center lg:text-left">
+              <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase text-center lg:text-left`}>
                 Manage your team
               </p>
               <div className="flex justify-center lg:justify-start">
                 <button
                   onClick={() => navigate('/app/matcha/onboarding?tab=workspace')}
-                  className="mt-4 inline-flex items-center gap-2 border border-stone-300 bg-stone-100 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-stone-600 hover:text-zinc-900 hover:border-stone-400 rounded-xl transition-colors"
+                  className={`mt-4 inline-flex items-center gap-2 ${t.btnSecondary} px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors`}
                   title="Open Google Workspace provisioning settings"
                 >
-                  <span className="text-stone-500">Google Auto-Provision</span>
+                  <span className={t.textMuted}>Google Auto-Provision</span>
                   <span className={`rounded-lg border px-2 py-0.5 ${googleBadge.tone}`}>{googleBadge.label}</span>
                 </button>
               </div>
@@ -938,7 +1021,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <div className="flex items-center gap-2 sm:gap-3">
               <button
                 onClick={() => navigate('/app/matcha/onboarding?tab=employees')}
-                className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+                className={`flex items-center justify-center gap-2 px-4 sm:px-6 py-2 ${t.btnPrimary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
               >
                 <Plus size={14} />
                 Onboard New Employee
@@ -951,9 +1034,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               data-tour="emp-help-btn"
               onClick={() => setShowHelp(!showHelp)}
               className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
-                showHelp
-                  ? 'border-stone-400 text-zinc-900 bg-stone-200'
-                  : 'border-stone-300 text-stone-500 hover:text-zinc-900 hover:border-stone-400'
+                showHelp ? t.btnSecondaryActive : t.btnSecondary
               }`}
             >
               <HelpCircle size={14} />
@@ -965,9 +1046,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               <button
                 onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
                 className={`w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
-                  showSettingsDropdown
-                    ? 'border-stone-400 text-zinc-900 bg-stone-200'
-                    : 'border-stone-300 text-stone-500 hover:text-zinc-900 hover:border-stone-400'
+                  showSettingsDropdown ? t.btnSecondaryActive : t.btnSecondary
                 }`}
               >
                 <Settings size={14} />
@@ -979,13 +1058,13 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     className="fixed inset-0 z-10"
                     onClick={() => setShowSettingsDropdown(false)}
                   />
-                  <div className="absolute right-0 mt-2 w-56 bg-stone-100 border border-stone-200 shadow-xl z-20 rounded-xl overflow-hidden">
+                  <div className={`absolute right-0 mt-2 w-56 ${t.dropdownBg} z-20 rounded-xl overflow-hidden`}>
                     <button
                       onClick={() => {
                         setShowSettingsDropdown(false);
                         navigate('/app/matcha/onboarding-templates');
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-3 text-left text-xs font-medium text-stone-600 hover:bg-stone-50 hover:text-zinc-900 transition-colors"
+                      className={`w-full flex items-center gap-3 px-4 py-3 text-left text-xs font-medium ${t.dropdownItem} transition-colors`}
                     >
                       <ClipboardCheck size={14} />
                       Onboarding Templates
@@ -998,7 +1077,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <button
               data-tour="emp-bulk-btn"
               onClick={() => setShowBulkUploadModal(true)}
-              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-stone-300 text-stone-500 hover:text-zinc-900 hover:border-stone-400 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
             >
               <Upload size={14} />
               <span>Bulk CSV</span>
@@ -1025,7 +1104,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                 }
                 setDraftLoaded(true);
               }}
-              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border border-stone-300 text-stone-500 hover:text-zinc-900 hover:border-stone-400 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
             >
               <ClipboardCheck size={14} />
               <span>Batch Wizard</span>
@@ -1037,7 +1116,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                 resetAddEmployeeForm();
                 setShowAddModal(true);
               }}
-              className="flex items-center justify-center gap-2 px-4 sm:px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+              className={`flex items-center justify-center gap-2 px-4 sm:px-6 py-2 ${t.btnPrimary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
             >
               <Plus size={14} />
               Add Employee
@@ -1060,9 +1139,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       />
 
       {showFirstEmployeeBanner && (
-        <div className="border border-amber-300 bg-amber-50 px-4 py-3 text-[11px] text-amber-800 rounded-xl">
-          <p className="font-bold uppercase tracking-wider text-amber-700">No employees yet</p>
-          <p className="mt-1 text-amber-700/80">
+        <div className={`${t.alertWarn} px-4 py-3 text-[11px] rounded-xl`}>
+          <p className={`font-bold uppercase tracking-wider ${t.alertWarnText}`}>No employees yet</p>
+          <p className={`mt-1 ${t.alertWarnText} opacity-80`}>
             Use the Employee Lifecycle wizard to choose the best path for your first hires:
             Add Employee for one person, Batch Wizard for a few, or Bulk CSV if you already have a spreadsheet.
           </p>
@@ -1070,12 +1149,12 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       )}
 
       {mode === 'onboarding' && (
-        <div className="border border-stone-200 bg-stone-100 rounded-xl p-4 text-[11px] text-stone-600 space-y-1">
-          <p className="uppercase tracking-wider text-stone-500">Onboarding flows</p>
+        <div className={`${t.innerEl} p-4 text-[11px] ${t.textDim} space-y-1`}>
+          <p className={`uppercase tracking-wider ${t.textMuted}`}>Onboarding flows</p>
           <p>
-            Use <span className="text-zinc-900 font-medium">Add Employee</span> for one hire,{' '}
-            <span className="text-zinc-900 font-medium">Batch Wizard</span> for up to 50 hires, or{' '}
-            <span className="text-zinc-900 font-medium">Bulk CSV</span> when you already have a spreadsheet.
+            Use <span className={`${t.textMain} font-medium`}>Add Employee</span> for one hire,{' '}
+            <span className={`${t.textMain} font-medium`}>Batch Wizard</span> for up to 50 hires, or{' '}
+            <span className={`${t.textMain} font-medium`}>Bulk CSV</span> when you already have a spreadsheet.
           </p>
         </div>
       )}
@@ -1085,14 +1164,14 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
       {/* Error message */}
       {error && (
-        <div className="bg-red-50 border border-red-300 rounded-xl p-4 flex items-center justify-between gap-4">
+        <div className={`${t.alertError} rounded-xl p-4 flex items-center justify-between gap-4`}>
           <div className="flex items-center gap-3">
-             <AlertTriangle className="text-red-600 shrink-0" size={16} />
-             <p className="text-sm text-red-700 font-mono">{error}</p>
+             <AlertTriangle className={t.alertErrorText} size={16} />
+             <p className={`text-sm ${t.alertErrorText} font-mono`}>{error}</p>
           </div>
           <button
             onClick={() => setError(null)}
-            className="text-xs text-red-600 hover:text-red-800 uppercase tracking-wider font-bold shrink-0"
+            className={`text-xs ${t.alertErrorText} uppercase tracking-wider font-bold shrink-0`}
           >
             Dismiss
           </button>
@@ -1100,7 +1179,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       )}
 
       {/* Filter tabs */}
-      <div data-tour="emp-tabs" className="border-b border-stone-400/40 -mx-4 px-4 sm:mx-0 sm:px-0">
+      <div data-tour="emp-tabs" className={`border-b ${t.borderTab} -mx-4 px-4 sm:mx-0 sm:px-0`}>
         <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">
           {[
             { value: '', label: 'All' },
@@ -1112,9 +1191,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               key={tab.value}
               onClick={() => setFilter(tab.value)}
               className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
-                filter === tab.value
-                  ? 'border-zinc-900 text-zinc-900'
-                  : 'border-transparent text-stone-500 hover:text-stone-700 hover:border-stone-400'
+                filter === tab.value ? t.tabActive : t.tabInactive
               }`}
             >
               {tab.label}
@@ -1125,17 +1202,17 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
       {/* Employee list */}
       {employees.length === 0 ? (
-        <div className="text-center py-24 border border-dashed border-stone-300 bg-stone-100 rounded-2xl">
-          <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-stone-200 border border-stone-300 flex items-center justify-center">
-            <EmptyStateIcon size={24} className="text-stone-400" />
+        <div className={`text-center py-24 ${t.emptyBorder}`}>
+          <div className={`w-16 h-16 mx-auto mb-6 rounded-full ${t.emptyIcon} flex items-center justify-center`}>
+            <EmptyStateIcon size={24} className={t.textFaint} />
           </div>
           <>
-            <h3 className="text-zinc-900 text-sm font-bold mb-1 uppercase tracking-wide">{emptyState.title}</h3>
-            <p className="text-stone-500 text-xs mb-6 font-mono uppercase">{emptyState.description}</p>
+            <h3 className={`${t.textMain} text-sm font-bold mb-1 uppercase tracking-wide`}>{emptyState.title}</h3>
+            <p className={`${t.textMuted} text-xs mb-6 font-mono uppercase`}>{emptyState.description}</p>
             {emptyState.action && emptyState.actionLabel && (
               <button
                 onClick={emptyState.action}
-                className="flex items-center gap-2 mx-auto px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+                className={`flex items-center gap-2 mx-auto px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
               >
                 <Plus size={14} />
                 {emptyState.actionLabel}
@@ -1144,9 +1221,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           </>
         </div>
       ) : (
-        <div data-tour="emp-list" className="bg-stone-100 rounded-2xl overflow-hidden border border-stone-200">
+        <div data-tour="emp-list" className={`${t.card} overflow-hidden`}>
            {/* Table Header */}
-           <div className="hidden md:flex items-center gap-4 py-3 px-6 text-[10px] text-stone-400 uppercase tracking-widest font-bold border-b border-stone-200">
+           <div className={`hidden md:flex items-center gap-4 py-3 px-6 text-[10px] ${t.textFaint} uppercase tracking-widest font-bold border-b ${t.border}`}>
               <div className="flex-1">Name / Email</div>
               <div className="w-32 text-right">Work State</div>
               <div className="w-32 text-right">Type</div>
@@ -1155,55 +1232,55 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               <div className="w-32"></div>
            </div>
 
-          <div className="divide-y divide-stone-200">
+          <div className={`${t.divide}`}>
           {employees.map((employee) => (
             <div
               key={employee.id}
               onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-              className="group hover:bg-stone-50 transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer"
+              className={`group ${t.rowHover} transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
             >
               <div className="flex items-center min-w-0 flex-1">
                 <div className="flex-shrink-0">
-                  <div className="h-10 w-10 rounded-xl bg-zinc-900 flex items-center justify-center text-zinc-50 font-bold text-xs">
+                  <div className={`h-10 w-10 rounded-xl ${t.avatar} flex items-center justify-center font-bold text-xs`}>
                     {employee.first_name[0]}{employee.last_name[0]}
                   </div>
                 </div>
                 <div className="ml-4 min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-bold text-zinc-900 truncate">
+                    <p className={`text-sm font-bold ${t.textMain} truncate`}>
                       {employee.first_name} {employee.last_name}
                     </p>
                   </div>
-                  <p className="text-xs text-stone-500 font-mono truncate">
+                  <p className={`text-xs ${t.textMuted} font-mono truncate`}>
                     {employee.work_email || employee.email}
                   </p>
                   {employee.personal_email && (
-                    <p className="text-[10px] text-stone-400 truncate">
+                    <p className={`text-[10px] ${t.textFaint} truncate`}>
                       Personal: {employee.personal_email}
                     </p>
                   )}
                 </div>
                 <div className="lg:hidden">
-                   <ChevronRight size={16} className="text-stone-400" />
+                   <ChevronRight size={16} className={t.textFaint} />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t border-stone-200 pt-4 lg:border-0 lg:pt-0">
+              <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t ${t.border} pt-4 lg:border-0 lg:pt-0`}>
                  <div className="lg:text-right">
-                    <p className="text-[10px] text-stone-500 uppercase tracking-wider lg:hidden">Location</p>
-                    <p className="text-xs text-stone-600 font-mono">{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
+                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Location</p>
+                    <p className={`text-xs ${t.textDim} font-mono`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
                  </div>
                  <div className="lg:text-right lg:w-24">
-                    <p className="text-[10px] text-stone-500 uppercase tracking-wider lg:hidden">Type</p>
-                    <p className="text-[10px] text-stone-500 uppercase tracking-wider truncate">
+                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Type</p>
+                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider truncate`}>
                       {employee.employment_type?.replace('_', ' ') || '—'}
                     </p>
                  </div>
                  <div data-tour="emp-onboarding-col" className="lg:w-36 flex flex-col lg:items-end lg:justify-end">
-                    <p className="text-[10px] text-stone-500 uppercase tracking-wider lg:hidden mb-1">Onboarding</p>
+                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Onboarding</p>
                     {onboardingProgress[employee.id]?.has_onboarding ? (
                       <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-stone-300 rounded-full overflow-hidden">
+                        <div className={`w-16 h-1.5 ${t.progressBg} rounded-full overflow-hidden`}>
                           <div
                             className="h-full bg-emerald-500 rounded-full transition-all"
                             style={{
@@ -1211,16 +1288,16 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             }}
                           />
                         </div>
-                        <span className="text-[10px] text-stone-500 font-mono">
+                        <span className={`text-[10px] ${t.textMuted} font-mono`}>
                           {onboardingProgress[employee.id].completed}/{onboardingProgress[employee.id].total}
                         </span>
                       </div>
                     ) : (
-                      <span className="text-[10px] text-stone-400 uppercase tracking-wider">Not started</span>
+                      <span className={`text-[10px] ${t.textFaint} uppercase tracking-wider`}>Not started</span>
                     )}
                  </div>
                  <div className="flex flex-col lg:items-end lg:justify-end lg:w-32">
-                    <p className="text-[10px] text-stone-500 uppercase tracking-wider lg:hidden mb-1">Status</p>
+                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Status</p>
                     {getStatusBadge(employee)}
                  </div>
 
@@ -1230,7 +1307,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         data-tour="emp-invite-btn"
                         onClick={(e) => { e.stopPropagation(); handleSendInvite(employee.id); }}
                         disabled={invitingId === employee.id}
-                        className="flex-1 lg:flex-none inline-flex items-center justify-center px-3 py-1.5 border border-stone-300 text-[10px] font-bold uppercase tracking-wider rounded-lg text-stone-600 hover:text-zinc-900 hover:border-stone-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={`flex-1 lg:flex-none inline-flex items-center justify-center px-3 py-1.5 ${t.btnSecondary} text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                       >
                         {invitingId === employee.id ? (
                           <span className="animate-pulse">Sending...</span>
@@ -1243,7 +1320,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     )}
                  </div>
                  <div className="hidden lg:flex w-8 justify-end">
-                    <ChevronRight size={16} className="text-stone-400 group-hover:text-stone-600" />
+                    <ChevronRight size={16} className={t.chevron} />
                  </div>
               </div>
             </div>
@@ -1255,7 +1332,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       {/* Add Employee Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className="w-full max-w-lg bg-stone-100 border border-stone-200 shadow-2xl rounded-2xl flex flex-col" onClick={(e) => e.stopPropagation()}>
+            <div className={`w-full max-w-lg ${t.modalBg} flex flex-col`} onClick={(e) => e.stopPropagation()}>
               {agentEmployee ? (
                 <OnboardingAgentConsole
                   employeeId={agentEmployee.id}
@@ -1281,14 +1358,14 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                 />
               ) : (
               <>
-              <div className="flex items-center justify-between p-6 border-b border-stone-200">
-                  <h3 className="text-xl font-bold text-zinc-900 uppercase tracking-tight">Add Personnel</h3>
+              <div className={`flex items-center justify-between p-6 ${t.modalHeader}`}>
+                  <h3 className={`text-xl font-bold ${t.textMain} uppercase tracking-tight`}>Add Personnel</h3>
                   <button
                     onClick={() => {
                       setShowAddModal(false);
                       resetAddEmployeeForm();
                     }}
-                    className="text-stone-400 hover:text-zinc-900 transition-colors"
+                    className={t.closeBtnCls}
                   >
                     <X size={20} />
                   </button>
@@ -1296,11 +1373,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
               <form onSubmit={handleAddEmployee} className="flex-1 overflow-y-auto p-8">
                 <div className="space-y-6">
-                  <div className="rounded-xl border border-stone-200 bg-stone-200/60 p-3">
-                    <p className="text-[10px] uppercase tracking-wider text-stone-500">
+                  <div className={`${t.innerEl} p-3`}>
+                    <p className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}>
                       Step {addWizardStep} of 3
                     </p>
-                    <p className="text-xs text-stone-600 mt-1">
+                    <p className={`text-xs ${t.textDim} mt-1`}>
                       {addWizardStep === 1 &&
                         'Start with name and optional personal email. Work email setup comes next.'}
                       {addWizardStep === 2 &&
@@ -1315,26 +1392,24 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       <div key={step} className="flex items-center gap-3">
                         <div
                           className={`h-6 w-6 rounded-full border text-[10px] font-bold flex items-center justify-center ${
-                            addWizardStep >= step
-                              ? 'border-zinc-900 text-zinc-50 bg-zinc-900'
-                              : 'border-stone-300 text-stone-400'
+                            addWizardStep >= step ? t.wizardActive : t.wizardInactive
                           }`}
                         >
                           {step}
                         </div>
-                        {step < 3 && <div className="h-px w-8 bg-stone-300" />}
+                        {step < 3 && <div className={`h-px w-8 ${t.separator}`} />}
                       </div>
                     ))}
                   </div>
 
                   {addWizardStep === 1 && (
                     <div className="space-y-6">
-                      <p className="text-[11px] text-stone-500">
+                      <p className={`text-[11px] ${t.textMuted}`}>
                         Required now: first and last name.
                       </p>
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                             First Name <span className="text-red-500">*</span>
                           </label>
                           <input
@@ -1344,11 +1419,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             onChange={(e) =>
                               setNewEmployee({ ...newEmployee, first_name: e.target.value })
                             }
-                            className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
                           />
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                             Last Name <span className="text-red-500">*</span>
                           </label>
                           <input
@@ -1358,13 +1433,13 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             onChange={(e) =>
                               setNewEmployee({ ...newEmployee, last_name: e.target.value })
                             }
-                            className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
                           />
                         </div>
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                        <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                           Personal Email (Optional)
                         </label>
                         <input
@@ -1373,7 +1448,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                           onChange={(e) =>
                             setNewEmployee({ ...newEmployee, personal_email: e.target.value })
                           }
-                          className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
+                          className={`w-full px-3 py-2 ${t.inputCls}`}
                           placeholder="johnny_bravo@gmail.com"
                         />
                       </div>
@@ -1382,16 +1457,16 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
                   {addWizardStep === 2 && (
                     <div className="space-y-6">
-                      <p className="text-[11px] text-stone-500">
+                      <p className={`text-[11px] ${t.textMuted}`}>
                         Choose generated email for new Workspace accounts, or existing email for already provisioned employees.
                       </p>
                       <div className="space-y-3">
-                        <label className="block text-[10px] uppercase tracking-wider text-zinc-500">
+                        <label className={`block text-[10px] uppercase tracking-wider ${t.textMuted}`}>
                           Work Email Setup <span className="text-red-500">*</span>
                         </label>
 
                         {googleDomainAvailable ? (
-                          <div className="space-y-3 rounded-xl border border-stone-200 bg-stone-200/60 p-3">
+                          <div className={`space-y-3 ${t.innerEl} p-3`}>
                             <label className="flex items-start gap-3 cursor-pointer">
                               <input
                                 type="radio"
@@ -1409,9 +1484,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                 className="mt-0.5"
                               />
                               <div className="space-y-0.5">
-                                <p className="text-xs text-zinc-900 font-medium">Generate from first + last name</p>
-                                <p className="text-[11px] text-stone-500">
-                                  Domain detected from Google Workspace: <span className="text-zinc-900">@{normalizedGoogleDomain}</span>
+                                <p className={`text-xs ${t.textMain} font-medium`}>Generate from first + last name</p>
+                                <p className={`text-[11px] ${t.textMuted}`}>
+                                  Domain detected from Google Workspace: <span className={t.textMain}>@{normalizedGoogleDomain}</span>
                                 </p>
                               </div>
                             </label>
@@ -1434,15 +1509,15 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                 className="mt-0.5"
                               />
                               <div className="space-y-0.5">
-                                <p className="text-xs text-zinc-900 font-medium">Use existing work email</p>
-                                <p className="text-[11px] text-stone-500">
+                                <p className={`text-xs ${t.textMain} font-medium`}>Use existing work email</p>
+                                <p className={`text-[11px] ${t.textMuted}`}>
                                   Use this when the employee already has a company mailbox.
                                 </p>
                               </div>
                             </label>
                           </div>
                         ) : (
-                          <p className="text-[11px] text-stone-500">
+                          <p className={`text-[11px] ${t.textMuted}`}>
                             Configure Google Workspace domain in onboarding settings to auto-generate work emails.
                           </p>
                         )}
@@ -1451,10 +1526,10 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       <div>
                         {emailEntryMode === 'generated' && googleDomainAvailable ? (
                           <div className="space-y-2">
-                            <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                            <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                               Work Email Username <span className="text-red-500">*</span>
                             </label>
-                            <div className="flex items-center border border-stone-300 bg-white rounded-xl overflow-hidden">
+                            <div className={`flex items-center ${t.inputCls} overflow-hidden`}>
                               <input
                                 type="text"
                                 required
@@ -1463,20 +1538,20 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                   setGeneratedEmailEdited(true);
                                   setGeneratedEmailLocalPart(sanitizeEmailLocalPart(e.target.value));
                                 }}
-                                className="w-full px-3 py-2 bg-transparent text-zinc-900 text-sm focus:outline-none placeholder:text-stone-400"
+                                className={`w-full px-3 py-2 bg-transparent ${t.textMain} text-sm focus:outline-none`}
                                 placeholder="firstname.lastname"
                               />
-                              <span className="px-3 py-2 text-sm text-stone-500 border-l border-stone-300">
+                              <span className={`px-3 py-2 text-sm ${t.textMuted} border-l ${t.border}`}>
                                 @{normalizedGoogleDomain}
                               </span>
                             </div>
-                            <p className="text-[11px] text-stone-500">
-                              Final email: <span className="text-zinc-900">{generatedEmailLocalPart || 'firstname.lastname'}@{normalizedGoogleDomain}</span>
+                            <p className={`text-[11px] ${t.textMuted}`}>
+                              Final email: <span className={t.textMain}>{generatedEmailLocalPart || 'firstname.lastname'}@{normalizedGoogleDomain}</span>
                             </p>
                           </div>
                         ) : (
                           <div className="space-y-2">
-                            <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                            <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                               Work Email <span className="text-red-500">*</span>
                             </label>
                             <input
@@ -1486,11 +1561,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                               onChange={(e) =>
                                 setNewEmployee({ ...newEmployee, work_email: e.target.value })
                               }
-                              className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
+                              className={`w-full px-3 py-2 ${t.inputCls}`}
                               placeholder="johnny.bravo@energyco.com"
                             />
                             {googleDomainAvailable && (
-                              <label className="inline-flex items-center gap-2 text-[11px] text-stone-500">
+                              <label className={`inline-flex items-center gap-2 text-[11px] ${t.textMuted}`}>
                                 <input
                                   type="checkbox"
                                   checked={skipGoogleAutoProvision}
@@ -1507,11 +1582,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
                   {addWizardStep === 3 && (
                     <div className="space-y-6">
-                      <p className="text-[11px] text-stone-500">
+                      <p className={`text-[11px] ${t.textMuted}`}>
                         Final step: define where they work and verify a quick summary before creating.
                       </p>
                       <div className="space-y-2">
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                        <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                           Work Location
                         </label>
                         <div className="grid grid-cols-2 gap-2">
@@ -1521,7 +1596,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             className={`border px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
                               workLocationMode === 'remote'
                                 ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                                : 'border-stone-300 text-stone-500 hover:text-zinc-900 hover:border-stone-400'
+                                : t.btnSecondary
                             }`}
                           >
                             Remote
@@ -1532,7 +1607,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             className={`border px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
                               workLocationMode === 'office'
                                 ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                                : 'border-stone-300 text-stone-500 hover:text-zinc-900 hover:border-stone-400'
+                                : t.btnSecondary
                             }`}
                           >
                             Office / Store
@@ -1544,7 +1619,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         <div>
                           {workLocationMode === 'remote' ? (
                             <>
-                              <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                              <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                                 Work State <span className="text-red-500">*</span>
                               </label>
                               <select
@@ -1552,7 +1627,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                 onChange={(e) =>
                                   setNewEmployee({ ...newEmployee, work_state: e.target.value })
                                 }
-                                className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 transition-colors"
+                                className={`w-full px-3 py-2 ${t.inputCls}`}
                               >
                                 <option value="">Select state</option>
                                 {US_STATES.map((state) => (
@@ -1564,7 +1639,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             </>
                           ) : (
                             <>
-                              <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                              <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                                 Office / Store <span className="text-red-500">*</span>
                               </label>
                               <input
@@ -1573,14 +1648,14 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                 onChange={(e) =>
                                   setNewEmployee({ ...newEmployee, office_location: e.target.value })
                                 }
-                                className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
+                                className={`w-full px-3 py-2 ${t.inputCls}`}
                                 placeholder="Downtown HQ"
                               />
                             </>
                           )}
                         </div>
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                             Employment Type
                           </label>
                           <select
@@ -1588,7 +1663,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             onChange={(e) =>
                               setNewEmployee({ ...newEmployee, employment_type: e.target.value })
                             }
-                            className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 transition-colors"
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
                           >
                             <option value="full_time">Full Time</option>
                             <option value="part_time">Part Time</option>
@@ -1600,7 +1675,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
                       {workLocationMode === 'remote' && (
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                             Work City
                           </label>
                           <input
@@ -1609,7 +1684,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             onChange={(e) =>
                               setNewEmployee({ ...newEmployee, work_city: e.target.value })
                             }
-                            className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
                             placeholder="San Francisco"
                           />
                         </div>
@@ -1617,7 +1692,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                             Pay Classification
                           </label>
                           <select
@@ -1625,7 +1700,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             onChange={(e) =>
                               setNewEmployee({ ...newEmployee, pay_classification: e.target.value })
                             }
-                            className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 transition-colors"
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
                           >
                             <option value="">Not specified</option>
                             <option value="hourly">Hourly</option>
@@ -1634,7 +1709,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         </div>
                         {newEmployee.pay_classification && (
                           <div>
-                            <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                            <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                               {newEmployee.pay_classification === 'hourly' ? 'Hourly Rate ($)' : 'Annual Salary ($)'}
                             </label>
                             <input
@@ -1645,7 +1720,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                               onChange={(e) =>
                                 setNewEmployee({ ...newEmployee, pay_rate: e.target.value })
                               }
-                              className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors"
+                              className={`w-full px-3 py-2 ${t.inputCls}`}
                               placeholder={newEmployee.pay_classification === 'hourly' ? '18.50' : '65000'}
                             />
                           </div>
@@ -1653,7 +1728,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       </div>
 
                       <div>
-                        <label className="block text-[10px] font-bold uppercase tracking-widest text-stone-500 mb-2">
+                        <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
                           Start Date
                         </label>
                         <input
@@ -1662,17 +1737,17 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                           onChange={(e) =>
                             setNewEmployee({ ...newEmployee, start_date: e.target.value })
                           }
-                          className="w-full px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 transition-colors"
+                          className={`w-full px-3 py-2 ${t.inputCls}`}
                         />
                       </div>
 
-                      <div className="rounded-xl border border-stone-200 bg-stone-200/60 p-3 text-[11px] text-stone-500 space-y-1">
+                      <div className={`${t.innerEl} p-3 text-[11px] ${t.textMuted} space-y-1`}>
                         <p>
-                          <span className="text-zinc-900">Work email:</span>{' '}
+                          <span className={t.textMain}>Work email:</span>{' '}
                           {emailEntryMode === 'generated' ? generatedSingleWorkEmail : newEmployee.work_email}
                         </p>
                         <p>
-                          <span className="text-zinc-900">Location:</span>{' '}
+                          <span className={t.textMain}>Location:</span>{' '}
                           {workLocationMode === 'remote'
                             ? `Remote (${newEmployee.work_city ? `${newEmployee.work_city}, ` : ''}${newEmployee.work_state || 'state required'})`
                             : `Office/Store (${newEmployee.office_location || 'location required'})`}
@@ -1682,14 +1757,14 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                   )}
                 </div>
 
-                <div className="mt-8 flex justify-end gap-3 pt-6 border-t border-stone-200">
+                <div className={`mt-8 flex justify-end gap-3 pt-6 ${t.modalFooter}`}>
                   <button
                     type="button"
                     onClick={() => {
                       setShowAddModal(false);
                       resetAddEmployeeForm();
                     }}
-                    className="px-4 py-2 text-stone-500 hover:text-zinc-900 text-xs font-bold uppercase tracking-wider transition-colors"
+                    className={`px-4 py-2 ${t.cancelBtn} text-xs font-bold uppercase tracking-wider transition-colors`}
                   >
                     Cancel
                   </button>
@@ -1697,7 +1772,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     <button
                       type="button"
                       onClick={() => setAddWizardStep((prev) => (prev - 1) as AddWizardStep)}
-                      className="px-4 py-2 border border-stone-300 text-stone-600 hover:text-zinc-900 hover:border-stone-400 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+                      className={`px-4 py-2 ${t.btnSecondary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
                     >
                       Back
                     </button>
@@ -1707,7 +1782,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       type="button"
                       onClick={() => setAddWizardStep((prev) => (prev + 1) as AddWizardStep)}
                       disabled={(addWizardStep === 1 && !canProceedAddStep1) || (addWizardStep === 2 && !canProceedAddStep2)}
-                      className="px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className={`px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
                     >
                       Next
                     </button>
@@ -1716,7 +1791,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     <button
                       type="submit"
                       disabled={submitting || !canSubmitSingleWizard}
-                      className="px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      className={`px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
                     >
                       {submitting ? 'Adding...' : 'Add Employee'}
                     </button>
@@ -1732,14 +1807,14 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       {/* Batch Wizard Modal */}
       {showBatchWizardModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-6xl bg-stone-100 border border-stone-200 shadow-2xl rounded-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-stone-200">
+          <div className={`w-full max-w-6xl ${t.modalBg} max-h-[90vh] overflow-hidden flex flex-col`} onClick={(e) => e.stopPropagation()}>
+            <div className={`flex items-center justify-between p-6 ${t.modalHeader}`}>
               <div>
-                <h3 className="text-xl font-bold text-zinc-900 uppercase tracking-tight">Batch Onboarding Wizard</h3>
+                <h3 className={`text-xl font-bold ${t.textMain} uppercase tracking-tight`}>Batch Onboarding Wizard</h3>
                 <div className="flex items-center gap-3 mt-1">
-                  <p className="text-xs text-stone-500">Create up to 50 employees in one guided flow</p>
+                  <p className={`text-xs ${t.textMuted}`}>Create up to 50 employees in one guided flow</p>
                   {draftLoaded && (
-                    <span className={`text-[10px] uppercase tracking-wider ${draftSaving ? 'text-stone-500' : draftDirty ? 'text-stone-400' : 'text-stone-400'}`}>
+                    <span className={`text-[10px] uppercase tracking-wider ${draftSaving ? t.textMuted : t.textFaint}`}>
                       {draftSaving ? 'Saving…' : draftDirty ? '' : 'Draft saved'}
                     </span>
                   )}
@@ -1754,18 +1829,18 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                   setShowBatchWizardModal(false);
                   setBatchResult(null);
                 }}
-                className="text-stone-400 hover:text-zinc-900 transition-colors"
+                className={`${t.closeBtnCls}`}
               >
                 <X size={20} />
               </button>
             </div>
 
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <div className="rounded-xl border border-stone-200 bg-stone-200/60 p-3">
-                <p className="text-[10px] uppercase tracking-wider text-stone-500">
+              <div className={`${t.innerEl} p-3`}>
+                <p className={`text-[10px] uppercase tracking-wider ${t.textMuted}`}>
                   Step {batchWizardStep} of 3
                 </p>
-                <p className="text-xs text-stone-600 mt-1">
+                <p className={`text-xs ${t.textDim} mt-1`}>
                   {batchWizardStep === 1 &&
                     'Set defaults for email and location handling. These apply to every row in step 2.'}
                   {batchWizardStep === 2 &&
@@ -1782,12 +1857,12 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       className={`h-6 w-6 rounded-full border text-[10px] font-bold flex items-center justify-center ${
                         batchWizardStep >= step
                           ? 'border-zinc-900 text-zinc-50 bg-zinc-900'
-                          : 'border-stone-300 text-stone-400'
+                          : t.wizardInactive
                       }`}
                     >
                       {step}
                     </div>
-                    {step < 3 && <div className="h-px w-8 bg-stone-300" />}
+                    {step < 3 && <div className={`h-px w-8 ${t.separator}`} />}
                   </div>
                 ))}
               </div>
@@ -1795,7 +1870,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               {batchWizardStep === 1 && (
                 <div className="space-y-6">
                   <div className="space-y-2">
-                    <label className="block text-[10px] uppercase tracking-wider text-stone-500">
+                    <label className={`block text-[10px] uppercase tracking-wider ${t.textMuted}`}>
                       Work Email Mode
                     </label>
                     {googleDomainAvailable ? (
@@ -1806,11 +1881,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                           className={`border p-3 text-left rounded-xl transition-colors ${
                             batchEmailMode === 'generated'
                               ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                              : 'border-stone-300 hover:border-stone-400'
+                              : t.btnSecondary
                           }`}
                         >
-                          <p className={`text-xs font-bold uppercase tracking-wider ${batchEmailMode === 'generated' ? 'text-zinc-50' : 'text-zinc-900'}`}>Generate From Name</p>
-                          <p className={`text-[11px] mt-1 ${batchEmailMode === 'generated' ? 'text-zinc-400' : 'text-stone-500'}`}>Uses @{normalizedGoogleDomain}</p>
+                          <p className={`text-xs font-bold uppercase tracking-wider ${batchEmailMode === 'generated' ? 'text-zinc-50' : t.textMain}`}>Generate From Name</p>
+                          <p className={`text-[11px] mt-1 ${batchEmailMode === 'generated' ? 'text-zinc-400' : t.textMuted}`}>Uses @{normalizedGoogleDomain}</p>
                         </button>
                         <button
                           type="button"
@@ -1818,22 +1893,22 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                           className={`border p-3 text-left rounded-xl transition-colors ${
                             batchEmailMode === 'existing'
                               ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                              : 'border-stone-300 hover:border-stone-400'
+                              : t.btnSecondary
                           }`}
                         >
-                          <p className={`text-xs font-bold uppercase tracking-wider ${batchEmailMode === 'existing' ? 'text-zinc-50' : 'text-zinc-900'}`}>Existing Work Emails</p>
-                          <p className={`text-[11px] mt-1 ${batchEmailMode === 'existing' ? 'text-zinc-400' : 'text-stone-500'}`}>For already-provisioned mailboxes</p>
+                          <p className={`text-xs font-bold uppercase tracking-wider ${batchEmailMode === 'existing' ? 'text-zinc-50' : t.textMain}`}>Existing Work Emails</p>
+                          <p className={`text-[11px] mt-1 ${batchEmailMode === 'existing' ? 'text-zinc-400' : t.textMuted}`}>For already-provisioned mailboxes</p>
                         </button>
                       </div>
                     ) : (
-                      <div className="rounded-xl border border-stone-300 bg-stone-200/60 p-3 text-[11px] text-stone-500">
+                      <div className={`${t.innerEl} p-3 text-[11px] ${t.textMuted}`}>
                         Google Workspace domain is not configured, so batch mode uses existing work emails.
                       </div>
                     )}
                   </div>
 
                   <div className="space-y-2">
-                    <label className="block text-[10px] uppercase tracking-wider text-stone-500">
+                    <label className={`block text-[10px] uppercase tracking-wider ${t.textMuted}`}>
                       Work Location Mode
                     </label>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
@@ -1843,11 +1918,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         className={`border p-3 text-left rounded-xl transition-colors ${
                           batchWorkLocationMode === 'remote'
                             ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                            : 'border-stone-300 hover:border-stone-400'
+                            : t.btnSecondary
                         }`}
                       >
-                        <p className={`text-xs font-bold uppercase tracking-wider ${batchWorkLocationMode === 'remote' ? 'text-zinc-50' : 'text-zinc-900'}`}>Remote</p>
-                        <p className={`text-[11px] mt-1 ${batchWorkLocationMode === 'remote' ? 'text-zinc-400' : 'text-stone-500'}`}>Each employee must include a work state</p>
+                        <p className={`text-xs font-bold uppercase tracking-wider ${batchWorkLocationMode === 'remote' ? 'text-zinc-50' : t.textMain}`}>Remote</p>
+                        <p className={`text-[11px] mt-1 ${batchWorkLocationMode === 'remote' ? 'text-zinc-400' : t.textMuted}`}>Each employee must include a work state</p>
                       </button>
                       <button
                         type="button"
@@ -1855,16 +1930,16 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         className={`border p-3 text-left rounded-xl transition-colors ${
                           batchWorkLocationMode === 'office'
                             ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                            : 'border-stone-300 hover:border-stone-400'
+                            : t.btnSecondary
                         }`}
                       >
-                        <p className={`text-xs font-bold uppercase tracking-wider ${batchWorkLocationMode === 'office' ? 'text-zinc-50' : 'text-zinc-900'}`}>Office / Store</p>
-                        <p className={`text-[11px] mt-1 ${batchWorkLocationMode === 'office' ? 'text-zinc-400' : 'text-stone-500'}`}>Each employee must include office/store location</p>
+                        <p className={`text-xs font-bold uppercase tracking-wider ${batchWorkLocationMode === 'office' ? 'text-zinc-50' : t.textMain}`}>Office / Store</p>
+                        <p className={`text-[11px] mt-1 ${batchWorkLocationMode === 'office' ? 'text-zinc-400' : t.textMuted}`}>Each employee must include office/store location</p>
                       </button>
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-stone-200 bg-stone-200/60 p-3 text-[11px] text-stone-500 space-y-1">
+                  <div className={`${t.innerEl} p-3 text-[11px] ${t.textMuted} space-y-1`}>
                     <p>Step 2 lets you enter up to 50 rows.</p>
                     <p>Only non-empty rows are processed.</p>
                     <p>Use Add Row for more lines, and remove any line with the X action.</p>
@@ -1875,23 +1950,23 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               {batchWizardStep === 2 && (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs text-stone-500 uppercase tracking-wider">
+                    <p className={`text-xs ${t.textMuted} uppercase tracking-wider`}>
                       Rows: {batchRows.length}/{BATCH_MAX_ROWS}
                     </p>
                     <button
                       type="button"
                       onClick={addBatchRow}
                       disabled={batchRows.length >= BATCH_MAX_ROWS}
-                      className="inline-flex items-center gap-2 px-3 py-1.5 border border-stone-300 text-stone-600 hover:text-zinc-900 hover:border-stone-400 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className={`inline-flex items-center gap-2 px-3 py-1.5 ${t.btnSecondary} text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                     >
                       <Plus size={12} />
                       Add Row
                     </button>
                   </div>
 
-                  <div className="overflow-auto border border-stone-200 rounded-xl">
+                  <div className={`overflow-auto border ${t.border} rounded-xl`}>
                     <table className="min-w-[1200px] w-full text-xs">
-                      <thead className="bg-stone-200 text-stone-500 uppercase tracking-wider text-[10px]">
+                      <thead className={`${t.tableHeader} uppercase tracking-wider text-[10px]`}>
                         <tr>
                           <th className="px-2 py-2 text-left">#</th>
                           <th className="px-2 py-2 text-left">First</th>
@@ -1912,14 +1987,14 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             ? batchRowValidationError(row)
                             : null;
                           return (
-                            <tr key={row.id} className="border-t border-stone-200 align-top">
-                              <td className="px-2 py-2 text-stone-500">{idx + 1}</td>
+                            <tr key={row.id} className={`border-t ${t.border} align-top`}>
+                              <td className={`px-2 py-2 ${t.textMuted}`}>{idx + 1}</td>
                               <td className="px-2 py-2">
                                 <input
                                   type="text"
                                   value={row.first_name}
                                   onChange={(e) => updateBatchRowField(row.id, 'first_name', e.target.value)}
-                                  className="w-full px-2 py-1.5 bg-white border border-stone-300 text-zinc-900 rounded-lg"
+                                  className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                 />
                               </td>
                               <td className="px-2 py-2">
@@ -1927,12 +2002,12 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                   type="text"
                                   value={row.last_name}
                                   onChange={(e) => updateBatchRowField(row.id, 'last_name', e.target.value)}
-                                  className="w-full px-2 py-1.5 bg-white border border-stone-300 text-zinc-900 rounded-lg"
+                                  className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                 />
                               </td>
                               <td className="px-2 py-2">
                                 {batchEmailMode === 'generated' ? (
-                                  <div className="px-2 py-1.5 bg-stone-200/60 border border-stone-300 text-stone-600 rounded-lg min-w-[220px]">
+                                  <div className={`px-2 py-1.5 ${t.genPreview} rounded-lg min-w-[220px]`}>
                                     {rowEmailPreview || 'auto-generated from name'}
                                   </div>
                                 ) : (
@@ -1940,7 +2015,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                     type="email"
                                     value={row.work_email}
                                     onChange={(e) => updateBatchRowField(row.id, 'work_email', e.target.value)}
-                                    className="w-full px-2 py-1.5 bg-white border border-stone-300 text-zinc-900 rounded-lg"
+                                    className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                   />
                                 )}
                               </td>
@@ -1949,7 +2024,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                   type="email"
                                   value={row.personal_email}
                                   onChange={(e) => updateBatchRowField(row.id, 'personal_email', e.target.value)}
-                                  className="w-full px-2 py-1.5 bg-white border border-stone-300 text-zinc-900 rounded-lg"
+                                  className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                 />
                               </td>
                               <td className="px-2 py-2">
@@ -1957,7 +2032,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                   <select
                                     value={row.work_state}
                                     onChange={(e) => updateBatchRowField(row.id, 'work_state', e.target.value)}
-                                    className="w-full px-2 py-1.5 bg-white border border-stone-300 text-zinc-900 rounded-lg"
+                                    className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                   >
                                     <option value="">State</option>
                                     {US_STATES.map((state) => (
@@ -1971,7 +2046,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                     type="text"
                                     value={row.office_location}
                                     onChange={(e) => updateBatchRowField(row.id, 'office_location', e.target.value)}
-                                    className="w-full px-2 py-1.5 bg-white border border-stone-300 text-zinc-900 rounded-lg"
+                                    className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                     placeholder="Downtown HQ"
                                   />
                                 )}
@@ -1980,7 +2055,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                 <select
                                   value={row.employment_type}
                                   onChange={(e) => updateBatchRowField(row.id, 'employment_type', e.target.value)}
-                                  className="w-full px-2 py-1.5 bg-white border border-stone-300 text-zinc-900 rounded-lg"
+                                  className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                 >
                                   <option value="full_time">Full Time</option>
                                   <option value="part_time">Part Time</option>
@@ -1993,7 +2068,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                   type="date"
                                   value={row.start_date}
                                   onChange={(e) => updateBatchRowField(row.id, 'start_date', e.target.value)}
-                                  className="w-full px-2 py-1.5 bg-white border border-stone-300 text-zinc-900 rounded-lg"
+                                  className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                 />
                               </td>
                               {batchEmailMode === 'existing' && (
@@ -2015,7 +2090,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                 <button
                                   type="button"
                                   onClick={() => removeBatchRow(row.id)}
-                                  className="text-stone-400 hover:text-red-500"
+                                  className={`${t.textFaint} hover:text-red-500`}
                                   aria-label="Remove row"
                                 >
                                   <X size={14} />
@@ -2035,12 +2110,12 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
               {batchWizardStep === 3 && (
                 <div className="space-y-4">
-                  <div className="rounded-xl border border-stone-200 bg-stone-200/60 p-4 text-xs text-stone-500 space-y-1">
+                  <div className={`${t.innerEl} p-4 text-xs ${t.textMuted} space-y-1`}>
                     <p>
-                      Ready to create <span className="text-zinc-900 font-semibold">{batchRowsWithInput.length}</span> employees.
+                      Ready to create <span className={`${t.textMain} font-semibold`}>{batchRowsWithInput.length}</span> employees.
                     </p>
-                    <p>Email mode: <span className="text-zinc-900">{batchEmailMode === 'generated' ? 'Generated' : 'Existing'}</span></p>
-                    <p>Location mode: <span className="text-zinc-900">{batchWorkLocationMode === 'remote' ? 'Remote (state)' : 'Office/Store'}</span></p>
+                    <p>Email mode: <span className={t.textMain}>{batchEmailMode === 'generated' ? 'Generated' : 'Existing'}</span></p>
+                    <p>Location mode: <span className={t.textMain}>{batchWorkLocationMode === 'remote' ? 'Remote (state)' : 'Office/Store'}</span></p>
                   </div>
 
                   {batchResult && (
@@ -2048,11 +2123,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       <div className="grid grid-cols-2 gap-3">
                         <div className="border border-emerald-300 bg-emerald-50 p-3 rounded-xl">
                           <p className="text-2xl font-bold text-emerald-700">{batchResult.created}</p>
-                          <p className="text-[10px] text-stone-500 uppercase tracking-wider">Created</p>
+                          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>Created</p>
                         </div>
                         <div className="border border-red-300 bg-red-50 p-3 rounded-xl">
                           <p className="text-2xl font-bold text-red-700">{batchResult.failed}</p>
-                          <p className="text-[10px] text-stone-500 uppercase tracking-wider">Failed</p>
+                          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>Failed</p>
                         </div>
                       </div>
                       {batchResult.errors.length > 0 && (
@@ -2062,7 +2137,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                               <p className="text-red-700">
                                 Row {err.row_number} {err.name ? `(${err.name})` : ''}
                               </p>
-                              <p className="text-stone-500">{err.error}</p>
+                              <p className={t.textMuted}>{err.error}</p>
                             </div>
                           ))}
                         </div>
@@ -2073,7 +2148,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               )}
             </div>
 
-            <div className="p-6 border-t border-stone-200 flex justify-end gap-3">
+            <div className={`p-6 ${t.modalFooter} flex justify-end gap-3`}>
               <button
                 type="button"
                 onClick={async () => {
@@ -2084,7 +2159,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                   setShowBatchWizardModal(false);
                   setBatchResult(null);
                 }}
-                className="px-4 py-2 text-stone-500 hover:text-zinc-900 text-xs font-bold uppercase tracking-wider transition-colors"
+                className={`px-4 py-2 ${t.cancelBtn} text-xs font-bold uppercase tracking-wider transition-colors`}
               >
                 Cancel
               </button>
@@ -2092,7 +2167,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                 <button
                   type="button"
                   onClick={() => setBatchWizardStep((prev) => (prev - 1) as BatchWizardStep)}
-                  className="px-4 py-2 border border-stone-300 text-stone-600 hover:text-zinc-900 hover:border-stone-400 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+                  className={`px-4 py-2 ${t.btnSecondary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
                 >
                   Back
                 </button>
@@ -2105,7 +2180,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     (batchWizardStep === 1 && batchEmailMode === 'generated' && !googleDomainAvailable) ||
                     (batchWizardStep === 2 && !canProceedBatchStep2)
                   }
-                  className="px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
                 >
                   Next
                 </button>
@@ -2115,7 +2190,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                   type="button"
                   onClick={handleBatchCreate}
                   disabled={batchSubmitting || !canProceedBatchStep2}
-                  className="px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  className={`px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed`}
                 >
                   {batchSubmitting ? 'Creating...' : `Create ${batchRowsWithInput.length} Employees`}
                 </button>
@@ -2128,7 +2203,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     setShowBatchWizardModal(false);
                     setBatchResult(null);
                   }}
-                  className="px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+                  className={`px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
                 >
                   Done
                 </button>
@@ -2141,11 +2216,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       {/* Bulk Upload Modal */}
       {showBulkUploadModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl bg-stone-100 border border-stone-200 shadow-2xl rounded-2xl max-h-[90vh] overflow-hidden flex flex-col" onClick={(e) => e.stopPropagation()}>
-            <div className="flex items-center justify-between p-6 border-b border-stone-200">
+          <div className={`w-full max-w-2xl ${t.modalBg} max-h-[90vh] overflow-hidden flex flex-col`} onClick={(e) => e.stopPropagation()}>
+            <div className={`flex items-center justify-between p-6 ${t.modalHeader}`}>
               <div>
-                <h3 className="text-xl font-bold text-zinc-900 uppercase tracking-tight">Bulk Upload Employees</h3>
-                <p className="text-xs text-stone-500 mt-1">Upload a CSV file to add multiple employees at once</p>
+                <h3 className={`text-xl font-bold ${t.textMain} uppercase tracking-tight`}>Bulk Upload Employees</h3>
+                <p className={`text-xs ${t.textMuted} mt-1`}>Upload a CSV file to add multiple employees at once</p>
               </div>
               <button
                 onClick={() => {
@@ -2153,7 +2228,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                   setUploadFile(null);
                   setUploadResult(null);
                 }}
-                className="text-stone-400 hover:text-zinc-900 transition-colors"
+                className={`${t.closeBtnCls}`}
               >
                 <X size={20} />
               </button>
@@ -2163,17 +2238,17 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               {!uploadResult ? (
                 <div className="space-y-6">
                   {/* Download Template Button */}
-                  <div className="bg-stone-200/60 border border-stone-200 p-4 rounded-xl">
+                  <div className={`${t.innerEl} p-4`}>
                     <div className="flex items-start gap-3">
                       <Download className="text-emerald-600 mt-0.5" size={16} />
                       <div className="flex-1">
-                        <h4 className="text-sm font-bold text-zinc-900 uppercase tracking-wide mb-1">Step 1: Download Template</h4>
-                        <p className="text-xs text-stone-500 mb-3">
+                        <h4 className={`text-sm font-bold ${t.textMain} uppercase tracking-wide mb-1`}>Step 1: Download Template</h4>
+                        <p className={`text-xs ${t.textMuted} mb-3`}>
                           Get the CSV template with the correct format and column headers.
                         </p>
                         <button
                           onClick={handleDownloadTemplate}
-                          className="inline-flex items-center gap-2 px-4 py-2 border border-stone-300 text-stone-600 hover:text-zinc-900 hover:border-stone-400 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+                          className={`inline-flex items-center gap-2 px-4 py-2 ${t.btnSecondary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
                         >
                           <Download size={12} />
                           Download Template
@@ -2183,12 +2258,12 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                   </div>
 
                   {/* Upload Area */}
-                  <div className="bg-stone-200/60 border border-stone-200 p-4 rounded-xl">
+                  <div className={`${t.innerEl} p-4`}>
                     <div className="flex items-start gap-3 mb-4">
                       <Upload className="text-emerald-600 mt-0.5" size={16} />
                       <div className="flex-1">
-                        <h4 className="text-sm font-bold text-zinc-900 uppercase tracking-wide mb-1">Step 2: Upload CSV</h4>
-                        <p className="text-xs text-stone-500">
+                        <h4 className={`text-sm font-bold ${t.textMain} uppercase tracking-wide mb-1`}>Step 2: Upload CSV</h4>
+                        <p className={`text-xs ${t.textMuted}`}>
                           Drag and drop your CSV file or click to browse.
                         </p>
                       </div>
@@ -2199,35 +2274,31 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       onDragLeave={handleDragLeave}
                       onDrop={handleDrop}
                       className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors ${
-                        isDragging
-                          ? 'border-emerald-500 bg-emerald-50'
-                          : uploadFile
-                          ? 'border-emerald-400 bg-emerald-50'
-                          : 'border-stone-400 bg-white hover:border-stone-500'
+                        isDragging ? t.uploadZoneDrag : uploadFile ? t.uploadZoneDone : t.uploadZone
                       }`}
                     >
                       {uploadFile ? (
                         <div className="space-y-3">
                           <CheckCircle className="w-10 h-10 text-emerald-600 mx-auto" />
                           <div>
-                            <p className="text-sm font-medium text-zinc-900">{uploadFile.name}</p>
-                            <p className="text-xs text-stone-500 mt-1">
+                            <p className={`text-sm font-medium ${t.textMain}`}>{uploadFile.name}</p>
+                            <p className={`text-xs ${t.textMuted} mt-1`}>
                               {(uploadFile.size / 1024).toFixed(2)} KB
                             </p>
                           </div>
                           <button
                             onClick={() => setUploadFile(null)}
-                            className="text-xs text-stone-500 hover:text-zinc-900 uppercase tracking-wider"
+                            className={`text-xs ${t.cancelBtn} uppercase tracking-wider`}
                           >
                             Remove File
                           </button>
                         </div>
                       ) : (
                         <div className="space-y-3">
-                          <Upload className="w-10 h-10 text-zinc-600 mx-auto" />
+                          <Upload className={`w-10 h-10 ${t.textDim} mx-auto`} />
                           <div>
-                            <p className="text-sm font-medium text-zinc-600">Drop your CSV file here</p>
-                            <p className="text-xs text-stone-500 mt-1">or</p>
+                            <p className={`text-sm font-medium ${t.textDim}`}>Drop your CSV file here</p>
+                            <p className={`text-xs ${t.textMuted} mt-1`}>or</p>
                           </div>
                           <label className="inline-block">
                             <input
@@ -2236,7 +2307,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                               onChange={(e) => handleFileSelect(e.target.files?.[0] || null)}
                               className="hidden"
                             />
-                            <span className="inline-flex items-center gap-2 px-4 py-2 border border-stone-300 text-stone-600 hover:text-zinc-900 hover:border-stone-400 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors cursor-pointer">
+                            <span className={`inline-flex items-center gap-2 px-4 py-2 ${t.btnSecondary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors cursor-pointer`}>
                               Browse Files
                             </span>
                           </label>
@@ -2247,20 +2318,20 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
                   {/* Options */}
                   {uploadFile && (
-                    <div className="bg-stone-200/60 border border-stone-200 p-4 rounded-xl">
+                    <div className={`${t.innerEl} p-4`}>
                       <div className="flex items-center gap-3">
                         <input
                           type="checkbox"
                           id="send-invites"
                           checked={sendInvitationsOnUpload}
                           onChange={(e) => setSendInvitationsOnUpload(e.target.checked)}
-                          className="w-4 h-4 rounded border-stone-300 bg-white text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0"
+                          className={`w-4 h-4 rounded ${isLight ? 'border-stone-300 bg-white' : 'border-zinc-600 bg-zinc-700'} text-emerald-600 focus:ring-emerald-500 focus:ring-offset-0`}
                         />
-                        <label htmlFor="send-invites" className="text-sm text-zinc-900 cursor-pointer">
+                        <label htmlFor="send-invites" className={`text-sm ${t.textMain} cursor-pointer`}>
                           Send invitation emails automatically
                         </label>
                       </div>
-                      <p className="text-xs text-stone-500 mt-2 ml-7">
+                      <p className={`text-xs ${t.textMuted} mt-2 ml-7`}>
                         Employees will receive an email to set up their account and access the portal.
                       </p>
                     </div>
@@ -2269,50 +2340,50 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               ) : (
                 /* Upload Results */
                 <div className="space-y-4">
-                  <div className="bg-stone-200/60 border border-stone-200 p-6 rounded-xl">
+                  <div className={`${t.innerEl} p-6`}>
                     <div className="flex items-center gap-3 mb-4">
                       <CheckCircle className="text-emerald-600" size={24} />
                       <div>
-                        <h4 className="text-lg font-bold text-zinc-900 uppercase tracking-wide">Upload Complete</h4>
-                        <p className="text-xs text-stone-500 mt-1">
+                        <h4 className={`text-lg font-bold ${t.textMain} uppercase tracking-wide`}>Upload Complete</h4>
+                        <p className={`text-xs ${t.textMuted} mt-1`}>
                           {uploadResult.created} of {uploadResult.total_rows} employees created successfully
                         </p>
                       </div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-4 mt-6">
-                      <div className="bg-white border border-stone-200 p-4 rounded-xl text-center">
+                      <div className={`${t.resultCard} p-4 rounded-xl text-center`}>
                         <div className="text-2xl font-bold text-emerald-600">{uploadResult.created}</div>
-                        <div className="text-xs text-stone-500 uppercase tracking-wider mt-1">Created</div>
+                        <div className={`text-xs ${t.textMuted} uppercase tracking-wider mt-1`}>Created</div>
                       </div>
-                      <div className="bg-white border border-stone-200 p-4 rounded-xl text-center">
+                      <div className={`${t.resultCard} p-4 rounded-xl text-center`}>
                         <div className="text-2xl font-bold text-red-600">{uploadResult.failed}</div>
-                        <div className="text-xs text-stone-500 uppercase tracking-wider mt-1">Failed</div>
+                        <div className={`text-xs ${t.textMuted} uppercase tracking-wider mt-1`}>Failed</div>
                       </div>
-                      <div className="bg-white border border-stone-200 p-4 rounded-xl text-center">
-                        <div className="text-2xl font-bold text-zinc-600">{uploadResult.total_rows}</div>
-                        <div className="text-xs text-stone-500 uppercase tracking-wider mt-1">Total</div>
+                      <div className={`${t.resultCard} p-4 rounded-xl text-center`}>
+                        <div className={`text-2xl font-bold ${t.textDim}`}>{uploadResult.total_rows}</div>
+                        <div className={`text-xs ${t.textMuted} uppercase tracking-wider mt-1`}>Total</div>
                       </div>
                     </div>
                   </div>
 
                   {uploadResult.errors && uploadResult.errors.length > 0 && (
-                    <div className="bg-red-50 border border-red-300 rounded-xl p-4">
+                    <div className={`${t.alertError} rounded-xl p-4`}>
                       <div className="flex items-center gap-2 mb-3">
-                        <AlertTriangle className="text-red-600" size={16} />
-                        <h5 className="text-sm font-bold text-red-700 uppercase tracking-wide">
+                        <AlertTriangle className={t.alertErrorText} size={16} />
+                        <h5 className={`text-sm font-bold ${t.alertErrorText} uppercase tracking-wide`}>
                           Errors ({uploadResult.errors.length})
                         </h5>
                       </div>
                       <div className="space-y-2 max-h-60 overflow-y-auto">
                         {uploadResult.errors.map((err: any, idx: number) => (
-                          <div key={idx} className="bg-white border border-red-200 p-3 rounded-lg text-xs">
-                            <div className="flex items-center gap-2 text-red-700 font-medium mb-1">
+                          <div key={idx} className={`${t.resultCard} p-3 rounded-lg text-xs`}>
+                            <div className={`flex items-center gap-2 ${t.alertErrorText} font-medium mb-1`}>
                               <span>Row {err.row}</span>
-                              {err.email && <span className="text-stone-400">•</span>}
-                              {err.email && <span className="text-zinc-600 font-mono">{err.email}</span>}
+                              {err.email && <span className={t.textFaint}>•</span>}
+                              {err.email && <span className={`${t.textDim} font-mono`}>{err.email}</span>}
                             </div>
-                            <p className="text-stone-500">{err.error}</p>
+                            <p className={t.textMuted}>{err.error}</p>
                           </div>
                         ))}
                       </div>
@@ -2321,12 +2392,12 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
                   {/* Send Invitations button — shown when auto-send was off and employees were created */}
                   {!sendInvitationsOnUpload && uploadResult.created > 0 && uploadResult.employee_ids?.length > 0 && (
-                    <div className="bg-stone-200/60 border border-stone-200 p-4 rounded-xl">
+                    <div className={`${t.innerEl} p-4`}>
                       {bulkInviteResult ? (
                         <div className="flex items-center gap-3">
                           <CheckCircle className="text-emerald-600" size={18} />
                           <div>
-                            <p className="text-sm text-zinc-900 font-medium">
+                            <p className={`text-sm ${t.textMain} font-medium`}>
                               {bulkInviteResult.sent} invitation{bulkInviteResult.sent !== 1 ? 's' : ''} sent
                             </p>
                             {bulkInviteResult.failed > 0 && (
@@ -2339,8 +2410,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       ) : (
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm text-zinc-900 font-medium">Send invitation emails?</p>
-                            <p className="text-xs text-stone-500 mt-1">
+                            <p className={`text-sm ${t.textMain} font-medium`}>Send invitation emails?</p>
+                            <p className={`text-xs ${t.textMuted} mt-1`}>
                               Invite {uploadResult.created} new employee{uploadResult.created !== 1 ? 's' : ''} to set up their portal accounts
                             </p>
                           </div>
@@ -2368,7 +2439,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                               }
                             }}
                             disabled={bulkInviting}
-                            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50 shrink-0"
+                            className={`flex items-center gap-2 px-4 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50 shrink-0`}
                           >
                             {bulkInviting ? (
                               <>
@@ -2394,7 +2465,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       setUploadResult(null);
                       setBulkInviteResult(null);
                     }}
-                    className="w-full px-4 py-3 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors"
+                    className={`w-full px-4 py-3 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
                   >
                     Done
                   </button>
@@ -2403,21 +2474,21 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             </div>
 
             {!uploadResult && uploadFile && (
-              <div className="p-6 border-t border-stone-200 flex justify-end gap-3">
+              <div className={`p-6 ${t.modalFooter} flex justify-end gap-3`}>
                 <button
                   onClick={() => {
                     setShowBulkUploadModal(false);
                     setUploadFile(null);
                     setUploadResult(null);
                   }}
-                  className="px-4 py-2 text-stone-500 hover:text-zinc-900 text-xs font-bold uppercase tracking-wider transition-colors"
+                  className={`px-4 py-2 ${t.cancelBtn} text-xs font-bold uppercase tracking-wider transition-colors`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={handleBulkUpload}
                   disabled={uploadLoading || !uploadFile}
-                  className="flex items-center gap-2 px-6 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className={`flex items-center gap-2 px-6 py-2 ${t.btnPrimary} text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                 >
                   {uploadLoading ? (
                     <>
