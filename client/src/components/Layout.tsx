@@ -684,13 +684,13 @@ export function Layout() {
   const { user, profile, logout, hasRole, hasBetaFeature, hasFeature, platformFeatures } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showFeatureManager, setShowFeatureManager] = useState(false);
-  const [themeMode, setThemeMode] = useState<'dark' | 'lightSidebar' | 'lightPages'>(() => {
-    if (typeof window === 'undefined') return 'lightSidebar';
+  const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
+    if (typeof window === 'undefined') return 'dark';
     const saved = window.localStorage.getItem('matcha_theme_mode');
-    if (saved === 'dark' || saved === 'lightSidebar' || saved === 'lightPages') {
-      return saved;
-    }
-    return 'lightSidebar';
+    if (saved === 'dark' || saved === 'light') return saved;
+    // Migrate old values
+    if (saved === 'lightPages' || saved === 'lightSidebar') return 'light';
+    return 'dark';
   });
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(
     () => new Set(navSections.map(s => s.title))
@@ -699,27 +699,20 @@ export function Layout() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('matcha_theme_mode', themeMode);
-      if (themeMode === 'lightPages') {
+      // Sidebar is always light in both modes
+      document.documentElement.classList.add('theme-light-sidebar');
+      if (themeMode === 'light') {
         document.documentElement.classList.add('theme-light-pages');
+        document.documentElement.classList.remove('theme-dark');
       } else {
         document.documentElement.classList.remove('theme-light-pages');
-      }
-      if (themeMode === 'dark') {
         document.documentElement.classList.add('theme-dark');
-      } else {
-        document.documentElement.classList.remove('theme-dark');
-      }
-      // Sidebar gets light treatment in both lightSidebar and lightPages modes
-      if (themeMode !== 'dark') {
-        document.documentElement.classList.add('theme-light-sidebar');
-      } else {
-        document.documentElement.classList.remove('theme-light-sidebar');
       }
     }
   }, [themeMode]);
 
   const isMatchaRoute = location.pathname.startsWith('/app/matcha');
-  const shouldInvertPages = themeMode === 'lightPages' && !isMatchaRoute;
+  const shouldInvertPages = themeMode === 'light' && !isMatchaRoute;
 
   const toggleSection = (title: string) => {
     setCollapsedSections(prev => {
@@ -850,7 +843,7 @@ export function Layout() {
       </div>
 
       {/* Desktop Sidebar - hidden on mobile */}
-      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col bg-zinc-950 border-r border-white/10 sbl:border-black/10 sbl:shadow-[1px_0_24px_rgba(0,0,0,0.02)] ${themeMode === 'lightPages' ? 'sbl:bg-white/10 sbl:backdrop-blur-[40px] sbl:backdrop-saturate-[150%]' : themeMode === 'lightSidebar' ? 'bg-[#e8e8ec]' : ''}`}>
+      <aside className={`hidden md:flex fixed top-0 left-0 bottom-0 z-40 w-56 flex-col border-r sbl:border-black/10 sbl:shadow-[1px_0_24px_rgba(0,0,0,0.02)] ${themeMode === 'light' ? 'bg-white/10 backdrop-blur-[40px] backdrop-saturate-[150%]' : 'bg-[#e8e8ec]'}`}>
         {/* Logo */}
         <div className="h-16 flex items-center px-6 border-b border-white/10 sbl:border-black/5">
           <Link to="/" className="flex items-center gap-3 group">
@@ -908,19 +901,11 @@ export function Layout() {
           <NavLink item={settingsItem} />
           
           <button
-            onClick={() => {
-              if (themeMode === 'dark') setThemeMode('lightSidebar');
-              else if (themeMode === 'lightSidebar') setThemeMode('lightPages');
-              else setThemeMode('dark');
-            }}
+            onClick={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
             className="w-full flex items-center gap-3 px-3 py-2 text-[10px] tracking-[0.15em] uppercase text-zinc-400 hover:text-white sbl:text-black/60 sbl:hover:text-black border-l-2 border-transparent hover:border-zinc-700 sbl:hover:border-black/20 transition-all mt-1"
           >
-            {themeMode === 'lightPages' ? <Moon className="w-4 h-4 shrink-0" /> : <Sun className="w-4 h-4 shrink-0" />}
-            <span>
-              {themeMode === 'dark' ? 'Light Sidebar' : 
-               themeMode === 'lightSidebar' ? 'Light Pages' : 
-               'Dark Mode'}
-            </span>
+            {themeMode === 'light' ? <Moon className="w-4 h-4 shrink-0" /> : <Sun className="w-4 h-4 shrink-0" />}
+            <span>{themeMode === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>
           </button>
 
           <div className="mt-4 px-3 py-3 bg-zinc-900 border border-white/5 sbl:bg-black/[0.03] sbl:border-black/[0.05] sbl:shadow-inner">
