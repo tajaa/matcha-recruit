@@ -574,8 +574,12 @@ export function ERCaseDetail() {
     }
   }, [id]);
 
-  const fetchAnalysis = useCallback(async (type: AnalysisTab) => {
+  // Track which analysis tabs have already been fetched for this case
+  const fetchedTabsRef = useRef<Set<string>>(new Set());
+
+  const fetchAnalysis = useCallback(async (type: AnalysisTab, force = false) => {
     if (!id) return;
+    if (!force && fetchedTabsRef.current.has(type)) return;
     try {
       if (type === 'timeline') {
         const data = await erCopilot.getTimeline(id);
@@ -583,30 +587,31 @@ export function ERCaseDetail() {
           setTimeline([]);
           setTimelineSummary('');
           setTimelineGaps([]);
-          return;
+        } else {
+          setTimeline(normalizeTimelineEvents(data.analysis.events));
+          setTimelineSummary(data.analysis.timeline_summary || '');
+          setTimelineGaps(normalizeTimelineGaps(data.analysis.gaps_identified));
         }
-        setTimeline(normalizeTimelineEvents(data.analysis.events));
-        setTimelineSummary(data.analysis.timeline_summary || '');
-        setTimelineGaps(normalizeTimelineGaps(data.analysis.gaps_identified));
       } else if (type === 'discrepancies') {
         const data = await erCopilot.getDiscrepancies(id);
         if (!data.generated_at) {
           setDiscrepancies([]);
           setDiscrepancySummary('');
-          return;
+        } else {
+          setDiscrepancies(normalizeDiscrepancies(data.analysis.discrepancies));
+          setDiscrepancySummary(data.analysis.summary || '');
         }
-        setDiscrepancies(normalizeDiscrepancies(data.analysis.discrepancies));
-        setDiscrepancySummary(data.analysis.summary || '');
       } else if (type === 'policy') {
         const data = await erCopilot.getPolicyCheck(id);
         if (!data.generated_at) {
           setViolations([]);
           setPoliciesChecked(0);
-          return;
+        } else {
+          setViolations(normalizePolicyViolations(data.analysis.violations));
+          setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
         }
-        setViolations(normalizePolicyViolations(data.analysis.violations));
-        setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
       }
+      fetchedTabsRef.current.add(type);
     } catch {
       // Analysis not yet generated - that's okay
     }
@@ -715,17 +720,13 @@ export function ERCaseDetail() {
     fetchAnalysis(activeTab);
   }, [activeTab, fetchAnalysis]);
 
-  // Auto-load outcome analysis when visiting a pending_determination case
-  useEffect(() => {
-    if (!loading && erCase?.status === 'pending_determination' && !outcomeAnalysis && !outcomeError && !outcomeLoadingRef.current) {
-      fetchOutcomeAnalysis();
-    }
-  }, [loading, erCase?.status, outcomeAnalysis, outcomeError, fetchOutcomeAnalysis]);
+  // Outcome analysis is loaded on-demand via the "Generate" button — no auto-trigger.
 
   useEffect(() => {
     autoReviewSignatureRef.current = null;
     outcomeRequestSeqRef.current += 1;
     outcomeLoadingRef.current = false;
+    fetchedTabsRef.current = new Set();
     setAutoAssistStatus('idle');
     setAutoAssistMessage(null);
     setNotes([]);
@@ -776,7 +777,7 @@ export function ERCaseDetail() {
           };
           const tab = taskTypeToTab[data.task_type];
           if (tab) {
-            fetchAnalysis(tab);
+            fetchAnalysis(tab, true);
           }
           setAnalysisLoading(null);
           setAnalysisProgress(null);
@@ -903,6 +904,7 @@ export function ERCaseDetail() {
           setTimeline(normalizeTimelineEvents(data.analysis.events));
           setTimelineSummary(data.analysis.timeline_summary || '');
           setTimelineGaps(normalizeTimelineGaps(data.analysis.gaps_identified));
+          fetchedTabsRef.current.add(type);
           return true;
         } else if (type === 'discrepancies') {
           const data = await erCopilot.getDiscrepancies(id!);
@@ -911,6 +913,7 @@ export function ERCaseDetail() {
           }
           setDiscrepancies(normalizeDiscrepancies(data.analysis.discrepancies));
           setDiscrepancySummary(data.analysis.summary || '');
+          fetchedTabsRef.current.add(type);
           return true;
         } else if (type === 'policy') {
           const data = await erCopilot.getPolicyCheck(id!);
@@ -919,6 +922,7 @@ export function ERCaseDetail() {
           }
           setViolations(normalizePolicyViolations(data.analysis.violations));
           setPoliciesChecked(data.analysis.policies_potentially_applicable?.length || 0);
+          fetchedTabsRef.current.add(type);
           return true;
         }
       } catch {
