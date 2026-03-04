@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { irIncidents } from '../api/client';
+import { irIncidents, erCopilot } from '../api/client';
 import type {
   IRIncident,
   IRDocument,
@@ -11,6 +11,7 @@ import type {
   IRRootCauseAnalysis,
   IRRecommendationsAnalysis,
   IRSimilarIncidentsAnalysis,
+  ERCaseCategory,
 } from '../types';
 import { CategorizationAnalysisModal } from '../components/ir/CategorizationAnalysisModal';
 import { SeverityAnalysisModal } from '../components/ir/SeverityAnalysisModal';
@@ -49,6 +50,25 @@ const TYPE_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
+const IR_TYPE_TO_ER_CATEGORY: Record<string, ERCaseCategory> = {
+  safety: 'safety',
+  behavioral: 'misconduct',
+  property: 'other',
+  near_miss: 'safety',
+  other: 'other',
+};
+
+const ER_CATEGORY_OPTIONS: { value: ERCaseCategory; label: string }[] = [
+  { value: 'harassment', label: 'Harassment' },
+  { value: 'discrimination', label: 'Discrimination' },
+  { value: 'safety', label: 'Safety' },
+  { value: 'retaliation', label: 'Retaliation' },
+  { value: 'policy_violation', label: 'Policy Violation' },
+  { value: 'misconduct', label: 'Misconduct' },
+  { value: 'wage_hour', label: 'Wage & Hour' },
+  { value: 'other', label: 'Other' },
+];
+
 export function IRDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -76,6 +96,10 @@ export function IRDetail() {
   const [showRootCauseModal, setShowRootCauseModal] = useState(false);
   const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
   const [showSimilarModal, setShowSimilarModal] = useState(false);
+
+  const [showEscalateModal, setShowEscalateModal] = useState(false);
+  const [escalating, setEscalating] = useState(false);
+  const [escalateForm, setEscalateForm] = useState({ title: '', description: '', category: 'other' as ERCaseCategory });
 
   const fetchIncident = useCallback(async () => {
     if (!id) return;
@@ -154,6 +178,67 @@ export function IRDetail() {
     });
   };
 
+  const openEscalateModal = () => {
+    if (!incident) return;
+    const witnesses = incident.witnesses.length > 0
+      ? `Witnesses: ${incident.witnesses.map(w => w.name).join(', ')}`
+      : '';
+    const lines = [
+      `Escalated from IR incident ${incident.incident_number}`,
+      '',
+      `Type: ${TYPE_LABELS[incident.incident_type] || incident.incident_type}`,
+      `Severity: ${incident.severity}`,
+      `Occurred: ${formatDate(incident.occurred_at)}`,
+      incident.location ? `Location: ${incident.location}` : '',
+      `Reporter: ${incident.reported_by_name}`,
+      '',
+      incident.description || '',
+      witnesses,
+    ].filter(Boolean).join('\n');
+
+    setEscalateForm({
+      title: `[Escalated from ${incident.incident_number}] ${incident.title}`,
+      description: lines,
+      category: IR_TYPE_TO_ER_CATEGORY[incident.incident_type] || 'other',
+    });
+    setShowEscalateModal(true);
+  };
+
+  const handleEscalate = async () => {
+    if (!incident || !id) return;
+    setEscalating(true);
+    try {
+      const newCase = await erCopilot.createCase({
+        title: escalateForm.title,
+        description: escalateForm.description,
+        category: escalateForm.category,
+        intake_context: {
+          escalated_from_ir: {
+            incident_id: incident.id,
+            incident_number: incident.incident_number,
+            incident_type: incident.incident_type,
+            severity: incident.severity,
+            occurred_at: incident.occurred_at,
+          },
+        } as any,
+      });
+      await irIncidents.updateIncident(id, {
+        category_data: {
+          ...incident.category_data,
+          escalated_er_case_id: newCase.id,
+          escalated_er_case_number: newCase.case_number,
+        },
+      });
+      setShowEscalateModal(false);
+      navigate(`/app/matcha/er-copilot/${newCase.id}`);
+    } catch (err) {
+      console.error('Failed to escalate to ER case:', err);
+      setError(err instanceof Error ? err.message : 'Failed to escalate');
+    } finally {
+      setEscalating(false);
+    }
+  };
+
   const labelClass = 'text-[10px] uppercase tracking-wider text-zinc-600';
 
   if (loading) {
@@ -199,22 +284,39 @@ export function IRDetail() {
           <h1 className="text-xl font-medium text-white">{incident.title}</h1>
         </div>
 
-        <div>
-          <select
-            value={incident.status}
-            onChange={(e) => updateIncident({ status: e.target.value as IRStatus })}
-            disabled={updating}
-            className={`px-2 py-1 bg-transparent border-b border-zinc-800 text-xs text-zinc-400 focus:outline-none focus:border-zinc-500 cursor-pointer ${updating ? 'opacity-50' : ''}`}
-          >
-            {STATUS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          {error && (
-            <div className="text-xs text-red-400 mt-1">{error}</div>
+        <div className="flex items-center gap-4">
+          {incident.category_data?.escalated_er_case_id ? (
+            <button
+              onClick={() => navigate(`/app/matcha/er-copilot/${incident.category_data.escalated_er_case_id}`)}
+              className="text-xs text-emerald-400 hover:text-emerald-300 uppercase tracking-wider"
+            >
+              View ER Case →
+            </button>
+          ) : (
+            <button
+              onClick={openEscalateModal}
+              className="text-xs text-zinc-600 hover:text-white uppercase tracking-wider"
+            >
+              Escalate to ER Case
+            </button>
           )}
+          <div>
+            <select
+              value={incident.status}
+              onChange={(e) => updateIncident({ status: e.target.value as IRStatus })}
+              disabled={updating}
+              className={`px-2 py-1 bg-transparent border-b border-zinc-800 text-xs text-zinc-400 focus:outline-none focus:border-zinc-500 cursor-pointer ${updating ? 'opacity-50' : ''}`}
+            >
+              {STATUS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {error && (
+              <div className="text-xs text-red-400 mt-1">{error}</div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -571,6 +673,64 @@ export function IRDetail() {
         onClose={() => setShowSimilarModal(false)}
         analysis={similarIncidents}
       />
+
+      {/* Escalate to ER Case Modal */}
+      {showEscalateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowEscalateModal(false)} />
+          <div className="relative bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-lg p-6 space-y-4">
+            <h3 className="text-sm font-medium text-white">Escalate to ER Case</h3>
+
+            <div>
+              <label className={`${labelClass} block mb-1`}>Title</label>
+              <input
+                value={escalateForm.title}
+                onChange={(e) => setEscalateForm(f => ({ ...f, title: e.target.value }))}
+                className="w-full px-2.5 py-1.5 bg-transparent border border-zinc-800 rounded text-sm text-white focus:outline-none focus:border-zinc-600"
+              />
+            </div>
+
+            <div>
+              <label className={`${labelClass} block mb-1`}>Description</label>
+              <textarea
+                value={escalateForm.description}
+                onChange={(e) => setEscalateForm(f => ({ ...f, description: e.target.value }))}
+                rows={6}
+                className="w-full px-2.5 py-1.5 bg-transparent border border-zinc-800 rounded text-sm text-white focus:outline-none focus:border-zinc-600 resize-none"
+              />
+            </div>
+
+            <div>
+              <label className={`${labelClass} block mb-1`}>Category</label>
+              <select
+                value={escalateForm.category}
+                onChange={(e) => setEscalateForm(f => ({ ...f, category: e.target.value as ERCaseCategory }))}
+                className="w-full px-2.5 py-1.5 bg-transparent border border-zinc-800 rounded text-sm text-white focus:outline-none focus:border-zinc-600 cursor-pointer"
+              >
+                {ER_CATEGORY_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowEscalateModal(false)}
+                className="text-xs text-zinc-500 hover:text-white uppercase tracking-wider"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEscalate}
+                disabled={escalating || !escalateForm.title.trim()}
+                className="px-3 py-1.5 bg-white text-black text-xs rounded hover:bg-zinc-200 disabled:opacity-50 uppercase tracking-wider"
+              >
+                {escalating ? 'Creating...' : 'Create ER Case'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
