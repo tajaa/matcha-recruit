@@ -25,6 +25,7 @@ import {
   ChevronLeft, Upload, Trash2, Search,
   AlertTriangle, CheckCircle, Clock, X, RefreshCw, Download
 } from 'lucide-react';
+import { AnalysisConsole } from '../components/er/AnalysisConsole';
 
 function normalizeDiscrepancyStatement(
   value: unknown,
@@ -1489,13 +1490,19 @@ export function ERCaseDetail() {
           {assistanceAnswers?.additional_notes && (
             <p className={`text-sm ${t.textDim}`}>Notes: {assistanceAnswers.additional_notes}</p>
           )}
-          {autoAssistMessage && (
+          {autoAssistStatus === 'running' && (
+            <AnalysisConsole
+              title="Assistance Review"
+              analysisType="review"
+              currentStep={autoAssistMessage || undefined}
+              active
+            />
+          )}
+          {autoAssistMessage && autoAssistStatus !== 'running' && (
             <p className={`text-sm ${
               autoAssistStatus === 'completed'
                 ? 'text-emerald-700'
-                : autoAssistStatus === 'running'
-                  ? 'text-amber-700'
-                  : 'text-stone-600'
+                : 'text-stone-600'
             }`}>
               {autoAssistMessage}
             </p>
@@ -2114,13 +2121,13 @@ export function ERCaseDetail() {
                 {timeline.length === 0 ? (
                   <div className={`text-center py-12 ${t.textFaint} text-xs`}>
                     {analysisLoading === 'timeline' ? (
-                      <div className="flex flex-col items-center gap-3">
-                        <RefreshCw size={20} className={`animate-spin ${t.spinner}`} />
-                        <span>{analysisProgress?.step || 'Analyzing documents and reconstructing timeline...'}</span>
-                        {analysisProgress?.detail && (
-                          <span className={`text-xs ${t.textMuted}`}>{analysisProgress.detail}</span>
-                        )}
-                      </div>
+                      <AnalysisConsole
+                        title="Timeline Analysis"
+                        analysisType="timeline"
+                        currentStep={analysisProgress?.step}
+                        detail={analysisProgress?.detail}
+                        active
+                      />
                     ) : (
                       <div>
                         <p className="mb-2">No timeline generated yet.</p>
@@ -2211,13 +2218,13 @@ export function ERCaseDetail() {
                 {discrepancies.length === 0 ? (
                   <div className={`text-center py-12 ${t.textFaint} text-xs`}>
                     {analysisLoading === 'discrepancies' ? (
-                      <div className="flex flex-col items-center gap-3">
-                        <RefreshCw size={20} className={`animate-spin ${t.spinner}`} />
-                        <span>{analysisProgress?.step || 'Comparing statements and detecting discrepancies...'}</span>
-                        {analysisProgress?.detail && (
-                          <span className={`text-xs ${t.textMuted}`}>{analysisProgress.detail}</span>
-                        )}
-                      </div>
+                      <AnalysisConsole
+                        title="Discrepancy Analysis"
+                        analysisType="discrepancies"
+                        currentStep={analysisProgress?.step}
+                        detail={analysisProgress?.detail}
+                        active
+                      />
                     ) : discrepancySummary ? (
                       <div>
                         <p className="mb-2">No conflicting statements detected.</p>
@@ -2316,13 +2323,13 @@ export function ERCaseDetail() {
                 {violations.length === 0 ? (
                   <div className={`text-center py-12 ${t.textFaint} text-xs`}>
                     {analysisLoading === 'policy' ? (
-                      <div className="flex flex-col items-center gap-3">
-                        <RefreshCw size={20} className={`animate-spin ${t.spinner}`} />
-                        <span>{analysisProgress?.step || 'Checking evidence against policy documents...'}</span>
-                        {analysisProgress?.detail && (
-                          <span className={`text-xs ${t.textMuted}`}>{analysisProgress.detail}</span>
-                        )}
-                      </div>
+                      <AnalysisConsole
+                        title="Policy Check"
+                        analysisType="policy"
+                        currentStep={analysisProgress?.step}
+                        detail={analysisProgress?.detail}
+                        active
+                      />
                     ) : policiesChecked > 0 ? (
                       <div>
                         <p className="mb-2">No policy violations identified.</p>
