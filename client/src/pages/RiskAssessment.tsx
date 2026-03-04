@@ -223,6 +223,117 @@ function DimensionCard({ dimensionKey, dim }: { dimensionKey: string; dim: Dimen
   );
 }
 
+type EmployeeViolation = {
+  employee_name: string;
+  pay_rate: number;
+  threshold: number;
+  shortfall: number;
+  pay_classification: string;
+  location_city: string | null;
+  location_state: string | null;
+};
+
+type OpenCase = {
+  case_id: string;
+  title: string;
+  status: string;
+  category: string | null;
+  created_at: string | null;
+};
+
+function formatCurrency(value: number): string {
+  return value.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+}
+
+function formatStatus(status: string): string {
+  return status.replace(/_/g, ' ');
+}
+
+function ActionItems({ data }: { data: RiskAssessmentResult }) {
+  const violations: EmployeeViolation[] = (() => {
+    const raw = data.dimensions.compliance?.raw_data?.employee_violations;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(
+      (v): v is EmployeeViolation =>
+        v && typeof v === 'object' && typeof v.employee_name === 'string' && typeof v.pay_rate === 'number',
+    );
+  })();
+
+  const cases: OpenCase[] = (() => {
+    const raw = data.dimensions.er_cases?.raw_data?.open_cases;
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(
+      (c): c is OpenCase => c && typeof c === 'object' && typeof c.title === 'string' && typeof c.status === 'string',
+    );
+  })();
+
+  if (violations.length === 0 && cases.length === 0) return null;
+
+  return (
+    <div>
+      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Action Items</div>
+      <div className="border border-white/10 divide-y divide-white/10">
+        {violations.length > 0 && (
+          <div className="bg-zinc-900 p-5">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Wage Compliance</div>
+            <div className="flex flex-col gap-2">
+              {violations.map((v, i) => {
+                const isLarge = v.shortfall >= 10000;
+                const location =
+                  v.location_city && v.location_state
+                    ? `${v.location_city}, ${v.location_state}`
+                    : v.location_state || 'Unknown';
+                const rateLabel = v.pay_classification === 'exempt' ? 'salary' : 'hourly rate';
+                return (
+                  <div key={i} className="flex items-start gap-3 text-[11px]">
+                    <span
+                      className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${isLarge ? 'bg-red-500' : 'bg-amber-500'}`}
+                    />
+                    <span className="text-zinc-400">
+                      <span className="text-zinc-200">{v.employee_name}</span>
+                      {`'s ${rateLabel} is `}
+                      <span className="font-mono text-red-400">{formatCurrency(v.pay_rate)}</span>
+                      {' but the minimum for '}
+                      <span className="text-zinc-300">{location}</span>
+                      {' is '}
+                      <span className="font-mono text-zinc-300">{formatCurrency(v.threshold)}</span>
+                      <span className="text-zinc-600">{` (gap: ${formatCurrency(v.shortfall)})`}</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {cases.length > 0 && (
+          <div className="bg-zinc-900 p-5">
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Open ER Cases</div>
+            <div className="flex flex-col gap-2">
+              {cases.map((c) => {
+                const isPending = c.status === 'pending_determination';
+                return (
+                  <div key={c.case_id} className="flex items-start gap-3 text-[11px]">
+                    <span
+                      className={`mt-1 w-1.5 h-1.5 rounded-full shrink-0 ${isPending ? 'bg-red-500' : 'bg-amber-500'}`}
+                    />
+                    <span className="text-zinc-400">
+                      <span className="text-zinc-200">'{c.title}'</span>
+                      {` is ${formatStatus(c.status)}`}
+                      {c.category && (
+                        <span className="text-zinc-600">{` · ${formatStatus(c.category)}`}</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function isEmptyResult(data: RiskAssessmentResult): boolean {
   if (data.overall_score !== 0) return false;
   if (hasEmployeeComplianceAlerts(data.dimensions.compliance)) return false;
@@ -379,6 +490,9 @@ export default function RiskAssessment() {
               ))}
             </div>
           </div>
+
+          {/* Action Items */}
+          <ActionItems data={data} />
 
           {/* ER Case Metrics */}
           <div>

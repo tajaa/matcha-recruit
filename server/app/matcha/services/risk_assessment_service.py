@@ -69,6 +69,8 @@ async def _collect_minimum_wage_violation_metrics(
     hourly_employee_ids: set[str] = set()
     salary_employee_ids: set[str] = set()
     location_summaries: list[dict[str, Any]] = []
+    employee_violations: list[dict[str, Any]] = []
+    seen_employee_violations: set[str] = set()
 
     for location in location_rows:
         try:
@@ -90,6 +92,17 @@ async def _collect_minimum_wage_violation_metrics(
             violating_employee_ids.add(employee_id)
             hourly_employee_ids.add(employee_id)
             location_employee_ids.add(employee_id)
+            if employee_id not in seen_employee_violations:
+                seen_employee_violations.add(employee_id)
+                employee_violations.append({
+                    "employee_name": violation.get("employee_name"),
+                    "pay_rate": violation.get("pay_rate"),
+                    "threshold": violation.get("threshold"),
+                    "shortfall": violation.get("shortfall"),
+                    "pay_classification": violation.get("pay_classification"),
+                    "location_city": location["city"],
+                    "location_state": location["state"],
+                })
 
         for violation in violations_by_rate_type.get("exempt_salary", []):
             employee_id = violation.get("employee_id")
@@ -98,6 +111,17 @@ async def _collect_minimum_wage_violation_metrics(
             violating_employee_ids.add(employee_id)
             salary_employee_ids.add(employee_id)
             location_employee_ids.add(employee_id)
+            if employee_id not in seen_employee_violations:
+                seen_employee_violations.add(employee_id)
+                employee_violations.append({
+                    "employee_name": violation.get("employee_name"),
+                    "pay_rate": violation.get("pay_rate"),
+                    "threshold": violation.get("threshold"),
+                    "shortfall": violation.get("shortfall"),
+                    "pay_classification": violation.get("pay_classification"),
+                    "location_city": location["city"],
+                    "location_state": location["state"],
+                })
 
         if location_employee_ids:
             location_summaries.append(
@@ -118,12 +142,15 @@ async def _collect_minimum_wage_violation_metrics(
         )
     )
 
+    employee_violations.sort(key=lambda v: -(v.get("shortfall") or 0))
+
     return {
         "minimum_wage_violation_employee_count": len(violating_employee_ids),
         "hourly_minimum_wage_violation_count": len(hourly_employee_ids),
         "salary_minimum_wage_violation_count": len(salary_employee_ids),
         "locations_with_minimum_wage_violations": len(location_summaries),
         "top_minimum_wage_violation_locations": location_summaries[:5],
+        "employee_violations": employee_violations[:10],
     }
 
 
@@ -359,6 +386,34 @@ async def compute_er_dimension(company_id: UUID, conn) -> DimensionResult:
     if not factors:
         factors.append("No open ER cases")
 
+    # Fetch individual non-closed cases for action items
+    case_rows = await conn.fetch(
+        """
+        SELECT id, title, status, category, created_at
+        FROM er_cases
+        WHERE company_id = $1 AND status != 'closed'
+        ORDER BY
+            CASE status
+                WHEN 'pending_determination' THEN 1
+                WHEN 'in_review' THEN 2
+                ELSE 3
+            END,
+            created_at DESC
+        LIMIT 10
+        """,
+        company_id,
+    )
+    open_case_details = [
+        {
+            "case_id": str(row["id"]),
+            "title": row["title"],
+            "status": row["status"],
+            "category": row["category"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        }
+        for row in case_rows
+    ]
+
     return DimensionResult(
         score=score,
         band=_band(score),
@@ -369,6 +424,7 @@ async def compute_er_dimension(company_id: UUID, conn) -> DimensionResult:
             "open": open_cases,
             "major_policy_violation": has_major_policy_violation,
             "high_discrepancy": has_high_discrepancy,
+            "open_cases": open_case_details,
         },
     )
 
