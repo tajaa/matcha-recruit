@@ -2246,6 +2246,7 @@ export interface JurisdictionRequirement {
   previous_value: string | null;
   last_changed_at: string | null;
   last_verified_at: string | null;
+  is_bookmarked: boolean;
   updated_at: string | null;
 }
 
@@ -2319,6 +2320,14 @@ export const adminJurisdictions = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  toggleBookmark: (requirementId: string): Promise<{ id: string; is_bookmarked: boolean }> =>
+    request<{ id: string; is_bookmarked: boolean }>(`/admin/jurisdictions/requirements/${requirementId}/bookmark`, {
+      method: 'POST',
+    }),
+
+  listBookmarked: (): Promise<(JurisdictionRequirement & { jurisdiction_id: string; city: string; state: string })[]> =>
+    request<(JurisdictionRequirement & { jurisdiction_id: string; city: string; state: string })[]>('/admin/jurisdictions/requirements/bookmarked'),
 };
 
 // Jurisdiction Data Overview (repository dashboard)

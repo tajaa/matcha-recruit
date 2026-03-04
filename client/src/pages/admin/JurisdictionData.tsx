@@ -1,8 +1,9 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   Database, ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
   XCircle, Loader2, RefreshCw, Layers, Globe2, Filter, Trash2, Check,
-  X, ExternalLink, Settings2, ChevronUp, GripVertical, Eye, EyeOff, Plus, Info, Pencil, Save
+  X, ExternalLink, Settings2, ChevronUp, GripVertical, Eye, EyeOff, Plus, Info, Pencil, Save,
+  Bookmark, BookmarkCheck
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useQueryClient } from '@tanstack/react-query';
@@ -80,12 +81,13 @@ const DK = {
   confirmBtn: 'text-red-400 hover:text-red-300',
 };
 
-type Tab = 'coverage' | 'missing' | 'quality' | 'preemption';
+type Tab = 'coverage' | 'missing' | 'quality' | 'preemption' | 'bookmarks';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'coverage', label: 'Coverage' },
   { id: 'missing', label: 'Missing Data' },
   { id: 'quality', label: 'Data Quality' },
   { id: 'preemption', label: 'Preemption Rules' },
+  { id: 'bookmarks', label: 'Bookmarks' },
 ];
 
 const CAT_LABELS: Record<string, string> = {
@@ -308,6 +310,9 @@ export default function JurisdictionData() {
             )}
             {activeTab === 'preemption' && (
               <PreemptionTab t={t} cats={summary.required_categories} matrix={preemptionMatrix.matrix} states={preemptionMatrix.states} />
+            )}
+            {activeTab === 'bookmarks' && (
+              <BookmarksTab t={t} onCityClick={openCity} />
             )}
           </motion.div>
         </AnimatePresence>
@@ -698,6 +703,93 @@ function PreemptionTab({ t, cats, matrix, states }: {
   );
 }
 
+/* ───── Bookmarks Tab ───── */
+function BookmarksTab({ t, onCityClick }: { t: typeof LT; onCityClick: (id: string) => void }) {
+  const [items, setItems] = useState<(JurisdictionRequirement & { jurisdiction_id: string; city: string; state: string })[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setItems(await api.adminJurisdictions.listBookmarked()); }
+    catch (e) { console.error('Failed to load bookmarks', e); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const unbookmark = useCallback(async (reqId: string) => {
+    try {
+      await api.adminJurisdictions.toggleBookmark(reqId);
+      setItems(prev => prev.filter(r => r.id !== reqId));
+    } catch (e) { console.error('Failed to unbookmark', e); }
+  }, []);
+
+  // Group by state → city
+  const grouped = useMemo(() => {
+    const map: Record<string, Record<string, typeof items>> = {};
+    for (const item of items) {
+      if (!map[item.state]) map[item.state] = {};
+      if (!map[item.state][item.city]) map[item.state][item.city] = [];
+      map[item.state][item.city].push(item);
+    }
+    return map;
+  }, [items]);
+
+  if (loading) return <div className="flex justify-center py-12"><Loader2 className={`w-5 h-5 animate-spin ${t.textMuted}`} /></div>;
+  if (items.length === 0) return (
+    <div className={`${t.card} p-8 text-center`}>
+      <Bookmark className={`w-8 h-8 mx-auto mb-3 ${t.textFaint}`} />
+      <p className={`text-sm ${t.textMuted}`}>No bookmarked requirements yet.</p>
+      <p className={`text-xs ${t.textFaint} mt-1`}>Open a city and click the bookmark icon on any requirement card to flag it for review.</p>
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className={`text-xs ${t.textFaint}`}>{items.length} bookmarked requirement{items.length !== 1 ? 's' : ''} across {Object.keys(grouped).length} state{Object.keys(grouped).length !== 1 ? 's' : ''}</div>
+      {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([state, cities]) => (
+        <div key={state} className="space-y-2">
+          <h3 className={`text-sm font-semibold ${t.textMain}`}>{state}</h3>
+          {Object.entries(cities).sort(([a], [b]) => a.localeCompare(b)).map(([city, reqs]) => (
+            <div key={`${state}-${city}`} className={`${t.card} p-3 space-y-2`}>
+              <button onClick={() => onCityClick(reqs[0].jurisdiction_id)}
+                className={`text-sm font-medium ${t.textMain} hover:underline`}>
+                {city}, {state}
+              </button>
+              <div className="space-y-1.5">
+                {reqs.map(req => (
+                  <div key={req.id} className={`${t.innerEl} p-3 space-y-1.5`}>
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
+                      <button onClick={() => unbookmark(req.id)} title="Remove bookmark"
+                        className="text-amber-500 hover:text-amber-400 transition flex-shrink-0">
+                        <BookmarkCheck className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                    {req.current_value && <div className={`text-sm ${t.textDim}`}>{req.current_value}</div>}
+                    {req.description && <p className={`text-xs ${t.textFaint} leading-relaxed`}>{req.description}</p>}
+                    <div className={`flex flex-wrap gap-x-4 gap-y-1 text-[10px] font-mono ${t.textFaint} pt-1`}>
+                      <span className={`px-1.5 py-0.5 rounded ${t.innerEl} font-sans`}>{CAT_LABELS[req.category] || req.category}</span>
+                      {req.effective_date && <span>Effective: {formatDate(req.effective_date)}</span>}
+                      {req.last_verified_at && <span>Verified: {formatDate(req.last_verified_at)}</span>}
+                      {req.source_name && <span>Source: {req.source_name}</span>}
+                      {req.source_url && (
+                        <a href={req.source_url} target="_blank" rel="noopener noreferrer" className={`${t.btnGhost} inline-flex items-center gap-0.5`}>
+                          <ExternalLink className="w-2.5 h-2.5" /> link
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ───── City Detail Drawer ───── */
 const LEVEL_ORDER = ['federal', 'state', 'county', 'city'] as const;
 const LEVEL_COLORS: Record<string, { border: string; bg: string; label: string }> = {
@@ -718,6 +810,20 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
   const [editingReqId, setEditingReqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: '', description: '', current_value: '', effective_date: '', source_url: '', source_name: '' });
   const [saving, setSaving] = useState(false);
+
+  const toggleBookmark = useCallback(async (e: React.MouseEvent, reqId: string) => {
+    e.stopPropagation();
+    if (!detail) return;
+    try {
+      const res = await api.adminJurisdictions.toggleBookmark(reqId);
+      onDetailUpdate({
+        ...detail,
+        requirements: detail.requirements.map(r => r.id === res.id ? { ...r, is_bookmarked: res.is_bookmarked } : r),
+      });
+    } catch (err) {
+      console.error('Failed to toggle bookmark', err);
+    }
+  }, [detail, onDetailUpdate]);
 
   const startEditing = useCallback((req: JurisdictionRequirement) => {
     setEditingReqId(req.id);
@@ -1010,6 +1116,10 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                     <div className="flex items-start justify-between gap-2">
                       <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
                       <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button onClick={e => toggleBookmark(e, req.id)} title={req.is_bookmarked ? 'Remove bookmark' : 'Bookmark for review'}
+                          className={`transition ${req.is_bookmarked ? 'text-amber-500' : `opacity-0 group-hover:opacity-60 ${t.textMuted}`}`}>
+                          {req.is_bookmarked ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+                        </button>
                         <Pencil className={`w-3 h-3 opacity-0 group-hover:opacity-60 transition ${t.textMuted}`} />
                         {req.source_url && (
                           <a href={req.source_url} target="_blank" rel="noopener noreferrer"
@@ -1155,6 +1265,10 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                                 <div className="flex items-start justify-between gap-2">
                                   <h4 className={`text-sm font-medium ${t.textMain}`}>{req.title}</h4>
                                   <div className="flex items-center gap-1.5 flex-shrink-0">
+                                    <button onClick={e => toggleBookmark(e, req.id)} title={req.is_bookmarked ? 'Remove bookmark' : 'Bookmark for review'}
+                                      className={`transition ${req.is_bookmarked ? 'text-amber-500' : `opacity-0 group-hover:opacity-60 ${t.textMuted}`}`}>
+                                      {req.is_bookmarked ? <BookmarkCheck className="w-3.5 h-3.5" /> : <Bookmark className="w-3.5 h-3.5" />}
+                                    </button>
                                     <Pencil className={`w-3 h-3 opacity-0 group-hover:opacity-60 transition ${t.textMuted}`} />
                                     {req.source_url && (
                                       <a href={req.source_url} target="_blank" rel="noopener noreferrer"

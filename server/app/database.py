@@ -2202,6 +2202,7 @@ async def init_db():
                 previous_value VARCHAR(100),
                 last_changed_at TIMESTAMP,
                 last_verified_at TIMESTAMP NOT NULL DEFAULT NOW(),
+                is_bookmarked BOOLEAN NOT NULL DEFAULT false,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(jurisdiction_id, requirement_key)
@@ -2215,6 +2216,11 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE jurisdiction_requirements
             ADD COLUMN IF NOT EXISTS rate_type VARCHAR(50)
+        """)
+        # Add is_bookmarked column for accuracy review flagging
+        await conn.execute("""
+            ALTER TABLE jurisdiction_requirements
+            ADD COLUMN IF NOT EXISTS is_bookmarked BOOLEAN NOT NULL DEFAULT false
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_jurisdiction_requirements_rate_type

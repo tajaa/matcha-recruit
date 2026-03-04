@@ -2968,7 +2968,8 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
             SELECT id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                    title, description, current_value, numeric_value,
                    source_url, source_name, effective_date, expiration_date,
-                   previous_value, last_changed_at, last_verified_at, created_at, updated_at
+                   previous_value, last_changed_at, last_verified_at, is_bookmarked,
+                   created_at, updated_at
             FROM jurisdiction_requirements
             WHERE jurisdiction_id = $1
             ORDER BY category, title
@@ -3031,6 +3032,7 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
                     "previous_value": r["previous_value"],
                     "last_changed_at": fmt_date(r["last_changed_at"]),
                     "last_verified_at": fmt_date(r["last_verified_at"]),
+                    "is_bookmarked": r["is_bookmarked"],
                     "updated_at": fmt_date(r["updated_at"]),
                 }
                 for r in requirements
@@ -3103,7 +3105,8 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         RETURNING id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                   title, description, current_value, numeric_value,
                   source_url, source_name, effective_date, expiration_date,
-                  previous_value, last_changed_at, last_verified_at, created_at, updated_at
+                  previous_value, last_changed_at, last_verified_at, is_bookmarked,
+                  created_at, updated_at
     """
 
     async with get_connection() as conn:
@@ -3131,8 +3134,72 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         "previous_value": row["previous_value"],
         "last_changed_at": fmt_date(row["last_changed_at"]),
         "last_verified_at": fmt_date(row["last_verified_at"]),
+        "is_bookmarked": row["is_bookmarked"],
         "updated_at": fmt_date(row["updated_at"]),
     }
+
+
+@router.post("/jurisdictions/requirements/{requirement_id}/bookmark", dependencies=[Depends(require_admin)])
+async def toggle_requirement_bookmark(requirement_id: UUID):
+    """Toggle the is_bookmarked flag on a jurisdiction requirement."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow("""
+            UPDATE jurisdiction_requirements
+            SET is_bookmarked = NOT is_bookmarked, updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, is_bookmarked
+        """, requirement_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Requirement not found")
+    return {"id": str(row["id"]), "is_bookmarked": row["is_bookmarked"]}
+
+
+@router.get("/jurisdictions/requirements/bookmarked", dependencies=[Depends(require_admin)])
+async def list_bookmarked_requirements():
+    """List all bookmarked jurisdiction requirements across all cities."""
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT jr.id, jr.requirement_key, jr.category, jr.jurisdiction_level,
+                   jr.jurisdiction_name, jr.title, jr.description, jr.current_value,
+                   jr.numeric_value, jr.source_url, jr.source_name, jr.effective_date,
+                   jr.expiration_date, jr.previous_value, jr.last_changed_at,
+                   jr.last_verified_at, jr.is_bookmarked, jr.created_at, jr.updated_at,
+                   j.id AS jurisdiction_id, j.city, j.state
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE jr.is_bookmarked = true
+            ORDER BY jr.updated_at DESC
+        """)
+
+    def fmt_date(d):
+        return d.isoformat() if d else None
+
+    return [
+        {
+            "id": str(r["id"]),
+            "jurisdiction_id": str(r["jurisdiction_id"]),
+            "requirement_key": r["requirement_key"],
+            "category": r["category"],
+            "jurisdiction_level": r["jurisdiction_level"],
+            "jurisdiction_name": r["jurisdiction_name"],
+            "title": r["title"],
+            "description": r["description"],
+            "current_value": r["current_value"],
+            "numeric_value": float(r["numeric_value"]) if r["numeric_value"] is not None else None,
+            "source_url": r["source_url"],
+            "source_name": r["source_name"],
+            "effective_date": fmt_date(r["effective_date"]),
+            "expiration_date": fmt_date(r["expiration_date"]),
+            "previous_value": r["previous_value"],
+            "last_changed_at": fmt_date(r["last_changed_at"]),
+            "last_verified_at": fmt_date(r["last_verified_at"]),
+            "is_bookmarked": r["is_bookmarked"],
+            "updated_at": fmt_date(r["updated_at"]),
+            "city": r["city"],
+            "state": r["state"],
+        }
+        for r in rows
+    ]
 
 
 def _to_sse(event: dict[str, Any]) -> str:
