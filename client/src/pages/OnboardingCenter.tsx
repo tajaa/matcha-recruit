@@ -13,10 +13,10 @@ import { LifecycleWizard } from '../components/LifecycleWizard';
 type Tab = 'workspace' | 'employees' | 'templates' | 'priorities' | 'notifications' | 'runs' | 'profile';
 
 function statusTone(status: string): string {
-  if (status === 'connected') return 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200';
-  if (status === 'error') return 'border-red-500/40 bg-red-950/30 text-red-200';
-  if (status === 'needs_action') return 'border-amber-500/40 bg-amber-950/30 text-amber-200';
-  return 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80';
+  if (status === 'connected') return 'border-emerald-300 bg-emerald-50 text-emerald-700';
+  if (status === 'error') return 'border-red-300 bg-red-50 text-red-700';
+  if (status === 'needs_action') return 'border-amber-300 bg-amber-50 text-amber-700';
+  return 'border-stone-300 bg-stone-200 text-stone-600';
 }
 
 const ONBOARDING_CYCLE_STEPS = [
@@ -202,32 +202,32 @@ export default function OnboardingCenter() {
 
   const googleBadge = useMemo(() => {
     if (loadingGoogle) {
-      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80' };
+      return { label: 'Checking', tone: 'border-stone-300 bg-stone-200 text-stone-600' };
     }
     if (!googleStatus || googleStatus.status === 'disconnected') {
-      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80' };
+      return { label: 'Not Connected', tone: 'border-stone-300 bg-stone-200 text-stone-600' };
     }
     if (googleStatus.status === 'connected') {
-      return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
+      return { label: 'Connected', tone: 'border-emerald-300 bg-emerald-50 text-emerald-700' };
     }
     if (googleStatus.status === 'error') {
-      return { label: 'Needs Attention', tone: 'border-red-500/40 bg-red-950/30 text-red-200' };
+      return { label: 'Needs Attention', tone: 'border-red-300 bg-red-50 text-red-700' };
     }
     return { label: googleStatus.status.toUpperCase(), tone: statusTone(googleStatus.status) };
   }, [loadingGoogle, googleStatus]);
 
   const slackBadge = useMemo(() => {
     if (loadingSlack) {
-      return { label: 'Checking', tone: 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80' };
+      return { label: 'Checking', tone: 'border-stone-300 bg-stone-200 text-stone-600' };
     }
     if (!slackStatus || slackStatus.status === 'disconnected') {
-      return { label: 'Not Connected', tone: 'border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 text-zinc-300 light:text-black/80' };
+      return { label: 'Not Connected', tone: 'border-stone-300 bg-stone-200 text-stone-600' };
     }
     if (slackStatus.status === 'connected') {
-      return { label: 'Connected', tone: 'border-emerald-500/40 bg-emerald-950/30 text-emerald-200' };
+      return { label: 'Connected', tone: 'border-emerald-300 bg-emerald-50 text-emerald-700' };
     }
     if (slackStatus.status === 'error') {
-      return { label: 'Needs Attention', tone: 'border-red-500/40 bg-red-950/30 text-red-200' };
+      return { label: 'Needs Attention', tone: 'border-red-300 bg-red-50 text-red-700' };
     }
     return { label: slackStatus.status.toUpperCase(), tone: statusTone(slackStatus.status) };
   }, [loadingSlack, slackStatus]);
@@ -239,13 +239,12 @@ export default function OnboardingCenter() {
 
 
   return (
-    <div className="relative min-h-[calc(100vh-8rem)]">
-      <div className="fixed inset-0 pointer-events-none -z-10 transition-colors duration-500 light:bg-black/[0.12]" />
-      <div className="max-w-7xl mx-auto space-y-6 overflow-x-hidden relative z-10">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 border-b border-white/10 pb-6">
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen bg-stone-300">
+      <div className="max-w-7xl mx-auto space-y-6 overflow-x-hidden">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6">
         <div className="text-center sm:text-left">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tighter text-white light:text-black uppercase">Onboarding Center</h1>
-          <p className="text-[10px] sm:text-xs text-zinc-500 light:text-black/60 mt-2 font-mono uppercase tracking-wide">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tighter text-zinc-900 uppercase">Onboarding Center</h1>
+          <p className="text-[10px] sm:text-xs text-stone-500 mt-2 font-mono uppercase tracking-wide">
             Manage integrations, new hires, and onboarding workflows.
           </p>
         </div>
@@ -261,13 +260,13 @@ export default function OnboardingCenter() {
         storageKey="onboarding-cycle-collapsed-v1"
       />
       {analyticsError && (
-        <div className="border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-[10px] font-mono uppercase tracking-[0.15em] text-amber-200">
+        <div className="border border-amber-300 bg-amber-50 px-4 py-3 text-[10px] font-mono uppercase tracking-[0.15em] text-amber-700 rounded-xl">
           Analytics temporarily unavailable: {analyticsError}
         </div>
       )}
 
       {/* Tabs */}
-      <div className="border-b border-white/10 -mx-4 px-4 sm:mx-0 sm:px-0">
+      <div className="border-b border-stone-400/40 -mx-4 px-4 sm:mx-0 sm:px-0">
         <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">
           {[
             { id: 'workspace', label: 'Workspace' },
@@ -284,8 +283,8 @@ export default function OnboardingCenter() {
               data-tour={`onboarding-tab-${tab.id}`}
               className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
                 activeTab === tab.id
-                  ? 'border-white text-white light:text-black'
-                  : 'border-transparent text-zinc-500 light:text-black/60 hover:text-zinc-300 light:text-black/80 hover:border-zinc-800'
+                  ? 'border-zinc-900 text-zinc-900'
+                  : 'border-transparent text-stone-500 hover:text-stone-700 hover:border-stone-400'
               }`}
             >
               {tab.label}
@@ -298,91 +297,91 @@ export default function OnboardingCenter() {
       <div className="py-6">
         {activeTab === 'workspace' && (
           <div className="space-y-6">
-            <div className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/40 p-4 text-xs text-zinc-300 light:text-black/80 leading-relaxed">
+            <div className="border border-stone-200 bg-stone-100 rounded-xl p-4 text-xs text-stone-600 leading-relaxed">
               Connect external systems to automate employee provisioning. Credentials are encrypted and scoped to your organization.
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {/* Google Workspace Card */}
-              <section data-tour="onboarding-workspace-google-card" className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4">
+              <section data-tour="onboarding-workspace-google-card" className="border border-stone-200 bg-stone-100 rounded-2xl p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Google Workspace</h2>
-                    <p className="text-xs text-zinc-500 light:text-black/60 mt-1">Provision Gmail & groups.</p>
+                    <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Google Workspace</h2>
+                    <p className="text-xs text-stone-500 mt-1">Provision Gmail & groups.</p>
                   </div>
-                  <span className={`rounded border px-2 py-1 text-[10px] uppercase tracking-wider ${googleBadge.tone}`}>
+                  <span className={`rounded-lg border px-2 py-1 text-[10px] uppercase tracking-wider ${googleBadge.tone}`}>
                     {googleBadge.label}
                   </span>
                 </div>
 
                 {googleStatusError && (
-                  <p className="text-xs text-red-300">Status check failed: {googleStatusError}</p>
+                  <p className="text-xs text-red-600">Status check failed: {googleStatusError}</p>
                 )}
 
                 {googleStatus && (
-                  <div className="space-y-1 text-[11px] text-zinc-400 light:text-black/70">
-                    <p>Mode: <span className="text-zinc-200 light:text-black/90">{googleStatus.mode || 'not configured'}</span></p>
-                    <p>Domain: <span className="text-zinc-200 light:text-black/90">{googleStatus.domain || 'not set'}</span></p>
-                    <p>Auto-provision: <span className="text-zinc-200 light:text-black/90">{googleStatus.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
+                  <div className="space-y-1 text-[11px] text-stone-500">
+                    <p>Mode: <span className="text-zinc-900">{googleStatus.mode || 'not configured'}</span></p>
+                    <p>Domain: <span className="text-zinc-900">{googleStatus.domain || 'not set'}</span></p>
+                    <p>Auto-provision: <span className="text-zinc-900">{googleStatus.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
                   </div>
                 )}
 
                 <button
                   data-tour="onboarding-configure-google"
                   onClick={() => navigate('/app/matcha/google-workspace')}
-                  className="w-full px-3 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider"
+                  className="w-full px-3 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors"
                 >
                   Configure
                 </button>
               </section>
 
               {/* Slack Card */}
-              <section data-tour="onboarding-workspace-slack-card" className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4">
+              <section data-tour="onboarding-workspace-slack-card" className="border border-stone-200 bg-stone-100 rounded-2xl p-5 space-y-4">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Slack</h2>
-                    <p className="text-xs text-zinc-500 light:text-black/60 mt-1">Auto-invite, channels, and workspace defaults.</p>
+                    <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Slack</h2>
+                    <p className="text-xs text-stone-500 mt-1">Auto-invite, channels, and workspace defaults.</p>
                   </div>
-                  <span className={`rounded border px-2 py-1 text-[10px] uppercase tracking-wider ${slackBadge.tone}`}>
+                  <span className={`rounded-lg border px-2 py-1 text-[10px] uppercase tracking-wider ${slackBadge.tone}`}>
                     {slackBadge.label}
                   </span>
                 </div>
 
                 {slackStatusError && (
-                  <p className="text-xs text-red-300">Status check failed: {slackStatusError}</p>
+                  <p className="text-xs text-red-600">Status check failed: {slackStatusError}</p>
                 )}
 
                 {slackStatus && (
-                  <div className="space-y-1 text-[11px] text-zinc-400 light:text-black/70">
-                    <p>Workspace: <span className="text-zinc-200 light:text-black/90">{slackStatus.workspace_url || 'not set'}</span></p>
-                    <p>Team: <span className="text-zinc-200 light:text-black/90">{slackStatus.slack_team_name || 'not connected'}</span></p>
-                    <p>Auto-invite: <span className="text-zinc-200 light:text-black/90">{slackStatus.auto_invite_on_employee_create ? 'on' : 'off'}</span></p>
+                  <div className="space-y-1 text-[11px] text-stone-500">
+                    <p>Workspace: <span className="text-zinc-900">{slackStatus.workspace_url || 'not set'}</span></p>
+                    <p>Team: <span className="text-zinc-900">{slackStatus.slack_team_name || 'not connected'}</span></p>
+                    <p>Auto-invite: <span className="text-zinc-900">{slackStatus.auto_invite_on_employee_create ? 'on' : 'off'}</span></p>
                   </div>
                 )}
 
                 <button
                   data-tour="onboarding-configure-slack"
                   onClick={() => navigate('/app/matcha/slack-provisioning')}
-                  className="w-full px-3 py-2 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider"
+                  className="w-full px-3 py-2 bg-zinc-900 text-zinc-50 hover:bg-zinc-800 text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors"
                 >
                   Configure
                 </button>
               </section>
 
               {/* Toast Card (Coming Soon) */}
-              <section className="border border-white/10 bg-zinc-900 light:bg-black/[0.03]/50 p-5 space-y-4 opacity-75">
+              <section className="border border-stone-200 bg-stone-100 rounded-2xl p-5 space-y-4 opacity-75">
                 <div className="flex items-start justify-between gap-2">
                   <div>
-                    <h2 className="text-sm font-semibold tracking-wide text-white light:text-black">Toast</h2>
-                    <p className="text-xs text-zinc-500 light:text-black/60 mt-1">POS & location mapping.</p>
+                    <h2 className="text-sm font-semibold tracking-wide text-zinc-900">Toast</h2>
+                    <p className="text-xs text-stone-500 mt-1">POS & location mapping.</p>
                   </div>
-                  <span className="rounded border border-zinc-700 bg-zinc-900 light:bg-black/[0.03]/70 px-2 py-1 text-[10px] uppercase tracking-wider text-zinc-300 light:text-black/80">
+                  <span className="rounded-lg border border-stone-300 bg-stone-200 px-2 py-1 text-[10px] uppercase tracking-wider text-stone-600">
                     Soon
                   </span>
                 </div>
                 <button
                   disabled
-                  className="w-full px-3 py-2 border border-white/10 text-zinc-500 light:text-black/60 text-[10px] font-bold uppercase tracking-wider cursor-not-allowed"
+                  className="w-full px-3 py-2 border border-stone-300 text-stone-400 text-[10px] font-bold uppercase tracking-wider cursor-not-allowed rounded-xl"
                 >
                   Configure
                 </button>
@@ -422,7 +421,7 @@ export default function OnboardingCenter() {
               <select
                 value={runsProviderFilter}
                 onChange={(e) => setRunsProviderFilter(e.target.value)}
-                className="bg-zinc-900 light:bg-black/[0.03] border border-white/10 text-xs text-zinc-300 light:text-black/80 px-3 py-1.5 focus:outline-none focus:border-white/30"
+                className="bg-white border border-stone-300 text-xs text-zinc-900 px-3 py-1.5 rounded-xl focus:outline-none focus:border-stone-400"
               >
                 <option value="">All Providers</option>
                 <option value="slack">Slack</option>
@@ -431,7 +430,7 @@ export default function OnboardingCenter() {
               <select
                 value={runsStatusFilter}
                 onChange={(e) => setRunsStatusFilter(e.target.value)}
-                className="bg-zinc-900 light:bg-black/[0.03] border border-white/10 text-xs text-zinc-300 light:text-black/80 px-3 py-1.5 focus:outline-none focus:border-white/30"
+                className="bg-white border border-stone-300 text-xs text-zinc-900 px-3 py-1.5 rounded-xl focus:outline-none focus:border-stone-400"
               >
                 <option value="">All Statuses</option>
                 <option value="completed">Completed</option>
@@ -443,79 +442,81 @@ export default function OnboardingCenter() {
               {(runsProviderFilter || runsStatusFilter) && (
                 <button
                   onClick={() => { setRunsProviderFilter(''); setRunsStatusFilter(''); }}
-                  className="text-[10px] uppercase tracking-wider text-zinc-500 light:text-black/60 hover:text-white light:text-black"
+                  className="text-[10px] uppercase tracking-wider text-stone-500 hover:text-zinc-900"
                 >
                   Clear
                 </button>
               )}
-              <span className="ml-auto text-[10px] text-zinc-500 light:text-black/60 uppercase tracking-wider">
+              <span className="ml-auto text-[10px] text-stone-500 uppercase tracking-wider">
                 {runs.length} run{runs.length !== 1 ? 's' : ''}
               </span>
             </div>
 
             {runsError && (
-              <div className="border border-red-500/30 bg-red-950/20 px-4 py-3 text-xs text-red-300">
+              <div className="border border-red-300 bg-red-50 px-4 py-3 text-xs text-red-700 rounded-xl">
                 {runsError}
               </div>
             )}
 
             {runsLoading ? (
-              <p className="text-xs text-zinc-500 light:text-black/60 font-mono uppercase tracking-wider animate-pulse py-8 text-center">
+              <p className="text-xs text-stone-500 font-mono uppercase tracking-wider animate-pulse py-8 text-center">
                 Loading activity...
               </p>
             ) : runs.length === 0 ? (
-              <div className="flex items-center justify-center h-48 border border-dashed border-white/10 bg-white/5">
+              <div className="flex items-center justify-center h-48 border border-dashed border-stone-300 bg-stone-100 rounded-2xl">
                 <div className="text-center">
-                  <p className="text-zinc-500 light:text-black/60 text-xs font-mono uppercase tracking-wide">No provisioning runs found</p>
-                  <p className="text-zinc-600 text-[10px] mt-2">Runs appear here when employees are created or provisioned manually.</p>
+                  <p className="text-stone-500 text-xs font-mono uppercase tracking-wide">No provisioning runs found</p>
+                  <p className="text-stone-400 text-[10px] mt-2">Runs appear here when employees are created or provisioned manually.</p>
                 </div>
               </div>
             ) : (
-              <div className="space-y-1">
+              <div className="bg-stone-100 rounded-2xl overflow-hidden">
                 {/* Header row */}
-                <div className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-2 text-[10px] uppercase tracking-wider text-zinc-600 border-b border-white/5">
+                <div className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-2 text-[10px] uppercase tracking-wider text-stone-400 font-bold border-b border-stone-200">
                   <span>Employee</span>
                   <span>Provider</span>
                   <span>Status</span>
                   <span>Trigger</span>
                   <span>Time</span>
                 </div>
+                <div className="divide-y divide-stone-200">
                 {runs.map((run) => {
-                  let statusClass = 'bg-zinc-800 light:bg-black/[0.05] text-zinc-300 light:text-black/80 border-zinc-700';
-                  if (run.status === 'completed') statusClass = 'bg-emerald-900/30 text-emerald-300 border-emerald-600/30';
-                  else if (run.status === 'failed') statusClass = 'bg-red-900/30 text-red-300 border-red-600/30';
-                  else if (run.status === 'needs_action') statusClass = 'bg-amber-900/30 text-amber-300 border-amber-600/30';
-                  else if (run.status === 'running') statusClass = 'bg-blue-900/30 text-blue-300 border-blue-600/30';
+                  let statusClass = 'bg-stone-200 text-stone-600 border-stone-300';
+                  if (run.status === 'completed') statusClass = 'bg-emerald-50 text-emerald-700 border-emerald-300';
+                  else if (run.status === 'failed') statusClass = 'bg-red-50 text-red-700 border-red-300';
+                  else if (run.status === 'needs_action') statusClass = 'bg-amber-50 text-amber-700 border-amber-300';
+                  else if (run.status === 'running') statusClass = 'bg-blue-50 text-blue-700 border-blue-300';
 
                   return (
                     <div
                       key={run.run_id}
-                      className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-3 border border-white/5 bg-zinc-900 light:bg-black/[0.03]/30 hover:bg-zinc-900 light:bg-black/[0.03]/60 transition-colors"
+                      className="grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-3 hover:bg-stone-50 transition-colors"
                     >
                       <div className="min-w-0">
-                        <p className="text-xs text-white light:text-black truncate">{run.employee_name || '—'}</p>
-                        <p className="text-[10px] text-zinc-500 light:text-black/60 truncate">{run.employee_email || run.employee_id}</p>
+                        <p className="text-xs text-zinc-900 truncate">{run.employee_name || '—'}</p>
+                        <p className="text-[10px] text-stone-500 truncate">{run.employee_email || run.employee_id}</p>
                         {run.last_error && (
-                          <p className="text-[10px] text-red-400 mt-0.5 truncate" title={run.last_error}>
+                          <p className="text-[10px] text-red-600 mt-0.5 truncate" title={run.last_error}>
                             {run.last_error}
                           </p>
                         )}
                       </div>
-                      <span className="text-[10px] text-zinc-400 light:text-black/70 self-center">
+                      <span className="text-[10px] text-stone-500 self-center">
                         {run.provider === 'google_workspace' ? 'Google WS' : run.provider.charAt(0).toUpperCase() + run.provider.slice(1)}
                       </span>
-                      <span className={`self-center px-2 py-0.5 text-[10px] uppercase tracking-wider rounded border w-fit ${statusClass}`}>
+                      <span className={`self-center px-2 py-0.5 text-[10px] uppercase tracking-wider rounded-lg border w-fit ${statusClass}`}>
                         {run.status}
                       </span>
-                      <span className="text-[10px] text-zinc-500 light:text-black/60 self-center capitalize">
+                      <span className="text-[10px] text-stone-500 self-center capitalize">
                         {run.trigger_source.replace(/_/g, ' ')}
                       </span>
-                      <span className="text-[10px] text-zinc-500 light:text-black/60 self-center">
+                      <span className="text-[10px] text-stone-500 self-center font-mono">
                         {new Date(run.created_at).toLocaleString()}
                       </span>
                     </div>
                   );
                 })}
+                </div>
               </div>
             )}
           </div>
