@@ -401,7 +401,7 @@ export function LifecycleWizard({
   const StepIcon = STEP_ICONS[steps[activeStep - 1].icon];
 
   return (
-    <div className={`border border-white/5 light:border-stone-200 bg-zinc-900/30 light:bg-stone-100 rounded-sm overflow-hidden mb-8`}>
+    <div className={`border border-white/5 light:border-black/[0.08] bg-zinc-900/30 light:bg-black/[0.07] light:backdrop-blur-sm rounded-sm overflow-hidden mb-8`}>
       <button
         onClick={toggle}
         className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
@@ -479,9 +479,9 @@ export function LifecycleWizard({
                 })}
               </div>
 
-              <div className="p-4 bg-zinc-950/40 light:bg-zinc-900 border border-white/5 light:border-zinc-700 rounded-sm">
+              <div className="p-4 bg-zinc-950/40 light:bg-black/[0.18] border border-white/5 light:border-black/[0.1] rounded-sm">
                 <div className="flex items-start gap-4">
-                  <div className="p-2 bg-white/5 light:bg-zinc-800 rounded-sm text-zinc-400 light:text-zinc-300">
+                  <div className="p-2 bg-white/5 light:bg-black/[0.15] rounded-sm text-zinc-400 light:text-zinc-300">
                     <StepIcon className="w-4 h-4" />
                   </div>
                   <div className="flex-1 min-w-0">
