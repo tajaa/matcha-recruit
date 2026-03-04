@@ -193,3 +193,4 @@ body {
 }
 
 @custom-variant light (.theme-light-pages &);
+@custom-variant sbl (.theme-light-sidebar &);
