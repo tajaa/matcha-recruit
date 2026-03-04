@@ -699,14 +699,11 @@ export function Layout() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('matcha_theme_mode', themeMode);
-      // Sidebar is always light in both modes
       document.documentElement.classList.add('theme-light-sidebar');
       if (themeMode === 'light') {
         document.documentElement.classList.add('theme-light-pages');
-        document.documentElement.classList.remove('theme-dark');
       } else {
         document.documentElement.classList.remove('theme-light-pages');
-        document.documentElement.classList.add('theme-dark');
       }
     }
   }, [themeMode]);
