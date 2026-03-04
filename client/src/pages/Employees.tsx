@@ -1149,12 +1149,12 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       )}
 
       {mode === 'onboarding' && (
-        <div className={`${t.innerEl} p-4 text-[11px] ${t.textDim} space-y-1`}>
-          <p className={`uppercase tracking-wider ${t.textMuted}`}>Onboarding flows</p>
+        <div className="bg-zinc-900 rounded-2xl p-5 text-[11px] text-zinc-400 space-y-1">
+          <p className="uppercase tracking-wider text-zinc-500">Onboarding flows</p>
           <p>
-            Use <span className={`${t.textMain} font-medium`}>Add Employee</span> for one hire,{' '}
-            <span className={`${t.textMain} font-medium`}>Batch Wizard</span> for up to 50 hires, or{' '}
-            <span className={`${t.textMain} font-medium`}>Bulk CSV</span> when you already have a spreadsheet.
+            Use <span className="text-zinc-200 font-medium">Add Employee</span> for one hire,{' '}
+            <span className="text-zinc-200 font-medium">Batch Wizard</span> for up to 50 hires, or{' '}
+            <span className="text-zinc-200 font-medium">Bulk CSV</span> when you already have a spreadsheet.
           </p>
         </div>
       )}

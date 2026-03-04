@@ -97,6 +97,20 @@ const STATUS_TABS: { label: string; value: ERCaseStatus | 'all' }[] = [
   { label: 'Closed', value: 'closed' },
 ];
 
+const DARK_STATUS_DOTS: Record<string, string> = {
+  open: 'bg-zinc-100',
+  in_review: 'bg-zinc-400',
+  pending_determination: 'bg-zinc-600',
+  closed: 'bg-zinc-700',
+};
+
+const DARK_STATUS_COLORS: Record<string, string> = {
+  open: 'text-zinc-100',
+  in_review: 'text-zinc-400',
+  pending_determination: 'text-zinc-500',
+  closed: 'text-zinc-700',
+};
+
 
 const STATUS_LABELS: Record<ERCaseStatus, string> = {
   open: 'Open',
@@ -523,8 +537,8 @@ export function ERCopilot() {
           </button>
         </div>
       ) : (
-        <div data-tour="er-case-list" className={`${t.card} overflow-hidden mt-8`}>
-          <div className={`flex items-center gap-4 py-3 px-4 text-[10px] ${t.textFaint} uppercase tracking-widest font-bold border-b ${t.border}`}>
+        <div data-tour="er-case-list" className="bg-zinc-900 rounded-2xl overflow-hidden mt-8">
+          <div className="flex items-center gap-4 py-3 px-4 text-[10px] text-zinc-600 uppercase tracking-widest font-bold border-b border-zinc-800">
             <div className="w-8"></div>
             <div className="w-24">ID</div>
             <div className="flex-1">Title</div>
@@ -533,40 +547,40 @@ export function ERCopilot() {
             <div className="w-8"></div>
           </div>
 
-          <div className={`divide-y ${t.divide}`}>
+          <div className="divide-y divide-zinc-800">
           {cases.map((erCase) => (
             <div
               data-tour="er-case-row"
               key={erCase.id}
-              className={`group flex items-center gap-4 py-4 px-4 cursor-pointer ${t.rowHover} transition-colors`}
+              className="group flex items-center gap-4 py-4 px-4 cursor-pointer hover:bg-white/5 transition-colors"
               onClick={() => navigate(`/app/matcha/er-copilot/${erCase.id}`)}
             >
               <div className="w-8 flex justify-center">
-                <div className={`w-1.5 h-1.5 rounded-full ${t.statusDots[erCase.status] || t.textFaint}`} />
+                <div className={`w-1.5 h-1.5 rounded-full ${DARK_STATUS_DOTS[erCase.status] || 'bg-zinc-600'}`} />
               </div>
 
-              <div className={`w-24 text-[10px] ${t.textMuted} font-mono`}>
+              <div className="w-24 text-[10px] text-zinc-500 font-mono">
                 {erCase.case_number}
               </div>
 
               <div className="flex-1 min-w-0">
-                <h3 className={`text-sm font-bold ${t.textMain} truncate`}>
+                <h3 className="text-sm font-bold text-zinc-100 truncate">
                   {erCase.title}
                 </h3>
                 {erCase.description && (
-                  <p className={`text-[10px] ${t.textFaint} mt-1 truncate max-w-lg font-mono`}>{erCase.description}</p>
+                  <p className="text-[10px] text-zinc-600 mt-1 truncate max-w-lg font-mono">{erCase.description}</p>
                 )}
               </div>
 
-              <div data-tour="er-status-col" className={`w-32 text-[10px] font-bold uppercase tracking-wider ${t.statusColors[erCase.status]}`}>
+              <div data-tour="er-status-col" className={`w-32 text-[10px] font-bold uppercase tracking-wider ${DARK_STATUS_COLORS[erCase.status]}`}>
                 {STATUS_LABELS[erCase.status]}
               </div>
 
-              <div className={`w-24 text-right text-[10px] ${t.textMuted} font-mono`}>
+              <div className="w-24 text-right text-[10px] text-zinc-500 font-mono">
                 {formatDate(erCase.created_at)}
               </div>
 
-              <div className={`w-8 flex justify-center ${t.textFaint} group-hover:${t.textMain}`}>
+              <div className="w-8 flex justify-center text-zinc-600 group-hover:text-zinc-400">
                 <ChevronRight className="w-4 h-4" />
               </div>
             </div>

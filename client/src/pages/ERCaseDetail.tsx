@@ -1803,25 +1803,25 @@ export function ERCaseDetail() {
                   <h3 className={`text-xs uppercase tracking-wider ${t.textDim} mb-3`}>Suggested Guidance</h3>
 
                   {showDeterminationBanner && (
-                    <div className="border border-amber-200 bg-amber-50 p-3 rounded-md mb-3 space-y-2">
-                      <p className="text-sm font-medium text-amber-900">Ready for a determination?</p>
-                      <p className="text-sm text-amber-800 leading-relaxed">
+                    <div className="bg-zinc-900 rounded-2xl p-4 mb-3 space-y-2">
+                      <p className="text-sm font-medium text-amber-400">Ready for a determination?</p>
+                      <p className="text-sm text-zinc-400 leading-relaxed">
                         The current case file contains evidence that appears to meet the standard of
                         'preponderance of the evidence.' Continuing to investigate may produce diminishing returns.
                       </p>
                       {latestGuidancePayload?.determination_confidence != null && (
                         <div className="mt-1.5 space-y-1">
                           <div className="flex items-center gap-2">
-                            <div className="flex-1 h-1.5 bg-amber-200 rounded-full overflow-hidden">
-                              <div className="h-full bg-amber-600 rounded-full"
+                            <div className="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                              <div className="h-full bg-amber-500 rounded-full"
                                    style={{ width: `${Math.round(latestGuidancePayload.determination_confidence * 100)}%` }} />
                             </div>
-                            <span className="text-xs font-mono text-amber-700">
+                            <span className="text-xs font-mono text-amber-400">
                               {Math.round(latestGuidancePayload.determination_confidence * 100)}%
                             </span>
                           </div>
                           {latestGuidancePayload.determination_signals?.map((s, i) => (
-                            <p key={i} className="text-xs text-amber-600">&middot; {s}</p>
+                            <p key={i} className="text-xs text-amber-400">&middot; {s}</p>
                           ))}
                         </div>
                       )}
@@ -1848,7 +1848,7 @@ export function ERCaseDetail() {
                             }
                           }}
                           disabled={determinationAccepting}
-                          className="text-xs font-medium text-amber-900 bg-amber-200 hover:bg-amber-300 px-3 py-1 rounded-lg disabled:opacity-50"
+                          className="text-xs font-medium text-zinc-100 bg-zinc-800 hover:bg-zinc-700 px-3 py-1 rounded-lg disabled:opacity-50"
                         >
                           {determinationAccepting ? 'Working...' : 'Proceed to case determination'}
                         </button>
@@ -1871,13 +1871,13 @@ export function ERCaseDetail() {
                               console.error('Failed to persist determination dismissal:', err);
                             }
                           }}
-                          className="text-xs text-amber-700 hover:text-amber-900"
+                          className="text-xs text-amber-400 hover:text-amber-300"
                         >
                           Continue investigation
                         </button>
                       </div>
                       {latestGuidancePayload?.cards && latestGuidancePayload.cards.length > 0 && (
-                        <p className="text-xs text-amber-600 mt-1">
+                        <p className="text-xs text-amber-400 mt-1">
                           Still open: {latestGuidancePayload.cards.slice(0, 2).map(c => c.title).join(', ')}
                         </p>
                       )}
@@ -1887,10 +1887,10 @@ export function ERCaseDetail() {
                   {latestGuidanceNote ? (
                     <div className="space-y-3">
                       {/* Summary card */}
-                      <div className={`${t.guidanceSummary} p-4`}>
+                      <div className="bg-zinc-900 rounded-2xl p-4">
                         <div className="flex items-center justify-between mb-3">
-                          <span className={`text-xs uppercase tracking-widest ${t.textMuted} font-bold`}>Summary</span>
-                          <span className={`text-xs ${t.textFaint} font-mono`}>
+                          <span className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Summary</span>
+                          <span className="text-xs text-zinc-600 font-mono">
                             {new Date(latestGuidancePayload?.generated_at || latestGuidanceNote.created_at).toLocaleString('en-US', {
                               month: 'short',
                               day: 'numeric',
@@ -1899,11 +1899,11 @@ export function ERCaseDetail() {
                             })}
                           </span>
                         </div>
-                        <p className={`text-sm ${t.textMain} leading-relaxed`}>
+                        <p className="text-sm text-zinc-100 leading-relaxed">
                           {latestGuidancePayload?.summary || latestGuidanceNote.content}
                         </p>
                         {latestGuidancePayload && (
-                          <p className={`mt-3 text-xs ${t.textFaint} font-mono`}>
+                          <p className="mt-3 text-xs text-zinc-600 font-mono">
                             {latestGuidancePayload.model}{latestGuidancePayload.fallback_used ? ' · fallback' : ''}
                           </p>
                         )}
@@ -2113,8 +2113,10 @@ export function ERCaseDetail() {
                 </div>
 
                 {timelineSummary && (
-                  <div className={`text-base ${t.textDim} leading-relaxed font-serif`}>
-                    {timelineSummary}
+                  <div className="bg-zinc-900 rounded-2xl px-5 py-4">
+                    <div className="text-base text-zinc-300 leading-relaxed font-serif">
+                      {timelineSummary}
+                    </div>
                   </div>
                 )}
 
@@ -2210,8 +2212,10 @@ export function ERCaseDetail() {
                 </div>
 
                 {discrepancySummary && (
-                  <div className={`text-base ${t.textDim} leading-relaxed font-serif`}>
-                    {discrepancySummary}
+                  <div className="bg-zinc-900 rounded-2xl px-5 py-4">
+                    <div className="text-base text-zinc-300 leading-relaxed font-serif">
+                      {discrepancySummary}
+                    </div>
                   </div>
                 )}
 
@@ -2311,9 +2315,9 @@ export function ERCaseDetail() {
                 </div>
 
                 {policiesChecked > 0 && (
-                  <div className={`flex items-center gap-3 text-[10px] font-mono ${t.cardInner} px-3 py-2 rounded-lg`}>
-                    <span className={`${t.textDim} uppercase tracking-wider`}>{policiesChecked} {policiesChecked === 1 ? 'source' : 'sources'} checked</span>
-                    <span className={t.textFaint}>·</span>
+                  <div className="flex items-center gap-3 text-[10px] font-mono bg-zinc-900 rounded-xl px-4 py-3">
+                    <span className="text-zinc-400 uppercase tracking-wider">{policiesChecked} {policiesChecked === 1 ? 'source' : 'sources'} checked</span>
+                    <span className="text-zinc-600">·</span>
                     <span className={`uppercase tracking-wider font-semibold ${violations.length > 0 ? 'text-red-500' : 'text-emerald-500'}`}>
                       {violations.length} violation{violations.length !== 1 ? 's' : ''} found
                     </span>
