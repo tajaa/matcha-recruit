@@ -94,10 +94,13 @@ fi
 # Kill existing tmux session if it exists
 tmux kill-session -t "$SESSION_NAME" 2>/dev/null || true
 
+# Disable gitstatus in dev panes to avoid index.lock conflicts
+GS_OFF="export POWERLEVEL9K_DISABLE_GITSTATUS=true &&"
+
 # Create new tmux session with backend pane
 echo -e "${YELLOW}Creating tmux session...${NC}"
 tmux new-session -d -s "$SESSION_NAME" -c "$PROJECT_ROOT/server" \
-    "source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited. Press Enter to close.${NC}'; read"
+    "$GS_OFF source venv/bin/activate && python run.py; echo -e '\n${RED}Backend exited. Press Enter to close.${NC}'; read"
 
 # Rename the first window
 tmux rename-window -t "$SESSION_NAME:0" "dev"
@@ -107,28 +110,28 @@ sleep 0.5
 
 # Split for Celery worker
 tmux split-window -t "$SESSION_NAME:dev" -v -c "$PROJECT_ROOT/server" \
-    "source venv/bin/activate && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited. Press Enter to close.${NC}'; read"
+    "$GS_OFF source venv/bin/activate && celery -A app.workers.celery_app worker --loglevel=info; echo -e '\n${RED}Worker exited. Press Enter to close.${NC}'; read"
 
 # Small delay
 sleep 0.5
 
 # Split for frontend
 tmux split-window -t "$SESSION_NAME:dev" -v -c "$PROJECT_ROOT/client" \
-    "npm run dev; echo -e '\n${RED}Frontend exited. Press Enter to close.${NC}'; read"
+    "$GS_OFF npm run dev; echo -e '\n${RED}Frontend exited. Press Enter to close.${NC}'; read"
 
 # Even out the panes
 tmux select-layout -t "$SESSION_NAME:dev" even-vertical
 
 # Create a second window for Gummfit services
 tmux new-window -t "$SESSION_NAME" -n "gumfit" -c "$PROJECT_ROOT/gummfit-agency/server" \
-    "source venv/bin/activate && GUMMFIT_PORT=8003 python run.py; echo -e '\n${RED}GumFit backend exited. Press Enter to close.${NC}'; read"
+    "$GS_OFF source venv/bin/activate && GUMMFIT_PORT=8003 python run.py; echo -e '\n${RED}GumFit backend exited. Press Enter to close.${NC}'; read"
 
 # Small delay
 sleep 0.5
 
 # Split for Gummfit frontend
 tmux split-window -t "$SESSION_NAME:gumfit" -v -c "$PROJECT_ROOT/gummfit-agency/client" \
-    "npm run dev; echo -e '\n${RED}GumFit frontend exited. Press Enter to close.${NC}'; read"
+    "$GS_OFF npm run dev; echo -e '\n${RED}GumFit frontend exited. Press Enter to close.${NC}'; read"
 
 # Even out gumfit panes
 tmux select-layout -t "$SESSION_NAME:gumfit" even-vertical
