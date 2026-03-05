@@ -34,7 +34,8 @@ from ..models.ir_incident import (
     SeverityAnalysis,
     RootCauseAnalysis,
     RecommendationsAnalysis,
-    SimilarIncidentsAnalysis,
+    PrecedentMatch,
+    PrecedentAnalysis,
     AnalyticsSummary,
     TrendsAnalysis,
     TrendDataPoint,
@@ -1663,24 +1664,23 @@ async def analyze_recommendations(
         )
 
 
-@router.post("/{incident_id}/analyze/similar", response_model=SimilarIncidentsAnalysis)
+@router.post("/{incident_id}/analyze/similar", response_model=PrecedentAnalysis)
 async def analyze_similar_incidents(
     incident_id: UUID,
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Find similar historical incidents using AI."""
-    from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
-    from ..models.ir_incident import SimilarIncident
+    """Find precedent incidents using hybrid similarity scoring."""
+    from ..services.ir_precedent import find_precedents
 
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
 
-        # Check for cached analysis
+        # Check for cached analysis (type='precedent' for new format, fall back to 'similar')
         cached = await conn.fetchrow(
             """
             SELECT analysis_data FROM ir_incident_analysis
-            WHERE incident_id = $1 AND analysis_type = 'similar'
+            WHERE incident_id = $1 AND analysis_type = 'precedent'
             ORDER BY created_at DESC LIMIT 1
             """,
             str(incident_id),
@@ -1688,95 +1688,21 @@ async def analyze_similar_incidents(
 
         if cached:
             result = _safe_json_loads(cached["analysis_data"])
-            similar_incidents = []
-            for s in result.get("similar_incidents", []):
-                try:
-                    similar_incidents.append(SimilarIncident(
-                        incident_id=s["incident_id"],
-                        incident_number=s["incident_number"],
-                        title=s["title"],
-                        incident_type=s.get("incident_type", row["incident_type"]),
-                        similarity_score=s["similarity_score"],
-                        common_factors=s["common_factors"],
-                    ))
-                except Exception:
-                    continue
-            return SimilarIncidentsAnalysis(
-                similar_incidents=similar_incidents,
-                pattern_summary=result.get("pattern_summary"),
-                generated_at=result["generated_at"],
-            )
+            result["from_cache"] = True
+            return PrecedentAnalysis(**result)
 
-        # Get historical incidents (last 12 months, excluding current)
-        twelve_months_ago = datetime.utcnow() - timedelta(days=365)
-        historical = await conn.fetch(
-            """
-            SELECT id, incident_number, title, description, incident_type, location, occurred_at
-            FROM ir_incidents
-            WHERE id != $1 AND occurred_at >= $2
-            ORDER BY occurred_at DESC
-            LIMIT 100
-            """,
-            str(incident_id),
-            twelve_months_ago,
-        )
-
-        historical_list = [
-            {
-                "id": str(h["id"]),
-                "incident_number": h["incident_number"],
-                "title": h["title"],
-                "description": h["description"],
-                "incident_type": h["incident_type"],
-                "location": h["location"],
-                "occurred_at": h["occurred_at"].isoformat() if h["occurred_at"] else None,
-            }
-            for h in historical
-        ]
-
-        # Run AI analysis with fallback to stale cache on failure
+        # Run precedent analysis (pass pre-fetched row to avoid redundant query)
         try:
-            analyzer = get_ir_analyzer()
-            result = await analyzer.find_similar_incidents(
-                title=row["title"],
-                description=row["description"],
-                incident_type=row["incident_type"],
-                location=row["location"],
-                occurred_at=row["occurred_at"],
-                historical_incidents=historical_list,
-            )
-        except IRAnalysisError as e:
-            # Gemini failed - try to return stale cache if available
-            if cached:
-                result = _safe_json_loads(cached["analysis_data"])
-                similar_incidents = []
-                for s in result.get("similar_incidents", []):
-                    try:
-                        similar_incidents.append(SimilarIncident(
-                            incident_id=s["incident_id"],
-                            incident_number=s["incident_number"],
-                            title=s["title"],
-                            incident_type=s.get("incident_type", row["incident_type"]),
-                            similarity_score=s["similarity_score"],
-                            common_factors=s["common_factors"],
-                        ))
-                    except Exception:
-                        continue
-                return SimilarIncidentsAnalysis(
-                    similar_incidents=similar_incidents,
-                    pattern_summary=result.get("pattern_summary"),
-                    generated_at=result["generated_at"],
-                    from_cache=True,
-                    cache_reason=str(e),
-                )
-            logger.error(f"AI analysis failed for incident {incident_id}: {e}")
+            result = await find_precedents(str(incident_id), conn, incident_row=row)
+        except Exception as e:
+            logger.error(f"Precedent analysis failed for incident {incident_id}: {e}")
             raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
         # Cache the result
         await conn.execute(
             """
             INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
-            VALUES ($1, 'similar', $2)
+            VALUES ($1, 'precedent', $2)
             """,
             str(incident_id),
             json.dumps(result),
@@ -1790,29 +1716,11 @@ async def analyze_similar_incidents(
             "analysis_run",
             "analysis",
             None,
-            {"type": "similar"},
+            {"type": "precedent"},
             request.client.host if request.client else None,
         )
 
-        similar_incidents = []
-        for s in result.get("similar_incidents", []):
-            try:
-                similar_incidents.append(SimilarIncident(
-                    incident_id=s["incident_id"],
-                    incident_number=s["incident_number"],
-                    title=s["title"],
-                    incident_type=s.get("incident_type", row["incident_type"]),
-                    similarity_score=s["similarity_score"],
-                    common_factors=s["common_factors"],
-                ))
-            except Exception:
-                continue  # Skip invalid entries
-
-        return SimilarIncidentsAnalysis(
-            similar_incidents=similar_incidents,
-            pattern_summary=result.get("pattern_summary"),
-            generated_at=result["generated_at"],
-        )
+        return PrecedentAnalysis(**result)
 
 
 @router.delete("/{incident_id}/analyze/{analysis_type}")

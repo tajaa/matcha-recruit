@@ -2008,17 +2008,36 @@ export interface IRRecommendationsAnalysis {
   cache_reason?: string;
 }
 
-export interface IRSimilarIncident {
+export interface IRScoreBreakdown {
+  type_match: number;
+  severity_proximity: number;
+  category_overlap: number;
+  location_similarity: number;
+  temporal_pattern: number;
+  text_similarity: number;
+  root_cause_similarity: number;
+}
+
+export interface IRPrecedentMatch {
   incident_id: string;
   incident_number: string;
   title: string;
   incident_type: IRIncidentType;
+  severity: string;
+  status: string;
+  occurred_at: string;
+  resolved_at: string | null;
+  resolution_days: number | null;
+  root_cause: string | null;
+  corrective_actions: string | null;
+  resolution_effective: boolean | null;
   similarity_score: number;
+  score_breakdown: IRScoreBreakdown;
   common_factors: string[];
 }
 
-export interface IRSimilarIncidentsAnalysis {
-  similar_incidents: IRSimilarIncident[];
+export interface IRPrecedentAnalysis {
+  precedents: IRPrecedentMatch[];
   pattern_summary: string | null;
   generated_at: string;
   from_cache?: boolean;

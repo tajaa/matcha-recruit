@@ -11,7 +11,7 @@ IRIncidentType = Literal["safety", "behavioral", "property", "near_miss", "other
 IRSeverity = Literal["critical", "high", "medium", "low"]
 IRStatus = Literal["reported", "investigating", "action_required", "resolved", "closed"]
 IRDocumentType = Literal["photo", "form", "statement", "other"]
-IRAnalysisType = Literal["categorization", "severity", "root_cause", "recommendations", "similar"]
+IRAnalysisType = Literal["categorization", "severity", "root_cause", "recommendations", "similar", "precedent"]
 
 
 # ===========================================
@@ -215,21 +215,41 @@ class RecommendationsAnalysis(BaseModel):
     cache_reason: Optional[str] = None
 
 
-class SimilarIncident(BaseModel):
-    """A similar past incident."""
-    incident_id: UUID
+class ScoreBreakdown(BaseModel):
+    """Per-dimension similarity scores."""
+    type_match: float = 0.0
+    severity_proximity: float = 0.0
+    category_overlap: float = 0.0
+    location_similarity: float = 0.0
+    temporal_pattern: float = 0.0
+    text_similarity: float = 0.0
+    root_cause_similarity: float = 0.0
+
+
+class PrecedentMatch(BaseModel):
+    """A matched precedent incident with scoring details."""
+    incident_id: str
     incident_number: str
     title: str
     incident_type: IRIncidentType
+    severity: IRSeverity = "medium"
+    status: IRStatus = "reported"
+    occurred_at: str
+    resolved_at: Optional[str] = None
+    resolution_days: Optional[int] = None
+    root_cause: Optional[str] = None
+    corrective_actions: Optional[str] = None
+    resolution_effective: Optional[bool] = None
     similarity_score: float
-    common_factors: list[str]
+    score_breakdown: ScoreBreakdown
+    common_factors: list[str] = []
 
 
-class SimilarIncidentsAnalysis(BaseModel):
-    """AI similar incidents detection result."""
-    similar_incidents: list[SimilarIncident]
+class PrecedentAnalysis(BaseModel):
+    """Precedent analysis result with scored matches."""
+    precedents: list[PrecedentMatch]
     pattern_summary: Optional[str] = None
-    generated_at: datetime
+    generated_at: str
     from_cache: bool = False
     cache_reason: Optional[str] = None
 

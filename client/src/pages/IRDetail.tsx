@@ -10,7 +10,7 @@ import type {
   IRSeverityAnalysis,
   IRRootCauseAnalysis,
   IRRecommendationsAnalysis,
-  IRSimilarIncidentsAnalysis,
+  IRPrecedentAnalysis,
   ERCaseCategory,
 } from '../types';
 import { CategorizationAnalysisModal } from '../components/ir/CategorizationAnalysisModal';
@@ -83,7 +83,7 @@ export function IRDetail() {
   const [severityAnalysis, setSeverityAnalysis] = useState<IRSeverityAnalysis | null>(null);
   const [rootCause, setRootCause] = useState<IRRootCauseAnalysis | null>(null);
   const [recommendations, setRecommendations] = useState<IRRecommendationsAnalysis | null>(null);
-  const [similarIncidents, setSimilarIncidents] = useState<IRSimilarIncidentsAnalysis | null>(null);
+  const [similarIncidents, setSimilarIncidents] = useState<IRPrecedentAnalysis | null>(null);
   const [analyzingType, setAnalyzingType] = useState<string | null>(null);
 
   const [editingRootCause, setEditingRootCause] = useState(false);
@@ -517,7 +517,7 @@ export function IRDetail() {
                 { key: 'severity', label: 'Severity', data: severityAnalysis, onClick: () => setShowSeverityModal(true) },
                 { key: 'root_cause', label: 'Root Cause', data: rootCause, onClick: () => setShowRootCauseModal(true) },
                 { key: 'recommendations', label: 'Actions', data: recommendations, onClick: () => setShowRecommendationsModal(true) },
-                { key: 'similar', label: 'Similar', data: similarIncidents, onClick: () => setShowSimilarModal(true) },
+                { key: 'similar', label: 'Precedents', data: similarIncidents, onClick: () => setShowSimilarModal(true) },
               ].map(({ key, label, data, onClick }) => (
                 <div key={key} className="py-2 border-b border-zinc-900">
                   <div className="flex justify-between items-center">
@@ -595,7 +595,7 @@ export function IRDetail() {
                       className="mt-2 text-[10px] text-zinc-500 cursor-pointer hover:bg-zinc-900 rounded p-2 -m-2 transition-colors"
                     >
                       <div className="flex items-center justify-between">
-                        <span>{similarIncidents.similar_incidents.length} similar found</span>
+                        <span>{similarIncidents.precedents.length} precedent{similarIncidents.precedents.length !== 1 ? 's' : ''} found</span>
                         <span className="text-zinc-700">→</span>
                       </div>
                       {similarIncidents.from_cache && (

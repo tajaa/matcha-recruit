@@ -118,7 +118,7 @@ import type {
   IRSeverityAnalysis,
   IRRootCauseAnalysis,
   IRRecommendationsAnalysis,
-  IRSimilarIncidentsAnalysis,
+  IRPrecedentAnalysis,
   IRAuditLogResponse,
   // Policy types
   Policy,
@@ -1951,8 +1951,8 @@ export const irIncidents = {
       method: 'POST',
     }),
 
-  analyzeSimilarIncidents: (incidentId: string): Promise<IRSimilarIncidentsAnalysis> =>
-    request<IRSimilarIncidentsAnalysis>(`/ir/incidents/${incidentId}/analyze/similar`, {
+  analyzeSimilarIncidents: (incidentId: string): Promise<IRPrecedentAnalysis> =>
+    request<IRPrecedentAnalysis>(`/ir/incidents/${incidentId}/analyze/similar`, {
       method: 'POST',
     }),
 
