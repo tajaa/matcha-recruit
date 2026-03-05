@@ -1,22 +1,22 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { irIncidents } from '../api/client';
+import { irIncidents, erCopilot } from '../api/client';
 import type {
   IRIncident,
   IRDocument,
   IRIncidentUpdate,
   IRStatus,
-  IRCategorizationAnalysis,
-  IRSeverityAnalysis,
   IRRootCauseAnalysis,
   IRRecommendationsAnalysis,
-  IRSimilarIncidentsAnalysis,
+  IRPrecedentAnalysis,
+  ERCaseCategory,
 } from '../types';
-import { CategorizationAnalysisModal } from '../components/ir/CategorizationAnalysisModal';
-import { SeverityAnalysisModal } from '../components/ir/SeverityAnalysisModal';
 import { RootCauseAnalysisModal } from '../components/ir/RootCauseAnalysisModal';
 import { RecommendationsAnalysisModal } from '../components/ir/RecommendationsAnalysisModal';
 import { SimilarIncidentsAnalysisModal } from '../components/ir/SimilarIncidentsAnalysisModal';
+import { AnalysisTerminalModal } from '../components/ir/AnalysisTerminalModal';
+import { useIRAnalysisStream } from '../hooks/ir/useIRAnalysisStream';
+import type { AnalysisType } from '../hooks/ir/useIRAnalysisStream';
 import { useIsLightMode } from '../hooks/useIsLightMode';
 
 // ─── theme ────────────────────────────────────────────────────────────────────
@@ -38,6 +38,11 @@ const LT = {
   sidebarHover: 'hover:bg-stone-200 rounded-xl',
   sevDots: { critical: 'bg-zinc-900', high: 'bg-stone-600', medium: 'bg-stone-400', low: 'bg-stone-300' } as Record<string, string>,
   statusColors: { reported: 'text-zinc-900', investigating: 'text-stone-600', action_required: 'text-stone-500', resolved: 'text-stone-400', closed: 'text-stone-300' } as Record<string, string>,
+  escalateBtn: 'text-emerald-700 hover:text-emerald-600',
+  escalateGhost: 'text-stone-500 hover:text-zinc-900',
+  modalBg: 'bg-stone-100 border border-stone-300 rounded-xl',
+  modalInput: 'w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-xl text-sm text-zinc-900 focus:outline-none focus:border-stone-400',
+  modalSelect: 'w-full px-2.5 py-1.5 bg-white border border-stone-300 rounded-xl text-sm text-zinc-900 focus:outline-none focus:border-stone-400 cursor-pointer',
 } as const;
 
 const DK = {
@@ -57,6 +62,11 @@ const DK = {
   sidebarHover: 'hover:bg-zinc-800 rounded-xl',
   sevDots: { critical: 'bg-zinc-100', high: 'bg-zinc-400', medium: 'bg-zinc-500', low: 'bg-zinc-600' } as Record<string, string>,
   statusColors: { reported: 'text-zinc-100', investigating: 'text-zinc-400', action_required: 'text-zinc-300', resolved: 'text-zinc-500', closed: 'text-zinc-600' } as Record<string, string>,
+  escalateBtn: 'text-emerald-400 hover:text-emerald-300',
+  escalateGhost: 'text-zinc-600 hover:text-zinc-100',
+  modalBg: 'bg-zinc-900 border border-zinc-800 rounded-xl',
+  modalInput: 'w-full px-2.5 py-1.5 bg-transparent border border-zinc-800 rounded-xl text-sm text-white focus:outline-none focus:border-zinc-600',
+  modalSelect: 'w-full px-2.5 py-1.5 bg-transparent border border-zinc-800 rounded-xl text-sm text-white focus:outline-none focus:border-zinc-600 cursor-pointer',
 } as const;
 
 const STATUS_OPTIONS: { value: IRStatus; label: string }[] = [
@@ -75,6 +85,25 @@ const TYPE_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
+const IR_TYPE_TO_ER_CATEGORY: Record<string, ERCaseCategory> = {
+  safety: 'safety',
+  behavioral: 'misconduct',
+  property: 'other',
+  near_miss: 'safety',
+  other: 'other',
+};
+
+const ER_CATEGORY_OPTIONS: { value: ERCaseCategory; label: string }[] = [
+  { value: 'harassment', label: 'Harassment' },
+  { value: 'discrimination', label: 'Discrimination' },
+  { value: 'safety', label: 'Safety' },
+  { value: 'retaliation', label: 'Retaliation' },
+  { value: 'policy_violation', label: 'Policy Violation' },
+  { value: 'misconduct', label: 'Misconduct' },
+  { value: 'wage_hour', label: 'Wage & Hour' },
+  { value: 'other', label: 'Other' },
+];
+
 export function IRDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -87,23 +116,25 @@ export function IRDetail() {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [categorization, setCategorization] = useState<IRCategorizationAnalysis | null>(null);
-  const [severityAnalysis, setSeverityAnalysis] = useState<IRSeverityAnalysis | null>(null);
   const [rootCause, setRootCause] = useState<IRRootCauseAnalysis | null>(null);
   const [recommendations, setRecommendations] = useState<IRRecommendationsAnalysis | null>(null);
-  const [similarIncidents, setSimilarIncidents] = useState<IRSimilarIncidentsAnalysis | null>(null);
-  const [analyzingType, setAnalyzingType] = useState<string | null>(null);
+  const [similarIncidents, setSimilarIncidents] = useState<IRPrecedentAnalysis | null>(null);
+  const [showTerminalModal, setShowTerminalModal] = useState(false);
+
+  const stream = useIRAnalysisStream();
 
   const [editingRootCause, setEditingRootCause] = useState(false);
   const [editingActions, setEditingActions] = useState(false);
   const [rootCauseText, setRootCauseText] = useState('');
   const [correctiveActionsText, setCorrectiveActionsText] = useState('');
 
-  const [showCategorizationModal, setShowCategorizationModal] = useState(false);
-  const [showSeverityModal, setShowSeverityModal] = useState(false);
   const [showRootCauseModal, setShowRootCauseModal] = useState(false);
   const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
   const [showSimilarModal, setShowSimilarModal] = useState(false);
+
+  const [showEscalateModal, setShowEscalateModal] = useState(false);
+  const [escalating, setEscalating] = useState(false);
+  const [escalateForm, setEscalateForm] = useState({ title: '', description: '', category: 'other' as ERCaseCategory });
 
   const fetchIncident = useCallback(async () => {
     if (!id) return;
@@ -138,40 +169,34 @@ export function IRDetail() {
     } catch (err) {
       console.error('Failed to update incident:', err);
       setError(err instanceof Error ? err.message : 'Failed to update incident');
-      // Re-fetch to ensure UI is in sync with server
       fetchIncident();
     } finally {
       setUpdating(false);
     }
   };
 
-  const runAnalysis = async (type: string) => {
+  const runAnalysis = (type: string) => {
     if (!id) return;
-    setAnalyzingType(type);
-    try {
-      switch (type) {
-        case 'categorization':
-          setCategorization(await irIncidents.analyzeCategorization(id));
-          break;
-        case 'severity':
-          setSeverityAnalysis(await irIncidents.analyzeSeverity(id));
-          break;
-        case 'root_cause':
-          setRootCause(await irIncidents.analyzeRootCause(id));
-          break;
-        case 'recommendations':
-          setRecommendations(await irIncidents.analyzeRecommendations(id));
-          break;
-        case 'similar':
-          setSimilarIncidents(await irIncidents.analyzeSimilarIncidents(id));
-          break;
-      }
-    } catch (err) {
-      console.error(`Failed to run ${type} analysis:`, err);
-    } finally {
-      setAnalyzingType(null);
-    }
+    stream.reset();
+    setShowTerminalModal(true);
+    stream.runAnalysis(id, type as AnalysisType);
   };
+
+  // Sync stream results back to state for sidebar previews
+  useEffect(() => {
+    if (!stream.result || stream.streaming) return;
+    switch (stream.analysisType) {
+      case 'root_cause':
+        setRootCause(stream.result as IRRootCauseAnalysis);
+        break;
+      case 'recommendations':
+        setRecommendations(stream.result as IRRecommendationsAnalysis);
+        break;
+      case 'similar':
+        setSimilarIncidents(stream.result as IRPrecedentAnalysis);
+        break;
+    }
+  }, [stream.result, stream.streaming, stream.analysisType]);
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('en-US', {
@@ -180,6 +205,68 @@ export function IRDetail() {
       hour: '2-digit',
       minute: '2-digit',
     });
+  };
+
+  const openEscalateModal = () => {
+    if (!incident) return;
+    const witnesses = incident.witnesses.length > 0
+      ? `Witnesses: ${incident.witnesses.map(w => w.name).join(', ')}`
+      : '';
+    const lines = [
+      `Escalated from IR incident ${incident.incident_number}`,
+      '',
+      `Type: ${TYPE_LABELS[incident.incident_type] || incident.incident_type}`,
+      `Severity: ${incident.severity}`,
+      `Occurred: ${formatDate(incident.occurred_at)}`,
+      incident.location ? `Location: ${incident.location}` : '',
+      `Reporter: ${incident.reported_by_name}`,
+      '',
+      incident.description || '',
+      witnesses,
+    ].filter(Boolean).join('\n');
+
+    setEscalateForm({
+      title: `[Escalated from ${incident.incident_number}] ${incident.title}`,
+      description: lines,
+      category: IR_TYPE_TO_ER_CATEGORY[incident.incident_type] || 'other',
+    });
+    setShowEscalateModal(true);
+  };
+
+  const handleEscalate = async () => {
+    if (!incident || !id) return;
+    setEscalating(true);
+    try {
+      const newCase = await erCopilot.createCase({
+        title: escalateForm.title,
+        description: escalateForm.description,
+        category: escalateForm.category,
+        intake_context: {
+          assistance_requested: true,
+          escalated_from_ir: {
+            incident_id: incident.id,
+            incident_number: incident.incident_number,
+            incident_type: incident.incident_type,
+            severity: incident.severity,
+            occurred_at: incident.occurred_at,
+          },
+        } as any,
+      });
+      await irIncidents.updateIncident(id, {
+        category_data: {
+          ...incident.category_data,
+          escalated_er_case_id: newCase.id,
+          escalated_er_case_number: newCase.case_number,
+        },
+      });
+      setShowEscalateModal(false);
+      navigate(`/app/matcha/er-copilot/${newCase.id}`);
+    } catch (err) {
+      console.error('Failed to escalate to ER case:', err);
+      setError(err instanceof Error ? err.message : 'Failed to escalate');
+    } finally {
+      setEscalating(false);
+    }
   };
 
   if (loading) {
@@ -230,22 +317,39 @@ export function IRDetail() {
           <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>{incident.title}</h1>
         </div>
 
-        <div>
-          <select
-            value={incident.status}
-            onChange={(e) => updateIncident({ status: e.target.value as IRStatus })}
-            disabled={updating}
-            className={`${t.select} ${updating ? 'opacity-50' : ''} font-bold uppercase tracking-wider`}
-          >
-            {STATUS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          {error && (
-            <div className="text-xs text-red-400 mt-1">{error}</div>
+        <div className="flex items-center gap-4">
+          {incident.category_data?.escalated_er_case_id ? (
+            <button
+              onClick={() => navigate(`/app/matcha/er-copilot/${incident.category_data.escalated_er_case_id}`)}
+              className={`text-xs ${t.escalateBtn} uppercase tracking-wider font-bold`}
+            >
+              View ER Case &rarr;
+            </button>
+          ) : (
+            <button
+              onClick={openEscalateModal}
+              className={`text-xs ${t.escalateGhost} uppercase tracking-wider font-bold`}
+            >
+              Escalate to ER Case
+            </button>
           )}
+          <div>
+            <select
+              value={incident.status}
+              onChange={(e) => updateIncident({ status: e.target.value as IRStatus })}
+              disabled={updating}
+              className={`${t.select} ${updating ? 'opacity-50' : ''} font-bold uppercase tracking-wider`}
+            >
+              {STATUS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+            {error && (
+              <div className="text-xs text-red-400 mt-1">{error}</div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -273,7 +377,6 @@ export function IRDetail() {
               </div>
             </div>
 
-            {/* Company/Location Context */}
             {(incident.company_name || incident.location_city) && (
               <div className={`grid grid-cols-2 gap-4 pt-4 border-t ${t.sectionBorder}`}>
                 {incident.company_name && (
@@ -441,54 +544,21 @@ export function IRDetail() {
             <div className={`${t.label} mb-4`}>AI Analysis</div>
             <div className="space-y-3">
               {[
-                { key: 'categorization', label: 'Category', data: categorization, onClick: () => setShowCategorizationModal(true) },
-                { key: 'severity', label: 'Severity', data: severityAnalysis, onClick: () => setShowSeverityModal(true) },
                 { key: 'root_cause', label: 'Root Cause', data: rootCause, onClick: () => setShowRootCauseModal(true) },
                 { key: 'recommendations', label: 'Actions', data: recommendations, onClick: () => setShowRecommendationsModal(true) },
-                { key: 'similar', label: 'Similar', data: similarIncidents, onClick: () => setShowSimilarModal(true) },
+                { key: 'similar', label: 'Precedents', data: similarIncidents, onClick: () => setShowSimilarModal(true) },
               ].map(({ key, label, data, onClick }) => (
                 <div key={key} className={`py-2 border-b ${t.sectionBorder}`}>
                   <div className="flex justify-between items-center">
                     <span className={`text-xs ${t.textMuted}`}>{label}</span>
                     <button
                       onClick={() => runAnalysis(key)}
-                      disabled={analyzingType === key}
+                      disabled={stream.streaming && stream.analysisType === key}
                       className={`text-[10px] ${t.btnGhost} uppercase tracking-wider font-bold disabled:opacity-50`}
                     >
-                      {analyzingType === key ? '...' : data ? 'Rerun' : 'Run'}
+                      {stream.streaming && stream.analysisType === key ? '...' : data ? 'Rerun' : 'Run'}
                     </button>
                   </div>
-                  {key === 'categorization' && categorization && (
-                    <div
-                      onClick={onClick}
-                      className={`mt-2 text-[10px] ${t.textMuted} cursor-pointer ${t.sidebarHover} p-2 -m-2 transition-colors`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span>{TYPE_LABELS[categorization.suggested_type]} ({(categorization.confidence * 100).toFixed(0)}%)</span>
-                        <span className={t.textFaint}>&rarr;</span>
-                      </div>
-                      {categorization.from_cache && (
-                        <div className="mt-1 text-amber-500/70 text-[9px]">Cached result</div>
-                      )}
-                    </div>
-                  )}
-                  {key === 'severity' && severityAnalysis && (
-                    <div
-                      onClick={onClick}
-                      className={`mt-2 cursor-pointer ${t.sidebarHover} p-2 -m-2 transition-colors`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${t.sevDots[severityAnalysis.suggested_severity]}`} />
-                          <span className={`text-[10px] ${t.textMuted} capitalize`}>{severityAnalysis.suggested_severity}</span>
-                        </div>
-                        <span className={t.textFaint}>&rarr;</span>
-                      </div>
-                      {severityAnalysis.from_cache && (
-                        <div className="mt-1 text-amber-500/70 text-[9px]">Cached result</div>
-                      )}
-                    </div>
-                  )}
                   {key === 'root_cause' && rootCause && (
                     <div
                       onClick={onClick}
@@ -523,7 +593,7 @@ export function IRDetail() {
                       className={`mt-2 text-[10px] ${t.textMuted} cursor-pointer ${t.sidebarHover} p-2 -m-2 transition-colors`}
                     >
                       <div className="flex items-center justify-between">
-                        <span>{similarIncidents.similar_incidents.length} similar found</span>
+                        <span>{similarIncidents.precedents.length} precedent{similarIncidents.precedents.length !== 1 ? 's' : ''} found</span>
                         <span className={t.textFaint}>&rarr;</span>
                       </div>
                       {similarIncidents.from_cache && (
@@ -577,16 +647,6 @@ export function IRDetail() {
       </div>
 
       {/* Analysis Detail Modals */}
-      <CategorizationAnalysisModal
-        isOpen={showCategorizationModal}
-        onClose={() => setShowCategorizationModal(false)}
-        analysis={categorization}
-      />
-      <SeverityAnalysisModal
-        isOpen={showSeverityModal}
-        onClose={() => setShowSeverityModal(false)}
-        analysis={severityAnalysis}
-      />
       <RootCauseAnalysisModal
         isOpen={showRootCauseModal}
         onClose={() => setShowRootCauseModal(false)}
@@ -602,6 +662,75 @@ export function IRDetail() {
         onClose={() => setShowSimilarModal(false)}
         analysis={similarIncidents}
       />
+
+      {/* Analysis Terminal Modal */}
+      <AnalysisTerminalModal
+        isOpen={showTerminalModal}
+        onClose={() => setShowTerminalModal(false)}
+        messages={stream.messages}
+        streaming={stream.streaming}
+        result={stream.result}
+        error={stream.error}
+        analysisType={stream.analysisType}
+      />
+
+      {/* Escalate to ER Case Modal */}
+      {showEscalateModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowEscalateModal(false)} />
+          <div className={`relative ${t.modalBg} w-full max-w-lg p-6 space-y-4`}>
+            <h3 className={`text-sm font-medium ${t.textMain}`}>Escalate to ER Case</h3>
+
+            <div>
+              <label className={`${t.label} block mb-1`}>Title</label>
+              <input
+                value={escalateForm.title}
+                onChange={(e) => setEscalateForm(f => ({ ...f, title: e.target.value }))}
+                className={t.modalInput}
+              />
+            </div>
+
+            <div>
+              <label className={`${t.label} block mb-1`}>Description</label>
+              <textarea
+                value={escalateForm.description}
+                onChange={(e) => setEscalateForm(f => ({ ...f, description: e.target.value }))}
+                rows={6}
+                className={`${t.modalInput} resize-none`}
+              />
+            </div>
+
+            <div>
+              <label className={`${t.label} block mb-1`}>Category</label>
+              <select
+                value={escalateForm.category}
+                onChange={(e) => setEscalateForm(f => ({ ...f, category: e.target.value as ERCaseCategory }))}
+                className={t.modalSelect}
+              >
+                {ER_CATEGORY_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => setShowEscalateModal(false)}
+                className={`text-xs ${t.btnGhost} uppercase tracking-wider font-bold`}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleEscalate}
+                disabled={escalating || !escalateForm.title.trim()}
+                className={`px-3 py-1.5 ${t.btnPrimary} text-xs disabled:opacity-50 uppercase tracking-wider font-bold`}
+              >
+                {escalating ? 'Creating...' : 'Create ER Case'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
     </div>
   );
