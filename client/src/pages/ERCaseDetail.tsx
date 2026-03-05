@@ -1011,6 +1011,57 @@ export function ERCaseDetail() {
     }
   }, [id, pollForAnalysis, analysisModel]);
 
+  const handleGenerateGuidance = useCallback(async () => {
+    if (!id) return;
+    setAnalysisLoading('guidance');
+    setAnalysisProgress({ step: 'Generating guidance...' });
+    setAnalysisError(null);
+    try {
+      const modelParam = analysisModel === 'pro' ? 'pro' as const : undefined;
+      let payload: ERSuggestedGuidanceResponse | null = null;
+      try {
+        payload = await erCopilot.generateSuggestedGuidanceStream(
+          id,
+          (msg) => setAnalysisProgress({ step: msg }),
+          modelParam,
+        );
+      } catch (streamErr) {
+        console.error('Streaming guidance failed, trying non-streaming:', streamErr);
+        payload = await erCopilot.generateSuggestedGuidance(id, analysisModel === 'pro' ? 'pro' : undefined);
+      }
+      if (!payload) {
+        payload = {
+          summary: 'Unable to generate guidance at this time.',
+          cards: [],
+          generated_at: new Date().toISOString(),
+          model: 'client-fallback',
+          fallback_used: true,
+          determination_suggested: false,
+        };
+      }
+      const content = buildSuggestedGuidanceNoteContent(payload);
+      await erCopilot.createCaseNote(id, {
+        note_type: 'guidance',
+        content,
+        metadata: {
+          source: 'manual_trigger',
+          note_purpose: 'next_steps',
+          guidance_version: 3,
+          guidance_payload: payload,
+          guidance_model: payload.model,
+          guidance_fallback_used: payload.fallback_used,
+        },
+      });
+      await fetchNotes();
+    } catch (err) {
+      console.error('Failed to generate guidance:', err);
+      setAnalysisError(getErrorMessage(err, 'Failed to generate guidance.'));
+    } finally {
+      setAnalysisLoading(null);
+      setAnalysisProgress(null);
+    }
+  }, [id, analysisModel, fetchNotes]);
+
   const runEvidenceSearch = useCallback(async (query: string): Promise<boolean> => {
     if (!id || !query.trim()) return false;
     setSearching(true);
@@ -1890,14 +1941,23 @@ export function ERCaseDetail() {
                       <div className="bg-zinc-900 rounded-2xl p-4">
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-xs uppercase tracking-widest text-zinc-500 font-bold">Summary</span>
-                          <span className="text-xs text-zinc-600 font-mono">
-                            {new Date(latestGuidancePayload?.generated_at || latestGuidanceNote.created_at).toLocaleString('en-US', {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: 'numeric',
-                              minute: '2-digit',
-                            })}
-                          </span>
+                          <div className="flex items-center gap-3">
+                            <button
+                              onClick={handleGenerateGuidance}
+                              disabled={analysisLoading === 'guidance'}
+                              className="text-[10px] uppercase tracking-widest text-zinc-600 hover:text-zinc-400 transition-colors disabled:opacity-40"
+                            >
+                              {analysisLoading === 'guidance' ? 'Regenerating...' : 'Regenerate'}
+                            </button>
+                            <span className="text-xs text-zinc-600 font-mono">
+                              {new Date(latestGuidancePayload?.generated_at || latestGuidanceNote.created_at).toLocaleString('en-US', {
+                                month: 'short',
+                                day: 'numeric',
+                                hour: 'numeric',
+                                minute: '2-digit',
+                              })}
+                            </span>
+                          </div>
                         </div>
                         <p className="text-sm text-zinc-100 leading-relaxed">
                           {latestGuidancePayload?.summary || latestGuidanceNote.content}
@@ -1961,7 +2021,16 @@ export function ERCaseDetail() {
                       ) : null}
                     </div>
                   ) : (
-                    <p className={`text-sm ${t.textMuted}`}>No guidance yet. Complete assistance intake and analysis to generate next steps.</p>
+                    <div className="space-y-3">
+                      <p className={`text-sm ${t.textMuted}`}>No guidance generated yet.</p>
+                      <button
+                        onClick={handleGenerateGuidance}
+                        disabled={analysisLoading === 'guidance'}
+                        className={`text-xs uppercase tracking-wider font-medium px-3 py-1.5 border ${t.border} ${t.cardInner} ${t.textMain} hover:opacity-80 disabled:opacity-40 transition-all`}
+                      >
+                        {analysisLoading === 'guidance' ? 'Generating...' : 'Generate Guidance'}
+                      </button>
+                    </div>
                   )}
                 </>
               )}

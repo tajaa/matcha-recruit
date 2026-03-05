@@ -213,6 +213,7 @@ export function IRDetail() {
         description: escalateForm.description,
         category: escalateForm.category,
         intake_context: {
+          assistance_requested: true,
           escalated_from_ir: {
             incident_id: incident.id,
             incident_number: incident.incident_number,
