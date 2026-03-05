@@ -148,15 +148,25 @@ export function BusinessRegistrations() {
       setSavingEdit(true);
       setError(null);
 
-      const updated = await adminBusinessRegistrations.update(editingRegistration.id, {
-        company_name: editForm.company_name.trim(),
-        industry: editForm.industry.trim(),
-        company_size: editForm.company_size.trim(),
-        owner_email: editForm.owner_email.trim(),
-        owner_name: editForm.owner_name.trim(),
-        owner_phone: editForm.owner_phone.trim(),
-        owner_job_title: editForm.owner_job_title.trim(),
-      });
+      // Only send fields that actually changed to avoid overwriting
+      // unchanged values (especially owner_email which changes the user's login)
+      const changes: Record<string, string> = {};
+      const orig = editingRegistration;
+      if (editForm.company_name.trim() !== orig.company_name) changes.company_name = editForm.company_name.trim();
+      if (editForm.industry.trim() !== (orig.industry || '')) changes.industry = editForm.industry.trim();
+      if (editForm.company_size.trim() !== (orig.company_size || '')) changes.company_size = editForm.company_size.trim();
+      if (editForm.owner_email.trim() !== orig.owner_email) changes.owner_email = editForm.owner_email.trim();
+      if (editForm.owner_name.trim() !== orig.owner_name) changes.owner_name = editForm.owner_name.trim();
+      if (editForm.owner_phone.trim() !== (orig.owner_phone || '')) changes.owner_phone = editForm.owner_phone.trim();
+      if (editForm.owner_job_title.trim() !== (orig.owner_job_title || '')) changes.owner_job_title = editForm.owner_job_title.trim();
+
+      if (Object.keys(changes).length === 0) {
+        setEditModalOpen(false);
+        setEditingRegistration(null);
+        return;
+      }
+
+      const updated = await adminBusinessRegistrations.update(editingRegistration.id, changes);
 
       setRegistrations(prev => prev.map(r => (r.id === updated.id ? updated : r)));
       setEditModalOpen(false);

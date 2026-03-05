@@ -1082,7 +1082,7 @@ async def login(request: LoginRequest):
     """Authenticate user and return tokens."""
     async with get_connection() as conn:
         user = await conn.fetchrow(
-            "SELECT id, email, password_hash, role, is_active, created_at, last_login FROM users WHERE email = $1",
+            "SELECT id, email, password_hash, role, is_active, created_at, last_login FROM users WHERE lower(email) = lower($1)",
             request.email
         )
 
