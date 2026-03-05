@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink, Sparkles } from 'lucide-react';
+import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink, Sparkles, Circle, Check } from 'lucide-react';
 import { useIsLightMode } from '../hooks/useIsLightMode';
 import { getAccessToken } from '../api/client';
 import { OnboardingWizard } from '../components/OnboardingWizard';
@@ -280,6 +280,91 @@ function CompanyProfileBanner() {
             <ChevronRight className="w-3 h-3" />
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+const GETTING_STARTED_DISMISS_KEY = 'getting_started_dismissed';
+
+const CHECKLIST_ITEMS = [
+  { key: 'company_profile', label: 'Complete company profile', path: '/app/matcha/company', featureGate: null },
+  { key: 'compliance', label: 'Add business locations', path: '/app/matcha/compliance', featureGate: 'compliance' },
+  { key: 'employees', label: 'Add your first employee', path: '/app/matcha/employees', featureGate: 'employees' },
+  { key: 'policies', label: 'Create a policy', path: '/app/matcha/policies/new', featureGate: 'policies' },
+  { key: 'offer_letters', label: 'Create an offer letter', path: '/app/matcha/offer-letters', featureGate: 'offer_letters' },
+  { key: 'integrations', label: 'Set up integrations', path: '/app/matcha/setup', featureGate: 'onboarding' },
+] as const;
+
+function GettingStartedChecklist() {
+  const navigate = useNavigate();
+  const { user, hasFeature, onboardingNeeded } = useAuth();
+  const t = useIsLightMode() ? LT : DK;
+  const [dismissed, setDismissed] = useState(() =>
+    localStorage.getItem(GETTING_STARTED_DISMISS_KEY) === 'true'
+  );
+
+  if (user?.role !== 'client' || dismissed) return null;
+
+  const visibleItems = CHECKLIST_ITEMS.filter(
+    item => !item.featureGate || hasFeature(item.featureGate)
+  );
+
+  const completedCount = visibleItems.filter(item => !onboardingNeeded[item.key]).length;
+  const totalCount = visibleItems.length;
+
+  if (totalCount === 0 || completedCount === totalCount) return null;
+
+  const pct = Math.round((completedCount / totalCount) * 100);
+
+  return (
+    <div className={`${t.cardLight} p-6 mb-6 animate-in fade-in slide-in-from-top-2 duration-500`}>
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h2 className={`text-sm font-bold ${t.textMain} uppercase tracking-wider`}>Getting Started</h2>
+          <p className={`text-xs ${t.textMuted} mt-0.5`}>{completedCount} of {totalCount} complete</p>
+        </div>
+        <button
+          onClick={() => { localStorage.setItem(GETTING_STARTED_DISMISS_KEY, 'true'); setDismissed(true); }}
+          className={`${t.icon} hover:${t.textMain} transition-colors`}
+          aria-label="Dismiss checklist"
+        >
+          <X className="w-4 h-4" />
+        </button>
+      </div>
+
+      {/* Progress bar */}
+      <div className={`h-1.5 ${t.innerEl} mb-4 overflow-hidden`}>
+        <div
+          className="h-full bg-emerald-500 rounded-full transition-all duration-500"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+
+      <div className="space-y-1">
+        {visibleItems.map(item => {
+          const done = !onboardingNeeded[item.key];
+          return (
+            <button
+              key={item.key}
+              onClick={() => !done && navigate(item.path)}
+              disabled={done}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
+                done ? 'opacity-60 cursor-default' : `${t.rowHover} cursor-pointer`
+              }`}
+            >
+              {done ? (
+                <Check className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+              ) : (
+                <Circle className={`w-4 h-4 ${t.textFaint} flex-shrink-0`} />
+              )}
+              <span className={`text-xs font-medium flex-1 ${done ? `line-through ${t.textMuted}` : t.textMain}`}>
+                {item.label}
+              </span>
+              {!done && <ChevronRight className={`w-3.5 h-3.5 ${t.textFaint}`} />}
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -930,6 +1015,7 @@ export function Dashboard() {
     <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
     <div className="max-w-5xl mx-auto">
     <CompanyProfileBanner />
+    <GettingStartedChecklist />
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header Section */}
       <div className="flex justify-between items-start mb-12 pb-8">

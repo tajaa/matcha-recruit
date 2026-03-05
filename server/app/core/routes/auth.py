@@ -2042,6 +2042,17 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 enabled_features = merge_company_features(profile["enabled_features"])
                 company_id = profile["company_id"]
 
+                # Company profile completeness (always checked)
+                has_profile = await conn.fetchval(
+                    """SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1
+                       AND headquarters_state IS NOT NULL
+                       AND benefits_summary IS NOT NULL
+                       AND default_employment_type IS NOT NULL)""",
+                    company_id
+                )
+                if not has_profile:
+                    onboarding_needed["company_profile"] = True
+
                 if enabled_features.get("compliance"):
                     has_locations = await conn.fetchval(
                         "SELECT EXISTS(SELECT 1 FROM business_locations WHERE company_id = $1 AND is_active = true)",
@@ -2049,6 +2060,38 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     )
                     if not has_locations:
                         onboarding_needed["compliance"] = True
+
+                if enabled_features.get("employees"):
+                    has_employees = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM employees WHERE org_id = $1 AND termination_date IS NULL)",
+                        company_id
+                    )
+                    if not has_employees:
+                        onboarding_needed["employees"] = True
+
+                if enabled_features.get("policies"):
+                    has_policies = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM policies WHERE company_id = $1)",
+                        company_id
+                    )
+                    if not has_policies:
+                        onboarding_needed["policies"] = True
+
+                if enabled_features.get("offer_letters"):
+                    has_offers = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM offer_letters WHERE company_id = $1)",
+                        company_id
+                    )
+                    if not has_offers:
+                        onboarding_needed["offer_letters"] = True
+
+                if enabled_features.get("onboarding"):
+                    has_integrations = await conn.fetchval(
+                        "SELECT EXISTS(SELECT 1 FROM integration_connections WHERE company_id = $1 AND status = 'connected')",
+                        company_id
+                    )
+                    if not has_integrations:
+                        onboarding_needed["integrations"] = True
 
             return {
                 "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
