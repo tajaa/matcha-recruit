@@ -927,31 +927,33 @@ export function Dashboard() {
   return (
     <>
     <OnboardingWizard />
-    <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen ${t.pageBg}`}>
+    <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
+    <div className="max-w-5xl mx-auto">
     <CompanyProfileBanner />
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header Section */}
-      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4">
+      <div className="flex justify-between items-start mb-12 pb-8">
         <div>
-          <div className="flex items-center gap-3 mb-1.5">
-             <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] uppercase tracking-widest font-bold rounded-full`}>
-                Live Overview
-             </div>
+          <div className="flex items-center gap-3">
+            <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
+              Command Center
+            </h1>
+            <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] uppercase tracking-widest font-bold rounded-full`}>
+              Live
+            </div>
           </div>
-          <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
-            Command Center
-          </h1>
+          <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>Operations Dashboard</p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={() => navigate('/app/matcha/policies/new')}
-            className={`px-4 py-2 ${t.btnSecondary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
+            className={`px-5 py-2 ${t.btnSecondary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
           >
             New Policy
           </button>
           <button
             onClick={() => navigate('/app/matcha/offer-letters')}
-            className={`px-4 py-2 ${t.btnPrimary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
+            className={`px-5 py-2 ${t.btnPrimary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
           >
             Create Offer
           </button>
@@ -1293,6 +1295,7 @@ export function Dashboard() {
           </div>
         )}
       </WidgetContainer>
+    </div>
     </div>
     </div>
     </>
