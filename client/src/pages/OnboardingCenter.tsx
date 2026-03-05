@@ -393,88 +393,114 @@ export default function OnboardingCenter() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {/* Google Workspace Card */}
-              <section data-tour="onboarding-workspace-google-card" className={`${t.card} p-5 space-y-4`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h2 className={`text-sm font-semibold tracking-wide ${t.textMain}`}>Google Workspace</h2>
-                    <p className={`text-xs ${t.textMuted} mt-1`}>Provision Gmail & groups.</p>
-                  </div>
-                  <span className={`rounded-lg border px-2 py-1 text-[10px] uppercase tracking-wider ${googleBadge.tone}`}>
-                    {googleBadge.label}
-                  </span>
+              <section data-tour="onboarding-workspace-google-card" className={`${t.cardDark} p-6 ${t.cardDarkHover} transition-all group relative overflow-hidden text-left flex flex-col justify-between`}>
+                <div className={`absolute top-0 right-0 p-3 ${t.cardDarkGhost} group-hover:scale-110 transition-all duration-500`}>
+                  {/* Decorative faint icon */}
+                  <div className="w-10 h-10 opacity-20"></div> 
                 </div>
 
-                {googleStatusError && (
-                  <p className="text-xs text-red-500">Status check failed: {googleStatusError}</p>
-                )}
-
-                {googleStatus && (
-                  <div className={`space-y-1 text-[11px] ${t.textMuted}`}>
-                    <p>Mode: <span className={t.textMain}>{googleStatus.mode || 'not configured'}</span></p>
-                    <p>Domain: <span className={t.textMain}>{googleStatus.domain || 'not set'}</span></p>
-                    <p>Auto-provision: <span className={t.textMain}>{googleStatus.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
+                <div className="relative z-10 space-y-4 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className={`${t.labelOnDark} mb-1`}>Google Workspace</div>
+                      <p className={`text-[10px] ${t.textMuted}`}>Provision Gmail & groups.</p>
+                    </div>
+                    <span className={`rounded-full px-2.5 py-0.5 text-[9px] uppercase tracking-widest font-bold ${googleBadge.tone}`}>
+                      {googleBadge.label}
+                    </span>
                   </div>
-                )}
 
-                <button
-                  data-tour="onboarding-configure-google"
-                  onClick={() => navigate('/app/matcha/google-workspace')}
-                  className={`w-full px-3 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors`}
-                >
-                  Configure
-                </button>
+                  {googleStatusError && (
+                    <p className="text-[10px] text-red-500 bg-red-500/10 px-2 py-1 rounded">Status check failed: {googleStatusError}</p>
+                  )}
+
+                  {googleStatus && (
+                    <div className={`space-y-1 text-[11px] font-mono ${t.textMuted}`}>
+                      <p>Mode: <span className={t.textMain}>{googleStatus.mode || 'not configured'}</span></p>
+                      <p>Domain: <span className={t.textMain}>{googleStatus.domain || 'not set'}</span></p>
+                      <p>Auto-provision: <span className={t.textMain}>{googleStatus.auto_provision_on_employee_create ? 'on' : 'off'}</span></p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative z-10 mt-6">
+                  <button
+                    data-tour="onboarding-configure-google"
+                    onClick={() => navigate('/app/matcha/google-workspace')}
+                    className={`px-4 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors`}
+                  >
+                    Configure
+                  </button>
+                </div>
               </section>
 
               {/* Slack Card */}
-              <section data-tour="onboarding-workspace-slack-card" className={`${t.card} p-5 space-y-4`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h2 className={`text-sm font-semibold tracking-wide ${t.textMain}`}>Slack</h2>
-                    <p className={`text-xs ${t.textMuted} mt-1`}>Auto-invite, channels, and workspace defaults.</p>
-                  </div>
-                  <span className={`rounded-lg border px-2 py-1 text-[10px] uppercase tracking-wider ${slackBadge.tone}`}>
-                    {slackBadge.label}
-                  </span>
+              <section data-tour="onboarding-workspace-slack-card" className={`${t.cardDark} p-6 ${t.cardDarkHover} transition-all group relative overflow-hidden text-left flex flex-col justify-between`}>
+                <div className={`absolute top-0 right-0 p-3 ${t.cardDarkGhost} group-hover:scale-110 transition-all duration-500`}>
+                   <div className="w-10 h-10 opacity-20"></div>
                 </div>
 
-                {slackStatusError && (
-                  <p className="text-xs text-red-500">Status check failed: {slackStatusError}</p>
-                )}
-
-                {slackStatus && (
-                  <div className={`space-y-1 text-[11px] ${t.textMuted}`}>
-                    <p>Workspace: <span className={t.textMain}>{slackStatus.workspace_url || 'not set'}</span></p>
-                    <p>Team: <span className={t.textMain}>{slackStatus.slack_team_name || 'not connected'}</span></p>
-                    <p>Auto-invite: <span className={t.textMain}>{slackStatus.auto_invite_on_employee_create ? 'on' : 'off'}</span></p>
+                <div className="relative z-10 space-y-4 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className={`${t.labelOnDark} mb-1`}>Slack</div>
+                      <p className={`text-[10px] ${t.textMuted}`}>Auto-invite, channels, & defaults.</p>
+                    </div>
+                    <span className={`rounded-full px-2.5 py-0.5 text-[9px] uppercase tracking-widest font-bold ${slackBadge.tone}`}>
+                      {slackBadge.label}
+                    </span>
                   </div>
-                )}
 
-                <button
-                  data-tour="onboarding-configure-slack"
-                  onClick={() => navigate('/app/matcha/slack-provisioning')}
-                  className={`w-full px-3 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors`}
-                >
-                  Configure
-                </button>
+                  {slackStatusError && (
+                    <p className="text-[10px] text-red-500 bg-red-500/10 px-2 py-1 rounded">Status check failed: {slackStatusError}</p>
+                  )}
+
+                  {slackStatus && (
+                    <div className={`space-y-1 text-[11px] font-mono ${t.textMuted}`}>
+                      <p>Workspace: <span className={t.textMain} title={slackStatus.workspace_url || ''}>{slackStatus.workspace_url ? slackStatus.workspace_url.replace('https://','').split('.')[0] : 'not set'}</span></p>
+                      <p>Team: <span className={t.textMain}>{slackStatus.slack_team_name || 'not connected'}</span></p>
+                      <p>Auto-invite: <span className={t.textMain}>{slackStatus.auto_invite_on_employee_create ? 'on' : 'off'}</span></p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative z-10 mt-6">
+                  <button
+                    data-tour="onboarding-configure-slack"
+                    onClick={() => navigate('/app/matcha/slack-provisioning')}
+                    className={`px-4 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors`}
+                  >
+                    Configure
+                  </button>
+                </div>
               </section>
 
               {/* Toast Card (Coming Soon) */}
-              <section className={`${t.card} p-5 space-y-4 ${t.comingSoon}`}>
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <h2 className={`text-sm font-semibold tracking-wide ${t.textMain}`}>Toast</h2>
-                    <p className={`text-xs ${t.textMuted} mt-1`}>POS & location mapping.</p>
-                  </div>
-                  <span className={`rounded-lg border px-2 py-1 text-[10px] uppercase tracking-wider ${t.badgeDefault}`}>
-                    Soon
-                  </span>
+              <section className={`${t.cardDark} p-6 ${t.comingSoon} relative overflow-hidden text-left flex flex-col justify-between`}>
+                 <div className={`absolute top-0 right-0 p-3 ${t.cardDarkGhost}`}>
+                   <div className="w-10 h-10 opacity-20"></div>
                 </div>
-                <button
-                  disabled
-                  className={`w-full px-3 py-2 ${t.btnDisabled} text-[10px] font-bold uppercase tracking-wider rounded-xl`}
-                >
-                  Configure
-                </button>
+
+                <div className="relative z-10 space-y-4 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className={`${t.labelOnDark} mb-1`}>Toast</div>
+                      <p className={`text-[10px] ${t.textMuted}`}>POS & location mapping.</p>
+                    </div>
+                    <span className={`rounded-full px-2.5 py-0.5 text-[9px] uppercase tracking-widest font-bold ${t.badgeDefault}`}>
+                      Soon
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="relative z-10 mt-6">
+                  <button
+                    disabled
+                    className={`px-4 py-2 ${t.btnDisabled} text-[10px] font-bold uppercase tracking-wider rounded-xl`}
+                  >
+                    Configure
+                  </button>
+                </div>
               </section>
             </div>
           </div>
