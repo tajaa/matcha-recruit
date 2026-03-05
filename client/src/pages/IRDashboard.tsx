@@ -239,9 +239,9 @@ export function IRDashboard() {
 
               {/* Trend Chart */}
               {visibleWidgets.has('trend') && trends && trends.data.length > 0 && (
-                <div data-tour="ir-dash-trend" className={`${t.card} p-6`}>
-                  <div className={`${t.label} mb-6 flex items-center gap-2`}>
-                    <Activity size={14} className={t.icon} /> Weekly Trend
+                <div data-tour="ir-dash-trend" className={`${t.cardDark} p-6 shadow-lg`}>
+                  <div className={`${t.labelOnDark} mb-6 flex items-center gap-2`}>
+                    <Activity size={14} className="text-zinc-500" /> Weekly Trend
                   </div>
                   <div className="flex items-end gap-1 h-32">
                     {trends.data.map((point, idx) => {
@@ -250,17 +250,17 @@ export function IRDashboard() {
                       return (
                         <div
                           key={idx}
-                          className={`flex-1 ${t.barBg} ${t.barHover} transition-colors cursor-crosshair group relative rounded-sm`}
+                          className={`flex-1 bg-zinc-800 hover:bg-zinc-100 transition-colors cursor-crosshair group relative rounded-sm`}
                           style={{ height: `${Math.max(height, 2)}%` }}
                         >
-                          <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block ${t.tooltipBg} text-[10px] font-bold px-2 py-1 rounded-lg z-10 whitespace-nowrap`}>
+                          <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block bg-white text-black text-[10px] font-bold px-2 py-1 rounded-lg z-10 whitespace-nowrap`}>
                             {point.count} Incidents • {point.date}
                           </div>
                         </div>
                       );
                     })}
                   </div>
-                  <div className={`flex justify-between text-[9px] ${t.textFaint} mt-3 font-mono uppercase`}>
+                  <div className={`flex justify-between text-[9px] text-zinc-500 mt-3 font-mono uppercase`}>
                     <span>{trends.start_date}</span>
                     <span>{trends.end_date}</span>
                   </div>
@@ -270,28 +270,28 @@ export function IRDashboard() {
               {visibleWidgets.has('breakdown') && (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   {/* By Type */}
-                  <div data-tour="ir-dash-by-type" className={`${t.card} p-6`}>
-                    <div className={`${t.label} mb-6 flex items-center gap-2`}>
-                      <ShieldAlert size={14} className={t.icon} /> By Type
+                  <div data-tour="ir-dash-by-type" className={`${t.cardDark} p-6 shadow-md`}>
+                    <div className={`${t.labelOnDark} mb-6 flex items-center gap-2`}>
+                      <ShieldAlert size={14} className="text-zinc-500" /> By Type
                     </div>
                     {summary && Object.keys(summary.by_type).length > 0 ? (
                       <div className="space-y-3">
                         {Object.entries(summary.by_type).map(([type, count]) => (
                           <div key={type} className="flex justify-between items-center group">
-                            <span className={`text-xs ${t.textMuted} group-hover:${t.textMain} transition-colors`}>{TYPE_LABELS[type] || type}</span>
-                            <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{count}</span>
+                            <span className={`text-xs text-zinc-400 group-hover:text-zinc-100 transition-colors`}>{TYPE_LABELS[type] || type}</span>
+                            <span className={`text-xs font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-white/5`}>{count}</span>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
+                      <div className={`text-xs text-zinc-600 font-mono`}>No data available</div>
                     )}
                   </div>
 
                   {/* By Severity */}
-                  <div data-tour="ir-dash-by-severity" className={`${t.card} p-6`}>
-                    <div className={`${t.label} mb-6 flex items-center gap-2`}>
-                      <ShieldAlert size={14} className={t.icon} /> By Severity
+                  <div data-tour="ir-dash-by-severity" className={`${t.cardDark} p-6 shadow-md`}>
+                    <div className={`${t.labelOnDark} mb-6 flex items-center gap-2`}>
+                      <ShieldAlert size={14} className="text-zinc-500" /> By Severity
                     </div>
                     {summary && Object.keys(summary.by_severity).length > 0 ? (
                       <div className="space-y-3">
@@ -301,35 +301,35 @@ export function IRDashboard() {
                           return (
                             <div key={severity} className="flex justify-between items-center group">
                               <div className="flex items-center gap-2">
-                                <div className={`w-1.5 h-1.5 rounded-full ${sevDots[severity]}`} />
-                                <span className={`text-xs ${t.textMuted} capitalize group-hover:${t.textMain} transition-colors`}>{severity}</span>
+                                <div className={`w-1.5 h-1.5 rounded-full ${isLight ? SEVERITY_DOTS[severity] : sevDots[severity]}`} />
+                                <span className={`text-xs text-zinc-400 capitalize group-hover:text-zinc-100 transition-colors`}>{severity}</span>
                               </div>
-                              <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{count}</span>
+                              <span className={`text-xs font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-white/5`}>{count}</span>
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
+                      <div className={`text-xs text-zinc-600 font-mono`}>No data available</div>
                     )}
                   </div>
 
                   {/* Hotspots */}
-                  <div data-tour="ir-dash-hotspots" className={`${t.card} p-6`}>
-                    <div className={`${t.label} mb-6 flex items-center gap-2`}>
-                      <MapPin size={14} className={t.icon} /> Hotspots
+                  <div data-tour="ir-dash-hotspots" className={`${t.cardDark} p-6 shadow-md`}>
+                    <div className={`${t.labelOnDark} mb-6 flex items-center gap-2`}>
+                      <MapPin size={14} className="text-zinc-500" /> Hotspots
                     </div>
                     {locations && locations.hotspots.length > 0 ? (
                       <div className="space-y-3">
                         {locations.hotspots.slice(0, 4).map((hotspot, idx) => (
                           <div key={idx} className="flex justify-between items-center group">
-                            <span className={`text-xs ${t.textMuted} truncate max-w-[120px] group-hover:${t.textMain} transition-colors`}>{hotspot.location}</span>
-                            <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{hotspot.count}</span>
+                            <span className={`text-xs text-zinc-400 truncate max-w-[120px] group-hover:text-zinc-100 transition-colors`}>{hotspot.location}</span>
+                            <span className={`text-xs font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-white/5`}>{hotspot.count}</span>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
+                      <div className={`text-xs text-zinc-600 font-mono`}>No data available</div>
                     )}
                   </div>
                 </div>

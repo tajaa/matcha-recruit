@@ -248,8 +248,8 @@ export function Handbooks() {
           </button>
         </div>
       ) : (
-        <div data-tour="handbooks-list" className={`${t.card} overflow-hidden`}>
-          <div className={`flex items-center gap-4 py-3 px-4 ${t.label} border-b ${t.border}`}>
+        <div data-tour="handbooks-list" className={`${t.cardDark} overflow-hidden shadow-lg`}>
+          <div className={`flex items-center gap-4 py-3 px-4 ${t.labelOnDark} border-b border-white/5`}>
             <div className="flex-1">Handbook</div>
             <div className="w-28 text-center">Scope</div>
             <div className="w-24 text-center">Version</div>
@@ -264,22 +264,22 @@ export function Handbooks() {
               <Link
                 key={item.id}
                 to={`/app/matcha/handbook/${item.id}`}
-                className={`group flex items-center gap-4 py-4 px-4 cursor-pointer ${t.rowHover} transition-colors`}
+                className={`group flex items-center gap-4 py-4 px-4 cursor-pointer hover:bg-white/5 transition-colors`}
               >
                 <div className="flex-1 min-w-0">
-                  <h3 className={`text-sm font-bold ${t.textMain} truncate transition-colors`}>
+                  <h3 className={`text-sm font-bold text-zinc-100 truncate transition-colors`}>
                     {item.title}
                   </h3>
-                  <p className={`text-[10px] ${t.textFaint} mt-1 truncate max-w-xl font-mono uppercase`}>
+                  <p className={`text-[10px] text-zinc-500 mt-1 truncate max-w-xl font-mono uppercase`}>
                     {item.mode === 'multi_state' ? 'Multi-State' : 'Single-State'} • {item.source_type}
                   </p>
                 </div>
 
-                <div className={`w-28 text-center text-[10px] font-mono ${t.textMuted}`}>
+                <div className={`w-28 text-center text-[10px] font-mono text-zinc-400`}>
                   {(item.scope_states || []).join(', ') || 'N/A'}
                 </div>
 
-                <div className={`w-24 text-center text-[10px] font-mono ${t.textFaint}`}>
+                <div className={`w-24 text-center text-[10px] font-mono text-zinc-500`}>
                   v{item.active_version}
                 </div>
 
@@ -325,7 +325,7 @@ export function Handbooks() {
                   )}
                 </div>
 
-                <div className={`w-8 flex justify-center ${t.textFaint} group-hover:${t.textMain} transition-colors`}>
+                <div className={`w-8 flex justify-center text-zinc-600 group-hover:text-zinc-300 transition-colors`}>
                   <ChevronRight size={14} />
                 </div>
               </Link>

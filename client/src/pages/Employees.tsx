@@ -1229,9 +1229,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           </>
         </div>
       ) : (
-        <div data-tour="emp-list" className={`${t.card} overflow-hidden`}>
+        <div data-tour="emp-list" className={`${t.cardDark} overflow-hidden shadow-lg`}>
            {/* Table Header */}
-           <div className={`hidden md:flex items-center gap-4 py-3 px-6 text-[10px] ${t.textFaint} uppercase tracking-widest font-bold border-b ${t.border}`}>
+           <div className={`hidden md:flex items-center gap-4 py-3 px-6 text-[10px] ${t.labelOnDark} border-b border-white/5`}>
               <div className="flex-1">Name / Email</div>
               <div className="w-32 text-right">Work State</div>
               <div className="w-32 text-right">Type</div>
@@ -1240,55 +1240,50 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               <div className="w-32"></div>
            </div>
 
-          <div className={`${t.divide}`}>
+          <div className="divide-y divide-white/5">
           {employees.map((employee) => (
             <div
               key={employee.id}
               onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-              className={`group ${t.rowHover} transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
+              className={`group hover:bg-white/5 transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
             >
               <div className="flex items-center min-w-0 flex-1">
                 <div className="flex-shrink-0">
-                  <div className={`h-10 w-10 rounded-xl ${t.avatar} flex items-center justify-center font-bold text-xs`}>
+                  <div className={`h-10 w-10 rounded-xl bg-zinc-800 border border-white/5 flex items-center justify-center font-bold text-xs text-zinc-300`}>
                     {employee.first_name[0]}{employee.last_name[0]}
                   </div>
                 </div>
                 <div className="ml-4 min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <p className={`text-sm font-bold ${t.textMain} truncate`}>
+                    <p className={`text-sm font-bold text-zinc-100 truncate`}>
                       {employee.first_name} {employee.last_name}
                     </p>
                   </div>
-                  <p className={`text-xs ${t.textMuted} font-mono truncate`}>
+                  <p className={`text-xs text-zinc-500 font-mono truncate`}>
                     {employee.work_email || employee.email}
                   </p>
-                  {employee.personal_email && (
-                    <p className={`text-[10px] ${t.textFaint} truncate`}>
-                      Personal: {employee.personal_email}
-                    </p>
-                  )}
                 </div>
                 <div className="lg:hidden">
-                   <ChevronRight size={16} className={t.textFaint} />
+                   <ChevronRight size={16} className="text-zinc-600" />
                 </div>
               </div>
 
-              <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t ${t.border} pt-4 lg:border-0 lg:pt-0`}>
+              <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t border-white/5 pt-4 lg:border-0 lg:pt-0`}>
                  <div className="lg:text-right">
-                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Location</p>
-                    <p className={`text-xs ${t.textDim} font-mono`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
+                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden`}>Location</p>
+                    <p className={`text-xs text-zinc-400 font-mono`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
                  </div>
                  <div className="lg:text-right lg:w-24">
-                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Type</p>
-                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider truncate`}>
+                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden`}>Type</p>
+                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider truncate`}>
                       {employee.employment_type?.replace('_', ' ') || '—'}
                     </p>
                  </div>
                  <div data-tour="emp-onboarding-col" className="lg:w-36 flex flex-col lg:items-end lg:justify-end">
-                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Onboarding</p>
+                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden mb-1`}>Onboarding</p>
                     {onboardingProgress[employee.id]?.has_onboarding ? (
                       <div className="flex items-center gap-2">
-                        <div className={`w-16 h-1.5 ${t.progressBg} rounded-full overflow-hidden`}>
+                        <div className={`w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden`}>
                           <div
                             className="h-full bg-emerald-500 rounded-full transition-all"
                             style={{
@@ -1296,16 +1291,16 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             }}
                           />
                         </div>
-                        <span className={`text-[10px] ${t.textMuted} font-mono`}>
+                        <span className={`text-[10px] text-zinc-500 font-mono`}>
                           {onboardingProgress[employee.id].completed}/{onboardingProgress[employee.id].total}
                         </span>
                       </div>
                     ) : (
-                      <span className={`text-[10px] ${t.textFaint} uppercase tracking-wider`}>Not started</span>
+                      <span className={`text-[10px] text-zinc-600 uppercase tracking-wider`}>Not started</span>
                     )}
                  </div>
                  <div className="flex flex-col lg:items-end lg:justify-end lg:w-32">
-                    <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Status</p>
+                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden mb-1`}>Status</p>
                     {getStatusBadge(employee)}
                  </div>
 
@@ -1315,7 +1310,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         data-tour="emp-invite-btn"
                         onClick={(e) => { e.stopPropagation(); handleSendInvite(employee.id); }}
                         disabled={invitingId === employee.id}
-                        className={`flex-1 lg:flex-none inline-flex items-center justify-center px-3 py-1.5 ${t.btnSecondary} text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+                        className={`flex-1 lg:flex-none inline-flex items-center justify-center px-3 py-1.5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
                       >
                         {invitingId === employee.id ? (
                           <span className="animate-pulse">Sending...</span>
@@ -1328,7 +1323,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     )}
                  </div>
                  <div className="hidden lg:flex w-8 justify-end">
-                    <ChevronRight size={16} className={t.chevron} />
+                    <ChevronRight size={16} className="text-zinc-600 group-hover:text-zinc-400 transition-colors" />
                  </div>
               </div>
             </div>
@@ -1336,7 +1331,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           </div>
         </div>
       )}
-
       {/* Add Employee Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">

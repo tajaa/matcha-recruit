@@ -586,16 +586,16 @@ export default function OnboardingCenter() {
                 </div>
               </div>
             ) : (
-              <div className={`${t.card} overflow-hidden`}>
+              <div className={`${t.cardDark} overflow-hidden shadow-lg`}>
                 {/* Header row */}
-                <div className={`grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-3 py-2 text-[10px] uppercase tracking-wider ${t.textFaint} font-bold border-b ${t.border}`}>
+                <div className={`grid grid-cols-[1fr_120px_100px_100px_140px] gap-3 px-4 py-3 ${t.labelOnDark} border-b border-white/5`}>
                   <span>Employee</span>
                   <span>Provider</span>
-                  <span>Status</span>
-                  <span>Trigger</span>
-                  <span>Time</span>
+                  <span className="text-center">Status</span>
+                  <span className="text-center">Trigger</span>
+                  <span className="text-right">Time</span>
                 </div>
-                <div className={`${t.divide}`}>
+                <div className="divide-y divide-white/5">
                 {runs.map((run) => (
                     <div
                       key={run.run_id}
