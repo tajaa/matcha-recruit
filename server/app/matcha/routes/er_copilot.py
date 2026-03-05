@@ -623,26 +623,31 @@ async def export_case_file(
         )
 
     # Build HTML report
-    case_title = case_row["title"] or "Untitled Case"
-    case_number = case_row["case_number"]
-    status = case_row["status"]
-    category = case_row.get("category") or "—"
-    outcome = case_row.get("outcome") or "—"
-    description = case_row["description"] or "No description provided."
+    import html as html_mod
+
+    def esc(val: str) -> str:
+        return html_mod.escape(str(val)) if val else ""
+
+    case_title = esc(case_row["title"] or "Untitled Case")
+    case_number = esc(case_row["case_number"])
+    status = esc(case_row["status"])
+    category = esc(case_row.get("category") or "—")
+    outcome = esc(case_row.get("outcome") or "—")
+    description = esc(case_row["description"] or "No description provided.")
     created_at = case_row["created_at"].strftime("%Y-%m-%d %H:%M") if case_row["created_at"] else "—"
     closed_at = case_row["closed_at"].strftime("%Y-%m-%d %H:%M") if case_row.get("closed_at") else "—"
 
     docs_html = ""
     if doc_rows:
         rows_html = "".join(
-            f"<tr><td>{r['filename']}</td><td>{r['document_type']}</td><td>{(r['file_size'] or 0) // 1024} KB</td><td>{r['created_at'].strftime('%Y-%m-%d')}</td></tr>"
+            f"<tr><td>{esc(r['filename'])}</td><td>{esc(r['document_type'])}</td><td>{(r['file_size'] or 0) // 1024} KB</td><td>{r['created_at'].strftime('%Y-%m-%d')}</td></tr>"
             for r in doc_rows
         )
         docs_html = f"<h2>Documents ({len(doc_rows)})</h2><table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th></tr>{rows_html}</table>"
 
     analyses_html = ""
     for a in analysis_rows:
-        atype = (a["analysis_type"] or "unknown").replace("_", " ").title()
+        atype = esc((a["analysis_type"] or "unknown").replace("_", " ").title())
         result = a["analysis_data"]
         if isinstance(result, str):
             try:
@@ -654,14 +659,14 @@ async def export_case_file(
             summary = result.get("summary") or result.get("timeline_summary") or json.dumps(result, indent=2)[:500]
         else:
             summary = str(result)[:500] if result else "No results."
-        analyses_html += f"<h3>{atype}</h3><p>{summary}</p>"
+        analyses_html += f"<h3>{atype}</h3><p>{esc(summary)}</p>"
     if analyses_html:
         analyses_html = f"<h2>Analyses</h2>{analyses_html}"
 
     notes_html = ""
     if note_rows:
         items = "".join(
-            f"<div class='note'><span class='note-type'>{r['note_type']}</span> <span class='note-date'>{r['created_at'].strftime('%Y-%m-%d %H:%M')}</span><p>{r['content']}</p></div>"
+            f"<div class='note'><span class='note-type'>{esc(r['note_type'])}</span> <span class='note-date'>{r['created_at'].strftime('%Y-%m-%d %H:%M')}</span><p>{esc(r['content'])}</p></div>"
             for r in note_rows
         )
         notes_html = f"<h2>Case Notes ({len(note_rows)})</h2>{items}"
@@ -705,6 +710,9 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
         pdf_bytes = WeasyHTML(string=html).write_pdf()
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF generation not available (WeasyPrint not installed)")
+    except Exception as exc:
+        logger.error("PDF generation failed for case %s: %s", case_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
 
     # Encrypt PDF with password
     try:
@@ -721,6 +729,9 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
         encrypted_bytes = output.read()
     except ImportError:
         raise HTTPException(status_code=500, detail="PDF encryption not available (pypdf not installed)")
+    except Exception as exc:
+        logger.error("PDF encryption failed for case %s: %s", case_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"PDF encryption failed: {exc}")
 
     filename = f"ER-Case-{case_number}.pdf"
 
