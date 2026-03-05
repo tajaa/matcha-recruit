@@ -132,7 +132,21 @@ Your task:
 1. Identify specific policy sections that may have been violated
 2. For each potential violation, cite the exact policy text
 3. Link to specific evidence supporting the violation
-4. Assess severity (major vs minor violation)
+4. Assess severity and relevance
+
+CRITICAL MATCHING RULES:
+- Only flag a violation when the evidence DIRECTLY AND SPECIFICALLY relates to the policy section's subject matter.
+- Do NOT match evidence to a policy section simply because they share a broad theme. For example, do NOT match safety violations (e.g., equipment hazards, lockout/tagout) to a dress code or appearance policy just because both loosely relate to "professionalism" or "workplace standards."
+- Each violation must pass this test: would a reasonable HR professional, reading the specific policy text and the specific evidence, agree that this evidence describes conduct the policy was written to address?
+
+SEVERITY CRITERIA:
+- "major": Clear, direct violation with strong supporting evidence. The policy language specifically covers the conduct described.
+- "minor": Possible violation with circumstantial evidence, or the policy applies but the conduct is borderline.
+
+RELEVANCE CRITERIA:
+- "high": The evidence directly describes conduct that the policy section was specifically written to address.
+- "medium": The evidence relates to the policy section's subject matter but the connection requires some interpretation.
+- "low": The connection between evidence and policy is tenuous, thematic, or requires a stretch to justify. These should generally NOT be included.
 
 Return ONLY a JSON object with this structure:
 {{
@@ -141,6 +155,7 @@ Return ONLY a JSON object with this structure:
             "policy_section": "Section 3.2: Workplace Harassment",
             "policy_text": "Employees shall not engage in conduct that creates an intimidating, hostile, or offensive work environment",
             "severity": "major",
+            "relevance": "high",
             "evidence": [
                 {{
                     "source_document_id": "doc-uuid",
@@ -159,7 +174,7 @@ Return ONLY a JSON object with this structure:
     "summary": "Overview of findings and their severity"
 }}
 
-Be thorough but fair. Note both supporting and potentially mitigating evidence."""
+Be thorough but fair. Note both supporting and potentially mitigating evidence. Prioritize precision over volume — it is better to return fewer, well-matched violations than many tenuous ones."""
 
 
 SUMMARY_REPORT_PROMPT = """You are an Employee Relations investigation assistant. Generate a professional investigation summary report.

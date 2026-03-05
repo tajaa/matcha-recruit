@@ -1883,7 +1883,7 @@ async def generate_suggested_guidance(
         signals = [s for s in confidence_result.get("signals", []) if isinstance(s, dict) and s.get("present")]
         determination_signals = [s["reasoning"] for s in signals if isinstance(s.get("reasoning"), str)]
 
-        payload["determination_suggested"] = confidence >= 0.50
+        payload["determination_suggested"] = confidence >= 0.65
         payload["determination_confidence"] = round(confidence, 2)
         payload["determination_signals"] = determination_signals
 
@@ -2101,7 +2101,7 @@ async def generate_suggested_guidance_stream(
             present_signals = [s for s in conf_result.get("signals", []) if isinstance(s, dict) and s.get("present")]
             det_signals = [s["reasoning"] for s in present_signals if isinstance(s.get("reasoning"), str)]
 
-            payload["determination_suggested"] = conf >= 0.50
+            payload["determination_suggested"] = conf >= 0.65
             payload["determination_confidence"] = round(conf, 2)
             payload["determination_signals"] = det_signals
 

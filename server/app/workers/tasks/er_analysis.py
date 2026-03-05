@@ -592,6 +592,7 @@ async def _run_policy_check(case_id: str, model_override: Optional[str] = None) 
             raise ValueError("No evidence documents found for policy check")
 
         all_violations: list[dict[str, Any]] = []
+        filtered_violations: list[dict[str, Any]] = []
         applicable_policies: list[str] = []
         policy_summaries: list[str] = []
 
@@ -629,7 +630,11 @@ async def _run_policy_check(case_id: str, model_override: Optional[str] = None) 
 
             violations = policy_result.get("violations", [])
             if isinstance(violations, list):
-                all_violations.extend(violations)
+                for v in violations:
+                    if v.get("relevance") == "low":
+                        filtered_violations.append(v)
+                    else:
+                        all_violations.append(v)
 
             maybe_applicable = policy_result.get("policies_potentially_applicable", [])
             if isinstance(maybe_applicable, list):
@@ -642,9 +647,10 @@ async def _run_policy_check(case_id: str, model_override: Optional[str] = None) 
                 policy_summaries.append(f"{policies[idx]['title']}: {summary.strip()}")
 
         if all_violations:
+            filtered_note = f" ({len(filtered_violations)} low-relevance match(es) filtered.)" if filtered_violations else ""
             summary_text = (
                 f"Checked {len(policies)} policy source(s) and identified "
-                f"{len(all_violations)} potential violation(s)."
+                f"{len(all_violations)} potential violation(s).{filtered_note}"
             )
         else:
             summary_text = f"Checked {len(policies)} policy source(s). No policy violations identified."
@@ -659,6 +665,7 @@ async def _run_policy_check(case_id: str, model_override: Optional[str] = None) 
 
         result = {
             "violations": all_violations,
+            "filtered_count": len(filtered_violations),
             "policies_potentially_applicable": applicable_policies,
             "summary": summary_text,
             "generated_at": datetime.now(timezone.utc).isoformat(),
