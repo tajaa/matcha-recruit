@@ -128,7 +128,6 @@ export default function EmployeeDetail() {
   const [allEmployees, setAllEmployees] = useState<EmployeeListItem[]>([]);
   const [directReports, setDirectReports] = useState<EmployeeListItem[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
-  const [managerSearch, setManagerSearch] = useState('');
 
   const startEditing = () => {
     if (!employee) return;

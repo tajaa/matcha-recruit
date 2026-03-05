@@ -306,7 +306,7 @@ type EmployeeEmptyState = {
 
 function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getStatusBadge, handleSendInvite, invitingId }: {
   employee: Employee;
-  t: typeof LT;
+  t: typeof LT | typeof DK;
   isLight: boolean;
   navigate: (path: string) => void;
   onboardingProgress: Record<string, OnboardingProgress>;
