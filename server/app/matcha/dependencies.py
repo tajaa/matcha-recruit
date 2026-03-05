@@ -1,4 +1,5 @@
 """Matcha (HR/Recruiting) domain-specific dependencies."""
+from contextlib import asynccontextmanager
 from typing import Optional
 from uuid import UUID
 
@@ -288,6 +289,21 @@ async def get_client_company_id(
     """
     scope = await resolve_accessible_company_scope(current_user)
     return scope.get("company_id")
+
+
+@asynccontextmanager
+async def get_tenant_connection(current_user):
+    """Get a database connection with the RLS tenant context set.
+
+    Resolves the caller's company scope and passes the tenant_id to
+    ``get_connection`` so that PostgreSQL RLS policies automatically
+    filter rows.  Admin users see the first company by default (they
+    can override via ``resolve_accessible_company_scope``).
+    """
+    scope = await resolve_accessible_company_scope(current_user)
+    company_id = scope.get("company_id")
+    async with get_connection(tenant_id=str(company_id) if company_id else None) as conn:
+        yield conn
 
 
 async def get_employee_info(

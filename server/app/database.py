@@ -38,10 +38,23 @@ async def close_pool():
 
 
 @asynccontextmanager
-async def get_connection():
-    """Get a database connection from the pool."""
+async def get_connection(tenant_id: str | None = None):
+    """Get a database connection from the pool.
+
+    Args:
+        tenant_id: Optional company/org UUID string. When provided, sets
+            ``app.current_tenant_id`` for the duration of the connection so
+            that PostgreSQL row-level security policies can filter rows
+            automatically.  The setting is transaction-local and resets
+            when the connection returns to the pool.
+    """
     pool = await get_pool()
     async with pool.acquire() as conn:
+        if tenant_id:
+            await conn.execute(
+                "SELECT set_config('app.current_tenant_id', $1, true)",
+                str(tenant_id),
+            )
         yield conn
 
 

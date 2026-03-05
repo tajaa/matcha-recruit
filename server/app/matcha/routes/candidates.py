@@ -66,7 +66,7 @@ async def get_company_candidates(
             FROM candidates c
             LEFT JOIN job_applications ja ON ja.candidate_id = c.id
             LEFT JOIN positions p ON p.id = ja.position_id
-            WHERE p.company_id = $1 OR c.user_id IS NOT NULL
+            WHERE p.company_id = $1
             ORDER BY c.id, c.created_at DESC
             """,
             company_id,
@@ -75,7 +75,10 @@ async def get_company_candidates(
 
 
 @router.post("/upload", response_model=CandidateResponse)
-async def upload_resume(file: UploadFile = File(...)):
+async def upload_resume(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Upload and parse a resume (PDF or DOCX)."""
     # Validate file type
     if not file.filename:
@@ -164,7 +167,10 @@ async def upload_resume(file: UploadFile = File(...)):
 
 
 @router.post("/bulk-upload", response_model=BulkUploadResult)
-async def bulk_upload_resumes(files: list[UploadFile] = File(...)):
+async def bulk_upload_resumes(
+    files: list[UploadFile] = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Upload and parse multiple resumes (PDF or DOCX).
 
     Files are stored in S3 (or locally as fallback) and parsed using AI.
@@ -280,6 +286,7 @@ async def list_candidates(
     min_experience: Optional[int] = None,
     max_experience: Optional[int] = None,
     education: Optional[str] = None,  # e.g., "bachelor", "master", "phd"
+    current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List candidates with optional filters."""
     async with get_connection() as conn:
@@ -525,7 +532,10 @@ async def update_my_profile(
 # ===========================================
 
 @router.get("/{candidate_id}", response_model=CandidateDetail)
-async def get_candidate(candidate_id: UUID):
+async def get_candidate(
+    candidate_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Get a candidate's full details."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -558,7 +568,10 @@ async def get_candidate(candidate_id: UUID):
 
 
 @router.delete("/{candidate_id}")
-async def delete_candidate(candidate_id: UUID):
+async def delete_candidate(
+    candidate_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Delete a candidate."""
     async with get_connection() as conn:
         # Get file path first
