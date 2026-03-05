@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { CheckCircle, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 
 export type LifecycleStepIcon =
   | 'locations' | 'research' | 'alerts' | 'posters' | 'audit'
@@ -376,12 +377,65 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
   ),
 };
 
+const LT = {
+  container: 'border border-stone-200 bg-stone-100/80 rounded-2xl overflow-hidden mb-8 shadow-sm',
+  headerBtn: 'w-full flex items-center justify-between px-5 py-4 text-left hover:bg-stone-200/50 transition-colors',
+  title: 'text-[10px] font-bold uppercase tracking-[0.2em] text-stone-500 font-mono',
+  stageBadge: 'px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest bg-stone-200 border border-stone-300 text-zinc-900',
+  stageTitle: 'text-[10px] font-bold uppercase tracking-widest text-stone-600',
+  chevron: 'text-stone-400',
+  contentBorder: 'border-t border-stone-200',
+  stepCircleComplete: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600',
+  stepCircleActive: 'bg-zinc-900 border-zinc-900 text-zinc-50 shadow-md',
+  stepCirclePending: 'bg-stone-200 border-stone-300 text-stone-400',
+  stepTitleActive: 'text-zinc-900',
+  stepTitleComplete: 'text-emerald-600/80',
+  stepTitlePending: 'text-stone-400',
+  connectorActive: 'bg-emerald-500/20',
+  connectorPending: 'bg-stone-200',
+  infoBox: 'p-5 bg-stone-200/50 border border-stone-200 rounded-xl',
+  infoIcon: 'p-2 bg-stone-300 rounded-lg text-stone-600',
+  infoTitle: 'text-[11px] font-bold text-zinc-900 uppercase tracking-widest',
+  infoBadge: 'text-[8px] px-2 py-0.5 font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-full',
+  infoDesc: 'text-xs text-stone-600 leading-relaxed',
+  infoAction: 'text-[10px] text-stone-500 font-mono mt-3',
+  actionArrow: 'text-emerald-600',
+} as const;
+
+const DK = {
+  container: 'border border-white/10 bg-zinc-900/50 rounded-2xl overflow-hidden mb-8 shadow-sm backdrop-blur-sm',
+  headerBtn: 'w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03] transition-colors',
+  title: 'text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 font-mono',
+  stageBadge: 'px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest bg-zinc-800 border border-white/5 text-zinc-100',
+  stageTitle: 'text-[10px] font-bold uppercase tracking-widest text-zinc-400',
+  chevron: 'text-zinc-600',
+  contentBorder: 'border-t border-white/5',
+  stepCircleComplete: 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500',
+  stepCircleActive: 'bg-white border-white text-black shadow-[0_0_15px_rgba(255,255,255,0.1)]',
+  stepCirclePending: 'bg-zinc-900 border-white/5 text-zinc-700',
+  stepTitleActive: 'text-white',
+  stepTitleComplete: 'text-matcha-500/60',
+  stepTitlePending: 'text-zinc-700',
+  connectorActive: 'bg-matcha-500/20',
+  connectorPending: 'bg-white/5',
+  infoBox: 'p-5 bg-zinc-950/40 border border-white/5 rounded-xl',
+  infoIcon: 'p-2 bg-white/5 rounded-lg text-zinc-400',
+  infoTitle: 'text-[11px] font-bold text-white uppercase tracking-widest',
+  infoBadge: 'text-[8px] px-2 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 rounded-full',
+  infoDesc: 'text-xs text-zinc-500 leading-relaxed',
+  infoAction: 'text-[10px] text-zinc-400 font-mono mt-3',
+  actionArrow: 'text-matcha-500',
+} as const;
+
 export function LifecycleWizard({
   steps,
   activeStep,
   storageKey,
   title = 'System Lifecycle',
 }: LifecycleWizardProps) {
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
+  
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(storageKey) === 'true';
@@ -398,30 +452,31 @@ export function LifecycleWizard({
     } catch {}
   };
 
-  const StepIcon = STEP_ICONS[steps[activeStep - 1].icon];
+  const activeStepData = steps[activeStep - 1] || steps[0];
+  const StepIcon = STEP_ICONS[activeStepData.icon];
 
   return (
-    <div className={`border border-white/5 light:border-black/[0.08] bg-zinc-900/30 light:bg-black/[0.07] light:backdrop-blur-sm rounded-sm overflow-hidden mb-8`}>
+    <div className={t.container}>
       <button
         onClick={toggle}
-        className="w-full flex items-center justify-between px-4 py-3 text-left hover:bg-white/[0.02] transition-colors"
+        className={t.headerBtn}
       >
         <div className="flex items-center gap-4">
-          <span className="text-[9px] font-bold uppercase tracking-[0.25em] text-zinc-500 light:text-stone-500 font-mono">
+          <span className={t.title}>
             {title}
           </span>
           <div className="flex items-center gap-2">
-            <span className="px-1.5 py-0.5 text-[8px] font-mono font-bold uppercase tracking-widest bg-zinc-800 light:bg-zinc-900 border border-white/5 light:border-zinc-700 text-zinc-400 light:text-zinc-100">
+            <span className={t.stageBadge}>
               Stage 0{activeStep}
             </span>
-            <span className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 light:text-stone-600 hidden sm:inline">
-              {steps[activeStep - 1].title}
+            <span className={t.stageTitle + " hidden sm:inline"}>
+              {activeStepData.title}
             </span>
           </div>
         </div>
         <ChevronDown
           size={14}
-          className={`text-zinc-600 light:text-stone-500 transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`}
+          className={`${t.chevron} transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`}
         />
       </button>
 
@@ -432,10 +487,10 @@ export function LifecycleWizard({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="border-t border-white/5 light:border-stone-200 overflow-hidden"
+            className={`${t.contentBorder} overflow-hidden`}
           >
-            <div className="px-4 py-6">
-              <div className="flex items-start justify-between gap-8 mb-6 overflow-x-auto no-scrollbar pb-2">
+            <div className="px-5 py-8">
+              <div className="flex items-start justify-between gap-8 mb-8 overflow-x-auto no-scrollbar pb-4">
                 {steps.map((step, idx) => {
                   const isComplete = step.id < activeStep;
                   const isActive = step.id === activeStep;
@@ -445,23 +500,23 @@ export function LifecycleWizard({
                     <div key={step.id} className="flex items-center gap-4 group flex-shrink-0">
                       <div className="flex flex-col items-center">
                         <div
-                          className={`relative w-8 h-8 rounded-full border flex items-center justify-center transition-all duration-500 ${
+                          className={`relative w-9 h-9 rounded-full border flex items-center justify-center transition-all duration-500 ${
                             isComplete
-                              ? 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500 light:text-matcha-700'
+                              ? t.stepCircleComplete
                               : isActive
-                              ? 'bg-white/5 light:bg-zinc-900 border-white/20 light:border-zinc-700 text-white light:text-zinc-50 shadow-[0_0_15px_rgba(255,255,255,0.05)]'
-                              : 'bg-zinc-900 light:bg-stone-200 border-white/5 light:border-stone-300 text-zinc-700 light:text-stone-500'
+                              ? t.stepCircleActive
+                              : t.stepCirclePending
                           }`}
                         >
                           {isComplete ? (
-                            <CheckCircle size={14} strokeWidth={2.5} />
+                            <CheckCircle size={16} strokeWidth={2.5} />
                           ) : (
-                            <StepIconComponent className="w-3.5 h-3.5" />
+                            <StepIconComponent className="w-4 h-4" />
                           )}
                         </div>
                         <span
-                          className={`mt-2 text-[8px] font-bold uppercase tracking-[0.15em] ${
-                            isActive ? 'text-white light:text-zinc-900' : isComplete ? 'text-matcha-500/60 light:text-matcha-700' : 'text-zinc-700 light:text-stone-400'
+                          className={`mt-2 text-[9px] font-bold uppercase tracking-[0.15em] ${
+                            isActive ? t.stepTitleActive : isComplete ? t.stepTitleComplete : t.stepTitlePending
                           }`}
                         >
                           {step.title}
@@ -469,8 +524,8 @@ export function LifecycleWizard({
                       </div>
                       {idx < steps.length - 1 && (
                         <div
-                          className={`w-8 h-px transition-colors duration-700 ${
-                            step.id < activeStep ? 'bg-matcha-500/20' : 'bg-white/5 light:bg-stone-300'
+                          className={`w-10 h-px transition-colors duration-700 ${
+                            step.id < activeStep ? t.connectorActive : t.connectorPending
                           }`}
                         />
                       )}
@@ -479,26 +534,26 @@ export function LifecycleWizard({
                 })}
               </div>
 
-              <div className="p-4 bg-zinc-950/40 light:bg-black/[0.18] border border-white/5 light:border-black/[0.1] rounded-sm">
+              <div className={t.infoBox}>
                 <div className="flex items-start gap-4">
-                  <div className="p-2 bg-white/5 light:bg-black/[0.15] rounded-sm text-zinc-400 light:text-zinc-300">
-                    <StepIcon className="w-4 h-4" />
+                  <div className={t.infoIcon}>
+                    <StepIcon className="w-5 h-5" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-1">
-                      <h4 className="text-[10px] font-bold text-white uppercase tracking-widest">
-                        {steps[activeStep - 1].title}
+                    <div className="flex items-center gap-3 mb-2">
+                      <h4 className={t.infoTitle}>
+                        {activeStepData.title}
                       </h4>
-                      <span className="text-[7px] px-1.5 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 light:text-matcha-700 border border-matcha-500/20 rounded-xs">
+                      <span className={t.infoBadge}>
                         Active Stage
                       </span>
                     </div>
-                    <p className="text-[11px] text-zinc-500 light:text-zinc-400 leading-relaxed">
-                      {steps[activeStep - 1].description}
+                    <p className={t.infoDesc}>
+                      {activeStepData.description}
                     </p>
-                    {steps[activeStep - 1].action && (
-                      <p className="text-[10px] text-zinc-400 light:text-zinc-300 font-mono mt-2 opacity-80">
-                        <span className="text-matcha-500 light:text-matcha-700">→</span> {steps[activeStep - 1].action}
+                    {activeStepData.action && (
+                      <p className={t.infoAction + " opacity-80"}>
+                        <span className={t.actionArrow}>→</span> {activeStepData.action}
                       </p>
                     )}
                   </div>
