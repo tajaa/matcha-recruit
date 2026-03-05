@@ -14,6 +14,9 @@ import type {
 import { RootCauseAnalysisModal } from '../components/ir/RootCauseAnalysisModal';
 import { RecommendationsAnalysisModal } from '../components/ir/RecommendationsAnalysisModal';
 import { SimilarIncidentsAnalysisModal } from '../components/ir/SimilarIncidentsAnalysisModal';
+import { AnalysisTerminalModal } from '../components/ir/AnalysisTerminalModal';
+import { useIRAnalysisStream } from '../hooks/ir/useIRAnalysisStream';
+import type { AnalysisType } from '../hooks/ir/useIRAnalysisStream';
 
 const STATUS_OPTIONS: { value: IRStatus; label: string }[] = [
   { value: 'reported', label: 'Reported' },
@@ -78,7 +81,9 @@ export function IRDetail() {
   const [rootCause, setRootCause] = useState<IRRootCauseAnalysis | null>(null);
   const [recommendations, setRecommendations] = useState<IRRecommendationsAnalysis | null>(null);
   const [similarIncidents, setSimilarIncidents] = useState<IRPrecedentAnalysis | null>(null);
-  const [analyzingType, setAnalyzingType] = useState<string | null>(null);
+  const [showTerminalModal, setShowTerminalModal] = useState(false);
+
+  const stream = useIRAnalysisStream();
 
   const [editingRootCause, setEditingRootCause] = useState(false);
   const [editingActions, setEditingActions] = useState(false);
@@ -133,27 +138,28 @@ export function IRDetail() {
     }
   };
 
-  const runAnalysis = async (type: string) => {
+  const runAnalysis = (type: string) => {
     if (!id) return;
-    setAnalyzingType(type);
-    try {
-      switch (type) {
-        case 'root_cause':
-          setRootCause(await irIncidents.analyzeRootCause(id));
-          break;
-        case 'recommendations':
-          setRecommendations(await irIncidents.analyzeRecommendations(id));
-          break;
-        case 'similar':
-          setSimilarIncidents(await irIncidents.analyzeSimilarIncidents(id));
-          break;
-      }
-    } catch (err) {
-      console.error(`Failed to run ${type} analysis:`, err);
-    } finally {
-      setAnalyzingType(null);
-    }
+    stream.reset();
+    setShowTerminalModal(true);
+    stream.runAnalysis(id, type as AnalysisType);
   };
+
+  // Sync stream results back to state for sidebar previews
+  useEffect(() => {
+    if (!stream.result || stream.streaming) return;
+    switch (stream.analysisType) {
+      case 'root_cause':
+        setRootCause(stream.result as IRRootCauseAnalysis);
+        break;
+      case 'recommendations':
+        setRecommendations(stream.result as IRRecommendationsAnalysis);
+        break;
+      case 'similar':
+        setSimilarIncidents(stream.result as IRPrecedentAnalysis);
+        break;
+    }
+  }, [stream.result, stream.streaming, stream.analysisType]);
 
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleDateString('en-US', {
@@ -508,10 +514,10 @@ export function IRDetail() {
                     <span className="text-xs text-zinc-400">{label}</span>
                     <button
                       onClick={() => runAnalysis(key)}
-                      disabled={analyzingType === key}
+                      disabled={stream.streaming && stream.analysisType === key}
                       className="text-[10px] text-zinc-600 hover:text-white uppercase tracking-wider disabled:opacity-50"
                     >
-                      {analyzingType === key ? '...' : data ? 'Rerun' : 'Run'}
+                      {stream.streaming && stream.analysisType === key ? '...' : data ? 'Rerun' : 'Run'}
                     </button>
                   </div>
                   {key === 'root_cause' && rootCause && (
@@ -616,6 +622,17 @@ export function IRDetail() {
         isOpen={showSimilarModal}
         onClose={() => setShowSimilarModal(false)}
         analysis={similarIncidents}
+      />
+
+      {/* Analysis Terminal Modal */}
+      <AnalysisTerminalModal
+        isOpen={showTerminalModal}
+        onClose={() => setShowTerminalModal(false)}
+        messages={stream.messages}
+        streaming={stream.streaming}
+        result={stream.result}
+        error={stream.error}
+        analysisType={stream.analysisType}
       />
 
       {/* Escalate to ER Case Modal */}

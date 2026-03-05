@@ -632,3 +632,179 @@ async def find_precedents(incident_id: str, conn, incident_row=None) -> dict[str
         "generated_at": datetime.utcnow().isoformat(),
         "from_cache": False,
     }
+
+
+async def find_precedents_stream(incident_id: str, conn, incident_row=None):
+    """Streaming orchestrator: yields phase events between pipeline stages.
+
+    Yields dicts with {"type": "phase", ...} for progress updates,
+    and a final {"type": "result", "data": {...}} with the PrecedentAnalysis-shaped dict.
+    """
+    from ...config import get_settings
+
+    if incident_row:
+        row = incident_row
+    else:
+        row = await conn.fetchrow(
+            """
+            SELECT id, incident_number, title, description, incident_type, severity,
+                   status, occurred_at, location, location_id, company_id,
+                   root_cause, corrective_actions, category_data, resolved_at
+            FROM ir_incidents WHERE id = $1
+            """,
+            incident_id,
+        )
+    if not row:
+        yield {"type": "result", "data": {"precedents": [], "pattern_summary": None, "generated_at": datetime.utcnow().isoformat(), "from_cache": False}}
+        return
+
+    current = dict(row)
+    if isinstance(current.get("category_data"), str):
+        try:
+            current["category_data"] = json.loads(current["category_data"])
+        except (json.JSONDecodeError, TypeError):
+            current["category_data"] = {}
+
+    company_id = current.get("company_id")
+    lookback = datetime.utcnow() - timedelta(days=LOOKBACK_MONTHS * 30)
+
+    yield {"type": "phase", "step": "querying_history", "message": "Querying incident history..."}
+
+    if company_id:
+        historical = await conn.fetch(
+            """
+            SELECT id, incident_number, title, description, incident_type, severity,
+                   status, occurred_at, location, location_id,
+                   root_cause, corrective_actions, category_data, resolved_at, reported_at
+            FROM ir_incidents
+            WHERE id != $1 AND company_id = $2 AND occurred_at >= $3
+            ORDER BY occurred_at DESC
+            """,
+            incident_id,
+            str(company_id),
+            lookback,
+        )
+    else:
+        historical = await conn.fetch(
+            """
+            SELECT id, incident_number, title, description, incident_type, severity,
+                   status, occurred_at, location, location_id,
+                   root_cause, corrective_actions, category_data, resolved_at, reported_at
+            FROM ir_incidents
+            WHERE id != $1 AND occurred_at >= $2
+            ORDER BY occurred_at DESC
+            """,
+            incident_id,
+            lookback,
+        )
+
+    if not historical:
+        yield {"type": "phase", "step": "no_history", "message": "No historical incidents found"}
+        yield {"type": "result", "data": {"precedents": [], "pattern_summary": None, "generated_at": datetime.utcnow().isoformat(), "from_cache": False}}
+        return
+
+    yield {"type": "phase", "step": "structural_scoring", "message": f"Phase 1: Structural scoring ({len(historical)} candidates)..."}
+
+    candidates = []
+    for h in historical:
+        d = dict(h)
+        if isinstance(d.get("category_data"), str):
+            try:
+                d["category_data"] = json.loads(d["category_data"])
+            except (json.JSONDecodeError, TypeError):
+                d["category_data"] = {}
+        candidates.append(d)
+
+    top = compute_structural_scores(current, candidates)
+
+    if not top:
+        yield {"type": "phase", "step": "no_matches", "message": "No structurally similar incidents found"}
+        yield {"type": "result", "data": {"precedents": [], "pattern_summary": None, "generated_at": datetime.utcnow().isoformat(), "from_cache": False}}
+        return
+
+    yield {"type": "phase", "step": "semantic_enrichment", "message": f"Phase 2: Semantic enrichment ({len(top)} candidates)..."}
+
+    settings = get_settings()
+    semantic_result = await enrich_with_semantics(
+        current,
+        top,
+        api_key=settings.gemini_api_key if not settings.use_vertex else None,
+        vertex_project=settings.vertex_project if settings.use_vertex else None,
+    )
+
+    semantic_lookup: dict[str, dict] = {}
+    for s in semantic_result.get("scores", []):
+        sid = str(s.get("incident_id", ""))
+        semantic_lookup[sid] = s
+
+    yield {"type": "phase", "step": "resolution_check", "message": "Checking resolution effectiveness..."}
+
+    effectiveness = await batch_check_resolution_effectiveness(conn, top)
+
+    yield {"type": "phase", "step": "blending_scores", "message": "Blending scores and ranking precedents..."}
+
+    precedents = []
+    for cand in top:
+        cand_id = str(cand["id"])
+        sem = semantic_lookup.get(cand_id, {})
+
+        text_sim = float(sem.get("text_similarity", 0.0))
+        root_cause_sim = float(sem.get("root_cause_similarity", 0.0))
+        common_factors = sem.get("common_factors", [])
+
+        scores = cand["scores"]
+        final_score = (
+            scores["type_match"] * W_TYPE +
+            scores["severity_proximity"] * W_SEVERITY +
+            scores["category_overlap"] * W_CATEGORY +
+            scores["location_similarity"] * W_LOCATION +
+            scores["temporal_pattern"] * W_TEMPORAL +
+            text_sim * W_TEXT +
+            root_cause_sim * W_ROOT_CAUSE
+        )
+
+        resolved_at = cand.get("resolved_at")
+        reported_at = cand.get("reported_at") or cand.get("occurred_at")
+        resolution_days = None
+        if resolved_at and reported_at:
+            delta = resolved_at - reported_at
+            resolution_days = max(0, delta.days)
+
+        resolution_effective = effectiveness.get(cand_id)
+
+        precedents.append({
+            "incident_id": cand_id,
+            "incident_number": cand["incident_number"],
+            "title": cand["title"],
+            "incident_type": cand["incident_type"],
+            "severity": cand.get("severity", "medium"),
+            "status": cand.get("status", "reported"),
+            "occurred_at": cand["occurred_at"].isoformat() if isinstance(cand["occurred_at"], datetime) else cand["occurred_at"],
+            "resolved_at": resolved_at.isoformat() if isinstance(resolved_at, datetime) else resolved_at,
+            "resolution_days": resolution_days,
+            "root_cause": cand.get("root_cause"),
+            "corrective_actions": cand.get("corrective_actions"),
+            "resolution_effective": resolution_effective,
+            "similarity_score": round(final_score, 3),
+            "score_breakdown": {
+                "type_match": scores["type_match"],
+                "severity_proximity": scores["severity_proximity"],
+                "category_overlap": scores["category_overlap"],
+                "location_similarity": scores["location_similarity"],
+                "temporal_pattern": scores["temporal_pattern"],
+                "text_similarity": round(text_sim, 3),
+                "root_cause_similarity": round(root_cause_sim, 3),
+            },
+            "common_factors": common_factors,
+        })
+
+    precedents.sort(key=lambda x: x["similarity_score"], reverse=True)
+    precedents = precedents[:FINAL_KEEP]
+
+    result = {
+        "precedents": precedents,
+        "pattern_summary": semantic_result.get("pattern_summary"),
+        "generated_at": datetime.utcnow().isoformat(),
+        "from_cache": False,
+    }
+    yield {"type": "result", "data": result}

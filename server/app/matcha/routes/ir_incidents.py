@@ -16,6 +16,7 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Request, Query, BackgroundTasks
+from fastapi.responses import StreamingResponse
 
 from ...database import get_connection
 from ...core.dependencies import require_admin
@@ -52,6 +53,11 @@ router = APIRouter()
 
 # Valid analysis types
 ANALYSIS_TYPES = Literal["categorization", "severity", "root_cause", "recommendations", "similar"]
+
+
+def _sse(event: dict) -> str:
+    """Format a dict as an SSE data line."""
+    return f"data: {json.dumps(event)}\n\n"
 
 
 # ===========================================
@@ -1450,19 +1456,20 @@ async def analyze_severity(
         )
 
 
-@router.post("/{incident_id}/analyze/root-cause", response_model=RootCauseAnalysis)
+@router.post("/{incident_id}/analyze/root-cause")
 async def analyze_root_cause(
     incident_id: UUID,
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Perform root cause analysis using AI."""
+    """Perform root cause analysis using AI (SSE stream)."""
     from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
 
+    # Pre-fetch data before starting the stream (auth + data validation)
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
+        row = dict(row)
 
-        # Check for cached analysis
         cached = await conn.fetchrow(
             """
             SELECT analysis_data FROM ir_incident_analysis
@@ -1472,22 +1479,37 @@ async def analyze_root_cause(
             str(incident_id),
         )
 
+    async def event_stream():
+        yield _sse({"type": "phase", "step": "loading_incident", "message": "Loading incident data..."})
+        await asyncio.sleep(0.05)
+
+        yield _sse({"type": "phase", "step": "checking_cache", "message": "Checking analysis cache..."})
+        await asyncio.sleep(0.05)
+
         if cached:
             result = _safe_json_loads(cached["analysis_data"])
-            return RootCauseAnalysis(
+            rc = RootCauseAnalysis(
                 primary_cause=result["primary_cause"],
                 contributing_factors=result["contributing_factors"],
                 prevention_suggestions=result["prevention_suggestions"],
                 reasoning=result["reasoning"],
                 generated_at=result["generated_at"],
+                from_cache=True,
             )
+            yield _sse({"type": "cached", "message": "Using cached analysis result", "result": rc.model_dump()})
+            yield "data: [DONE]\n\n"
+            return
 
-        # Run AI analysis with fallback to stale cache on failure
+        yield _sse({"type": "phase", "step": "preparing_context", "message": "Preparing incident context for AI..."})
+        await asyncio.sleep(0.05)
+
+        category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
+        witnesses = parse_witnesses(row.get("witnesses"))
+
+        yield _sse({"type": "phase", "step": "analyzing", "message": "AI analyzing root cause..."})
+
         try:
             analyzer = get_ir_analyzer()
-            category_data = json.loads(row["category_data"]) if isinstance(row.get("category_data"), str) else row.get("category_data")
-            witnesses = parse_witnesses(row.get("witnesses"))
-
             result = await analyzer.analyze_root_cause(
                 title=row["title"],
                 description=row["description"],
@@ -1498,66 +1520,78 @@ async def analyze_root_cause(
                 witnesses=[w.model_dump() for w in witnesses],
             )
         except IRAnalysisError as e:
-            # Gemini failed - try to return stale cache if available
             if cached:
-                result = _safe_json_loads(cached["analysis_data"])
-                return RootCauseAnalysis(
-                    primary_cause=result["primary_cause"],
-                    contributing_factors=result["contributing_factors"],
-                    prevention_suggestions=result["prevention_suggestions"],
-                    reasoning=result["reasoning"],
-                    generated_at=result["generated_at"],
+                result_data = _safe_json_loads(cached["analysis_data"])
+                rc = RootCauseAnalysis(
+                    primary_cause=result_data["primary_cause"],
+                    contributing_factors=result_data["contributing_factors"],
+                    prevention_suggestions=result_data["prevention_suggestions"],
+                    reasoning=result_data["reasoning"],
+                    generated_at=result_data["generated_at"],
                     from_cache=True,
                     cache_reason=str(e),
                 )
+                yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rc.model_dump()})
+                yield "data: [DONE]\n\n"
+                return
             logger.error(f"AI analysis failed for incident {incident_id}: {e}")
-            raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
+            yield _sse({"type": "error", "message": "Analysis temporarily unavailable. Please try again later."})
+            yield "data: [DONE]\n\n"
+            return
 
-        # Cache the result
-        await conn.execute(
-            """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
-            VALUES ($1, 'root_cause', $2)
-            """,
-            str(incident_id),
-            json.dumps(result),
-        )
+        yield _sse({"type": "phase", "step": "validating", "message": "Validating AI response..."})
+        await asyncio.sleep(0.05)
 
-        # Log audit
-        await log_audit(
-            conn,
-            str(incident_id),
-            str(current_user.id),
-            "analysis_run",
-            "analysis",
-            None,
-            {"type": "root_cause"},
-            request.client.host if request.client else None,
-        )
+        yield _sse({"type": "phase", "step": "caching", "message": "Caching analysis result..."})
 
-        return RootCauseAnalysis(
+        async with get_connection() as conn2:
+            await conn2.execute(
+                """
+                INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                VALUES ($1, 'root_cause', $2)
+                """,
+                str(incident_id),
+                json.dumps(result),
+            )
+            await log_audit(
+                conn2,
+                str(incident_id),
+                str(current_user.id),
+                "analysis_run",
+                "analysis",
+                None,
+                {"type": "root_cause"},
+                request.client.host if request.client else None,
+            )
+
+        rc = RootCauseAnalysis(
             primary_cause=result["primary_cause"],
             contributing_factors=result["contributing_factors"],
             prevention_suggestions=result["prevention_suggestions"],
             reasoning=result["reasoning"],
             generated_at=result["generated_at"],
         )
+        yield _sse({"type": "complete", "result": rc.model_dump()})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@router.post("/{incident_id}/analyze/recommendations", response_model=RecommendationsAnalysis)
+@router.post("/{incident_id}/analyze/recommendations")
 async def analyze_recommendations(
     incident_id: UUID,
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Generate corrective action recommendations using AI."""
+    """Generate corrective action recommendations using AI (SSE stream)."""
     from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
     from ..models.ir_incident import RecommendationItem
 
+    # Pre-fetch all data before starting the stream
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
+        row = dict(row)
 
-        # Fetch company context
         company_name = None
         industry = None
         company_size = None
@@ -1574,7 +1608,6 @@ async def analyze_recommendations(
                 company_size = company["size"]
                 ir_guidance_blurb = company["ir_guidance_blurb"]
 
-        # Fetch location context
         city = None
         state = None
 
@@ -1587,7 +1620,6 @@ async def analyze_recommendations(
                 city = location["city"]
                 state = location["state"]
 
-        # Check for cached analysis
         cached = await conn.fetchrow(
             """
             SELECT analysis_data FROM ir_incident_analysis
@@ -1597,15 +1629,33 @@ async def analyze_recommendations(
             str(incident_id),
         )
 
+    async def event_stream():
+        yield _sse({"type": "phase", "step": "loading_incident", "message": "Loading incident data..."})
+        await asyncio.sleep(0.05)
+
+        yield _sse({"type": "phase", "step": "loading_context", "message": "Loading company & location context..."})
+        await asyncio.sleep(0.05)
+
+        yield _sse({"type": "phase", "step": "checking_cache", "message": "Checking analysis cache..."})
+        await asyncio.sleep(0.05)
+
         if cached:
             result = _safe_json_loads(cached["analysis_data"])
-            return RecommendationsAnalysis(
+            rec = RecommendationsAnalysis(
                 recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
                 summary=result["summary"],
                 generated_at=result["generated_at"],
+                from_cache=True,
             )
+            yield _sse({"type": "cached", "message": "Using cached analysis result", "result": rec.model_dump()})
+            yield "data: [DONE]\n\n"
+            return
 
-        # Run AI analysis with fallback to stale cache on failure
+        yield _sse({"type": "phase", "step": "building_context", "message": "Building analysis context..."})
+        await asyncio.sleep(0.05)
+
+        yield _sse({"type": "phase", "step": "analyzing", "message": "AI generating recommendations..."})
+
         try:
             analyzer = get_ir_analyzer()
             result = await analyzer.generate_recommendations(
@@ -1622,61 +1672,73 @@ async def analyze_recommendations(
                 ir_guidance_blurb=ir_guidance_blurb,
             )
         except IRAnalysisError as e:
-            # Gemini failed - try to return stale cache if available
             if cached:
-                result = _safe_json_loads(cached["analysis_data"])
-                return RecommendationsAnalysis(
-                    recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
-                    summary=result["summary"],
-                    generated_at=result["generated_at"],
+                result_data = _safe_json_loads(cached["analysis_data"])
+                rec = RecommendationsAnalysis(
+                    recommendations=[RecommendationItem(**r) for r in result_data["recommendations"]],
+                    summary=result_data["summary"],
+                    generated_at=result_data["generated_at"],
                     from_cache=True,
                     cache_reason=str(e),
                 )
+                yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rec.model_dump()})
+                yield "data: [DONE]\n\n"
+                return
             logger.error(f"AI analysis failed for incident {incident_id}: {e}")
-            raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
+            yield _sse({"type": "error", "message": "Analysis temporarily unavailable. Please try again later."})
+            yield "data: [DONE]\n\n"
+            return
 
-        # Cache the result
-        await conn.execute(
-            """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
-            VALUES ($1, 'recommendations', $2)
-            """,
-            str(incident_id),
-            json.dumps(result),
-        )
+        yield _sse({"type": "phase", "step": "validating", "message": "Validating AI response..."})
+        await asyncio.sleep(0.05)
 
-        # Log audit
-        await log_audit(
-            conn,
-            str(incident_id),
-            str(current_user.id),
-            "analysis_run",
-            "analysis",
-            None,
-            {"type": "recommendations"},
-            request.client.host if request.client else None,
-        )
+        yield _sse({"type": "phase", "step": "caching", "message": "Caching analysis result..."})
 
-        return RecommendationsAnalysis(
+        async with get_connection() as conn2:
+            await conn2.execute(
+                """
+                INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                VALUES ($1, 'recommendations', $2)
+                """,
+                str(incident_id),
+                json.dumps(result),
+            )
+            await log_audit(
+                conn2,
+                str(incident_id),
+                str(current_user.id),
+                "analysis_run",
+                "analysis",
+                None,
+                {"type": "recommendations"},
+                request.client.host if request.client else None,
+            )
+
+        rec = RecommendationsAnalysis(
             recommendations=[RecommendationItem(**r) for r in result["recommendations"]],
             summary=result["summary"],
             generated_at=result["generated_at"],
         )
+        yield _sse({"type": "complete", "result": rec.model_dump()})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
-@router.post("/{incident_id}/analyze/similar", response_model=PrecedentAnalysis)
+@router.post("/{incident_id}/analyze/similar")
 async def analyze_similar_incidents(
     incident_id: UUID,
     request: Request,
     current_user=Depends(require_admin_or_client),
 ):
-    """Find precedent incidents using hybrid similarity scoring."""
-    from ..services.ir_precedent import find_precedents
+    """Find precedent incidents using hybrid similarity scoring (SSE stream)."""
+    from ..services.ir_precedent import find_precedents_stream
 
+    # Pre-fetch data before starting the stream
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
+        row = dict(row)
 
-        # Check for cached analysis (reuse 'similar' analysis_type to match DB constraints)
         cached = await conn.fetchrow(
             """
             SELECT analysis_data FROM ir_incident_analysis
@@ -1686,45 +1748,65 @@ async def analyze_similar_incidents(
             str(incident_id),
         )
 
+    async def event_stream():
+        yield _sse({"type": "phase", "step": "loading_incident", "message": "Loading incident data..."})
+        await asyncio.sleep(0.05)
+
+        yield _sse({"type": "phase", "step": "checking_cache", "message": "Checking analysis cache..."})
+        await asyncio.sleep(0.05)
+
         if cached:
             result = _safe_json_loads(cached["analysis_data"])
-            # Old-format cache won't have 'precedents' key — skip it
             if "precedents" in result:
                 result["from_cache"] = True
-                return PrecedentAnalysis(**result)
+                pa = PrecedentAnalysis(**result)
+                yield _sse({"type": "cached", "message": "Using cached precedent analysis", "result": pa.model_dump()})
+                yield "data: [DONE]\n\n"
+                return
 
-        # Run precedent analysis (pass pre-fetched row to avoid redundant query)
-        try:
-            result = await find_precedents(str(incident_id), conn, incident_row=row)
-        except Exception as e:
-            logger.error(f"Precedent analysis failed for incident {incident_id}: {e}")
-            raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
+        # Stream precedent analysis phases
+        result = None
+        async with get_connection() as conn2:
+            async for event in find_precedents_stream(str(incident_id), conn2, incident_row=row):
+                if event.get("type") == "result":
+                    result = event["data"]
+                else:
+                    yield _sse(event)
 
-        # Cache the result (upsert to handle unique constraint)
-        await conn.execute(
-            """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
-            VALUES ($1, 'similar', $2)
-            ON CONFLICT (incident_id, analysis_type)
-            DO UPDATE SET analysis_data = $2, generated_at = now()
-            """,
-            str(incident_id),
-            json.dumps(result),
-        )
+        if result is None:
+            yield _sse({"type": "error", "message": "Analysis produced no result."})
+            yield "data: [DONE]\n\n"
+            return
 
-        # Log audit
-        await log_audit(
-            conn,
-            str(incident_id),
-            str(current_user.id),
-            "analysis_run",
-            "analysis",
-            None,
-            {"type": "similar"},
-            request.client.host if request.client else None,
-        )
+        yield _sse({"type": "phase", "step": "caching", "message": "Caching precedent analysis..."})
 
-        return PrecedentAnalysis(**result)
+        async with get_connection() as conn3:
+            await conn3.execute(
+                """
+                INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                VALUES ($1, 'similar', $2)
+                ON CONFLICT (incident_id, analysis_type)
+                DO UPDATE SET analysis_data = $2, generated_at = now()
+                """,
+                str(incident_id),
+                json.dumps(result),
+            )
+            await log_audit(
+                conn3,
+                str(incident_id),
+                str(current_user.id),
+                "analysis_run",
+                "analysis",
+                None,
+                {"type": "similar"},
+                request.client.host if request.client else None,
+            )
+
+        pa = PrecedentAnalysis(**result)
+        yield _sse({"type": "complete", "result": pa.model_dump()})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.delete("/{incident_id}/analyze/{analysis_type}")
