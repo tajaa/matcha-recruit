@@ -6,15 +6,11 @@ import type {
   IRDocument,
   IRIncidentUpdate,
   IRStatus,
-  IRCategorizationAnalysis,
-  IRSeverityAnalysis,
   IRRootCauseAnalysis,
   IRRecommendationsAnalysis,
   IRPrecedentAnalysis,
   ERCaseCategory,
 } from '../types';
-import { CategorizationAnalysisModal } from '../components/ir/CategorizationAnalysisModal';
-import { SeverityAnalysisModal } from '../components/ir/SeverityAnalysisModal';
 import { RootCauseAnalysisModal } from '../components/ir/RootCauseAnalysisModal';
 import { RecommendationsAnalysisModal } from '../components/ir/RecommendationsAnalysisModal';
 import { SimilarIncidentsAnalysisModal } from '../components/ir/SimilarIncidentsAnalysisModal';
@@ -79,8 +75,6 @@ export function IRDetail() {
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [categorization, setCategorization] = useState<IRCategorizationAnalysis | null>(null);
-  const [severityAnalysis, setSeverityAnalysis] = useState<IRSeverityAnalysis | null>(null);
   const [rootCause, setRootCause] = useState<IRRootCauseAnalysis | null>(null);
   const [recommendations, setRecommendations] = useState<IRRecommendationsAnalysis | null>(null);
   const [similarIncidents, setSimilarIncidents] = useState<IRPrecedentAnalysis | null>(null);
@@ -91,8 +85,6 @@ export function IRDetail() {
   const [rootCauseText, setRootCauseText] = useState('');
   const [correctiveActionsText, setCorrectiveActionsText] = useState('');
 
-  const [showCategorizationModal, setShowCategorizationModal] = useState(false);
-  const [showSeverityModal, setShowSeverityModal] = useState(false);
   const [showRootCauseModal, setShowRootCauseModal] = useState(false);
   const [showRecommendationsModal, setShowRecommendationsModal] = useState(false);
   const [showSimilarModal, setShowSimilarModal] = useState(false);
@@ -146,12 +138,6 @@ export function IRDetail() {
     setAnalyzingType(type);
     try {
       switch (type) {
-        case 'categorization':
-          setCategorization(await irIncidents.analyzeCategorization(id));
-          break;
-        case 'severity':
-          setSeverityAnalysis(await irIncidents.analyzeSeverity(id));
-          break;
         case 'root_cause':
           setRootCause(await irIncidents.analyzeRootCause(id));
           break;
@@ -513,8 +499,6 @@ export function IRDetail() {
             <div className={`${labelClass} mb-4`}>AI Analysis</div>
             <div className="space-y-3">
               {[
-                { key: 'categorization', label: 'Category', data: categorization, onClick: () => setShowCategorizationModal(true) },
-                { key: 'severity', label: 'Severity', data: severityAnalysis, onClick: () => setShowSeverityModal(true) },
                 { key: 'root_cause', label: 'Root Cause', data: rootCause, onClick: () => setShowRootCauseModal(true) },
                 { key: 'recommendations', label: 'Actions', data: recommendations, onClick: () => setShowRecommendationsModal(true) },
                 { key: 'similar', label: 'Precedents', data: similarIncidents, onClick: () => setShowSimilarModal(true) },
@@ -530,37 +514,6 @@ export function IRDetail() {
                       {analyzingType === key ? '...' : data ? 'Rerun' : 'Run'}
                     </button>
                   </div>
-                  {key === 'categorization' && categorization && (
-                    <div
-                      onClick={onClick}
-                      className="mt-2 text-[10px] text-zinc-500 cursor-pointer hover:bg-zinc-900 rounded p-2 -m-2 transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span>{TYPE_LABELS[categorization.suggested_type]} ({(categorization.confidence * 100).toFixed(0)}%)</span>
-                        <span className="text-zinc-700">→</span>
-                      </div>
-                      {categorization.from_cache && (
-                        <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
-                      )}
-                    </div>
-                  )}
-                  {key === 'severity' && severityAnalysis && (
-                    <div
-                      onClick={onClick}
-                      className="mt-2 cursor-pointer hover:bg-zinc-900 rounded p-2 -m-2 transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${SEVERITY_COLORS[severityAnalysis.suggested_severity]}`} />
-                          <span className="text-[10px] text-zinc-500 capitalize">{severityAnalysis.suggested_severity}</span>
-                        </div>
-                        <span className="text-zinc-700">→</span>
-                      </div>
-                      {severityAnalysis.from_cache && (
-                        <div className="mt-1 text-amber-500/70 text-[9px]">⚠ Cached result</div>
-                      )}
-                    </div>
-                  )}
                   {key === 'root_cause' && rootCause && (
                     <div
                       onClick={onClick}
@@ -649,16 +602,6 @@ export function IRDetail() {
       </div>
 
       {/* Analysis Detail Modals */}
-      <CategorizationAnalysisModal
-        isOpen={showCategorizationModal}
-        onClose={() => setShowCategorizationModal(false)}
-        analysis={categorization}
-      />
-      <SeverityAnalysisModal
-        isOpen={showSeverityModal}
-        onClose={() => setShowSeverityModal(false)}
-        analysis={severityAnalysis}
-      />
       <RootCauseAnalysisModal
         isOpen={showRootCauseModal}
         onClose={() => setShowRootCauseModal(false)}
