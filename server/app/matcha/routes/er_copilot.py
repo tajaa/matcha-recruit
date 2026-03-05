@@ -590,87 +590,93 @@ async def export_case_file(
 
     password = body.password
 
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Case not found")
-
-    is_admin = current_user.role == "admin"
-    async with get_connection() as conn:
-        await _verify_case_company(conn, case_id, company_id, is_admin)
-
-        # Fetch case
-        case_row = await conn.fetchrow(
-            "SELECT * FROM er_cases WHERE id = $1", case_id
-        )
-        if not case_row:
+    try:
+        company_id = await get_client_company_id(current_user)
+        if company_id is None:
             raise HTTPException(status_code=404, detail="Case not found")
 
-        # Fetch documents
-        doc_rows = await conn.fetch(
-            "SELECT filename, document_type, file_size, created_at FROM er_case_documents WHERE case_id = $1 ORDER BY created_at",
-            case_id,
-        )
+        is_admin = current_user.role == "admin"
+        async with get_connection() as conn:
+            await _verify_case_company(conn, case_id, company_id, is_admin)
 
-        # Fetch analyses
-        analysis_rows = await conn.fetch(
-            "SELECT analysis_type, analysis_data, created_at FROM er_case_analysis WHERE case_id = $1 ORDER BY created_at",
-            case_id,
-        )
+            # Fetch case
+            case_row = await conn.fetchrow(
+                "SELECT * FROM er_cases WHERE id = $1", case_id
+            )
+            if not case_row:
+                raise HTTPException(status_code=404, detail="Case not found")
 
-        # Fetch notes
-        note_rows = await conn.fetch(
-            "SELECT note_type, content, created_at FROM er_case_notes WHERE case_id = $1 ORDER BY created_at",
-            case_id,
-        )
+            # Fetch documents
+            doc_rows = await conn.fetch(
+                "SELECT filename, document_type, file_size, created_at FROM er_case_documents WHERE case_id = $1 ORDER BY created_at",
+                case_id,
+            )
 
-    # Build HTML report
-    import html as html_mod
+            # Fetch analyses
+            analysis_rows = await conn.fetch(
+                "SELECT analysis_type, analysis_data, created_at FROM er_case_analysis WHERE case_id = $1 ORDER BY created_at",
+                case_id,
+            )
 
-    def esc(val: str) -> str:
-        return html_mod.escape(str(val)) if val else ""
+            # Fetch notes
+            note_rows = await conn.fetch(
+                "SELECT note_type, content, created_at FROM er_case_notes WHERE case_id = $1 ORDER BY created_at",
+                case_id,
+            )
 
-    case_title = esc(case_row["title"] or "Untitled Case")
-    case_number = esc(case_row["case_number"])
-    status = esc(case_row["status"])
-    category = esc(case_row.get("category") or "—")
-    outcome = esc(case_row.get("outcome") or "—")
-    description = esc(case_row["description"] or "No description provided.")
-    created_at = case_row["created_at"].strftime("%Y-%m-%d %H:%M") if case_row["created_at"] else "—"
-    closed_at = case_row["closed_at"].strftime("%Y-%m-%d %H:%M") if case_row.get("closed_at") else "—"
+        # Build HTML report
+        import html as html_mod
 
-    docs_html = ""
-    if doc_rows:
-        rows_html = "".join(
-            f"<tr><td>{esc(r['filename'])}</td><td>{esc(r['document_type'])}</td><td>{(r['file_size'] or 0) // 1024} KB</td><td>{r['created_at'].strftime('%Y-%m-%d')}</td></tr>"
-            for r in doc_rows
-        )
-        docs_html = f"<h2>Documents ({len(doc_rows)})</h2><table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th></tr>{rows_html}</table>"
+        def esc(val: str) -> str:
+            return html_mod.escape(str(val)) if val else ""
 
-    analyses_html = ""
-    for a in analysis_rows:
-        atype = esc((a["analysis_type"] or "unknown").replace("_", " ").title())
-        result = a["analysis_data"]
-        if isinstance(result, str):
-            try:
-                result = json.loads(result)
-            except Exception:
-                pass
-        summary = ""
-        if isinstance(result, dict):
-            summary = result.get("summary") or result.get("timeline_summary") or json.dumps(result, indent=2)[:500]
-        else:
-            summary = str(result)[:500] if result else "No results."
-        analyses_html += f"<h3>{atype}</h3><p>{esc(summary)}</p>"
-    if analyses_html:
-        analyses_html = f"<h2>Analyses</h2>{analyses_html}"
+        case_title = esc(case_row["title"] or "Untitled Case")
+        case_number = esc(case_row["case_number"])
+        status = esc(case_row["status"])
+        category = esc(case_row.get("category") or "—")
+        outcome = esc(case_row.get("outcome") or "—")
+        description = esc(case_row["description"] or "No description provided.")
+        created_at = case_row["created_at"].strftime("%Y-%m-%d %H:%M") if case_row["created_at"] else "—"
+        closed_at = case_row["closed_at"].strftime("%Y-%m-%d %H:%M") if case_row.get("closed_at") else "—"
 
-    notes_html = ""
-    if note_rows:
-        items = "".join(
-            f"<div class='note'><span class='note-type'>{esc(r['note_type'])}</span> <span class='note-date'>{r['created_at'].strftime('%Y-%m-%d %H:%M')}</span><p>{esc(r['content'])}</p></div>"
-            for r in note_rows
-        )
-        notes_html = f"<h2>Case Notes ({len(note_rows)})</h2>{items}"
+        docs_html = ""
+        if doc_rows:
+            rows_html = "".join(
+                f"<tr><td>{esc(r['filename'])}</td><td>{esc(r['document_type'])}</td><td>{(r['file_size'] or 0) // 1024} KB</td><td>{r['created_at'].strftime('%Y-%m-%d')}</td></tr>"
+                for r in doc_rows
+            )
+            docs_html = f"<h2>Documents ({len(doc_rows)})</h2><table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th></tr>{rows_html}</table>"
+
+        analyses_html = ""
+        for a in analysis_rows:
+            atype = esc((a["analysis_type"] or "unknown").replace("_", " ").title())
+            result = a["analysis_data"]
+            if isinstance(result, str):
+                try:
+                    result = json.loads(result)
+                except Exception:
+                    pass
+            summary = ""
+            if isinstance(result, dict):
+                summary = result.get("summary") or result.get("timeline_summary") or json.dumps(result, indent=2)[:500]
+            else:
+                summary = str(result)[:500] if result else "No results."
+            analyses_html += f"<h3>{atype}</h3><p>{esc(summary)}</p>"
+        if analyses_html:
+            analyses_html = f"<h2>Analyses</h2>{analyses_html}"
+
+        notes_html = ""
+        if note_rows:
+            items = "".join(
+                f"<div class='note'><span class='note-type'>{esc(r['note_type'])}</span> <span class='note-date'>{r['created_at'].strftime('%Y-%m-%d %H:%M')}</span><p>{esc(r['content'])}</p></div>"
+                for r in note_rows
+            )
+            notes_html = f"<h2>Case Notes ({len(note_rows)})</h2>{items}"
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Export failed for case %s during data/HTML phase: %s", case_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Export preparation failed: {exc}")
 
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>

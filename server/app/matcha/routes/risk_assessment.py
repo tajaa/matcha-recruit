@@ -342,7 +342,7 @@ async def get_assignable_users(
                 u.role = 'admin'
                 OR EXISTS (
                     SELECT 1 FROM companies comp
-                    WHERE comp.id = $1 AND comp.user_id = u.id
+                    WHERE comp.id = $1 AND comp.owner_id = u.id
                 )
               )
             ORDER BY name
