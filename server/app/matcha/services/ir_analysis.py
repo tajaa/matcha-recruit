@@ -722,7 +722,7 @@ def get_ir_analyzer() -> IRAnalyzer:
 
     if settings.use_vertex:
         return IRAnalyzer(
-            vertex_project=settings.gcp_project,
+            vertex_project=settings.vertex_project,
             vertex_location="us-central1",
         )
     else:

@@ -1294,7 +1294,7 @@ async def analyze_categorization(
             """
             SELECT analysis_data FROM ir_incident_analysis
             WHERE incident_id = $1 AND analysis_type = 'categorization'
-            ORDER BY created_at DESC LIMIT 1
+            ORDER BY generated_at DESC LIMIT 1
             """,
             str(incident_id),
         )
@@ -1379,7 +1379,7 @@ async def analyze_severity(
             """
             SELECT analysis_data FROM ir_incident_analysis
             WHERE incident_id = $1 AND analysis_type = 'severity'
-            ORDER BY created_at DESC LIMIT 1
+            ORDER BY generated_at DESC LIMIT 1
             """,
             str(incident_id),
         )
@@ -1467,7 +1467,7 @@ async def analyze_root_cause(
             """
             SELECT analysis_data FROM ir_incident_analysis
             WHERE incident_id = $1 AND analysis_type = 'root_cause'
-            ORDER BY created_at DESC LIMIT 1
+            ORDER BY generated_at DESC LIMIT 1
             """,
             str(incident_id),
         )
@@ -1592,7 +1592,7 @@ async def analyze_recommendations(
             """
             SELECT analysis_data FROM ir_incident_analysis
             WHERE incident_id = $1 AND analysis_type = 'recommendations'
-            ORDER BY created_at DESC LIMIT 1
+            ORDER BY generated_at DESC LIMIT 1
             """,
             str(incident_id),
         )
@@ -1676,20 +1676,22 @@ async def analyze_similar_incidents(
     async with get_connection() as conn:
         row = await _get_incident_with_company_check(conn, incident_id, current_user)
 
-        # Check for cached analysis (type='precedent' for new format, fall back to 'similar')
+        # Check for cached analysis (reuse 'similar' analysis_type to match DB constraints)
         cached = await conn.fetchrow(
             """
             SELECT analysis_data FROM ir_incident_analysis
-            WHERE incident_id = $1 AND analysis_type = 'precedent'
-            ORDER BY created_at DESC LIMIT 1
+            WHERE incident_id = $1 AND analysis_type = 'similar'
+            ORDER BY generated_at DESC LIMIT 1
             """,
             str(incident_id),
         )
 
         if cached:
             result = _safe_json_loads(cached["analysis_data"])
-            result["from_cache"] = True
-            return PrecedentAnalysis(**result)
+            # Old-format cache won't have 'precedents' key — skip it
+            if "precedents" in result:
+                result["from_cache"] = True
+                return PrecedentAnalysis(**result)
 
         # Run precedent analysis (pass pre-fetched row to avoid redundant query)
         try:
@@ -1698,11 +1700,13 @@ async def analyze_similar_incidents(
             logger.error(f"Precedent analysis failed for incident {incident_id}: {e}")
             raise HTTPException(status_code=503, detail="Analysis temporarily unavailable. Please try again later.")
 
-        # Cache the result
+        # Cache the result (upsert to handle unique constraint)
         await conn.execute(
             """
             INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
-            VALUES ($1, 'precedent', $2)
+            VALUES ($1, 'similar', $2)
+            ON CONFLICT (incident_id, analysis_type)
+            DO UPDATE SET analysis_data = $2, generated_at = now()
             """,
             str(incident_id),
             json.dumps(result),
@@ -1716,7 +1720,7 @@ async def analyze_similar_incidents(
             "analysis_run",
             "analysis",
             None,
-            {"type": "precedent"},
+            {"type": "similar"},
             request.client.host if request.client else None,
         )
 

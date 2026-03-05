@@ -11,7 +11,7 @@ IRIncidentType = Literal["safety", "behavioral", "property", "near_miss", "other
 IRSeverity = Literal["critical", "high", "medium", "low"]
 IRStatus = Literal["reported", "investigating", "action_required", "resolved", "closed"]
 IRDocumentType = Literal["photo", "form", "statement", "other"]
-IRAnalysisType = Literal["categorization", "severity", "root_cause", "recommendations", "similar", "precedent"]
+IRAnalysisType = Literal["categorization", "severity", "root_cause", "recommendations", "similar"]
 
 
 # ===========================================

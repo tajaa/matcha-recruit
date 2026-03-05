@@ -440,7 +440,7 @@ export function IRList() {
           {/* Header row */}
           <div className="flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10 font-bold">
             <div className="w-3" />
-            <div className="w-24">ID</div>
+            <div className="w-32">ID</div>
             <div className="flex-1">Incident Details</div>
               <div className="w-24">Type</div>
               <div className="w-24">Status</div>
@@ -456,7 +456,7 @@ export function IRList() {
               className="flex items-center gap-4 py-4 px-6 bg-zinc-950 hover:bg-zinc-900 cursor-pointer group transition-colors"
             >
               <div className={`w-1.5 h-1.5 rounded-full ${SEVERITY_COLORS[incident.severity]}`} />
-              <div className="text-[10px] text-zinc-500 font-mono w-24 group-hover:text-zinc-400">{incident.incident_number}</div>
+              <div className="text-[10px] text-zinc-500 font-mono w-32 group-hover:text-zinc-400 truncate" title={incident.incident_number}>{incident.incident_number}</div>
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-bold text-zinc-300 truncate group-hover:text-white transition-colors uppercase tracking-wide">
                   {incident.title}

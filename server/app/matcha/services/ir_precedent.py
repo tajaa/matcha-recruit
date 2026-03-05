@@ -11,7 +11,7 @@ import json
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -475,7 +475,7 @@ async def find_precedents(incident_id: str, conn, incident_row=None) -> dict[str
             incident_id,
         )
     if not row:
-        return {"precedents": [], "pattern_summary": None, "generated_at": datetime.now(timezone.utc).isoformat(), "from_cache": False}
+        return {"precedents": [], "pattern_summary": None, "generated_at": datetime.utcnow().isoformat(), "from_cache": False}
 
     current = dict(row)
     # Parse category_data if it's a string
@@ -486,7 +486,7 @@ async def find_precedents(incident_id: str, conn, incident_row=None) -> dict[str
             current["category_data"] = {}
 
     company_id = current.get("company_id")
-    lookback = datetime.now(timezone.utc) - timedelta(days=LOOKBACK_MONTHS * 30)
+    lookback = datetime.utcnow() - timedelta(days=LOOKBACK_MONTHS * 30)
 
     # Query historical incidents for the same company (last 24 months)
     if company_id:
@@ -521,7 +521,7 @@ async def find_precedents(incident_id: str, conn, incident_row=None) -> dict[str
         return {
             "precedents": [],
             "pattern_summary": None,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.utcnow().isoformat(),
             "from_cache": False,
         }
 
@@ -543,7 +543,7 @@ async def find_precedents(incident_id: str, conn, incident_row=None) -> dict[str
         return {
             "precedents": [],
             "pattern_summary": None,
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.utcnow().isoformat(),
             "from_cache": False,
         }
 
@@ -553,7 +553,7 @@ async def find_precedents(incident_id: str, conn, incident_row=None) -> dict[str
         current,
         top,
         api_key=settings.gemini_api_key if not settings.use_vertex else None,
-        vertex_project=settings.gcp_project if settings.use_vertex else None,
+        vertex_project=settings.vertex_project if settings.use_vertex else None,
     )
 
     # Build semantic score lookup
@@ -629,6 +629,6 @@ async def find_precedents(incident_id: str, conn, incident_row=None) -> dict[str
     return {
         "precedents": precedents,
         "pattern_summary": semantic_result.get("pattern_summary"),
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.utcnow().isoformat(),
         "from_cache": False,
     }
