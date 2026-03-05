@@ -2,16 +2,20 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { irIncidents } from '../api/client';
 import type { IRAnalyticsSummary, IRTrendsAnalysis, IRLocationAnalysis, IRIncident } from '../types';
-import { Plus, ArrowRight, Activity, MapPin, ShieldAlert, ChevronRight } from 'lucide-react';
+import { Plus, ArrowRight, Activity, MapPin, ShieldAlert, ChevronRight, History } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { WidgetContainer } from '../components/WidgetContainer';
 
 // ─── theme ────────────────────────────────────────────────────────────────────
 
 const LT = {
   pageBg: 'bg-stone-300',
   card: 'bg-stone-100 rounded-2xl',
+  cardLight: 'bg-stone-100 rounded-2xl',
   cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
   statBg: 'bg-stone-200',
   statGap: 'bg-stone-300',
   textMain: 'text-zinc-900',
@@ -19,6 +23,7 @@ const LT = {
   textFaint: 'text-stone-400',
   border: 'border-stone-200',
   label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
   btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl',
   btnSecondary: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900 rounded-xl',
   rowHover: 'hover:bg-stone-50',
@@ -33,12 +38,16 @@ const LT = {
   tooltipBg: 'bg-zinc-900 text-zinc-50',
   icon: 'text-stone-400',
   countBadge: 'bg-stone-200 text-zinc-900 border border-stone-300',
+  livePill: 'bg-stone-200 text-stone-600',
 } as const;
 
 const DK = {
   pageBg: 'bg-zinc-950',
   card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
-  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
   statBg: 'bg-zinc-900',
   statGap: 'bg-zinc-950',
   textMain: 'text-zinc-100',
@@ -46,10 +55,11 @@ const DK = {
   textFaint: 'text-zinc-600',
   border: 'border-white/10',
   label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
   btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600 rounded-xl',
   btnSecondary: 'border border-white/10 hover:border-white/20 text-zinc-500 hover:text-zinc-100 rounded-xl',
   rowHover: 'hover:bg-white/5',
-  divide: 'divide-zinc-800',
+  divide: 'divide-white/10',
   recentId: 'text-zinc-500 group-hover:text-zinc-400',
   recentTitle: 'text-zinc-300 group-hover:text-white',
   recentDate: 'text-zinc-600',
@@ -60,6 +70,7 @@ const DK = {
   tooltipBg: 'bg-white text-black',
   icon: 'text-zinc-600',
   countBadge: 'bg-zinc-800 text-zinc-100 border border-zinc-700',
+  livePill: 'bg-zinc-800 text-zinc-400',
 } as const;
 
 const TYPE_LABELS: Record<string, string> = {
@@ -151,190 +162,229 @@ export function IRDashboard() {
     (summary?.by_status?.investigating || 0) +
     (summary?.by_status?.action_required || 0);
 
+  const stats = [
+    { label: 'Total', value: summary?.total_incidents || 0, change: 'Lifetime', icon: Activity, path: '/app/ir' },
+    { label: 'Last 30d', value: summary?.recent_count || 0, change: 'Recent', icon: History, path: '/app/ir' },
+    { label: 'Open', value: openCount, change: 'Action Required', icon: ShieldAlert, path: '/app/ir' },
+    { label: 'Avg Resolution', value: summary?.avg_resolution_days ? `${summary.avg_resolution_days}d` : '—', change: 'Resolution Time', icon: Activity, path: '/app/ir' },
+  ];
+
+  const dashboardWidgets = [
+    { id: 'stats', label: 'Key Metrics', icon: Activity },
+    { id: 'trend', label: 'Weekly Trend', icon: Activity },
+    { id: 'breakdown', label: 'Incidents Breakdown', icon: ShieldAlert },
+    { id: 'recent', label: 'Recent Incidents', icon: History },
+  ];
+
   return (
     <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
-    <div className="max-w-5xl mx-auto space-y-12">
-      {/* Header */}
-      <div className="flex justify-between items-start mb-12 pb-8">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>Incidents</h1>
-            <FeatureGuideTrigger guideId="ir-dashboard" />
-          </div>
-          <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>Workplace incident tracking</p>
-        </div>
-        <div className="flex gap-3">
-          <button
-            onClick={() => navigate('/app/ir')}
-            className={`text-xs uppercase tracking-wider transition-colors px-5 py-2 font-bold ${t.btnSecondary}`}
-          >
-            View All
-          </button>
-          <button
-            onClick={() => navigate('/app/ir/incidents/new')}
-            className={`flex items-center gap-2 px-5 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${t.btnPrimary}`}
-          >
-            <Plus size={14} /> Report
-          </button>
-        </div>
-      </div>
-
-      {/* Stats Row */}
-      <div data-tour="ir-dash-stats" className={`grid grid-cols-4 gap-px ${t.statGap} rounded-2xl overflow-hidden`}>
-        {[
-          { label: 'Total', value: summary?.total_incidents || 0 },
-          { label: 'Last 30d', value: summary?.recent_count || 0 },
-          { label: 'Open', value: openCount },
-          { label: 'Avg Resolution', value: summary?.avg_resolution_days ? `${summary.avg_resolution_days}d` : '—' },
-        ].map((stat) => (
-          <div key={stat.label} className={`${t.statBg} p-6`}>
-            <div className={`text-3xl font-light ${t.textMain} font-mono tabular-nums`}>{stat.value}</div>
-            <div className={`${t.label} mt-2`}>{stat.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Trend Chart */}
-      {trends && trends.data.length > 0 && (
-        <div data-tour="ir-dash-trend" className={`${t.card} p-6`}>
-          <div className={`${t.label} mb-6 flex items-center gap-2`}>
-             <Activity size={14} className={t.icon} /> Weekly Trend
-          </div>
-          <div className="flex items-end gap-1 h-32">
-            {trends.data.map((point, idx) => {
-              const maxCount = Math.max(...trends.data.map((d) => d.count), 1);
-              const height = (point.count / maxCount) * 100;
-              return (
-                <div
-                  key={idx}
-                  className={`flex-1 ${t.barBg} ${t.barHover} transition-colors cursor-crosshair group relative rounded-sm`}
-                  style={{ height: `${Math.max(height, 2)}%` }}
-                >
-                   <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block ${t.tooltipBg} text-[10px] font-bold px-2 py-1 rounded-lg z-10 whitespace-nowrap`}>
-                      {point.count} Incidents • {point.date}
-                   </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className={`flex justify-between text-[9px] ${t.textFaint} mt-3 font-mono uppercase`}>
-            <span>{trends.start_date}</span>
-            <span>{trends.end_date}</span>
-          </div>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* By Type */}
-        <div data-tour="ir-dash-by-type" className={`${t.card} p-6`}>
-          <div className={`${t.label} mb-6 flex items-center gap-2`}>
-             <ShieldAlert size={14} className={t.icon} /> By Type
-          </div>
-          {summary && Object.keys(summary.by_type).length > 0 ? (
-            <div className="space-y-3">
-              {Object.entries(summary.by_type).map(([type, count]) => (
-                <div key={type} className="flex justify-between items-center group">
-                  <span className={`text-xs ${t.textMuted} group-hover:${t.textMain} transition-colors`}>{TYPE_LABELS[type] || type}</span>
-                  <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{count}</span>
-                </div>
-              ))}
+      <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-500">
+        {/* Header Section */}
+        <div className="flex justify-between items-start mb-12 pb-8">
+          <div>
+            <div className="flex items-center gap-3">
+              <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
+                Incidents
+              </h1>
+              <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] uppercase tracking-widest font-bold rounded-full`}>
+                Live
+              </div>
+              <FeatureGuideTrigger guideId="ir-dashboard" />
             </div>
-          ) : (
-            <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
-          )}
-        </div>
-
-        {/* By Severity */}
-        <div data-tour="ir-dash-by-severity" className={`${t.card} p-6`}>
-          <div className={`${t.label} mb-6 flex items-center gap-2`}>
-             <ShieldAlert size={14} className={t.icon} /> By Severity
+            <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>Workplace incident tracking</p>
           </div>
-          {summary && Object.keys(summary.by_severity).length > 0 ? (
-            <div className="space-y-3">
-              {['critical', 'high', 'medium', 'low'].map((severity) => {
-                const count = summary.by_severity[severity] || 0;
-                if (count === 0) return null;
-                return (
-                  <div key={severity} className="flex justify-between items-center group">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-1.5 h-1.5 rounded-full ${sevDots[severity]}`} />
-                      <span className={`text-xs ${t.textMuted} capitalize group-hover:${t.textMain} transition-colors`}>{severity}</span>
-                    </div>
-                    <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{count}</span>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
-          )}
-        </div>
-
-        {/* Hotspots */}
-        <div data-tour="ir-dash-hotspots" className={`${t.card} p-6`}>
-          <div className={`${t.label} mb-6 flex items-center gap-2`}>
-             <MapPin size={14} className={t.icon} /> Hotspots
-          </div>
-          {locations && locations.hotspots.length > 0 ? (
-            <div className="space-y-3">
-              {locations.hotspots.slice(0, 4).map((hotspot, idx) => (
-                <div key={idx} className="flex justify-between items-center group">
-                  <span className={`text-xs ${t.textMuted} truncate max-w-[120px] group-hover:${t.textMain} transition-colors`}>{hotspot.location}</span>
-                  <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{hotspot.count}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
-          )}
-        </div>
-      </div>
-
-      {/* Recent Incidents */}
-      <div data-tour="ir-dash-recent" className={`${t.cardDark} overflow-hidden`}>
-        <div className="flex justify-between items-center p-4 border-b border-zinc-800">
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Recent Incidents</div>
-          <button
-            onClick={() => navigate('/app/ir')}
-            className="text-[10px] text-zinc-500 hover:text-zinc-100 uppercase tracking-wider transition-colors flex items-center gap-1"
-          >
-            All <ArrowRight size={10} />
-          </button>
-        </div>
-        {recentIncidents.length > 0 ? (
-          <div className="divide-y divide-zinc-800">
-          {recentIncidents.map((incident) => (
-            <div
-              key={incident.id}
-              onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
-              className="flex items-center gap-4 p-4 hover:bg-white/5 cursor-pointer group transition-colors"
+          <div className="flex gap-3">
+            <button
+              onClick={() => navigate('/app/ir')}
+              className={`px-5 py-2 ${t.btnSecondary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
             >
-              <div className={`w-1.5 h-1.5 rounded-full ${sevDots[incident.severity]}`} />
-              <span className="text-[10px] text-zinc-500 font-mono w-24 group-hover:text-zinc-400">{incident.incident_number}</span>
-              <span className="text-xs text-zinc-300 flex-1 truncate group-hover:text-white transition-colors font-bold">
-                {incident.title}
-              </span>
-              <span className={`text-[10px] font-bold uppercase tracking-wider ${statusColors[incident.status]}`}>
-                {incident.status.replace('_', ' ')}
-              </span>
-              <span className="text-[10px] text-zinc-600 w-16 text-right font-mono">{formatDate(incident.occurred_at)}</span>
-              <ChevronRight className="w-4 h-4 text-zinc-600 group-hover:text-zinc-400" />
-            </div>
-          ))}
-          </div>
-        ) : (
-          <div className="text-center py-12">
-            <div className={`text-xs ${t.textMuted} mb-3 font-mono uppercase tracking-wider`}>No incidents reported</div>
+              View All
+            </button>
             <button
               onClick={() => navigate('/app/ir/incidents/new')}
-              className={`text-xs ${t.textMain} font-bold uppercase tracking-wider underline underline-offset-4`}
+              className={`flex items-center gap-2 px-5 py-2 ${t.btnPrimary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
             >
-              Report First Incident
+              <Plus size={14} /> Report
             </button>
           </div>
-        )}
+        </div>
+
+        <WidgetContainer widgets={dashboardWidgets}>
+          {(visibleWidgets) => (
+            <div className="space-y-6">
+              {/* Stats Grid */}
+              {visibleWidgets.has('stats') && (
+                <div data-tour="ir-dash-stats" className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  {stats.map((stat) => (
+                    <button
+                      key={stat.label}
+                      onClick={() => navigate(stat.path)}
+                      className={`${t.cardDark} p-6 ${t.cardDarkHover} transition-all group relative overflow-hidden text-left`}
+                    >
+                      <div className={`absolute top-0 right-0 p-3 ${t.cardDarkGhost} group-hover:scale-110 transition-all duration-500`}>
+                        <stat.icon className="w-10 h-10" strokeWidth={0.5} />
+                      </div>
+
+                      <div className="relative z-10">
+                        <div className={`${t.labelOnDark} mb-3`}>{stat.label}</div>
+                        <div className="text-4xl font-light font-mono text-zinc-50 mb-1 tabular-nums">{stat.value}</div>
+                        <div className={`text-[10px] ${t.textMuted} font-mono`}>
+                          {stat.change}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Trend Chart */}
+              {visibleWidgets.has('trend') && trends && trends.data.length > 0 && (
+                <div data-tour="ir-dash-trend" className={`${t.card} p-6`}>
+                  <div className={`${t.label} mb-6 flex items-center gap-2`}>
+                    <Activity size={14} className={t.icon} /> Weekly Trend
+                  </div>
+                  <div className="flex items-end gap-1 h-32">
+                    {trends.data.map((point, idx) => {
+                      const maxCount = Math.max(...trends.data.map((d) => d.count), 1);
+                      const height = (point.count / maxCount) * 100;
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex-1 ${t.barBg} ${t.barHover} transition-colors cursor-crosshair group relative rounded-sm`}
+                          style={{ height: `${Math.max(height, 2)}%` }}
+                        >
+                          <div className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block ${t.tooltipBg} text-[10px] font-bold px-2 py-1 rounded-lg z-10 whitespace-nowrap`}>
+                            {point.count} Incidents • {point.date}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className={`flex justify-between text-[9px] ${t.textFaint} mt-3 font-mono uppercase`}>
+                    <span>{trends.start_date}</span>
+                    <span>{trends.end_date}</span>
+                  </div>
+                </div>
+              )}
+
+              {visibleWidgets.has('breakdown') && (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* By Type */}
+                  <div data-tour="ir-dash-by-type" className={`${t.card} p-6`}>
+                    <div className={`${t.label} mb-6 flex items-center gap-2`}>
+                      <ShieldAlert size={14} className={t.icon} /> By Type
+                    </div>
+                    {summary && Object.keys(summary.by_type).length > 0 ? (
+                      <div className="space-y-3">
+                        {Object.entries(summary.by_type).map(([type, count]) => (
+                          <div key={type} className="flex justify-between items-center group">
+                            <span className={`text-xs ${t.textMuted} group-hover:${t.textMain} transition-colors`}>{TYPE_LABELS[type] || type}</span>
+                            <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
+                    )}
+                  </div>
+
+                  {/* By Severity */}
+                  <div data-tour="ir-dash-by-severity" className={`${t.card} p-6`}>
+                    <div className={`${t.label} mb-6 flex items-center gap-2`}>
+                      <ShieldAlert size={14} className={t.icon} /> By Severity
+                    </div>
+                    {summary && Object.keys(summary.by_severity).length > 0 ? (
+                      <div className="space-y-3">
+                        {['critical', 'high', 'medium', 'low'].map((severity) => {
+                          const count = summary.by_severity[severity] || 0;
+                          if (count === 0) return null;
+                          return (
+                            <div key={severity} className="flex justify-between items-center group">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-1.5 h-1.5 rounded-full ${sevDots[severity]}`} />
+                                <span className={`text-xs ${t.textMuted} capitalize group-hover:${t.textMain} transition-colors`}>{severity}</span>
+                              </div>
+                              <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{count}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
+                    )}
+                  </div>
+
+                  {/* Hotspots */}
+                  <div data-tour="ir-dash-hotspots" className={`${t.card} p-6`}>
+                    <div className={`${t.label} mb-6 flex items-center gap-2`}>
+                      <MapPin size={14} className={t.icon} /> Hotspots
+                    </div>
+                    {locations && locations.hotspots.length > 0 ? (
+                      <div className="space-y-3">
+                        {locations.hotspots.slice(0, 4).map((hotspot, idx) => (
+                          <div key={idx} className="flex justify-between items-center group">
+                            <span className={`text-xs ${t.textMuted} truncate max-w-[120px] group-hover:${t.textMain} transition-colors`}>{hotspot.location}</span>
+                            <span className={`text-xs font-mono px-2 py-0.5 rounded-full ${t.countBadge}`}>{hotspot.count}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className={`text-xs ${t.textFaint} font-mono`}>No data available</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Incidents */}
+              {visibleWidgets.has('recent') && (
+                <div data-tour="ir-dash-recent" className={`${t.cardLight} overflow-hidden`}>
+                  <div className={`flex justify-between items-center p-4 border-b ${t.border}`}>
+                    <div className={t.label}>Recent Incidents</div>
+                    <button
+                      onClick={() => navigate('/app/ir')}
+                      className={`text-[10px] flex items-center gap-1 uppercase tracking-wider transition-colors ${t.recentAllHover} ${t.textMuted}`}
+                    >
+                      All <ArrowRight size={10} />
+                    </button>
+                  </div>
+                  {recentIncidents.length > 0 ? (
+                    <div className={`divide-y ${t.divide}`}>
+                      {recentIncidents.map((incident) => (
+                        <div
+                          key={incident.id}
+                          onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
+                          className={`flex items-center gap-4 p-4 ${t.rowHover} cursor-pointer group transition-colors`}
+                        >
+                          <div className={`w-1.5 h-1.5 rounded-full ${sevDots[incident.severity]}`} />
+                          <span className={`text-[10px] font-mono w-24 transition-colors ${t.recentId}`}>{incident.incident_number}</span>
+                          <span className={`text-xs flex-1 truncate transition-colors font-bold ${t.recentTitle}`}>
+                            {incident.title}
+                          </span>
+                          <span className={`text-[10px] font-bold uppercase tracking-wider ${statusColors[incident.status]}`}>
+                            {incident.status.replace('_', ' ')}
+                          </span>
+                          <span className={`text-[10px] w-16 text-right font-mono ${t.recentDate}`}>{formatDate(incident.occurred_at)}</span>
+                          <ChevronRight className={`w-4 h-4 transition-colors ${t.recentChevron}`} />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-12">
+                      <div className={`text-xs ${t.textMuted} mb-3 font-mono uppercase tracking-wider`}>No incidents reported</div>
+                      <button
+                        onClick={() => navigate('/app/ir/incidents/new')}
+                        className={`text-xs ${t.textMain} font-bold uppercase tracking-wider underline underline-offset-4`}
+                      >
+                        Report First Incident
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </WidgetContainer>
       </div>
-    </div>
     </div>
   );
 }
