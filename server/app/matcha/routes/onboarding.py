@@ -597,6 +597,7 @@ class NotificationSettingsUpdate(BaseModel):
     escalate_to_manager_after_days: int = 3
     escalate_to_hr_after_days: int = 5
     timezone: str = "America/New_York"
+    auto_send_invitation: bool = False
 
 
 @router.get("/notification-settings")
@@ -619,6 +620,7 @@ async def get_notification_settings(
                 "escalate_to_manager_after_days": 3,
                 "escalate_to_hr_after_days": 5,
                 "timezone": "America/New_York",
+                "auto_send_invitation": False,
             }
         return dict(row)
 
@@ -636,8 +638,9 @@ async def update_notification_settings(
             """
             INSERT INTO onboarding_notification_settings
                 (org_id, email_enabled, hr_escalation_emails, reminder_days_before_due,
-                 escalate_to_manager_after_days, escalate_to_hr_after_days, timezone)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+                 escalate_to_manager_after_days, escalate_to_hr_after_days, timezone,
+                 auto_send_invitation)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             ON CONFLICT (org_id) DO UPDATE SET
                 email_enabled = EXCLUDED.email_enabled,
                 hr_escalation_emails = EXCLUDED.hr_escalation_emails,
@@ -645,6 +648,7 @@ async def update_notification_settings(
                 escalate_to_manager_after_days = EXCLUDED.escalate_to_manager_after_days,
                 escalate_to_hr_after_days = EXCLUDED.escalate_to_hr_after_days,
                 timezone = EXCLUDED.timezone,
+                auto_send_invitation = EXCLUDED.auto_send_invitation,
                 updated_at = NOW()
             RETURNING *
             """,
@@ -655,5 +659,6 @@ async def update_notification_settings(
             request.escalate_to_manager_after_days,
             request.escalate_to_hr_after_days,
             request.timezone,
+            request.auto_send_invitation,
         )
         return dict(row)

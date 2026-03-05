@@ -139,6 +139,7 @@ class EmployeeCreateRequest(BaseModel):
     start_date: Optional[str] = None
     manager_id: Optional[UUID] = None
     skip_google_workspace_provisioning: bool = False
+    skip_invitation: bool = False
     pay_classification: Optional[str] = None
     pay_rate: Optional[Decimal] = None
     work_city: Optional[str] = None
@@ -354,6 +355,19 @@ async def send_single_invitation(
     finally:
         if should_close:
             await conn.close()
+
+
+async def _auto_send_invitation(
+    *,
+    employee_id: UUID,
+    org_id: UUID,
+    invited_by: UUID,
+) -> None:
+    """Background task: auto-send invitation to a newly created employee."""
+    try:
+        await send_single_invitation(employee_id, org_id, invited_by)
+    except Exception:
+        logger.exception("Auto-invite background task failed for employee %s", employee_id)
 
 
 async def _run_provisioning_and_notify(
@@ -887,6 +901,23 @@ async def create_employee(
                 run_google=run_google,
                 run_slack=run_slack,
             )
+
+        # Auto-send invitation if enabled in notification settings
+        if not request.skip_invitation:
+            try:
+                settings = await conn.fetchrow(
+                    "SELECT auto_send_invitation FROM onboarding_notification_settings WHERE org_id = $1",
+                    company_id,
+                )
+                if settings and settings["auto_send_invitation"]:
+                    background_tasks.add_task(
+                        _auto_send_invitation,
+                        employee_id=row["id"],
+                        org_id=company_id,
+                        invited_by=current_user.id,
+                    )
+            except Exception:
+                logger.exception("Auto-invite check failed for employee %s", row["id"])
 
         return response
 
@@ -1536,6 +1567,71 @@ async def send_bulk_invitations(
                     })
 
             # Delay between batches to avoid overwhelming email service
+            if i + BATCH_SIZE < len(employee_ids):
+                await asyncio.sleep(1)
+
+    return BulkInviteResponse(
+        sent=sent,
+        failed=failed,
+        total=len(employee_ids),
+        errors=errors
+    )
+
+
+@router.post("/invite-all", response_model=BulkInviteResponse)
+async def invite_all_uninvited(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Send invitation emails to all uninvited employees in the company.
+
+    Finds all employees who have no user_id and no pending/accepted invitation,
+    then sends invitations in batches of 10 with rate limiting.
+    """
+    company_id = await get_client_company_id(current_user)
+
+    sent = 0
+    failed = 0
+    errors = []
+
+    BATCH_SIZE = 10
+
+    async with get_connection() as conn:
+        # Find all employees who are uninvited:
+        # - no user_id (haven't created an account)
+        # - no pending or accepted invitation
+        rows = await conn.fetch(
+            """
+            SELECT e.id
+            FROM employees e
+            WHERE e.org_id = $1
+              AND e.user_id IS NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM employee_invitations ei
+                  WHERE ei.employee_id = e.id
+                    AND ei.status IN ('pending', 'accepted')
+              )
+            ORDER BY e.created_at
+            """,
+            company_id,
+        )
+
+        employee_ids = [row["id"] for row in rows]
+
+        for i in range(0, len(employee_ids), BATCH_SIZE):
+            batch = employee_ids[i:i + BATCH_SIZE]
+
+            for employee_id in batch:
+                try:
+                    await send_single_invitation(employee_id, company_id, current_user.id, conn)
+                    sent += 1
+                except Exception as e:
+                    failed += 1
+                    errors.append({
+                        "employee_id": str(employee_id),
+                        "error": str(e)
+                    })
+
             if i + BATCH_SIZE < len(employee_ids):
                 await asyncio.sleep(1)
 

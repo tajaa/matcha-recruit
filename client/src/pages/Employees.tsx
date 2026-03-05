@@ -469,6 +469,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const [isDragging, setIsDragging] = useState(false);
   const [bulkInviting, setBulkInviting] = useState(false);
   const [bulkInviteResult, setBulkInviteResult] = useState<{ sent: number; failed: number } | null>(null);
+  const [inviteAllLoading, setInviteAllLoading] = useState(false);
+  const [inviteAllResult, setInviteAllResult] = useState<{ sent: number; failed: number } | null>(null);
 
   // Search & filter state
   const [searchInput, setSearchInput] = useState('');
@@ -1296,6 +1298,60 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               <Plus size={14} />
               Add Employee
             </button>
+
+            {/* Invite All button — only in onboarding mode when uninvited employees exist */}
+            {mode === 'onboarding' && (() => {
+              const uninvitedCount = employees.filter(e => !e.user_id && e.invitation_status !== 'pending').length;
+              if (uninvitedCount === 0) return null;
+              return (
+                <button
+                  onClick={async () => {
+                    setInviteAllLoading(true);
+                    setInviteAllResult(null);
+                    try {
+                      const token = getAccessToken();
+                      const res = await fetch(`${API_BASE}/employees/invite-all`, {
+                        method: 'POST',
+                        headers: { Authorization: `Bearer ${token}` },
+                      });
+                      if (res.ok) {
+                        const data = await res.json();
+                        setInviteAllResult({ sent: data.sent, failed: data.failed });
+                        // Refresh employee list to update invitation statuses
+                        const empRes = await fetch(`${API_BASE}/employees`, {
+                          headers: { Authorization: `Bearer ${token}` },
+                        });
+                        if (empRes.ok) {
+                          const empData = await empRes.json();
+                          setEmployees(empData);
+                        }
+                      } else {
+                        setInviteAllResult({ sent: 0, failed: -1 });
+                      }
+                    } catch (err) {
+                      console.error('Invite all failed:', err);
+                      setInviteAllResult({ sent: 0, failed: -1 });
+                    } finally {
+                      setInviteAllLoading(false);
+                    }
+                  }}
+                  disabled={inviteAllLoading}
+                  className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50`}
+                >
+                  {inviteAllLoading ? (
+                    <span className="w-3 h-3 border-2 border-current/20 border-t-current rounded-full animate-spin" />
+                  ) : (
+                    <Mail size={14} />
+                  )}
+                  {inviteAllResult
+                    ? inviteAllResult.failed === -1
+                      ? 'Failed — try again'
+                      : `${inviteAllResult.sent} Sent${inviteAllResult.failed ? `, ${inviteAllResult.failed} Failed` : ''}`
+                    : `Invite All (${uninvitedCount})`
+                  }
+                </button>
+              );
+            })()}
           </div>
         )}
       </div>

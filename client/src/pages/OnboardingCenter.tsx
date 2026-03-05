@@ -357,6 +357,112 @@ export default function OnboardingCenter() {
         </div>
       )}
 
+      {/* Analytics Dashboard */}
+      {analytics && (analytics.funnel.invited > 0 || analytics.funnel.accepted > 0 || analytics.funnel.started > 0 || analytics.funnel.completed > 0 || analytics.funnel.ready_for_day1 > 0) && (
+        <div className="space-y-4">
+          {/* Funnel Bar */}
+          <div className={`${t.card} p-5`}>
+            <div className={`${t.label} mb-4`}>Onboarding Funnel</div>
+            {(() => {
+              const stages = [
+                { key: 'invited', label: 'Invited', count: analytics.funnel.invited, color: isLight ? 'bg-stone-400' : 'bg-zinc-600' },
+                { key: 'accepted', label: 'Accepted', count: analytics.funnel.accepted, color: isLight ? 'bg-blue-400' : 'bg-blue-500' },
+                { key: 'started', label: 'Started', count: analytics.funnel.started, color: isLight ? 'bg-amber-400' : 'bg-amber-500' },
+                { key: 'completed', label: 'Completed', count: analytics.funnel.completed, color: isLight ? 'bg-emerald-400' : 'bg-emerald-500' },
+                { key: 'ready', label: 'Ready for Day 1', count: analytics.funnel.ready_for_day1, color: isLight ? 'bg-emerald-600' : 'bg-emerald-400' },
+              ];
+              const total = Math.max(...stages.map(s => s.count), 1);
+              return (
+                <div className="space-y-3">
+                  {/* Segmented bar */}
+                  <div className={`flex h-3 rounded-full overflow-hidden ${isLight ? 'bg-stone-200' : 'bg-zinc-800'}`}>
+                    {stages.map((s) => {
+                      const pct = (s.count / total) * 100;
+                      if (pct === 0) return null;
+                      return (
+                        <div
+                          key={s.key}
+                          className={`${s.color} transition-all duration-500`}
+                          style={{ width: `${pct}%` }}
+                          title={`${s.label}: ${s.count}`}
+                        />
+                      );
+                    })}
+                  </div>
+                  {/* Stage labels */}
+                  <div className="flex flex-wrap gap-x-6 gap-y-2">
+                    {stages.map((s, i) => {
+                      const prev = i > 0 ? stages[i - 1].count : null;
+                      const convPct = prev && prev > 0 ? Math.round((s.count / prev) * 100) : null;
+                      return (
+                        <div key={s.key} className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${s.color}`} />
+                          <span className={`text-[11px] ${t.textMuted}`}>{s.label}</span>
+                          <span className={`text-[11px] font-bold ${t.textMain}`}>{s.count}</span>
+                          {convPct !== null && (
+                            <span className={`text-[10px] ${t.textFaint}`}>({convPct}%)</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
+
+          {/* KPI Cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div className={`${t.card} p-4`}>
+              <div className={`${t.label} mb-2`}>Time to Ready (p50)</div>
+              <div className={`text-xl font-bold tracking-tight ${t.textMain}`}>
+                {analytics.kpis.time_to_ready_p50_days != null ? `${analytics.kpis.time_to_ready_p50_days}d` : '—'}
+              </div>
+            </div>
+            <div className={`${t.card} p-4`}>
+              <div className={`${t.label} mb-2`}>Time to Ready (p90)</div>
+              <div className={`text-xl font-bold tracking-tight ${t.textMain}`}>
+                {analytics.kpis.time_to_ready_p90_days != null ? `${analytics.kpis.time_to_ready_p90_days}d` : '—'}
+              </div>
+            </div>
+            <div className={`${t.card} p-4`}>
+              <div className={`${t.label} mb-2`}>Complete Before Start</div>
+              <div className={`text-xl font-bold tracking-tight ${t.textMain}`}>
+                {analytics.kpis.completion_before_start_rate != null ? `${Math.round(analytics.kpis.completion_before_start_rate)}%` : '—'}
+              </div>
+            </div>
+            <div className={`${t.card} p-4`}>
+              <div className={`${t.label} mb-2`}>Automation Success</div>
+              <div className={`text-xl font-bold tracking-tight ${t.textMain}`}>
+                {analytics.kpis.automation_success_rate != null ? `${Math.round(analytics.kpis.automation_success_rate)}%` : '—'}
+              </div>
+            </div>
+          </div>
+
+          {/* Bottlenecks */}
+          {analytics.bottlenecks.length > 0 && (
+            <div className={`${t.card} p-5`}>
+              <div className={`${t.label} mb-3`}>Bottlenecks</div>
+              <div className={`divide-y ${t.divide}`}>
+                {analytics.bottlenecks.map((b, i) => (
+                  <div key={i} className="flex items-center justify-between py-2.5 first:pt-0 last:pb-0">
+                    <span className={`text-xs ${t.textMain}`}>{b.task_title}</span>
+                    <div className="flex items-center gap-4">
+                      <span className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>
+                        {b.overdue_count} overdue
+                      </span>
+                      <span className={`text-[10px] font-mono ${t.textFaint}`}>
+                        avg {b.avg_days_overdue.toFixed(1)}d
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Tabs */}
       <div className={`border-b ${t.borderTab} -mx-4 px-4 sm:mx-0 sm:px-0`}>
         <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">

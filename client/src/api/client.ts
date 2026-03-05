@@ -614,6 +614,7 @@ export interface OnboardingNotificationSettings {
   escalate_to_manager_after_days: number;
   escalate_to_hr_after_days: number;
   timezone: string;
+  auto_send_invitation: boolean;
 }
 
 export interface OnboardingTemplate {

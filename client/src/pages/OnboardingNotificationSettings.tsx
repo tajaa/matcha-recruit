@@ -51,6 +51,7 @@ const DEFAULTS: Settings = {
   escalate_to_manager_after_days: 3,
   escalate_to_hr_after_days: 5,
   timezone: 'America/New_York',
+  auto_send_invitation: false,
 };
 
 export default function OnboardingNotificationSettings() {
@@ -141,6 +142,33 @@ export default function OnboardingNotificationSettings() {
           {success}
         </div>
       )}
+
+      {/* Auto-send invitation toggle */}
+      <div className={`${t.card} p-5 space-y-4`}>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className={`text-xs font-bold uppercase tracking-widest ${t.textMain}`}>Auto-Send Invitation</h3>
+            <p className={`text-[10px] ${t.textMuted} mt-1`}>
+              Automatically send portal invitation email to new employees — like auto-provisioning for Google Workspace and Slack.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSettings((s) => ({ ...s, auto_send_invitation: !s.auto_send_invitation }))}
+            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border transition-colors ${
+              settings.auto_send_invitation
+                ? 'bg-emerald-600 border-emerald-500/50'
+                : `${isLight ? 'bg-stone-300 border-stone-300' : 'bg-zinc-700 border-zinc-600'}`
+            }`}
+          >
+            <span
+              className={`pointer-events-none inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                settings.auto_send_invitation ? 'translate-x-4' : 'translate-x-0.5'
+              } mt-[1px]`}
+            />
+          </button>
+        </div>
+      </div>
 
       {/* Email notifications toggle */}
       <div className={`${t.card} p-5 space-y-4`}>
