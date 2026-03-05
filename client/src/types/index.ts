@@ -1544,7 +1544,7 @@ export type ERCaseCategory = 'harassment' | 'discrimination' | 'safety' | 'retal
 export type ERCaseOutcome = 'termination' | 'disciplinary_action' | 'retraining' | 'no_action' | 'resignation' | 'other';
 export type ERDocumentType = 'transcript' | 'policy' | 'email' | 'other';
 export type ERProcessingStatus = 'pending' | 'processing' | 'completed' | 'failed';
-export type ERAnalysisType = 'timeline' | 'discrepancies' | 'policy_check' | 'summary' | 'determination';
+export type ERAnalysisType = 'timeline' | 'discrepancies' | 'policy_check' | 'summary' | 'determination' | 'similar_cases';
 export type ERCaseNoteType = 'general' | 'question' | 'answer' | 'guidance' | 'system';
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 export type SeverityLevel = 'high' | 'medium' | 'low';
@@ -1690,6 +1690,44 @@ export interface OutcomeAnalysisResponse {
   case_summary: string;
   generated_at: string;
   model: string;
+}
+
+// ER Similar Cases Analysis
+export interface ERCaseScoreBreakdown {
+  category_match: number;
+  outcome_relevance: number;
+  status_maturity: number;
+  evidence_profile: number;
+  temporal_recency: number;
+  intake_context_overlap: number;
+  text_similarity: number;
+  investigation_pattern_similarity: number;
+}
+
+export interface ERSimilarCaseMatch {
+  case_id: string;
+  case_number: string;
+  title: string;
+  category: ERCaseCategory | null;
+  outcome: ERCaseOutcome | null;
+  status: ERCaseStatus;
+  created_at: string;
+  closed_at: string | null;
+  resolution_days: number | null;
+  outcome_effective: boolean | null;
+  similarity_score: number;
+  score_breakdown: ERCaseScoreBreakdown;
+  common_factors: string[];
+  relevance_note: string | null;
+}
+
+export interface ERSimilarCasesAnalysis {
+  matches: ERSimilarCaseMatch[];
+  pattern_summary: string | null;
+  outcome_distribution: Record<string, number>;
+  generated_at: string;
+  from_cache?: boolean;
+  cache_reason?: string;
 }
 
 // Document types

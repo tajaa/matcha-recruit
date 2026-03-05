@@ -1036,7 +1036,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS er_case_analysis (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 case_id UUID NOT NULL REFERENCES er_cases(id) ON DELETE CASCADE,
-                analysis_type VARCHAR(50) NOT NULL CHECK (analysis_type IN ('timeline', 'discrepancies', 'policy_check', 'summary', 'determination')),
+                analysis_type VARCHAR(50) NOT NULL CHECK (analysis_type IN ('timeline', 'discrepancies', 'policy_check', 'summary', 'determination', 'similar_cases')),
                 analysis_data JSONB NOT NULL,
                 source_documents JSONB,
                 generated_by UUID REFERENCES users(id),

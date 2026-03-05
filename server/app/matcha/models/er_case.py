@@ -12,7 +12,7 @@ ERCaseCategory = Literal["harassment", "discrimination", "safety", "retaliation"
 ERCaseOutcome = Literal["termination", "disciplinary_action", "retraining", "no_action", "resignation", "other"]
 ERDocumentType = Literal["transcript", "policy", "email", "other"]
 ERProcessingStatus = Literal["pending", "processing", "completed", "failed"]
-ERAnalysisType = Literal["timeline", "discrepancies", "policy_check", "summary", "determination"]
+ERAnalysisType = Literal["timeline", "discrepancies", "policy_check", "summary", "determination", "similar_cases"]
 ERCaseNoteType = Literal["general", "question", "answer", "guidance", "system"]
 ConfidenceLevel = Literal["high", "medium", "low"]
 SeverityLevel = Literal["high", "medium", "low"]
@@ -342,3 +342,47 @@ class AuditLogResponse(BaseModel):
     """Response for listing audit log entries."""
     entries: list[AuditLogEntry]
     total: int
+
+
+# ===========================================
+# Similar Cases Analysis Models
+# ===========================================
+
+class ERCaseScoreBreakdown(BaseModel):
+    """Score breakdown for each similarity dimension."""
+    category_match: float
+    outcome_relevance: float
+    status_maturity: float
+    evidence_profile: float
+    temporal_recency: float
+    intake_context_overlap: float
+    text_similarity: float
+    investigation_pattern_similarity: float
+
+
+class ERSimilarCaseMatch(BaseModel):
+    """A single similar case match."""
+    case_id: str
+    case_number: str
+    title: str
+    category: Optional[ERCaseCategory] = None
+    outcome: Optional[ERCaseOutcome] = None
+    status: ERCaseStatus
+    created_at: str
+    closed_at: Optional[str] = None
+    resolution_days: Optional[int] = None
+    outcome_effective: Optional[bool] = None
+    similarity_score: float
+    score_breakdown: ERCaseScoreBreakdown
+    common_factors: list[str] = []
+    relevance_note: Optional[str] = None
+
+
+class ERSimilarCasesAnalysis(BaseModel):
+    """Complete similar cases analysis result."""
+    matches: list[ERSimilarCaseMatch] = []
+    pattern_summary: Optional[str] = None
+    outcome_distribution: dict[str, int] = {}
+    generated_at: str
+    from_cache: bool = False
+    cache_reason: Optional[str] = None

@@ -100,6 +100,7 @@ import type {
   OutcomeAnalysisResponse,
   ERTaskStatus,
   ERAuditLogResponse,
+  ERSimilarCasesAnalysis,
   // IR (Incident Report) types
   IRIncident,
   IRIncidentCreate,
@@ -1705,6 +1706,9 @@ export const erCopilot = {
 
   getPolicyCheck: (caseId: string): Promise<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string | null }> =>
     request<{ analysis: PolicyCheckAnalysis; source_documents: string[]; generated_at: string | null }>(`/er/cases/${caseId}/analysis/policy-check`),
+
+  getSimilarCases: (caseId: string): Promise<ERSimilarCasesAnalysis> =>
+    request<ERSimilarCasesAnalysis>(`/er/cases/${caseId}/analysis/similar-cases`),
 
   generateSuggestedGuidance: (caseId: string, model?: 'flash' | 'pro'): Promise<ERSuggestedGuidanceResponse> =>
     request<ERSuggestedGuidanceResponse>(`/er/cases/${caseId}/guidance/suggested${model === 'pro' ? '?model=pro' : ''}`, {

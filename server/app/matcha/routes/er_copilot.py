@@ -56,6 +56,7 @@ from ..models.er_case import (
     TaskStatusResponse,
     AuditLogEntry,
     AuditLogResponse,
+    ERSimilarCasesAnalysis,
 )
 
 logger = logging.getLogger(__name__)
@@ -1701,6 +1702,123 @@ async def get_policy_check(
             "source_documents": source_docs,
             "generated_at": row["generated_at"],
         }
+
+
+@router.post("/{case_id}/analysis/similar-cases")
+async def analyze_similar_cases(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Stream SSE progress events during similar cases analysis."""
+    from starlette.responses import StreamingResponse
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async def event_stream():
+        def sse(data: dict) -> str:
+            return f"data: {json.dumps(data, default=str)}\n\n"
+
+        async with get_connection() as conn:
+            await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+
+            # Check cache first
+            cached = await conn.fetchrow(
+                """
+                SELECT analysis_data, generated_at
+                FROM er_case_analysis
+                WHERE case_id = $1 AND analysis_type = 'similar_cases'
+                """,
+                case_id,
+            )
+            if cached:
+                analysis = cached["analysis_data"]
+                if isinstance(analysis, str):
+                    analysis = json.loads(analysis)
+                analysis["from_cache"] = True
+                analysis["cache_reason"] = f"Cached from {cached['generated_at'].isoformat() if cached['generated_at'] else 'unknown'}"
+                yield sse({"type": "cached", "message": "Using cached results", "result": analysis})
+                yield "data: [DONE]\n\n"
+                return
+
+            # Stream fresh analysis
+            from ..services.er_precedent import find_similar_cases_stream
+
+            async for event in find_similar_cases_stream(str(case_id), conn):
+                if event["type"] == "phase":
+                    yield sse(event)
+                elif event["type"] == "result":
+                    result_data = event["data"]
+                    # Cache the result
+                    try:
+                        await conn.execute(
+                            """
+                            INSERT INTO er_case_analysis (case_id, analysis_type, analysis_data, generated_by, generated_at)
+                            VALUES ($1, 'similar_cases', $2, $3, NOW())
+                            ON CONFLICT (case_id, analysis_type)
+                            DO UPDATE SET analysis_data = $2, generated_by = $3, generated_at = NOW()
+                            """,
+                            case_id,
+                            json.dumps(result_data, default=str),
+                            current_user.id,
+                        )
+                    except Exception as cache_err:
+                        logger.warning(f"Failed to cache similar cases result: {cache_err}")
+
+                    yield sse({"type": "complete", "message": "Analysis complete", "result": result_data})
+
+            yield "data: [DONE]\n\n"
+
+            # Audit log
+            try:
+                await log_audit(
+                    conn, str(case_id), str(current_user.id),
+                    "analysis_requested",
+                    entity_type="analysis",
+                    details={"analysis_type": "similar_cases"},
+                )
+            except Exception:
+                pass
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/{case_id}/analysis/similar-cases")
+async def get_similar_cases(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get cached similar cases analysis."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+        row = await conn.fetchrow(
+            """
+            SELECT analysis_data, generated_at
+            FROM er_case_analysis
+            WHERE case_id = $1 AND analysis_type = 'similar_cases'
+            """,
+            case_id,
+        )
+
+        if not row:
+            return {
+                "matches": [],
+                "pattern_summary": None,
+                "outcome_distribution": {},
+                "generated_at": None,
+                "from_cache": False,
+            }
+
+        analysis = row["analysis_data"]
+        if isinstance(analysis, str):
+            analysis = json.loads(analysis)
+
+        return analysis
 
 
 @router.post("/{case_id}/guidance/suggested", response_model=SuggestedGuidanceResponse)

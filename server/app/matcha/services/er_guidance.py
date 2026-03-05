@@ -43,7 +43,7 @@ def _normalize_guidance_action(
 ) -> dict[str, Any]:
     valid_action_types = {"run_analysis", "open_tab", "search_evidence", "upload_document"}
     valid_tabs = {"timeline", "discrepancies", "policy", "search"}
-    valid_analysis_types = {"timeline", "discrepancies", "policy"}
+    valid_analysis_types = {"timeline", "discrepancies", "policy", "similar_cases"}
 
     action_type = "open_tab"
     label = "Open Timeline"

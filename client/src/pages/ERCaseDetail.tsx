@@ -23,9 +23,11 @@ import type {
 } from '../types';
 import {
   ChevronLeft, Upload, Trash2, Search,
-  AlertTriangle, CheckCircle, Clock, X, RefreshCw, Download
+  AlertTriangle, CheckCircle, Clock, X, RefreshCw, Download, Scale
 } from 'lucide-react';
 import { AnalysisConsole } from '../components/er/AnalysisConsole';
+import { useERSimilarCasesStream } from '../hooks/er/useERSimilarCasesStream';
+import { SimilarCasesAnalysisModal } from '../components/er/SimilarCasesAnalysisModal';
 
 function normalizeDiscrepancyStatement(
   value: unknown,
@@ -521,6 +523,17 @@ export function ERCaseDetail() {
   const [exportPassword, setExportPassword] = useState('');
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+
+  // Similar Cases state
+  const {
+    streaming: similarStreaming,
+    messages: similarMessages,
+    result: similarResult,
+    error: similarError,
+    runAnalysis: runSimilarAnalysis,
+    reset: resetSimilar,
+  } = useERSimilarCasesStream();
+  const [showSimilarModal, setShowSimilarModal] = useState(false);
 
   const handleExport = useCallback(async () => {
     if (!id || exportPassword.length < 4) return;
@@ -1479,6 +1492,19 @@ export function ERCaseDetail() {
           <h1 className={`text-3xl font-light ${t.textMain} tracking-tight`}>{erCase.title}</h1>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              if (id) {
+                runSimilarAnalysis(id);
+                setShowSimilarModal(true);
+              }
+            }}
+            disabled={similarStreaming}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${t.textMuted} hover:${t.textMain} uppercase tracking-wider transition-colors border ${t.border} hover:border-current rounded-lg ${similarStreaming ? 'opacity-50' : ''}`}
+          >
+            <Scale size={12} />
+            {similarStreaming ? 'Analyzing...' : 'Similar Cases'}
+          </button>
           <button
             onClick={() => setShowExportModal(true)}
             className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${t.textMuted} hover:${t.textMain} uppercase tracking-wider transition-colors border ${t.border} hover:border-current rounded-lg`}
@@ -2577,6 +2603,18 @@ export function ERCaseDetail() {
           </div>
         </div>
       , document.body)}
+
+      {/* Similar Cases Modal */}
+      <SimilarCasesAnalysisModal
+        isOpen={showSimilarModal}
+        onClose={() => {
+          setShowSimilarModal(false);
+          resetSimilar();
+        }}
+        analysis={similarResult}
+        streaming={similarStreaming}
+        messages={similarMessages}
+      />
 
       {/* Export Modal */}
       {showExportModal && createPortal(
