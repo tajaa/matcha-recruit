@@ -13,6 +13,10 @@ import { useIsLightMode } from '../hooks/useIsLightMode';
 const LT = {
   pageBg: 'bg-stone-300',
   card: 'bg-stone-100 rounded-2xl',
+  cardLight: 'bg-stone-100 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
   cardBg: 'bg-stone-100',
   textMain: 'text-zinc-900',
   textMuted: 'text-stone-500',
@@ -21,6 +25,7 @@ const LT = {
   divide: 'divide-stone-200',
   rowHover: 'hover:bg-stone-50',
   label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
   btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl',
   btnSecondary: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900 rounded-xl',
   btnGhost: 'text-stone-500 hover:text-zinc-900',
@@ -42,11 +47,16 @@ const LT = {
   actionBtn: 'text-stone-400 hover:text-zinc-900 hover:bg-stone-200 rounded-lg',
   publishBtn: 'text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg',
   distributeBtn: 'text-sky-600 hover:text-sky-700 hover:bg-sky-50 rounded-lg',
+  livePill: 'bg-stone-200 text-stone-600',
 } as const;
 
 const DK = {
   pageBg: 'bg-zinc-950',
   card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
   cardBg: 'bg-zinc-900/50',
   textMain: 'text-zinc-100',
   textMuted: 'text-zinc-500',
@@ -55,6 +65,7 @@ const DK = {
   divide: 'divide-white/10',
   rowHover: 'hover:bg-white/5',
   label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
   btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600 rounded-xl',
   btnSecondary: 'border border-white/10 hover:border-white/20 text-zinc-500 hover:text-zinc-100 rounded-xl',
   btnGhost: 'text-zinc-600 hover:text-zinc-100',
@@ -76,6 +87,7 @@ const DK = {
   actionBtn: 'text-zinc-600 hover:text-white hover:bg-white/10 rounded-lg',
   publishBtn: 'text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg',
   distributeBtn: 'text-sky-500 hover:text-sky-400 hover:bg-sky-500/10 rounded-lg',
+  livePill: 'bg-zinc-800 text-zinc-400',
 } as const;
 
 export function Handbooks() {
@@ -151,7 +163,7 @@ export function Handbooks() {
 
   return (
     <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
-    <div className="max-w-5xl mx-auto space-y-8">
+    <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-500">
       <div className="flex justify-between items-start mb-12 pb-8">
         <div>
           <div className="flex items-center gap-3">

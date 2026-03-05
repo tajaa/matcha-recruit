@@ -83,9 +83,13 @@ const HANDBOOK_WIZARD_RETURN_PATH = '/app/matcha/handbook/new';
 const LT = {
   pageBg: 'bg-stone-300',
   panelBg: 'bg-stone-200/60 border border-stone-200',
+  cardLight: 'bg-stone-100 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
   textMain: 'text-zinc-900',
   textBody: 'text-stone-600',
-  textMuted: 'text-zinc-500',
+  textMuted: 'text-stone-500',
   textFaint: 'text-stone-400',
   border: 'border-stone-300',
   borderLight: 'border-stone-200',
@@ -94,7 +98,9 @@ const LT = {
   btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
   btnSecondary: 'border border-stone-300 text-stone-600 hover:text-zinc-900',
   btnGhost: 'text-stone-500 hover:text-zinc-900',
-  label: 'text-stone-500',
+  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  livePill: 'bg-stone-200 text-stone-600',
   pillBg: 'bg-stone-200 border border-stone-200 text-stone-600',
   toggleOff: 'bg-stone-200 text-stone-500 hover:text-stone-700',
   alertAmber: 'text-amber-700 border border-amber-300 bg-amber-50',
@@ -117,6 +123,10 @@ const LT = {
 const DK = {
   pageBg: 'bg-zinc-950',
   panelBg: 'bg-zinc-900/40 border border-white/10',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
   textMain: 'text-white',
   textBody: 'text-zinc-300',
   textMuted: 'text-zinc-500',
@@ -128,7 +138,9 @@ const DK = {
   btnPrimary: 'bg-white text-black hover:bg-zinc-200',
   btnSecondary: 'border border-white/20 text-zinc-300 hover:text-white',
   btnGhost: 'text-zinc-500 hover:text-white',
-  label: 'text-zinc-500',
+  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  livePill: 'bg-zinc-800 text-zinc-400',
   pillBg: 'bg-zinc-950 border border-white/15 text-zinc-300',
   toggleOff: 'bg-zinc-900 text-zinc-400 hover:text-zinc-200',
   alertAmber: 'text-amber-300/90 border border-amber-500/30 bg-amber-500/10',
@@ -2107,7 +2119,7 @@ export function HandbookForm() {
 
   return (
     <div className={`min-h-screen ${t.pageBg} px-4 py-10`}>
-    <div className="max-w-4xl mx-auto space-y-10">
+    <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-500">
       <div className="flex items-start justify-between">
         <div>
           <button
@@ -2117,10 +2129,10 @@ export function HandbookForm() {
             <ChevronLeft size={12} />
             Back
           </button>
-          <h1 className={`text-3xl font-light tracking-tight ${t.textMain}`}>
+          <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
             {isEditing ? 'Edit Handbook' : 'Create Handbook'}
           </h1>
-          <p className={`text-sm ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>
+          <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>
             {isEditing ? 'Update handbook scope and employer settings' : 'Step-by-step handbook setup wizard'}
           </p>
           {isWizard && (

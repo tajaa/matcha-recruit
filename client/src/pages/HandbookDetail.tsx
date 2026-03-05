@@ -31,12 +31,18 @@ import { useIsLightMode } from '../hooks/useIsLightMode';
 const LT = {
   pageBg: 'bg-stone-300',
   card: 'bg-stone-100 rounded-2xl',
+  cardLight: 'bg-stone-100 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
   textMain: 'text-zinc-900',
   textSecondary: 'text-zinc-700',
   textMuted: 'text-stone-500',
   textFaint: 'text-stone-400',
   border: 'border-stone-200',
   label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  livePill: 'bg-stone-200 text-stone-600',
   btnGhost: 'text-stone-500 hover:text-zinc-900',
   btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl',
   btnSecondary: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900 rounded-xl',
@@ -99,12 +105,18 @@ const LT = {
 const DK = {
   pageBg: 'bg-zinc-950',
   card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
   textMain: 'text-zinc-100',
   textSecondary: 'text-zinc-300',
   textMuted: 'text-zinc-500',
   textFaint: 'text-zinc-600',
   border: 'border-white/10',
   label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  livePill: 'bg-zinc-800 text-zinc-400',
   btnGhost: 'text-zinc-600 hover:text-zinc-100',
   btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600 rounded-xl',
   btnSecondary: 'border border-white/10 hover:border-white/20 text-zinc-500 hover:text-zinc-100 rounded-xl',
@@ -611,7 +623,7 @@ function HandbookDetailPage() {
 
   return (
     <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
-    <div className="max-w-5xl mx-auto space-y-8">
+    <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-500">
       <div className="flex items-start justify-between mb-12 pb-8">
         <div className="space-y-3">
           <button
