@@ -95,7 +95,7 @@ const DK = {
   actionBtnDanger: 'text-zinc-600 hover:text-red-400',
 } as const;
 
-type Theme = typeof LT;
+type Theme = typeof LT | typeof DK;
 
 export default function OnboardingPriorities() {
   const isLight = useIsLightMode();
