@@ -667,6 +667,8 @@ async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, pa
 
         analyses_html = ""
         for a in analysis_rows:
+            if a["analysis_type"] == "similar_cases":
+                continue
             atype = esc((a["analysis_type"] or "unknown").replace("_", " ").title())
             result = a["analysis_data"]
             if isinstance(result, str):

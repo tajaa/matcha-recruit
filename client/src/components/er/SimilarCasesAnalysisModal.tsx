@@ -1,7 +1,6 @@
-import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Modal } from '../Modal';
-import type { ERSimilarCasesAnalysis, ERSimilarCaseMatch, ERCaseScoreBreakdown } from '../../types';
+import type { ERSimilarCasesAnalysis, ERSimilarCaseMatch } from '../../types';
 
 interface SimilarCasesAnalysisModalProps {
   isOpen: boolean;
@@ -77,43 +76,6 @@ const STATUS_DOT: Record<string, string> = {
   closed: 'bg-zinc-500',
 };
 
-const DIMENSION_LABELS: Record<keyof ERCaseScoreBreakdown, string> = {
-  category_match: 'Category',
-  outcome_relevance: 'Outcome',
-  status_maturity: 'Status',
-  evidence_profile: 'Evidence',
-  temporal_recency: 'Recency',
-  intake_context_overlap: 'Intake',
-  text_similarity: 'Text',
-  investigation_pattern_similarity: 'Investigation',
-};
-
-const DIMENSION_COLORS: Record<keyof ERCaseScoreBreakdown, string> = {
-  category_match: 'bg-violet-500',
-  outcome_relevance: 'bg-emerald-500',
-  status_maturity: 'bg-cyan-500',
-  evidence_profile: 'bg-orange-500',
-  temporal_recency: 'bg-pink-500',
-  intake_context_overlap: 'bg-amber-500',
-  text_similarity: 'bg-blue-500',
-  investigation_pattern_similarity: 'bg-teal-500',
-};
-
-function ScoreBar({ label, score, color }: { label: string; score: number; color: string }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-[10px] text-zinc-600 w-16 shrink-0">{label}</span>
-      <div className="flex-1 bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full ${color}`}
-          style={{ width: `${Math.max(score * 100, 1)}%` }}
-        />
-      </div>
-      <span className="text-[10px] text-zinc-500 w-7 text-right">{(score * 100).toFixed(0)}%</span>
-    </div>
-  );
-}
-
 function OutcomeDistributionBar({ distribution }: { distribution: Record<string, number> }) {
   const total = Object.values(distribution).reduce((sum, n) => sum + n, 0);
   if (total === 0) return null;
@@ -150,20 +112,6 @@ function OutcomeDistributionBar({ distribution }: { distribution: Record<string,
 }
 
 function SimilarCaseCard({ match, onClose }: { match: ERSimilarCaseMatch; onClose: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-
-  const getSimilarityColor = (score: number): string => {
-    if (score >= 0.7) return 'text-green-400';
-    if (score >= 0.5) return 'text-yellow-400';
-    return 'text-orange-400';
-  };
-
-  const getBarColor = (score: number): string => {
-    if (score >= 0.7) return 'bg-green-500';
-    if (score >= 0.5) return 'bg-yellow-500';
-    return 'bg-orange-500';
-  };
-
   const formatDate = (dateStr: string) =>
     new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
@@ -196,21 +144,6 @@ function SimilarCaseCard({ match, onClose }: { match: ERSimilarCaseMatch; onClos
               {OUTCOME_LABELS[match.outcome] || match.outcome}
             </span>
           )}
-        </div>
-      </div>
-
-      {/* Similarity Score */}
-      <div>
-        <div className="flex items-center gap-3">
-          <div className="flex-1 bg-zinc-800 h-2 rounded-full overflow-hidden">
-            <div
-              className={`h-full rounded-full transition-all ${getBarColor(match.similarity_score)}`}
-              style={{ width: `${match.similarity_score * 100}%` }}
-            />
-          </div>
-          <span className={`text-sm font-medium ${getSimilarityColor(match.similarity_score)}`}>
-            {(match.similarity_score * 100).toFixed(0)}%
-          </span>
         </div>
       </div>
 
@@ -251,25 +184,6 @@ function SimilarCaseCard({ match, onClose }: { match: ERSimilarCaseMatch; onClos
         </div>
       )}
 
-      {/* Expandable Score Breakdown */}
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
-      >
-        {expanded ? 'Hide' : 'Show'} score breakdown
-      </button>
-      {expanded && (
-        <div className="space-y-1.5 pt-1">
-          {(Object.keys(DIMENSION_LABELS) as (keyof ERCaseScoreBreakdown)[]).map((dim) => (
-            <ScoreBar
-              key={dim}
-              label={DIMENSION_LABELS[dim]}
-              score={match.score_breakdown[dim]}
-              color={DIMENSION_COLORS[dim]}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -369,20 +283,27 @@ export function SimilarCasesAnalysisModal({
 
         {/* Similar Case Matches */}
         <div>
-          <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-3">
-            Matches ({analysis.matches.length})
-          </div>
-          {analysis.matches.length === 0 ? (
-            <div className="text-sm text-zinc-500 italic">
-              No similar cases found
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {analysis.matches.map((match) => (
-                <SimilarCaseCard key={match.case_id} match={match} onClose={onClose} />
-              ))}
-            </div>
-          )}
+          {(() => {
+            const filteredMatches = analysis.matches.filter(m => m.similarity_score >= 0.5);
+            return (
+              <>
+                <div className="text-[10px] uppercase tracking-wider text-zinc-600 mb-3">
+                  Matches ({filteredMatches.length})
+                </div>
+                {filteredMatches.length === 0 ? (
+                  <div className="text-sm text-zinc-500 italic">
+                    No similar cases found
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {filteredMatches.map((match) => (
+                      <SimilarCaseCard key={match.case_id} match={match} onClose={onClose} />
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Metadata */}
