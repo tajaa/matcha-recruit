@@ -16,6 +16,10 @@ type Tab = 'workspace' | 'employees' | 'templates' | 'priorities' | 'notificatio
 const LT = {
   pageBg: 'bg-stone-300',
   card: 'bg-stone-100 rounded-2xl',
+  cardLight: 'bg-stone-100 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
   cardBorder: 'border border-stone-200 bg-stone-100 rounded-2xl',
   innerEl: 'bg-stone-200 rounded-xl',
   textMain: 'text-zinc-900',
@@ -45,11 +49,18 @@ const LT = {
   statusRunning: 'bg-blue-50 text-blue-700 border-blue-300',
   statusDefault: 'bg-stone-200 text-stone-600 border-stone-300',
   comingSoon: 'opacity-75',
+  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  livePill: 'bg-stone-200 text-stone-600',
 };
 
 const DK = {
   pageBg: 'bg-zinc-950',
   card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
   cardBorder: 'border border-white/10 bg-zinc-900/50 rounded-2xl',
   innerEl: 'bg-zinc-800 rounded-xl',
   textMain: 'text-zinc-100',
@@ -79,6 +90,9 @@ const DK = {
   statusRunning: 'bg-blue-950/40 text-blue-400 border-blue-500/30',
   statusDefault: 'bg-zinc-800 text-zinc-400 border-zinc-700',
   comingSoon: 'opacity-50',
+  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  livePill: 'bg-zinc-800 text-zinc-400',
 };
 
 const ONBOARDING_CYCLE_STEPS = [
@@ -311,16 +325,23 @@ export default function OnboardingCenter() {
 
   return (
     <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
-      <div className="max-w-7xl mx-auto space-y-6 overflow-x-hidden">
-      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6">
-        <div className="text-center sm:text-left">
-          <h1 className={`text-2xl sm:text-3xl font-bold tracking-tighter ${t.textMain} uppercase`}>Onboarding Center</h1>
-          <p className={`text-[10px] sm:text-xs ${t.textMuted} mt-2 font-mono uppercase tracking-wide`}>
+      <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-500">
+      <div className="flex justify-between items-start mb-12 pb-8">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
+              Onboarding Center
+            </h1>
+            <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] uppercase tracking-widest font-bold rounded-full`}>
+              Live
+            </div>
+            <div data-tour="onboarding-center-guide">
+              <FeatureGuideTrigger guideId="onboarding-center" />
+            </div>
+          </div>
+          <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>
             Manage integrations, new hires, and onboarding workflows.
           </p>
-        </div>
-        <div className="flex justify-center sm:justify-end" data-tour="onboarding-center-guide">
-          <FeatureGuideTrigger guideId="onboarding-center" />
         </div>
       </div>
 
