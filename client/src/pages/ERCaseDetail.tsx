@@ -23,7 +23,7 @@ import type {
 } from '../types';
 import {
   ChevronLeft, Upload, Trash2, Search,
-  AlertTriangle, CheckCircle, Clock, X, RefreshCw, Download, Scale
+  AlertTriangle, CheckCircle, Clock, X, RefreshCw, Download, Scale, Link
 } from 'lucide-react';
 import { AnalysisConsole } from '../components/er/AnalysisConsole';
 import { useERSimilarCasesStream } from '../hooks/er/useERSimilarCasesStream';
@@ -524,6 +524,14 @@ export function ERCaseDetail() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  // Share link state
+  const [shareLinks, setShareLinks] = useState<Array<{ id: string; token: string; created_at: string; expires_at: string | null; revoked_at: string | null; download_count: number; last_downloaded_at: string | null; filename: string }>>([]);
+  const [generatingLink, setGeneratingLink] = useState(false);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareLinksExpanded, setShareLinksExpanded] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [revokingLinkId, setRevokingLinkId] = useState<string | null>(null);
+
   // Similar Cases state
   const {
     streaming: similarStreaming,
@@ -557,6 +565,50 @@ export function ERCaseDetail() {
       setExporting(false);
     }
   }, [id, exportPassword, erCase?.case_number]);
+
+  const loadShareLinks = useCallback(async () => {
+    if (!id) return;
+    try {
+      const links = await erCopilot.listShareLinks(id);
+      setShareLinks(links);
+    } catch {
+      // silent fail
+    }
+  }, [id]);
+
+  const handleCreateShareLink = async () => {
+    if (!id || exportPassword.length < 4) return;
+    setGeneratingLink(true);
+    try {
+      const result = await erCopilot.createShareLink(id, exportPassword);
+      setShareUrl(`${window.location.origin}${result.url}`);
+      await loadShareLinks();
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : 'Failed to create share link');
+    } finally {
+      setGeneratingLink(false);
+    }
+  };
+
+  const handleRevokeLink = async (linkId: string) => {
+    if (!id) return;
+    setRevokingLinkId(linkId);
+    try {
+      await erCopilot.revokeShareLink(id, linkId);
+      await loadShareLinks();
+    } catch {
+      // silent fail
+    } finally {
+      setRevokingLinkId(null);
+    }
+  };
+
+  const handleCopyShareUrl = () => {
+    if (!shareUrl) return;
+    navigator.clipboard.writeText(shareUrl);
+    setLinkCopied(true);
+    setTimeout(() => setLinkCopied(false), 2000);
+  };
 
   const fetchCase = useCallback(async () => {
     if (!id) return;
@@ -2622,17 +2674,17 @@ export function ERCaseDetail() {
       {/* Export Modal */}
       {showExportModal && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className={`w-full max-w-sm ${t.modalBg} shadow-2xl`}>
+          <div className={`w-full max-w-md ${t.modalBg} shadow-2xl max-h-[80vh] flex flex-col`}>
             <div className={`flex items-center justify-between px-6 py-5 ${t.modalHeader}`}>
               <h3 className={`text-xs font-bold ${t.textMain} uppercase tracking-wider`}>Export Case File</h3>
               <button
-                onClick={() => { setShowExportModal(false); setExportPassword(''); setExportError(null); }}
+                onClick={() => { setShowExportModal(false); setExportPassword(''); setExportError(null); setShareUrl(null); setShareLinksExpanded(false); }}
                 className={`${t.btnGhost} transition-colors`}
               >
                 <X size={16} />
               </button>
             </div>
-            <div className="px-6 py-6 space-y-4">
+            <div className="px-6 py-6 space-y-4 overflow-y-auto">
               <p className={`text-xs ${t.textMuted}`}>
                 Export a password-protected PDF containing the full case file, documents, analyses, and notes.
               </p>
@@ -2652,14 +2704,92 @@ export function ERCaseDetail() {
                   onKeyDown={(e) => { if (e.key === 'Enter' && exportPassword.length >= 4) handleExport(); }}
                 />
               </div>
-              <button
-                onClick={handleExport}
-                disabled={exporting || exportPassword.length < 4}
-                className={`w-full flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider ${t.btnPrimary} rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed`}
-              >
-                <Download size={14} />
-                {exporting ? 'Generating…' : 'Export Case File'}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleExport}
+                  disabled={exporting || exportPassword.length < 4}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider ${t.btnPrimary} rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  <Download size={14} />
+                  {exporting ? 'Generating...' : 'Download PDF'}
+                </button>
+                <button
+                  onClick={handleCreateShareLink}
+                  disabled={generatingLink || exportPassword.length < 4}
+                  className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-xs font-bold uppercase tracking-wider border ${t.border} ${t.textMuted} hover:${t.textMain} rounded-lg transition-all disabled:opacity-40 disabled:cursor-not-allowed`}
+                >
+                  <Link size={14} />
+                  {generatingLink ? 'Creating...' : 'Share Link'}
+                </button>
+              </div>
+
+              {/* Share URL display */}
+              {shareUrl && (
+                <div className={`p-3 rounded-lg border ${t.border} space-y-2`}>
+                  <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider font-bold`}>Share Link Created</p>
+                  <div className="flex gap-2">
+                    <input
+                      readOnly
+                      value={shareUrl}
+                      className={`flex-1 ${t.input} text-xs px-2.5 py-1.5 focus:outline-none font-mono`}
+                      onClick={(e) => (e.target as HTMLInputElement).select()}
+                    />
+                    <button
+                      onClick={handleCopyShareUrl}
+                      className={`px-3 py-1.5 text-xs font-bold uppercase tracking-wider ${linkCopied ? 'text-emerald-600' : t.textMuted} hover:${t.textMain} border ${t.border} rounded-md transition-all`}
+                    >
+                      {linkCopied ? 'Copied!' : 'Copy'}
+                    </button>
+                  </div>
+                  <p className={`text-[10px] ${t.textMuted}`}>
+                    Recipients will need the password to download the PDF.
+                  </p>
+                </div>
+              )}
+
+              {/* Shared Links section */}
+              <div>
+                <button
+                  onClick={() => { setShareLinksExpanded(!shareLinksExpanded); if (!shareLinksExpanded) loadShareLinks(); }}
+                  className={`flex items-center gap-1.5 text-[10px] ${t.textMuted} hover:${t.textMain} uppercase tracking-wider font-bold transition-colors`}
+                >
+                  <ChevronLeft size={10} className={`transition-transform ${shareLinksExpanded ? '-rotate-90' : ''}`} />
+                  Shared Links
+                </button>
+                {shareLinksExpanded && (
+                  <div className="mt-2 space-y-1.5">
+                    {shareLinks.length === 0 ? (
+                      <p className={`text-xs ${t.textMuted} italic`}>No share links created yet.</p>
+                    ) : (
+                      shareLinks.map((link) => (
+                        <div key={link.id} className={`flex items-center justify-between p-2 rounded border ${t.border} text-xs`}>
+                          <div className="min-w-0 flex-1">
+                            <span className={`font-mono text-[10px] ${link.revoked_at ? 'line-through opacity-50' : ''} ${t.textMain}`}>
+                              ...{link.token.slice(-8)}
+                            </span>
+                            <span className={`ml-2 ${t.textMuted} text-[10px]`}>
+                              {new Date(link.created_at).toLocaleDateString()} · {link.download_count} downloads
+                            </span>
+                            {link.revoked_at && <span className="ml-1 text-red-500 text-[10px]">revoked</span>}
+                            {link.expires_at && !link.revoked_at && new Date(link.expires_at) < new Date() && (
+                              <span className="ml-1 text-amber-500 text-[10px]">expired</span>
+                            )}
+                          </div>
+                          {!link.revoked_at && (
+                            <button
+                              onClick={() => handleRevokeLink(link.id)}
+                              disabled={revokingLinkId === link.id}
+                              className={`ml-2 px-2 py-0.5 text-[10px] text-red-500 hover:text-red-700 uppercase tracking-wider transition-colors disabled:opacity-40`}
+                            >
+                              {revokingLinkId === link.id ? '...' : 'Revoke'}
+                            </button>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

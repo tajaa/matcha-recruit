@@ -1615,6 +1615,24 @@ export const erCopilot = {
     return res.blob();
   },
 
+  // Share Links
+  createShareLink: async (caseId: string, password: string, expiresInDays?: number): Promise<{ token: string; url: string; expires_at: string | null; created_at: string }> => {
+    return request<{ token: string; url: string; expires_at: string | null; created_at: string }>(`/er/cases/${caseId}/export/share`, {
+      method: 'POST',
+      body: JSON.stringify({ password, expires_in_days: expiresInDays }),
+    });
+  },
+
+  listShareLinks: async (caseId: string): Promise<Array<{ id: string; token: string; created_at: string; expires_at: string | null; revoked_at: string | null; download_count: number; last_downloaded_at: string | null; filename: string }>> => {
+    return request<Array<{ id: string; token: string; created_at: string; expires_at: string | null; revoked_at: string | null; download_count: number; last_downloaded_at: string | null; filename: string }>>(`/er/cases/${caseId}/export/links`);
+  },
+
+  revokeShareLink: async (caseId: string, linkId: string): Promise<void> => {
+    await request<{ status: string }>(`/er/cases/${caseId}/export/links/${linkId}`, {
+      method: 'DELETE',
+    });
+  },
+
   // Notes
   listCaseNotes: (caseId: string): Promise<ERCaseNote[]> =>
     request<ERCaseNote[]>(`/er/cases/${caseId}/notes`),
@@ -1837,6 +1855,31 @@ export const erCopilot = {
   // Audit Log
   getAuditLog: (caseId: string, limit: number = 100, offset: number = 0): Promise<ERAuditLogResponse> =>
     request<ERAuditLogResponse>(`/er/cases/${caseId}/audit-log?limit=${limit}&offset=${offset}`),
+};
+
+// ER Export Public API (no auth required)
+export const erExportPublic = {
+  getInfo: async (token: string): Promise<{ filename: string; created_at: string; expired: boolean }> => {
+    const res = await fetch(`${API_BASE}/shared/er-export/${token}/info`);
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Not found' }));
+      throw new Error(error.detail || 'Not found');
+    }
+    return res.json();
+  },
+
+  download: async (token: string, password: string): Promise<Blob> => {
+    const res = await fetch(`${API_BASE}/shared/er-export/${token}/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password }),
+    });
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: 'Download failed' }));
+      throw new Error(error.detail || 'Download failed');
+    }
+    return res.blob();
+  },
 };
 
 // IR (Incident Report) API

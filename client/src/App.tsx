@@ -76,6 +76,7 @@ const MatchaWorkThread = lazy(() => import('./pages/MatchaWorkThread'));
 const MatchaWorkReviewRequest = lazy(() => import('./pages/MatchaWorkReviewRequest'));
 const RiskAssessment = lazy(() => import('./pages/RiskAssessment'));
 const AnonymousReport = lazy(() => import('./pages/AnonymousReport'));
+const ERExportDownload = lazy(() => import('./pages/ERExportDownload'));
 
 // Employee Management (Admin)
 const Employees = lazy(() => import('./pages/Employees'));
@@ -226,6 +227,9 @@ function App() {
 
             {/* Anonymous incident reporting (public, token-based) */}
             <Route path="/report/:token" element={<AnonymousReport />} />
+
+            {/* ER Export download (public, password-based) */}
+            <Route path="/shared/er-export/:token" element={<ERExportDownload />} />
             <Route path="/review-request/:token" element={<MatchaWorkReviewRequest />} />
 
             {/* Public job board */}

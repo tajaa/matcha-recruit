@@ -18,7 +18,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import UUID
 
+from io import BytesIO
+
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
@@ -26,6 +29,7 @@ from ..dependencies import require_admin_or_client, get_client_company_id
 from ...core.models.auth import CurrentUser
 from ...config import get_settings
 from ...core.services.storage import get_storage
+from ...core.services.auth import hash_password, verify_password_async
 from ..services.er_guidance import (
     _build_fallback_guidance_payload,
     _determination_confidence_floor,
@@ -62,6 +66,7 @@ from ..models.er_case import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+public_router = APIRouter()
 
 MAX_UPLOAD_SIZE = 50 * 1024 * 1024  # 50MB
 
@@ -578,53 +583,66 @@ class ExportCaseFileRequest(BaseModel):
     password: str = Field(..., min_length=4, max_length=128)
 
 
-@router.post("/{case_id}/export")
-async def export_case_file(
-    case_id: UUID,
-    body: ExportCaseFileRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Export a case as a password-protected PDF."""
-    from io import BytesIO
-    from fastapi.responses import StreamingResponse
+class CreateShareLinkRequest(BaseModel):
+    password: str = Field(..., min_length=4, max_length=128)
+    expires_in_days: Optional[int] = Field(None, ge=0, le=365)
 
-    password = body.password
 
+class ShareLinkResponse(BaseModel):
+    token: str
+    url: str
+    expires_at: Optional[datetime] = None
+    created_at: datetime
+
+
+class ShareLinkListItem(BaseModel):
+    id: str
+    token: str
+    created_at: datetime
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    download_count: int
+    last_downloaded_at: Optional[datetime] = None
+    filename: str
+
+
+class ShareLinkDownloadRequest(BaseModel):
+    password: str
+
+
+class ShareLinkInfoResponse(BaseModel):
+    filename: str
+    created_at: datetime
+    expired: bool
+
+
+async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, password: str) -> tuple[bytes, str]:
+    """Generate encrypted PDF for case. Returns (pdf_bytes, filename)."""
     try:
-        company_id = await get_client_company_id(current_user)
-        if company_id is None:
-            raise HTTPException(status_code=404, detail="Case not found")
-
-        is_admin = current_user.role == "admin"
         async with get_connection() as conn:
             await _verify_case_company(conn, case_id, company_id, is_admin)
 
-            # Fetch case
             case_row = await conn.fetchrow(
                 "SELECT * FROM er_cases WHERE id = $1", case_id
             )
             if not case_row:
                 raise HTTPException(status_code=404, detail="Case not found")
 
-            # Fetch documents
             doc_rows = await conn.fetch(
                 "SELECT filename, document_type, file_size, created_at FROM er_case_documents WHERE case_id = $1 ORDER BY created_at",
                 case_id,
             )
 
-            # Fetch analyses
             analysis_rows = await conn.fetch(
                 "SELECT analysis_type, analysis_data, generated_at FROM er_case_analysis WHERE case_id = $1 ORDER BY generated_at",
                 case_id,
             )
 
-            # Fetch notes
             note_rows = await conn.fetch(
                 "SELECT note_type, content, created_at FROM er_case_notes WHERE case_id = $1 ORDER BY created_at",
                 case_id,
             )
 
-        # Build HTML report
         import html as html_mod
 
         def esc(val: str) -> str:
@@ -633,11 +651,11 @@ async def export_case_file(
         case_title = esc(case_row["title"] or "Untitled Case")
         case_number = esc(case_row["case_number"])
         status = esc(case_row["status"])
-        category = esc(case_row.get("category") or "—")
-        outcome = esc(case_row.get("outcome") or "—")
+        category = esc(case_row.get("category") or "\u2014")
+        outcome = esc(case_row.get("outcome") or "\u2014")
         description = esc(case_row["description"] or "No description provided.")
-        created_at = case_row["created_at"].strftime("%Y-%m-%d %H:%M") if case_row["created_at"] else "—"
-        closed_at = case_row["closed_at"].strftime("%Y-%m-%d %H:%M") if case_row.get("closed_at") else "—"
+        created_at = case_row["created_at"].strftime("%Y-%m-%d %H:%M") if case_row["created_at"] else "\u2014"
+        closed_at = case_row["closed_at"].strftime("%Y-%m-%d %H:%M") if case_row.get("closed_at") else "\u2014"
 
         docs_html = ""
         if doc_rows:
@@ -711,7 +729,6 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
 <div class="footer">Confidential — ER Case Export — Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}</div>
 </body></html>"""
 
-    # Convert to PDF
     try:
         from weasyprint import HTML as WeasyHTML
         pdf_bytes = WeasyHTML(string=html).write_pdf()
@@ -721,7 +738,6 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
         logger.error("PDF generation failed for case %s: %s", case_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {exc}")
 
-    # Encrypt PDF with password
     try:
         from pypdf import PdfReader, PdfWriter
         reader = PdfReader(BytesIO(pdf_bytes))
@@ -741,11 +757,213 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
         raise HTTPException(status_code=500, detail=f"PDF encryption failed: {exc}")
 
     filename = f"ER-Case-{case_number}.pdf"
+    return encrypted_bytes, filename
 
+
+@router.post("/{case_id}/export")
+async def export_case_file(
+    case_id: UUID,
+    body: ExportCaseFileRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Export a case as a password-protected PDF."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    is_admin = current_user.role == "admin"
+    pdf_bytes, filename = await _generate_case_pdf(case_id, company_id, is_admin, body.password)
     return StreamingResponse(
-        BytesIO(encrypted_bytes),
+        BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/{case_id}/export/share", response_model=ShareLinkResponse)
+async def create_share_link(
+    case_id: UUID,
+    body: CreateShareLinkRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a shareable download link for a case export."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    is_admin = current_user.role == "admin"
+
+    pdf_bytes, filename = await _generate_case_pdf(case_id, company_id, is_admin, body.password)
+
+    storage = get_storage()
+    storage_path = await storage.upload_file(pdf_bytes, filename, prefix="er-exports", content_type="application/pdf")
+
+    token = secrets.token_urlsafe(32)
+    pw_hash = hash_password(body.password)
+
+    expires_at = None
+    if body.expires_in_days is not None:
+        from datetime import timedelta
+        expires_at = datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO er_case_export_links
+                (case_id, org_id, token, password_hash, storage_path, filename, created_by, expires_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, created_at
+            """,
+            case_id, company_id, token, pw_hash, storage_path, filename, current_user.id, expires_at,
+        )
+
+    settings = get_settings()
+    base_url = settings.frontend_url if hasattr(settings, "frontend_url") and settings.frontend_url else str(request.base_url).rstrip("/")
+    url = f"{base_url}/shared/er-export/{token}"
+
+    return ShareLinkResponse(
+        token=token,
+        url=url,
+        expires_at=expires_at,
+        created_at=row["created_at"],
+    )
+
+
+@router.get("/{case_id}/export/links", response_model=list[ShareLinkListItem])
+async def list_share_links(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List share links for a case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    is_admin = current_user.role == "admin"
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, is_admin)
+        rows = await conn.fetch(
+            """
+            SELECT id, token, created_at, expires_at, revoked_at, download_count, last_downloaded_at, filename
+            FROM er_case_export_links
+            WHERE case_id = $1
+            ORDER BY created_at DESC
+            """,
+            case_id,
+        )
+
+    return [
+        ShareLinkListItem(
+            id=str(r["id"]),
+            token=r["token"],
+            created_at=r["created_at"],
+            expires_at=r["expires_at"],
+            revoked_at=r["revoked_at"],
+            download_count=r["download_count"],
+            last_downloaded_at=r["last_downloaded_at"],
+            filename=r["filename"],
+        )
+        for r in rows
+    ]
+
+
+@router.delete("/{case_id}/export/links/{link_id}")
+async def revoke_share_link(
+    case_id: UUID,
+    link_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Revoke a share link and delete its S3 file."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+    is_admin = current_user.role == "admin"
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, is_admin)
+        row = await conn.fetchrow(
+            "SELECT storage_path FROM er_case_export_links WHERE id = $1 AND case_id = $2",
+            link_id, case_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Link not found")
+
+        await conn.execute(
+            "UPDATE er_case_export_links SET revoked_at = now() WHERE id = $1",
+            link_id,
+        )
+
+    storage = get_storage()
+    try:
+        await storage.delete_file(row["storage_path"])
+    except Exception:
+        logger.warning("Failed to delete S3 file for revoked link %s", link_id)
+
+    return {"status": "revoked"}
+
+
+# ===========================================
+# Public Share Link Endpoints
+# ===========================================
+
+@public_router.get("/{token}/info", response_model=ShareLinkInfoResponse)
+async def share_link_info(token: str):
+    """Get info about a share link (public, no auth)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT filename, created_at, expires_at, revoked_at FROM er_case_export_links WHERE token = $1",
+            token,
+        )
+    if not row or row["revoked_at"] is not None:
+        raise HTTPException(status_code=404, detail="Link not found")
+
+    expired = row["expires_at"] is not None and row["expires_at"] < datetime.now(timezone.utc)
+    return ShareLinkInfoResponse(
+        filename=row["filename"],
+        created_at=row["created_at"],
+        expired=expired,
+    )
+
+
+@public_router.post("/{token}/download")
+async def share_link_download(token: str, body: ShareLinkDownloadRequest):
+    """Download a shared export (public, password-protected)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT id, password_hash, storage_path, filename, expires_at, revoked_at, failed_attempts
+            FROM er_case_export_links WHERE token = $1
+            """,
+            token,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Link not found")
+        if row["revoked_at"] is not None:
+            raise HTTPException(status_code=404, detail="Link not found")
+        if row["expires_at"] is not None and row["expires_at"] < datetime.now(timezone.utc):
+            raise HTTPException(status_code=410, detail="Link has expired")
+        if row["failed_attempts"] >= 5:
+            raise HTTPException(status_code=429, detail="Too many failed attempts")
+
+        valid = await verify_password_async(body.password, row["password_hash"])
+        if not valid:
+            await conn.execute(
+                "UPDATE er_case_export_links SET failed_attempts = failed_attempts + 1 WHERE id = $1",
+                row["id"],
+            )
+            raise HTTPException(status_code=403, detail="Invalid password")
+
+        await conn.execute(
+            "UPDATE er_case_export_links SET download_count = download_count + 1, last_downloaded_at = now(), failed_attempts = 0 WHERE id = $1",
+            row["id"],
+        )
+
+    storage = get_storage()
+    file_bytes = await storage.download_file(row["storage_path"])
+
+    return StreamingResponse(
+        BytesIO(file_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{row["filename"]}"'},
     )
 
 

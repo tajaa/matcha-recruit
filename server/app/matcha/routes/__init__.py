@@ -12,7 +12,7 @@ from .onboarding import router as onboarding_router
 from .invitations import router as invitations_router
 from .offer_letters import router as offer_letters_router, candidate_router as offer_letters_candidate_router
 from .openings import router as openings_router
-from .er_copilot import router as er_copilot_router
+from .er_copilot import router as er_copilot_router, public_router as er_copilot_public_router
 from .ir_incidents import router as ir_incidents_router
 from .accommodations import router as accommodations_router
 from .public_jobs import router as public_jobs_router
@@ -51,6 +51,11 @@ matcha_router.include_router(offer_letters_candidate_router, prefix="/offer-lett
 matcha_router.include_router(openings_router, prefix="/openings", tags=["openings"])
 matcha_router.include_router(er_copilot_router, prefix="/er/cases", tags=["er-copilot"],
                              dependencies=[Depends(require_feature("er_copilot"))])
+matcha_router.include_router(
+    er_copilot_public_router,
+    prefix="/shared/er-export",
+    tags=["er-export-public"],
+)
 matcha_router.include_router(ir_incidents_router, prefix="/ir/incidents", tags=["ir-incidents"],
                              dependencies=[Depends(require_feature("incidents"))])
 matcha_router.include_router(accommodations_router, prefix="/accommodations", tags=["accommodations"],
@@ -113,6 +118,7 @@ __all__ = [
     "offer_letters_router",
     "openings_router",
     "er_copilot_router",
+    "er_copilot_public_router",
     "ir_incidents_router",
     "public_jobs_router",
     "xp_admin_router",
