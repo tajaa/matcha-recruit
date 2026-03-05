@@ -2,9 +2,60 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { irIncidents } from '../api/client';
 import type { IRIncident, IRIncidentType, IRSeverity, IRStatus, IRAnalyticsSummary } from '../types';
-import { Plus, Trash2, BarChart3 } from 'lucide-react';
+import { Plus, Trash2, BarChart3, ChevronRight } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
+import { useIsLightMode } from '../hooks/useIsLightMode';
+
+// ─── theme ────────────────────────────────────────────────────────────────────
+
+const LT = {
+  pageBg: 'bg-stone-300',
+  card: 'bg-stone-100 rounded-2xl',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  border: 'border-stone-200',
+  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl',
+  btnSecondary: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900 rounded-xl',
+  btnGhost: 'text-stone-500 hover:text-zinc-900',
+  statBg: 'bg-stone-200',
+  statGap: 'bg-stone-300',
+  tabActive: 'bg-zinc-900 border-zinc-900 text-zinc-50 rounded-xl',
+  tabInactive: 'bg-transparent border-transparent text-stone-500 hover:text-zinc-900 hover:border-stone-300 rounded-xl',
+  input: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:border-stone-400',
+  select: 'bg-white border border-stone-300 rounded-xl text-zinc-900 focus:border-stone-400',
+  rowBg: 'bg-stone-100',
+  rowHover: 'hover:bg-stone-50',
+  emptyBg: 'border border-dashed border-stone-200 bg-stone-100 rounded-2xl',
+  sevDots: { critical: 'bg-zinc-900', high: 'bg-stone-600', medium: 'bg-stone-400', low: 'bg-stone-300' } as Record<string, string>,
+  statusColors: { reported: 'text-zinc-900', investigating: 'text-stone-600', action_required: 'text-stone-500', resolved: 'text-stone-400', closed: 'text-stone-300' } as Record<string, string>,
+} as const;
+
+const DK = {
+  pageBg: 'bg-zinc-950',
+  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  border: 'border-white/10',
+  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600 rounded-xl',
+  btnSecondary: 'border border-white/10 hover:border-white/20 text-zinc-500 hover:text-zinc-100 rounded-xl',
+  btnGhost: 'text-zinc-600 hover:text-zinc-100',
+  statBg: 'bg-zinc-900',
+  statGap: 'bg-zinc-950',
+  tabActive: 'bg-zinc-800 border-zinc-700 text-white rounded-xl',
+  tabInactive: 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-800 rounded-xl',
+  input: 'bg-zinc-800 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
+  select: 'bg-zinc-800 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
+  rowBg: 'bg-zinc-900',
+  rowHover: 'hover:bg-white/5',
+  emptyBg: 'border border-dashed border-white/10 bg-white/5 rounded-2xl',
+  sevDots: { critical: 'bg-zinc-100', high: 'bg-zinc-400', medium: 'bg-zinc-500', low: 'bg-zinc-600' } as Record<string, string>,
+  statusColors: { reported: 'text-zinc-100', investigating: 'text-zinc-400', action_required: 'text-zinc-300', resolved: 'text-zinc-500', closed: 'text-zinc-600' } as Record<string, string>,
+} as const;
 
 const STATUS_TABS: { label: string; value: IRStatus | 'all' | 'needs_attention' }[] = [
   { label: 'Needs Attention', value: 'needs_attention' },
@@ -22,21 +73,6 @@ const TYPE_LABELS: Record<string, string> = {
   property: 'Property',
   near_miss: 'Near Miss',
   other: 'Other',
-};
-
-const STATUS_COLORS: Record<string, string> = {
-  reported: 'text-blue-400',
-  investigating: 'text-amber-400',
-  action_required: 'text-orange-400',
-  resolved: 'text-emerald-400',
-  closed: 'text-zinc-500',
-};
-
-const SEVERITY_COLORS: Record<string, string> = {
-  critical: 'bg-red-500',
-  high: 'bg-orange-500',
-  medium: 'bg-yellow-500',
-  low: 'bg-emerald-500',
 };
 
 const IR_CYCLE_STEPS = [
@@ -79,6 +115,8 @@ const IR_CYCLE_STEPS = [
 
 export function IRList() {
   const navigate = useNavigate();
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
   const [incidents, setIncidents] = useState<IRIncident[]>([]);
   const [summary, setSummary] = useState<IRAnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -168,28 +206,29 @@ export function IRList() {
   const recentCount = summary?.recent_count || 0;
 
   return (
+    <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
     <div className="max-w-5xl mx-auto space-y-8">
       {/* Header */}
-      <div className="flex justify-between items-start border-b border-white/10 pb-8">
+      <div className="flex justify-between items-start mb-12 pb-8">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-4xl font-bold tracking-tighter text-white uppercase">Incident Management</h1>
+            <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>Incident Management</h1>
             <FeatureGuideTrigger guideId="ir-list" />
           </div>
-          <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">{total} Records in Current View</p>
+          <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>{total} Records in Current View</p>
         </div>
         <div className="flex gap-3">
           <button
             data-tour="ir-list-analytics-btn"
             onClick={() => navigate('/app/ir/dashboard')}
-            className="flex items-center gap-2 px-4 py-2 border border-white/10 hover:bg-zinc-900 text-xs font-bold text-zinc-400 hover:text-white uppercase tracking-wider transition-colors"
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${t.btnSecondary}`}
           >
             <BarChart3 size={14} /> Analytics
           </button>
           <button
             data-tour="ir-list-report-btn"
             onClick={() => navigate('/app/ir/incidents/new')}
-            className="flex items-center gap-2 px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors"
+            className={`flex items-center gap-2 px-5 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${t.btnPrimary}`}
           >
             <Plus size={14} /> Report
           </button>
@@ -207,33 +246,28 @@ export function IRList() {
       />
 
       {/* Summary */}
-      <div data-tour="ir-list-stats" className="grid grid-cols-2 md:grid-cols-4 gap-px bg-white/10 border border-white/10">
-        <div className="bg-zinc-950 p-4">
-          <div className="text-2xl font-light text-white font-mono">{openCount}</div>
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1 font-bold">Open</div>
-        </div>
-        <div className="bg-zinc-950 p-4">
-          <div className="text-2xl font-light text-orange-400 font-mono">{actionRequiredCount}</div>
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1 font-bold">Action Required</div>
-        </div>
-        <div className="bg-zinc-950 p-4">
-          <div className="text-2xl font-light text-red-400 font-mono">{criticalCount}</div>
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1 font-bold">Critical</div>
-        </div>
-        <div className="bg-zinc-950 p-4">
-          <div className="text-2xl font-light text-white font-mono">{recentCount}</div>
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest mt-1 font-bold">Last 30d</div>
-        </div>
+      <div data-tour="ir-list-stats" className={`grid grid-cols-2 md:grid-cols-4 gap-px ${t.statGap} rounded-2xl overflow-hidden`}>
+        {[
+          { label: 'Open', value: openCount },
+          { label: 'Action Required', value: actionRequiredCount },
+          { label: 'Critical', value: criticalCount },
+          { label: 'Last 30d', value: recentCount },
+        ].map((stat) => (
+          <div key={stat.label} className={`${t.statBg} p-4`}>
+            <div className={`text-2xl font-light ${t.textMain} font-mono tabular-nums`}>{stat.value}</div>
+            <div className={`${t.label} mt-1`}>{stat.label}</div>
+          </div>
+        ))}
       </div>
 
       {error && (
-        <div className="px-4 py-3 border border-red-500/40 bg-red-950/30 text-red-300 text-xs uppercase tracking-wider font-mono">
+        <div className="px-4 py-3 border border-red-500/40 bg-red-950/30 text-red-300 text-xs uppercase tracking-wider font-mono rounded-xl">
           {error}
         </div>
       )}
 
       {/* Filters */}
-      <div className="flex flex-wrap items-center gap-6 pb-6 border-b border-white/10">
+      <div className={`flex flex-wrap items-center gap-6 pb-6 border-b ${t.border}`}>
         {/* Status Tabs */}
         <div data-tour="ir-list-tabs" className="flex gap-2">
           {STATUS_TABS.map((tab) => (
@@ -241,9 +275,7 @@ export function IRList() {
               key={tab.value}
               onClick={() => setActiveTab(tab.value)}
               className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider transition-colors border ${
-                activeTab === tab.value
-                  ? 'bg-zinc-800 border-zinc-700 text-white'
-                  : 'bg-transparent border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-800'
+                activeTab === tab.value ? t.tabActive : t.tabInactive
               }`}
             >
               {tab.label}
@@ -251,14 +283,14 @@ export function IRList() {
           ))}
         </div>
 
-        <div className="w-px h-6 bg-zinc-800" />
+        <div className={`w-px h-6 ${isLight ? 'bg-stone-300' : 'bg-zinc-800'}`} />
 
         {/* Type */}
         <select
           data-tour="ir-list-type-filter"
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value as IRIncidentType | '')}
-          className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider focus:outline-none focus:border-zinc-600 cursor-pointer"
+          className={`px-3 py-1.5 ${t.select} text-[10px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer`}
         >
           <option value="">All Types</option>
           <option value="safety">Safety</option>
@@ -273,7 +305,7 @@ export function IRList() {
           data-tour="ir-list-severity-filter"
           value={severityFilter}
           onChange={(e) => setSeverityFilter(e.target.value as IRSeverity | '')}
-          className="px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-400 uppercase tracking-wider focus:outline-none focus:border-zinc-600 cursor-pointer"
+          className={`px-3 py-1.5 ${t.select} text-[10px] font-bold uppercase tracking-wider focus:outline-none cursor-pointer`}
         >
           <option value="">All Severities</option>
           <option value="critical">Critical</option>
@@ -289,17 +321,17 @@ export function IRList() {
             placeholder="SEARCH INCIDENTS..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full px-3 py-1.5 bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-white placeholder-zinc-600 focus:outline-none focus:border-zinc-600 tracking-wider"
+            className={`w-full px-3 py-1.5 ${t.input} text-[10px] font-bold focus:outline-none tracking-wider`}
           />
         </div>
       </div>
 
       {/* List */}
       {loading ? (
-        <div className="text-center py-24 text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading...</div>
+        <div className={`text-center py-24 text-xs ${t.textFaint} uppercase tracking-wider animate-pulse`}>Loading...</div>
       ) : incidents.length === 0 ? (
-        <div className="text-center py-24 border border-dashed border-white/10 bg-white/5">
-          <div className="text-xs text-zinc-500 mb-4 font-mono uppercase tracking-wider">No incidents found matching criteria</div>
+        <div className={`text-center py-24 ${t.emptyBg}`}>
+          <div className={`text-xs ${t.textMuted} mb-4 font-mono uppercase tracking-wider`}>No incidents found matching criteria</div>
           <button
             onClick={() => {
                setActiveTab('all');
@@ -307,15 +339,15 @@ export function IRList() {
                setSeverityFilter('');
                setSearchQuery('');
             }}
-            className="text-xs text-white hover:text-zinc-300 font-bold uppercase tracking-wider underline underline-offset-4"
+            className={`text-xs ${t.textMain} font-bold uppercase tracking-wider underline underline-offset-4`}
           >
             Clear Filters
           </button>
         </div>
       ) : (
-        <div data-tour="ir-list-rows" className="space-y-px bg-white/10 border border-white/10">
+        <div data-tour="ir-list-rows" className={`space-y-px ${isLight ? 'bg-stone-300' : 'bg-white/10'} ${isLight ? 'border border-stone-200' : 'border border-white/10'} rounded-2xl overflow-hidden`}>
           {/* Header row */}
-          <div className="flex items-center gap-4 py-3 px-6 bg-zinc-950 text-[10px] text-zinc-500 uppercase tracking-widest border-b border-white/10 font-bold">
+          <div className={`flex items-center gap-4 py-3 px-6 ${t.rowBg} ${t.label} border-b ${t.border}`}>
             <div className="w-3" />
             <div className="w-24">ID</div>
             <div className="flex-1">Incident Details</div>
@@ -330,20 +362,20 @@ export function IRList() {
             <div
               key={incident.id}
               onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
-              className="flex items-center gap-4 py-4 px-6 bg-zinc-950 hover:bg-zinc-900 cursor-pointer group transition-colors"
+              className={`flex items-center gap-4 py-4 px-6 ${t.rowBg} ${t.rowHover} cursor-pointer group transition-colors`}
             >
-              <div className={`w-1.5 h-1.5 rounded-full ${SEVERITY_COLORS[incident.severity]}`} />
-              <div className="text-[10px] text-zinc-500 font-mono w-24 group-hover:text-zinc-400">{incident.incident_number}</div>
+              <div className={`w-1.5 h-1.5 rounded-full ${t.sevDots[incident.severity]}`} />
+              <div className={`text-[10px] ${t.textMuted} font-mono w-24`}>{incident.incident_number}</div>
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-bold text-zinc-300 truncate group-hover:text-white transition-colors uppercase tracking-wide">
+                <div className={`text-xs font-bold ${isLight ? 'text-zinc-700 group-hover:text-zinc-900' : 'text-zinc-300 group-hover:text-white'} truncate transition-colors uppercase tracking-wide`}>
                   {incident.title}
                 </div>
                 {incident.description && (
-                  <div className="text-[10px] text-zinc-600 truncate mt-1 font-mono max-w-xl">{incident.description}</div>
+                  <div className={`text-[10px] ${t.textFaint} truncate mt-1 font-mono max-w-xl`}>{incident.description}</div>
                 )}
               </div>
-              <div className="text-[10px] text-zinc-500 w-24 uppercase tracking-wider font-bold">{TYPE_LABELS[incident.incident_type]}</div>
-              <div className={`text-[10px] w-24 uppercase tracking-wider font-bold ${STATUS_COLORS[incident.status]}`}>
+              <div className={`text-[10px] ${t.textMuted} w-24 uppercase tracking-wider font-bold`}>{TYPE_LABELS[incident.incident_type]}</div>
+              <div className={`text-[10px] w-24 uppercase tracking-wider font-bold ${t.statusColors[incident.status]}`}>
                 {incident.status.replace('_', ' ')}
               </div>
               <div className="w-40">
@@ -353,7 +385,7 @@ export function IRList() {
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => handleStatusUpdate(incident.id, e.target.value as IRStatus, e)}
                   disabled={updatingIncidentId === incident.id}
-                  className="w-full px-2 py-1 bg-zinc-900 border border-zinc-800 text-[10px] font-bold text-zinc-300 uppercase tracking-wider focus:outline-none focus:border-zinc-600 disabled:opacity-50"
+                  className={`w-full px-2 py-1 ${t.select} text-[10px] font-bold uppercase tracking-wider focus:outline-none disabled:opacity-50`}
                 >
                   <option value="reported">Reported</option>
                   <option value="investigating">Investigating</option>
@@ -362,11 +394,11 @@ export function IRList() {
                   <option value="closed">Closed</option>
                 </select>
               </div>
-              <div className="text-[10px] text-zinc-600 w-24 text-right font-mono">{formatDate(incident.occurred_at)}</div>
+              <div className={`text-[10px] ${t.textFaint} w-24 text-right font-mono`}>{formatDate(incident.occurred_at)}</div>
               <div className="w-12 text-right">
                 <button
                   onClick={(e) => handleDelete(incident.id, e)}
-                  className="p-2 text-zinc-600 hover:text-red-500 hover:bg-red-900/20 rounded transition-colors opacity-0 group-hover:opacity-100"
+                  className={`p-2 ${t.btnGhost} hover:text-red-500 hover:bg-red-900/20 rounded-xl transition-colors opacity-0 group-hover:opacity-100`}
                 >
                   <Trash2 size={14} />
                 </button>
@@ -375,6 +407,7 @@ export function IRList() {
           ))}
         </div>
       )}
+    </div>
     </div>
   );
 }
