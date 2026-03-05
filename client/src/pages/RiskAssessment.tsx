@@ -308,7 +308,7 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
     setAdding(null);
   };
 
-  const updateItem = async (id: string, update: { assigned_to?: string | null; due_date?: string | null; status?: 'open' | 'completed' | 'dismissed' }) => {
+  const updateItem = async (id: string, update: { assigned_to?: string | null; due_date?: string | null; status?: 'open' | 'completed' }) => {
     try {
       await riskAssessment.updateActionItem(id, update);
       await fetchItems();
@@ -481,13 +481,6 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
                         >
                           <Check size={11} />
                           Resolve
-                        </button>
-                        <button
-                          onClick={() => updateItem(item.id, { status: 'dismissed' })}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-zinc-500 border border-white/5 text-[10px] font-bold uppercase tracking-widest hover:bg-red-500/10 hover:text-red-400 hover:border-red-500/20 transition-colors"
-                        >
-                          <X size={11} />
-                          Dismiss
                         </button>
                         {item.assigned_to_name && (
                           <span className="ml-auto text-[9px] text-zinc-600 font-mono truncate">

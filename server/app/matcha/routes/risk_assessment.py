@@ -253,7 +253,7 @@ async def update_action_item(
     if company_id is None:
         raise HTTPException(status_code=403, detail="No company associated")
 
-    if body.status and body.status not in ("open", "completed", "dismissed"):
+    if body.status and body.status not in ("open", "completed"):
         raise HTTPException(status_code=422, detail="Invalid status")
 
     async with get_connection() as conn:
@@ -283,7 +283,7 @@ async def update_action_item(
             idx += 1
             sets.append(f"status = ${idx}")
             params.append(body.status)
-            if body.status in ("completed", "dismissed"):
+            if body.status == "completed":
                 sets.append("closed_at = NOW()")
             else:
                 sets.append("closed_at = NULL")
