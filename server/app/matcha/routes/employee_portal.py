@@ -456,6 +456,8 @@ async def get_portal_dashboard(
                 phone=employee["phone"],
                 address=employee["address"],
                 emergency_contact=employee["emergency_contact"],
+                job_title=employee.get("job_title"),
+                department=employee.get("department"),
                 created_at=employee["created_at"],
                 updated_at=employee["updated_at"]
             ),

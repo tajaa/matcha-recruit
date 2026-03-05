@@ -99,6 +99,20 @@ async def _employee_compensation_fields_available(conn) -> bool:
     }.issubset(existing)
 
 
+async def _employee_org_fields_available(conn) -> bool:
+    columns = await conn.fetch(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'employees'
+          AND column_name = ANY($1::text[])
+        """,
+        ["job_title", "department"],
+    )
+    existing = {row["column_name"] for row in columns}
+    return {"job_title", "department"}.issubset(existing)
+
+
 def _employee_compensation_values(
     row,
     compensation_fields_available: bool,
@@ -128,6 +142,8 @@ class EmployeeCreateRequest(BaseModel):
     pay_classification: Optional[str] = None
     pay_rate: Optional[Decimal] = None
     work_city: Optional[str] = None
+    job_title: Optional[str] = None
+    department: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_work_email_present(self):
@@ -165,6 +181,8 @@ class EmployeeUpdateRequest(BaseModel):
     pay_classification: Optional[str] = None
     pay_rate: Optional[Decimal] = None
     work_city: Optional[str] = None
+    job_title: Optional[str] = None
+    department: Optional[str] = None
 
     @model_validator(mode="after")
     def validate_pay_fields(self):
@@ -193,6 +211,8 @@ class EmployeeListResponse(BaseModel):
     pay_classification: Optional[str] = None
     pay_rate: Optional[float] = None
     work_city: Optional[str] = None
+    job_title: Optional[str] = None
+    department: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -508,6 +528,12 @@ async def get_bulk_onboarding_progress(
 @router.get("", response_model=List[EmployeeListResponse])
 async def list_employees(
     status: Optional[str] = None,  # active, terminated, invited
+    search: Optional[str] = Query(None, min_length=1, max_length=200),
+    department: Optional[str] = Query(None),
+    employment_type: Optional[str] = Query(None),
+    work_state: Optional[str] = Query(None),
+    work_city: Optional[str] = Query(None),
+    manager_id: Optional[UUID] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List all employees for the company."""
@@ -515,10 +541,16 @@ async def list_employees(
 
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
+        org_fields_available = await _employee_org_fields_available(conn)
         compensation_select = (
             "e.pay_classification, e.pay_rate, e.work_city,"
             if compensation_fields_available
             else "NULL::VARCHAR AS pay_classification, NULL::NUMERIC AS pay_rate, NULL::VARCHAR AS work_city,"
+        )
+        org_select = (
+            "e.job_title, e.department,"
+            if org_fields_available
+            else "NULL::VARCHAR AS job_title, NULL::VARCHAR AS department,"
         )
 
         # Build query based on status filter
@@ -528,6 +560,7 @@ async def list_employees(
                 e.employment_type, e.start_date, e.termination_date,
                 e.manager_id, e.user_id, e.created_at,
                 {compensation_select}
+                {org_select}
                 m.first_name || ' ' || m.last_name as manager_name,
                 (
                     SELECT status FROM employee_invitations
@@ -539,6 +572,9 @@ async def list_employees(
             WHERE e.org_id = $1
         """
 
+        params: list = [company_id]
+        param_num = 2
+
         if status == "active":
             base_query += " AND e.termination_date IS NULL AND e.user_id IS NOT NULL"
         elif status == "terminated":
@@ -546,13 +582,48 @@ async def list_employees(
         elif status == "invited":
             base_query += " AND e.user_id IS NULL"
 
+        if search:
+            search_pattern = f"%{search}%"
+            search_cols = ["e.first_name", "e.last_name", "e.email"]
+            if org_fields_available:
+                search_cols.extend(["e.job_title", "e.department"])
+            ilike_clauses = " OR ".join(f"{col} ILIKE ${param_num}" for col in search_cols)
+            base_query += f" AND ({ilike_clauses})"
+            params.append(search_pattern)
+            param_num += 1
+
+        if department and org_fields_available:
+            base_query += f" AND e.department = ${param_num}"
+            params.append(department)
+            param_num += 1
+
+        if employment_type:
+            base_query += f" AND e.employment_type = ${param_num}"
+            params.append(employment_type)
+            param_num += 1
+
+        if work_state:
+            base_query += f" AND e.work_state = ${param_num}"
+            params.append(work_state)
+            param_num += 1
+
+        if work_city and compensation_fields_available:
+            base_query += f" AND e.work_city = ${param_num}"
+            params.append(work_city)
+            param_num += 1
+
+        if manager_id:
+            base_query += f" AND e.manager_id = ${param_num}"
+            params.append(manager_id)
+            param_num += 1
+
         base_query += " ORDER BY e.created_at DESC"
 
-        rows = await conn.fetch(base_query, company_id)
+        rows = await conn.fetch(base_query, *params)
 
         responses = []
         for row in rows:
-            pay_classification, pay_rate, work_city = _employee_compensation_values(
+            pay_classification, pay_rate, _work_city = _employee_compensation_values(
                 row, compensation_fields_available
             )
             responses.append(
@@ -573,12 +644,60 @@ async def list_employees(
                     invitation_status=row["invitation_status"],
                     pay_classification=pay_classification,
                     pay_rate=pay_rate,
-                    work_city=work_city,
+                    work_city=_work_city,
+                    job_title=row["job_title"],
+                    department=row["department"],
                     created_at=row["created_at"],
                 )
             )
 
         return responses
+
+
+@router.get("/departments")
+async def list_departments(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return distinct department names for the company."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        if not await _employee_org_fields_available(conn):
+            return []
+        rows = await conn.fetch(
+            "SELECT DISTINCT department FROM employees WHERE org_id = $1 AND department IS NOT NULL ORDER BY department",
+            company_id,
+        )
+        return [row["department"] for row in rows]
+
+
+@router.get("/locations")
+async def list_locations(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return distinct state/city pairs for the company."""
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        has_city = await _column_exists(conn, "employees", "work_city")
+        if has_city:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT work_state, work_city FROM employees
+                WHERE org_id = $1 AND work_state IS NOT NULL
+                ORDER BY work_state, work_city
+                """,
+                company_id,
+            )
+            return [{"state": r["work_state"], "city": r["work_city"]} for r in rows]
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT DISTINCT work_state FROM employees
+                WHERE org_id = $1 AND work_state IS NOT NULL
+                ORDER BY work_state
+                """,
+                company_id,
+            )
+            return [{"state": r["work_state"], "city": None} for r in rows]
 
 
 @router.post("", response_model=EmployeeDetailResponse)
@@ -610,54 +729,57 @@ async def create_employee(
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid start_date format. Use YYYY-MM-DD")
 
+        org_fields_available = await _employee_org_fields_available(conn)
+
+        # Build dynamic INSERT columns/values based on available schema
+        insert_cols = [
+            "org_id", "email", "personal_email", "first_name", "last_name",
+            "work_state", "employment_type", "start_date", "address", "manager_id",
+        ]
+        insert_vals = [
+            company_id,
+            work_email,
+            str(request.personal_email).strip().lower() if request.personal_email else None,
+            request.first_name,
+            request.last_name,
+            request.work_state,
+            request.employment_type,
+            start_date,
+            request.address.strip() if request.address else None,
+            request.manager_id,
+        ]
+
         if compensation_fields_available:
-            row = await conn.fetchrow(
-                """
-                INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, address, manager_id, pay_classification, pay_rate, work_city)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                RETURNING id, org_id, email, first_name, last_name, work_state, employment_type,
-                          start_date, termination_date, manager_id, user_id, personal_email, phone, address,
-                          emergency_contact, pay_classification, pay_rate, work_city, created_at, updated_at
-                """,
-                company_id,
-                work_email,
-                str(request.personal_email).strip().lower() if request.personal_email else None,
-                request.first_name,
-                request.last_name,
-                request.work_state,
-                request.employment_type,
-                start_date,
-                request.address.strip() if request.address else None,
-                request.manager_id,
+            insert_cols.extend(["pay_classification", "pay_rate", "work_city"])
+            insert_vals.extend([
                 request.pay_classification,
                 request.pay_rate,
                 request.work_city.strip() if request.work_city else None,
-            )
-        else:
-            if request.pay_classification or request.pay_rate is not None or request.work_city:
-                logger.warning(
-                    "Skipping employee compensation fields until employees schema is migrated for company %s",
-                    company_id,
-                )
-            row = await conn.fetchrow(
-                """
-                INSERT INTO employees (org_id, email, personal_email, first_name, last_name, work_state, employment_type, start_date, address, manager_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                RETURNING id, org_id, email, first_name, last_name, work_state, employment_type,
-                          start_date, termination_date, manager_id, user_id, personal_email, phone, address,
-                          emergency_contact, created_at, updated_at
-                """,
+            ])
+        elif request.pay_classification or request.pay_rate is not None or request.work_city:
+            logger.warning(
+                "Skipping employee compensation fields until employees schema is migrated for company %s",
                 company_id,
-                work_email,
-                str(request.personal_email).strip().lower() if request.personal_email else None,
-                request.first_name,
-                request.last_name,
-                request.work_state,
-                request.employment_type,
-                start_date,
-                request.address.strip() if request.address else None,
-                request.manager_id,
             )
+
+        if org_fields_available:
+            insert_cols.extend(["job_title", "department"])
+            insert_vals.extend([
+                request.job_title.strip() if request.job_title else None,
+                request.department.strip() if request.department else None,
+            ])
+
+        placeholders = ", ".join(f"${i}" for i in range(1, len(insert_vals) + 1))
+        col_list = ", ".join(insert_cols)
+
+        row = await conn.fetchrow(
+            f"""
+            INSERT INTO employees ({col_list})
+            VALUES ({placeholders})
+            RETURNING *
+            """,
+            *insert_vals,
+        )
 
         # Auto-assign active onboarding task templates to the new employee
         try:
@@ -740,6 +862,8 @@ async def create_employee(
             pay_classification=pay_classification,
             pay_rate=pay_rate,
             work_city=work_city,
+            job_title=row.get("job_title"),
+            department=row.get("department"),
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -819,6 +943,8 @@ async def get_employee(
             pay_classification=pay_classification,
             pay_rate=pay_rate,
             work_city=work_city,
+            job_title=row.get("job_title"),
+            department=row.get("department"),
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -838,6 +964,7 @@ async def update_employee(
 
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
+        org_fields_available = await _employee_org_fields_available(conn)
         # Check employee exists
         existing = await conn.fetchval(
             "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
@@ -938,6 +1065,16 @@ async def update_employee(
             values.append(request.work_city.strip())
             param_num += 1
 
+        if org_fields_available and request.job_title is not None:
+            updates.append(f"job_title = ${param_num}")
+            values.append(request.job_title.strip() if request.job_title else None)
+            param_num += 1
+
+        if org_fields_available and request.department is not None:
+            updates.append(f"department = ${param_num}")
+            values.append(request.department.strip() if request.department else None)
+            param_num += 1
+
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")
 
@@ -991,6 +1128,8 @@ async def update_employee(
             pay_classification=pay_classification,
             pay_rate=pay_rate,
             work_city=work_city,
+            job_title=row.get("job_title"),
+            department=row.get("department"),
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -1075,8 +1214,8 @@ async def download_bulk_upload_template(
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=[
         'email', 'personal_email', 'first_name', 'last_name', 'work_state',
-        'employment_type', 'start_date', 'manager_email', 'job_title', 'phone',
-        'pay_classification', 'pay_rate', 'work_city'
+        'employment_type', 'start_date', 'manager_email', 'job_title', 'department',
+        'phone', 'pay_classification', 'pay_rate', 'work_city'
     ])
     writer.writeheader()
 
@@ -1091,6 +1230,7 @@ async def download_bulk_upload_template(
         'start_date': '2026-02-01',
         'manager_email': 'manager@example.com',
         'job_title': 'Software Engineer',
+        'department': 'Engineering',
         'phone': '555-1234',
         'pay_classification': 'hourly',
         'pay_rate': '18.50',
@@ -1230,6 +1370,7 @@ async def bulk_upload_employees_csv(
                 work_state = row.get('work_state', '').strip() or None
                 employment_type = row.get('employment_type', '').strip() or None
                 job_title = row.get('job_title', '').strip() or None
+                department_val = row.get('department', '').strip() or None
                 phone = row.get('phone', '').strip() or None
 
                 # Parse compensation fields
@@ -1290,33 +1431,26 @@ async def bulk_upload_employees_csv(
                         manager_id = manager['id']
 
                 # Create employee record
+                bulk_cols = [
+                    "org_id", "email", "personal_email", "first_name", "last_name",
+                    "work_state", "employment_type", "start_date", "manager_id", "phone",
+                ]
+                bulk_vals: list = [
+                    company_id, email, personal_email, first_name, last_name,
+                    work_state, employment_type, start_date, manager_id, phone,
+                ]
                 if compensation_fields_available:
-                    employee = await conn.fetchrow(
-                        """
-                        INSERT INTO employees (
-                            org_id, email, personal_email, first_name, last_name, work_state,
-                            employment_type, start_date, manager_id, phone,
-                            pay_classification, pay_rate, work_city
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-                        RETURNING id
-                        """,
-                        company_id, email, personal_email, first_name, last_name, work_state,
-                        employment_type, start_date, manager_id, phone,
-                        pay_classification, pay_rate, work_city
-                    )
-                else:
-                    employee = await conn.fetchrow(
-                        """
-                        INSERT INTO employees (
-                            org_id, email, personal_email, first_name, last_name, work_state,
-                            employment_type, start_date, manager_id, phone
-                        )
-                        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                        RETURNING id
-                        """,
-                        company_id, email, personal_email, first_name, last_name, work_state,
-                        employment_type, start_date, manager_id, phone
+                    bulk_cols.extend(["pay_classification", "pay_rate", "work_city"])
+                    bulk_vals.extend([pay_classification, pay_rate, work_city])
+                org_fields_avail = await _employee_org_fields_available(conn)
+                if org_fields_avail:
+                    bulk_cols.extend(["job_title", "department"])
+                    bulk_vals.extend([job_title, department_val])
+                bulk_placeholders = ", ".join(f"${i}" for i in range(1, len(bulk_vals) + 1))
+                bulk_col_list = ", ".join(bulk_cols)
+                employee = await conn.fetchrow(
+                    f"INSERT INTO employees ({bulk_col_list}) VALUES ({bulk_placeholders}) RETURNING id",
+                    *bulk_vals
                     )
 
                 employee_ids.append(employee['id'])

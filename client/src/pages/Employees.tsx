@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAccessToken, provisioning, onboardingDraft } from '../api/client';
-import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download } from 'lucide-react';
+import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download, Search, MapPin } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
 import { useIsLightMode } from '../hooks/useIsLightMode';
@@ -132,6 +132,8 @@ interface Employee {
   pay_classification: string | null;
   pay_rate: number | null;
   work_city: string | null;
+  job_title: string | null;
+  department: string | null;
   created_at: string;
 }
 
@@ -147,6 +149,8 @@ interface NewEmployee {
   pay_classification: string;
   pay_rate: string;
   work_city: string;
+  job_title: string;
+  department: string;
 }
 
 type EmailEntryMode = 'generated' | 'existing';
@@ -300,6 +304,107 @@ type EmployeeEmptyState = {
   icon: 'add' | 'invited' | 'terminated';
 };
 
+function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getStatusBadge, handleSendInvite, invitingId }: {
+  employee: Employee;
+  t: typeof LT;
+  isLight: boolean;
+  navigate: (path: string) => void;
+  onboardingProgress: Record<string, OnboardingProgress>;
+  getStatusBadge: (emp: Employee) => React.ReactNode;
+  handleSendInvite: (id: string) => void;
+  invitingId: string | null;
+}) {
+  return (
+    <div
+      onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
+      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
+    >
+      <div className="flex items-center min-w-0 flex-1">
+        <div className="flex-shrink-0">
+          <div className={`h-10 w-10 rounded-xl ${isLight ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-800 border border-white/5 text-zinc-300'} flex items-center justify-center font-bold text-xs`}>
+            {employee.first_name[0]}{employee.last_name[0]}
+          </div>
+        </div>
+        <div className="ml-4 min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className={`text-sm font-bold ${t.textMain} truncate`}>
+              {employee.first_name} {employee.last_name}
+            </p>
+          </div>
+          <p className={`text-xs ${t.textMuted} truncate`}>
+            {employee.job_title || (employee.work_email || employee.email)}
+          </p>
+        </div>
+        <div className="lg:hidden">
+          <ChevronRight size={16} className={t.textFaint} />
+        </div>
+      </div>
+
+      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-4 lg:border-0 lg:pt-0`}>
+        <div className="lg:text-right lg:w-28">
+          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Department</p>
+          <p className={`text-xs ${t.textDim} truncate`}>{employee.department || '—'}</p>
+        </div>
+        <div className="lg:text-right lg:w-32">
+          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Location</p>
+          <p className={`text-xs ${t.textDim} font-mono`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
+        </div>
+        <div className="lg:text-right lg:w-24">
+          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Type</p>
+          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider truncate`}>
+            {employee.employment_type?.replace('_', ' ') || '—'}
+          </p>
+        </div>
+        <div data-tour="emp-onboarding-col" className="lg:w-36 flex flex-col lg:items-end lg:justify-end">
+          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Onboarding</p>
+          {onboardingProgress[employee.id]?.has_onboarding ? (
+            <div className="flex items-center gap-2">
+              <div className={`w-16 h-1.5 ${isLight ? 'bg-stone-300' : 'bg-zinc-800'} rounded-full overflow-hidden`}>
+                <div
+                  className="h-full bg-emerald-500 rounded-full transition-all"
+                  style={{
+                    width: `${(onboardingProgress[employee.id].completed / onboardingProgress[employee.id].total) * 100}%`,
+                  }}
+                />
+              </div>
+              <span className={`text-[10px] ${t.textMuted} font-mono`}>
+                {onboardingProgress[employee.id].completed}/{onboardingProgress[employee.id].total}
+              </span>
+            </div>
+          ) : (
+            <span className={`text-[10px] ${t.textFaint} uppercase tracking-wider`}>Not started</span>
+          )}
+        </div>
+        <div className="flex flex-col lg:items-end lg:justify-end lg:w-32">
+          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Status</p>
+          {getStatusBadge(employee)}
+        </div>
+        <div className="col-span-2 sm:col-auto lg:w-32 flex lg:justify-end mt-2 sm:mt-0">
+          {!employee.user_id && !employee.termination_date && (
+            <button
+              data-tour="emp-invite-btn"
+              onClick={(e) => { e.stopPropagation(); handleSendInvite(employee.id); }}
+              disabled={invitingId === employee.id}
+              className={`flex-1 lg:flex-none inline-flex items-center justify-center px-3 py-1.5 border ${isLight ? 'border-stone-300 text-stone-500 hover:text-zinc-900 hover:bg-stone-50' : 'border-white/10 text-zinc-400 hover:text-white hover:bg-white/5'} text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+            >
+              {invitingId === employee.id ? (
+                <span className="animate-pulse">Sending...</span>
+              ) : employee.invitation_status === 'pending' ? (
+                'Resend Invite'
+              ) : (
+                'Send Invite'
+              )}
+            </button>
+          )}
+        </div>
+        <div className="hidden lg:flex w-8 justify-end">
+          <ChevronRight size={16} className={`${t.textFaint} group-hover:${t.textDim} transition-colors`} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' | 'directory' }) {
   const isLight = useIsLightMode();
   const t = isLight ? LT : DK;
@@ -321,6 +426,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     pay_classification: '',
     pay_rate: '',
     work_city: '',
+    job_title: '',
+    department: '',
   });
   const [emailEntryMode, setEmailEntryMode] = useState<EmailEntryMode>('existing');
   const [generatedEmailLocalPart, setGeneratedEmailLocalPart] = useState('');
@@ -362,6 +469,17 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const [bulkInviting, setBulkInviting] = useState(false);
   const [bulkInviteResult, setBulkInviteResult] = useState<{ sent: number; failed: number } | null>(null);
 
+  // Search & filter state
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterDepartment, setFilterDepartment] = useState('');
+  const [filterEmploymentType, setFilterEmploymentType] = useState('');
+  const [filterLocation, setFilterLocation] = useState('');
+  const [groupByLocation, setGroupByLocation] = useState(false);
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [locations, setLocations] = useState<{ state: string; city: string | null }[]>([]);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const normalizedGoogleDomain = (googleWorkspaceStatus?.domain || '')
     .trim()
     .replace(/^@/, '')
@@ -386,6 +504,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       pay_classification: '',
       pay_rate: '',
       work_city: '',
+      job_title: '',
+      department: '',
     });
     setEmailEntryMode(googleDomainAvailable ? 'generated' : 'existing');
     setGeneratedEmailLocalPart('');
@@ -440,9 +560,19 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const fetchEmployees = async () => {
     try {
       const token = getAccessToken();
-      const url = filter
-        ? `${API_BASE}/employees?status=${filter}`
-        : `${API_BASE}/employees`;
+      const params = new URLSearchParams();
+      if (filter) params.set('status', filter);
+      if (searchQuery) params.set('search', searchQuery);
+      if (filterDepartment) params.set('department', filterDepartment);
+      if (filterEmploymentType) params.set('employment_type', filterEmploymentType);
+      if (filterLocation) {
+        // filterLocation is "STATE" or "STATE|CITY"
+        const [st, ct] = filterLocation.split('|');
+        if (st) params.set('work_state', st);
+        if (ct) params.set('work_city', ct);
+      }
+      const qs = params.toString();
+      const url = `${API_BASE}/employees${qs ? `?${qs}` : ''}`;
 
       const response = await fetch(url, {
         headers: {
@@ -498,10 +628,39 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   useEffect(() => {
     fetchEmployees();
     fetchOnboardingProgress();
-  }, [filter]);
+  }, [filter, searchQuery, filterDepartment, filterEmploymentType, filterLocation]);
+
+  // Debounced search
+  useEffect(() => {
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+    searchTimerRef.current = setTimeout(() => {
+      setSearchQuery(searchInput);
+    }, 300);
+    return () => { if (searchTimerRef.current) clearTimeout(searchTimerRef.current); };
+  }, [searchInput]);
+
+  // Fetch departments + locations for filter dropdowns
+  const fetchFilterOptions = async () => {
+    try {
+      const token = getAccessToken();
+      const [deptRes, locRes] = await Promise.allSettled([
+        fetch(`${API_BASE}/employees/departments`, { headers: { Authorization: `Bearer ${token}` } }),
+        fetch(`${API_BASE}/employees/locations`, { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      if (deptRes.status === 'fulfilled' && deptRes.value.ok) {
+        setDepartments(await deptRes.value.json());
+      }
+      if (locRes.status === 'fulfilled' && locRes.value.ok) {
+        setLocations(await locRes.value.json());
+      }
+    } catch {
+      // non-critical
+    }
+  };
 
   useEffect(() => {
     fetchGoogleWorkspaceStatus();
+    fetchFilterOptions();
   }, []);
 
   useEffect(() => {
@@ -597,6 +756,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         pay_classification: newEmployee.pay_classification || undefined,
         pay_rate: newEmployee.pay_rate ? parseFloat(newEmployee.pay_rate) : undefined,
         work_city: newEmployee.work_city || undefined,
+        job_title: newEmployee.job_title || undefined,
+        department: newEmployee.department || undefined,
       };
       const response = await fetch(`${API_BASE}/employees`, {
         method: 'POST',
@@ -1208,6 +1369,74 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         </nav>
       </div>
 
+      {/* Search + Filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px] max-w-sm">
+          <Search size={14} className={`absolute left-3 top-1/2 -translate-y-1/2 ${t.textFaint}`} />
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search name, email, title..."
+            className={`w-full pl-9 pr-3 py-2 ${t.inputCls} text-xs`}
+          />
+        </div>
+        {departments.length > 0 && (
+          <select
+            value={filterDepartment}
+            onChange={(e) => setFilterDepartment(e.target.value)}
+            className={`px-3 py-2 ${t.inputCls} text-xs`}
+          >
+            <option value="">All Departments</option>
+            {departments.map((d) => (
+              <option key={d} value={d}>{d}</option>
+            ))}
+          </select>
+        )}
+        <select
+          value={filterEmploymentType}
+          onChange={(e) => setFilterEmploymentType(e.target.value)}
+          className={`px-3 py-2 ${t.inputCls} text-xs`}
+        >
+          <option value="">All Types</option>
+          <option value="full_time">Full Time</option>
+          <option value="part_time">Part Time</option>
+          <option value="contractor">Contractor</option>
+          <option value="intern">Intern</option>
+        </select>
+        {locations.length > 0 && (
+          <select
+            value={filterLocation}
+            onChange={(e) => setFilterLocation(e.target.value)}
+            className={`px-3 py-2 ${t.inputCls} text-xs`}
+          >
+            <option value="">All Locations</option>
+            {locations.map((loc) => {
+              const val = loc.city ? `${loc.state}|${loc.city}` : loc.state;
+              const label = loc.city ? `${loc.state} — ${loc.city}` : loc.state;
+              return <option key={val} value={val}>{label}</option>;
+            })}
+          </select>
+        )}
+        <button
+          onClick={() => setGroupByLocation(!groupByLocation)}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${
+            groupByLocation ? t.btnSecondaryActive : t.btnSecondary
+          }`}
+        >
+          <MapPin size={12} />
+          Group by Location
+        </button>
+        {(searchInput || filterDepartment || filterEmploymentType || filterLocation) && (
+          <button
+            onClick={() => { setSearchInput(''); setSearchQuery(''); setFilterDepartment(''); setFilterEmploymentType(''); setFilterLocation(''); }}
+            className={`text-xs ${t.textMuted} hover:${t.textMain} uppercase tracking-wider font-bold`}
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       {/* Employee list */}
       {employees.length === 0 ? (
         <div className={`text-center py-24 ${t.emptyBorder}`}>
@@ -1231,104 +1460,67 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       ) : (
         <div data-tour="emp-list" className={`${t.cardDark} overflow-hidden shadow-lg`}>
            {/* Table Header */}
-           <div className={`hidden md:flex items-center gap-4 py-3 px-6 text-[10px] ${t.labelOnDark} border-b border-white/5`}>
-              <div className="flex-1">Name / Email</div>
-              <div className="w-32 text-right">Work State</div>
-              <div className="w-32 text-right">Type</div>
-              <div className="w-36 text-right">Onboarding</div>
-              <div className="w-32 text-right">Status</div>
-              <div className="w-32"></div>
-           </div>
+           {!groupByLocation && (
+             <div className={`hidden md:flex items-center gap-4 py-3 px-6 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
+                <div className="flex-1">Name / Role</div>
+                <div className="w-28 text-right">Department</div>
+                <div className="w-32 text-right">Location</div>
+                <div className="w-24 text-right">Type</div>
+                <div className="w-36 text-right">Onboarding</div>
+                <div className="w-32 text-right">Status</div>
+                <div className="w-32"></div>
+             </div>
+           )}
 
-          <div className="divide-y divide-white/5">
-          {employees.map((employee) => (
-            <div
-              key={employee.id}
-              onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-              className={`group hover:bg-white/5 transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
-            >
-              <div className="flex items-center min-w-0 flex-1">
-                <div className="flex-shrink-0">
-                  <div className={`h-10 w-10 rounded-xl bg-zinc-800 border border-white/5 flex items-center justify-center font-bold text-xs text-zinc-300`}>
-                    {employee.first_name[0]}{employee.last_name[0]}
-                  </div>
-                </div>
-                <div className="ml-4 min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <p className={`text-sm font-bold text-zinc-100 truncate`}>
-                      {employee.first_name} {employee.last_name}
-                    </p>
-                  </div>
-                  <p className={`text-xs text-zinc-500 font-mono truncate`}>
-                    {employee.work_email || employee.email}
-                  </p>
-                </div>
-                <div className="lg:hidden">
-                   <ChevronRight size={16} className="text-zinc-600" />
-                </div>
-              </div>
-
-              <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t border-white/5 pt-4 lg:border-0 lg:pt-0`}>
-                 <div className="lg:text-right">
-                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden`}>Location</p>
-                    <p className={`text-xs text-zinc-400 font-mono`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
-                 </div>
-                 <div className="lg:text-right lg:w-24">
-                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden`}>Type</p>
-                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider truncate`}>
-                      {employee.employment_type?.replace('_', ' ') || '—'}
-                    </p>
-                 </div>
-                 <div data-tour="emp-onboarding-col" className="lg:w-36 flex flex-col lg:items-end lg:justify-end">
-                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden mb-1`}>Onboarding</p>
-                    {onboardingProgress[employee.id]?.has_onboarding ? (
-                      <div className="flex items-center gap-2">
-                        <div className={`w-16 h-1.5 bg-zinc-800 rounded-full overflow-hidden`}>
-                          <div
-                            className="h-full bg-emerald-500 rounded-full transition-all"
-                            style={{
-                              width: `${(onboardingProgress[employee.id].completed / onboardingProgress[employee.id].total) * 100}%`,
-                            }}
-                          />
+          {groupByLocation ? (
+            (() => {
+              const groups: Record<string, Employee[]> = {};
+              employees.forEach((emp) => {
+                const key = emp.work_state
+                  ? emp.work_city ? `${emp.work_state}|${emp.work_city}` : `${emp.work_state}|`
+                  : '__none__';
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(emp);
+              });
+              const sortedKeys = Object.keys(groups).sort((a, b) => {
+                if (a === '__none__') return 1;
+                if (b === '__none__') return -1;
+                return a.localeCompare(b);
+              });
+              return (
+                <div className="space-y-0">
+                  {sortedKeys.map((key) => {
+                    const emps = groups[key];
+                    const [state, city] = key === '__none__' ? ['', ''] : key.split('|');
+                    const label = key === '__none__'
+                      ? 'Remote / No Location'
+                      : city ? `${state} — ${city}` : state;
+                    return (
+                      <details key={key} open className="group/loc">
+                        <summary className={`flex items-center gap-3 px-6 py-3 cursor-pointer ${isLight ? 'bg-stone-200/80' : 'bg-zinc-800/80'} ${t.textDim} text-xs font-bold uppercase tracking-wider`}>
+                          <ChevronDown size={14} className="transition-transform group-open/loc:rotate-0 -rotate-90" />
+                          <MapPin size={12} />
+                          {label}
+                          <span className={`${t.textFaint} font-mono ml-1`}>({emps.length})</span>
+                        </summary>
+                        <div className={`divide-y ${isLight ? 'divide-stone-200' : 'divide-white/5'}`}>
+                          {emps.map((employee) => (
+                            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} getStatusBadge={getStatusBadge} handleSendInvite={handleSendInvite} invitingId={invitingId} />
+                          ))}
                         </div>
-                        <span className={`text-[10px] text-zinc-500 font-mono`}>
-                          {onboardingProgress[employee.id].completed}/{onboardingProgress[employee.id].total}
-                        </span>
-                      </div>
-                    ) : (
-                      <span className={`text-[10px] text-zinc-600 uppercase tracking-wider`}>Not started</span>
-                    )}
-                 </div>
-                 <div className="flex flex-col lg:items-end lg:justify-end lg:w-32">
-                    <p className={`text-[10px] text-zinc-500 uppercase tracking-wider lg:hidden mb-1`}>Status</p>
-                    {getStatusBadge(employee)}
-                 </div>
-
-                 <div className="col-span-2 sm:col-auto lg:w-32 flex lg:justify-end mt-2 sm:mt-0">
-                    {!employee.user_id && !employee.termination_date && (
-                      <button
-                        data-tour="emp-invite-btn"
-                        onClick={(e) => { e.stopPropagation(); handleSendInvite(employee.id); }}
-                        disabled={invitingId === employee.id}
-                        className={`flex-1 lg:flex-none inline-flex items-center justify-center px-3 py-1.5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/5 text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
-                      >
-                        {invitingId === employee.id ? (
-                          <span className="animate-pulse">Sending...</span>
-                        ) : employee.invitation_status === 'pending' ? (
-                          'Resend Invite'
-                        ) : (
-                          'Send Invite'
-                        )}
-                      </button>
-                    )}
-                 </div>
-                 <div className="hidden lg:flex w-8 justify-end">
-                    <ChevronRight size={16} className="text-zinc-600 group-hover:text-zinc-400 transition-colors" />
-                 </div>
-              </div>
-            </div>
+                      </details>
+                    );
+                  })}
+                </div>
+              );
+            })()
+          ) : (
+          <div className={`divide-y ${isLight ? 'divide-stone-200' : 'divide-white/5'}`}>
+          {employees.map((employee) => (
+            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} getStatusBadge={getStatusBadge} handleSendInvite={handleSendInvite} invitingId={invitingId} />
           ))}
           </div>
+          )}
         </div>
       )}
       {/* Add Employee Modal */}
@@ -1691,6 +1883,37 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                           />
                         </div>
                       )}
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
+                            Job Title
+                          </label>
+                          <input
+                            type="text"
+                            value={newEmployee.job_title}
+                            onChange={(e) => setNewEmployee({ ...newEmployee, job_title: e.target.value })}
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
+                            placeholder="Software Engineer"
+                          />
+                        </div>
+                        <div>
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
+                            Department
+                          </label>
+                          <input
+                            type="text"
+                            value={newEmployee.department}
+                            onChange={(e) => setNewEmployee({ ...newEmployee, department: e.target.value })}
+                            list="add-dept-options"
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
+                            placeholder="Engineering"
+                          />
+                          <datalist id="add-dept-options">
+                            {departments.map((d) => <option key={d} value={d} />)}
+                          </datalist>
+                        </div>
+                      </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>

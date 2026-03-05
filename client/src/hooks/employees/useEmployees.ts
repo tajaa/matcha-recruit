@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getAccessToken } from '../../api/client';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -18,6 +18,11 @@ export interface Employee {
   manager_name: string | null;
   user_id: string | null;
   invitation_status: string | null;
+  job_title: string | null;
+  department: string | null;
+  pay_classification: string | null;
+  pay_rate: number | null;
+  work_city: string | null;
   created_at: string;
 }
 
@@ -29,23 +34,44 @@ export interface OnboardingProgress {
   has_onboarding: boolean;
 }
 
-export function useEmployees(filter: string) {
+export interface EmployeeFilters {
+  status?: string;
+  search?: string;
+  department?: string;
+  employment_type?: string;
+  work_state?: string;
+  work_city?: string;
+  manager_id?: string;
+}
+
+export function useEmployees(filters: EmployeeFilters) {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [onboardingProgress, setOnboardingProgress] = useState<Record<string, OnboardingProgress>>({});
+  const abortRef = useRef<AbortController | null>(null);
 
-  const fetchEmployees = async () => {
+  const fetchEmployees = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const token = getAccessToken();
-      const url = filter
-        ? `${API_BASE}/employees?status=${filter}`
-        : `${API_BASE}/employees`;
+      const params = new URLSearchParams();
+      if (filters.status) params.set('status', filters.status);
+      if (filters.search) params.set('search', filters.search);
+      if (filters.department) params.set('department', filters.department);
+      if (filters.employment_type) params.set('employment_type', filters.employment_type);
+      if (filters.work_state) params.set('work_state', filters.work_state);
+      if (filters.work_city) params.set('work_city', filters.work_city);
+      if (filters.manager_id) params.set('manager_id', filters.manager_id);
+
+      const qs = params.toString();
+      const url = `${API_BASE}/employees${qs ? `?${qs}` : ''}`;
 
       const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -55,20 +81,20 @@ export function useEmployees(filter: string) {
 
       const data = await response.json();
       setEmployees(data);
+      setError(null);
     } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
-  };
+  }, [filters.status, filters.search, filters.department, filters.employment_type, filters.work_state, filters.work_city, filters.manager_id]);
 
   const fetchOnboardingProgress = async () => {
     try {
       const token = getAccessToken();
       const response = await fetch(`${API_BASE}/employees/onboarding-progress`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       if (!response.ok) throw new Error('Failed to fetch onboarding progress');
@@ -81,9 +107,10 @@ export function useEmployees(filter: string) {
   };
 
   useEffect(() => {
+    setLoading(true);
     fetchEmployees();
     fetchOnboardingProgress();
-  }, [filter]);
+  }, [fetchEmployees]);
 
   const refetch = async () => {
     setLoading(true);

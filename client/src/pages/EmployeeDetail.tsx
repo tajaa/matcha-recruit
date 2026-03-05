@@ -5,7 +5,7 @@ import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioni
 import {
   ArrowLeft, Mail, Phone, MapPin, Calendar, Users, CheckCircle, Clock, FileText,
   Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw,
-  Pencil, DollarSign, Briefcase, Save
+  Pencil, DollarSign, Briefcase, Save, ChevronRight
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -30,8 +30,17 @@ interface Employee {
   address: string | null;
   pay_classification: string | null;
   pay_rate: number | null;
+  job_title: string | null;
+  department: string | null;
   emergency_contact: object | null;
   created_at: string;
+}
+
+interface EmployeeListItem {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
 }
 
 interface EditFields {
@@ -47,6 +56,9 @@ interface EditFields {
   start_date: string;
   pay_classification: string;
   pay_rate: string;
+  job_title: string;
+  department: string;
+  manager_id: string;
 }
 
 interface OnboardingTask {
@@ -113,6 +125,10 @@ export default function EmployeeDetail() {
   const [editing, setEditing] = useState(false);
   const [editFields, setEditFields] = useState<EditFields | null>(null);
   const [saving, setSaving] = useState(false);
+  const [allEmployees, setAllEmployees] = useState<EmployeeListItem[]>([]);
+  const [directReports, setDirectReports] = useState<EmployeeListItem[]>([]);
+  const [departments, setDepartments] = useState<string[]>([]);
+  const [managerSearch, setManagerSearch] = useState('');
 
   const startEditing = () => {
     if (!employee) return;
@@ -129,6 +145,9 @@ export default function EmployeeDetail() {
       start_date: employee.start_date || '',
       pay_classification: employee.pay_classification || '',
       pay_rate: employee.pay_rate != null ? String(employee.pay_rate) : '',
+      job_title: employee.job_title || '',
+      department: employee.department || '',
+      manager_id: employee.manager_id || '',
     });
     setEditing(true);
   };
@@ -159,6 +178,9 @@ export default function EmployeeDetail() {
       const newRate = editFields.pay_rate ? parseFloat(editFields.pay_rate) : null;
       const oldRate = employee?.pay_rate ?? null;
       if (newRate !== oldRate) body.pay_rate = newRate;
+      if (editFields.job_title !== (employee?.job_title || '')) body.job_title = editFields.job_title || null;
+      if (editFields.department !== (employee?.department || '')) body.department = editFields.department || null;
+      if (editFields.manager_id !== (employee?.manager_id || '')) body.manager_id = editFields.manager_id || null;
 
       if (Object.keys(body).length === 0) {
         setEditing(false);
@@ -248,6 +270,48 @@ export default function EmployeeDetail() {
     }
   };
 
+  const fetchAllEmployees = async () => {
+    try {
+      const token = getAccessToken();
+      const response = await fetch(`${API_BASE}/employees`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setAllEmployees(data.map((e: Employee) => ({ id: e.id, first_name: e.first_name, last_name: e.last_name, email: e.email })));
+    } catch {
+      // non-critical
+    }
+  };
+
+  const fetchDirectReports = async () => {
+    if (!employeeId) return;
+    try {
+      const token = getAccessToken();
+      const response = await fetch(`${API_BASE}/employees?manager_id=${employeeId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      const data = await response.json();
+      setDirectReports(data.map((e: Employee) => ({ id: e.id, first_name: e.first_name, last_name: e.last_name, email: e.email })));
+    } catch {
+      // non-critical
+    }
+  };
+
+  const fetchDepartments = async () => {
+    try {
+      const token = getAccessToken();
+      const response = await fetch(`${API_BASE}/employees/departments`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return;
+      setDepartments(await response.json());
+    } catch {
+      // non-critical
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
@@ -255,6 +319,9 @@ export default function EmployeeDetail() {
       setLoading(false);
     };
     loadData();
+    fetchAllEmployees();
+    fetchDirectReports();
+    fetchDepartments();
   }, [employeeId]);
 
   const handleAssignAll = async () => {
@@ -436,7 +503,12 @@ export default function EmployeeDetail() {
           <h1 className="text-4xl font-bold tracking-tighter text-white">
             {employee.first_name} {employee.last_name}
           </h1>
-          <p className="text-xs text-zinc-500 mt-1 font-mono">{displayWorkEmail}</p>
+          <div className="flex items-center gap-3 mt-1">
+            {employee.job_title && <span className="text-sm text-zinc-400">{employee.job_title}</span>}
+            {employee.job_title && employee.department && <span className="text-zinc-600">·</span>}
+            {employee.department && <span className="text-sm text-zinc-400">{employee.department}</span>}
+            {!employee.job_title && !employee.department && <span className="text-xs text-zinc-500 font-mono">{displayWorkEmail}</span>}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {employee.termination_date ? (
@@ -553,6 +625,17 @@ export default function EmployeeDetail() {
             {editing && editFields ? (
               <div className="space-y-3">
                 <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Job Title</label>
+                  <input value={editFields.job_title} onChange={(e) => setEditFields({ ...editFields, job_title: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. Software Engineer" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Department</label>
+                  <input value={editFields.department} onChange={(e) => setEditFields({ ...editFields, department: e.target.value })} list="dept-options" className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. Engineering" />
+                  <datalist id="dept-options">
+                    {departments.map((d) => <option key={d} value={d} />)}
+                  </datalist>
+                </div>
+                <div>
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Employment Type</label>
                   <select value={editFields.employment_type} onChange={(e) => setEditFields({ ...editFields, employment_type: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30">
                     <option value="">Select...</option>
@@ -575,6 +658,21 @@ export default function EmployeeDetail() {
                     <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Work City</label>
                     <input value={editFields.work_city} onChange={(e) => setEditFields({ ...editFields, work_city: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. San Francisco" />
                   </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Manager</label>
+                  <select
+                    value={editFields.manager_id}
+                    onChange={(e) => setEditFields({ ...editFields, manager_id: e.target.value })}
+                    className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30"
+                  >
+                    <option value="">No Manager</option>
+                    {allEmployees
+                      .filter((e) => e.id !== employeeId)
+                      .map((e) => (
+                        <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>
+                      ))}
+                  </select>
                 </div>
                 <div>
                   <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Pay Classification</label>
@@ -604,6 +702,22 @@ export default function EmployeeDetail() {
               </div>
             ) : (
               <div className="space-y-3">
+                {employee.job_title && (
+                  <div className="flex items-center gap-3">
+                    <Briefcase size={16} className="text-zinc-500" />
+                    <span className="text-sm text-zinc-400">
+                      Title: <span className="text-white">{employee.job_title}</span>
+                    </span>
+                  </div>
+                )}
+                {employee.department && (
+                  <div className="flex items-center gap-3">
+                    <Users size={16} className="text-zinc-500" />
+                    <span className="text-sm text-zinc-400">
+                      Department: <span className="text-white">{employee.department}</span>
+                    </span>
+                  </div>
+                )}
                 {employee.start_date && (
                   <div className="flex items-center gap-3">
                     <Calendar size={16} className="text-zinc-500" />
@@ -641,10 +755,36 @@ export default function EmployeeDetail() {
                   <div className="flex items-center gap-3">
                     <Users size={16} className="text-zinc-500" />
                     <span className="text-sm text-zinc-400">
-                      Manager: <span className="text-white">{employee.manager_name}</span>
+                      Manager: <span className="text-white cursor-pointer hover:underline" onClick={() => employee.manager_id && navigate(`/app/matcha/employees/${employee.manager_id}`)}>{employee.manager_name}</span>
                     </span>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* Direct Reports */}
+          <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
+            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Direct Reports</h2>
+            {directReports.length === 0 ? (
+              <p className="text-xs text-zinc-600 font-mono uppercase">No direct reports</p>
+            ) : (
+              <div className="space-y-2">
+                {directReports.map((dr) => (
+                  <div
+                    key={dr.id}
+                    onClick={() => navigate(`/app/matcha/employees/${dr.id}`)}
+                    className="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer transition-colors"
+                  >
+                    <div className="h-7 w-7 rounded-lg bg-zinc-800 border border-white/5 flex items-center justify-center text-[10px] font-bold text-zinc-400">
+                      {dr.first_name[0]}{dr.last_name[0]}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-white truncate">{dr.first_name} {dr.last_name}</p>
+                    </div>
+                    <ChevronRight size={14} className="text-zinc-600" />
+                  </div>
+                ))}
               </div>
             )}
           </div>

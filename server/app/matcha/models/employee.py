@@ -33,6 +33,8 @@ class EmployeeBase(BaseModel):
     start_date: Optional[date] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    job_title: Optional[str] = None
+    department: Optional[str] = None
 
 
 class EmployeeCreate(EmployeeBase):
