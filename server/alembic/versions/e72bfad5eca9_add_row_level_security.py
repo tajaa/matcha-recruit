@@ -20,25 +20,17 @@ depends_on: Union[str, Sequence[str], None] = None
 # Tables that use company_id as the tenant column
 COMPANY_ID_TABLES = [
     "ir_incidents",
-    "ir_incident_analysis",
-    "ir_incident_documents",
     "offer_letters",
     "positions",
-    "compliance_requirements",
-    "compliance_locations",
     "policies",
-    "vibe_checks",
-    "performance_reviews",
-    "enps_surveys",
     "er_cases",
-    "pto_policies",
-    "pto_requests",
 ]
 
 # Tables that use org_id instead of company_id
 ORG_ID_TABLES = [
     "employees",
     "onboarding_tasks",
+    "enps_surveys",
 ]
 
 
