@@ -529,7 +529,7 @@ export function ERCaseDetail() {
     streaming: similarStreaming,
     messages: similarMessages,
     result: similarResult,
-    error: similarError,
+    error: _similarError,
     runAnalysis: runSimilarAnalysis,
     reset: resetSimilar,
   } = useERSimilarCasesStream();
