@@ -87,11 +87,26 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
     if _is_rate_limited(client_ip):
         raise HTTPException(status_code=429, detail="Too many reports. Please try again later.")
 
-    # Look up company, insert incident, and mark token used atomically
+    # Look up company, insert incident, and mark token used atomically.
+    # The connection must carry the tenant_id so that the INSERT into
+    # ir_incidents passes the RLS policy.  We resolve the company_id from
+    # the token first, then open a tenant-scoped connection for the write.
     incident_number = generate_incident_number()
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
+    # 1. Quick lookup to resolve company_id (companies table has no RLS)
     async with get_connection() as conn:
+        company_id_row = await conn.fetchval(
+            "SELECT id FROM companies WHERE report_email_token = $1",
+            token.lower(),
+        )
+    if not company_id_row:
+        raise HTTPException(status_code=404, detail="Invalid reporting link")
+
+    company_id = str(company_id_row)
+
+    # 2. Tenant-scoped connection for the atomic write
+    async with get_connection(tenant_id=company_id) as conn:
         async with conn.transaction():
             company = await conn.fetchrow(
                 """SELECT id, name, enabled_features, report_token_used_at
@@ -111,8 +126,6 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
                 features = json.loads(features)
             if not (features or {}).get("incidents", False):
                 raise HTTPException(status_code=404, detail="Invalid reporting link")
-
-            company_id = str(company["id"])
 
             row = await conn.fetchrow(
                 """
