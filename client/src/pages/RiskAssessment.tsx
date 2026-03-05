@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { RefreshCw, Sparkles, HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser } from '../types';
 import { riskAssessment, erCopilot } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -756,7 +756,7 @@ export default function RiskAssessment() {
                         <BarChart
                           data={Object.entries(metrics.by_category).map(([name, value]) => ({ name: name.replace('_', ' '), value }))}
                           layout="vertical"
-                          margin={{ top: 0, right: 8, bottom: 0, left: 0 }}
+                          margin={{ top: 0, right: 30, bottom: 0, left: 0 }}
                         >
                           <XAxis type="number" hide />
                           <YAxis type="category" dataKey="name" width={100} tick={{ fontSize: 10, fill: '#71717a' }} axisLine={false} tickLine={false} />
@@ -768,6 +768,7 @@ export default function RiskAssessment() {
                             {Object.entries(metrics.by_category).map((_, i) => (
                               <Cell key={i} fill={['#f59e0b', '#ef4444', '#3b82f6', '#10b981', '#a855f7', '#f97316', '#06b6d4', '#6366f1'][i % 8]} />
                             ))}
+                            <LabelList dataKey="value" position="right" style={{ fontSize: 10, fill: '#a1a1aa', fontFamily: 'monospace' }} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
@@ -784,7 +785,7 @@ export default function RiskAssessment() {
                         <BarChart
                           data={Object.entries(metrics.by_outcome).map(([name, value]) => ({ name: name.replace('_', ' '), value }))}
                           layout="vertical"
-                          margin={{ top: 0, right: 8, bottom: 0, left: 0 }}
+                          margin={{ top: 0, right: 30, bottom: 0, left: 0 }}
                         >
                           <XAxis type="number" hide />
                           <YAxis type="category" dataKey="name" width={120} tick={{ fontSize: 10, fill: '#71717a' }} axisLine={false} tickLine={false} />
@@ -796,6 +797,7 @@ export default function RiskAssessment() {
                             {Object.entries(metrics.by_outcome).map((_, i) => (
                               <Cell key={i} fill={['#10b981', '#f59e0b', '#3b82f6', '#ef4444', '#a855f7', '#6366f1'][i % 6]} />
                             ))}
+                            <LabelList dataKey="value" position="right" style={{ fontSize: 10, fill: '#a1a1aa', fontFamily: 'monospace' }} />
                           </Bar>
                         </BarChart>
                       </ResponsiveContainer>
