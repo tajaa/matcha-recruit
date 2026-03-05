@@ -926,14 +926,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     return <span className={`${base} ${muted}`}><Mail size={10} /> Not Invited</span>;
   };
 
-  const US_STATES = [
-    'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
-    'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
-    'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
-    'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
-    'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
-  ];
-
   // Unique "City, ST" pairs from compliance locations for the work location dropdown
   const complianceLocationOptions = Array.from(
     new Set(complianceLocations.map((l) => `${l.city}|${l.state}`))
