@@ -614,7 +614,7 @@ async def export_case_file(
 
             # Fetch analyses
             analysis_rows = await conn.fetch(
-                "SELECT analysis_type, analysis_data, created_at FROM er_case_analysis WHERE case_id = $1 ORDER BY created_at",
+                "SELECT analysis_type, analysis_data, generated_at FROM er_case_analysis WHERE case_id = $1 ORDER BY generated_at",
                 case_id,
             )
 
