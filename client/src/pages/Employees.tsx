@@ -1526,7 +1526,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       {/* Add Employee Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-            <div className={`w-full max-w-lg ${t.modalBg} flex flex-col`} onClick={(e) => e.stopPropagation()}>
+            <div className={`w-full max-w-lg ${t.modalBg} max-h-[90vh] overflow-hidden flex flex-col`} onClick={(e) => e.stopPropagation()}>
               {agentEmployee ? (
                 <OnboardingAgentConsole
                   employeeId={agentEmployee.id}
@@ -1981,6 +1981,16 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     </div>
                   )}
                 </div>
+
+                {error && (
+                  <div className={`${t.alertError} rounded-xl p-3 flex items-center gap-3 mt-4`}>
+                    <AlertTriangle className={t.alertErrorText} size={14} />
+                    <p className={`text-xs ${t.alertErrorText} font-mono flex-1`}>{error}</p>
+                    <button onClick={() => setError(null)} className={`text-[10px] ${t.alertErrorText} uppercase tracking-wider font-bold shrink-0`}>
+                      Dismiss
+                    </button>
+                  </div>
+                )}
 
                 <div className={`mt-8 flex justify-end gap-3 pt-6 ${t.modalFooter}`}>
                   <button
