@@ -393,7 +393,7 @@ export default function OnboardingCenter() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {/* Google Workspace Card */}
-              <section data-tour="onboarding-workspace-google-card" className={`${t.cardBorder} p-5 space-y-4`}>
+              <section data-tour="onboarding-workspace-google-card" className={`${t.card} p-5 space-y-4`}>
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className={`text-sm font-semibold tracking-wide ${t.textMain}`}>Google Workspace</h2>
@@ -426,7 +426,7 @@ export default function OnboardingCenter() {
               </section>
 
               {/* Slack Card */}
-              <section data-tour="onboarding-workspace-slack-card" className={`${t.cardBorder} p-5 space-y-4`}>
+              <section data-tour="onboarding-workspace-slack-card" className={`${t.card} p-5 space-y-4`}>
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className={`text-sm font-semibold tracking-wide ${t.textMain}`}>Slack</h2>
@@ -459,7 +459,7 @@ export default function OnboardingCenter() {
               </section>
 
               {/* Toast Card (Coming Soon) */}
-              <section className={`${t.cardBorder} p-5 space-y-4 ${t.comingSoon}`}>
+              <section className={`${t.card} p-5 space-y-4 ${t.comingSoon}`}>
                 <div className="flex items-start justify-between gap-2">
                   <div>
                     <h2 className={`text-sm font-semibold tracking-wide ${t.textMain}`}>Toast</h2>

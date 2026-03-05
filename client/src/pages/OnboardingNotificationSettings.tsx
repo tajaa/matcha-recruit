@@ -6,6 +6,10 @@ import { useIsLightMode } from '../hooks/useIsLightMode';
 
 const LT = {
   card: 'bg-stone-100 rounded-2xl',
+  cardLight: 'bg-stone-100 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
   textMain: 'text-zinc-900',
   textMuted: 'text-stone-500',
   textFaint: 'text-stone-400',
@@ -22,6 +26,10 @@ const LT = {
 
 const DK = {
   card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
   textMain: 'text-zinc-100',
   textMuted: 'text-zinc-500',
   textFaint: 'text-zinc-600',

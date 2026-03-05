@@ -62,7 +62,11 @@ interface CompanyData {
 }
 
 const LT = {
-  section: 'border border-stone-200 bg-stone-100 rounded-2xl',
+  section: 'bg-stone-100 rounded-2xl',
+  cardLight: 'bg-stone-100 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
   sectionHeader: 'p-6 border-b border-stone-200 flex items-center gap-3',
   textMain: 'text-zinc-900',
   textMuted: 'text-stone-500',
@@ -99,9 +103,13 @@ const LT = {
 } as const;
 
 const DK = {
-  section: 'border border-white/10 bg-zinc-900/30 rounded-2xl',
+  section: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
   sectionHeader: 'p-6 border-b border-white/10 flex items-center gap-3',
-  textMain: 'text-white',
+  textMain: 'text-zinc-100',
   textMuted: 'text-zinc-500',
   textFaint: 'text-zinc-600',
   textDim: 'text-zinc-400',

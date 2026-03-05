@@ -12,7 +12,11 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 const LT = {
   pageBg: 'bg-stone-300',
-  card: 'bg-stone-100 rounded-2xl border border-stone-200',
+  card: 'bg-stone-100 rounded-2xl',
+  cardLight: 'bg-stone-100 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
   innerEl: 'bg-stone-200/60 rounded-xl border border-stone-200',
   textMain: 'text-zinc-900',
   textMuted: 'text-stone-500',
@@ -60,8 +64,12 @@ const LT = {
 
 const DK = {
   pageBg: 'bg-zinc-950',
-  card: 'bg-zinc-900/50 rounded-2xl border border-white/10',
-  innerEl: 'bg-zinc-800/60 rounded-xl border border-white/10',
+  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
+  innerEl: 'bg-zinc-900/40 rounded-xl border border-white/10',
   textMain: 'text-zinc-100',
   textMuted: 'text-zinc-500',
   textFaint: 'text-zinc-600',
