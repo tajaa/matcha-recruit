@@ -380,6 +380,16 @@ function HandbookDetailPage() {
     }
   };
 
+  const handleMarkReviewed = async (sectionId: string) => {
+    if (!id) return;
+    try {
+      await handbooks.markSectionReviewed(id, sectionId);
+      await loadData();
+    } catch (error) {
+      console.error('Failed to mark section as reviewed:', error);
+    }
+  };
+
   const handleConfirmDistribution = async (employeeIds?: string[]) => {
     if (!id || distributionLoading) return;
     try {
@@ -621,6 +631,15 @@ function HandbookDetailPage() {
                   <div className="text-[10px] text-zinc-500">{new Date(freshnessCheck.checked_at).toLocaleDateString()}</div>
                   <div className="text-[10px] text-zinc-400">{freshnessCheck.impacted_sections} impacted</div>
                   <div className="text-[10px] text-zinc-400">{freshnessCheck.new_change_requests_count} new requests</div>
+                  {freshnessCheck.findings
+                    .filter(f => f.finding_type === 'review_recommended')
+                    .map((f, i) => (
+                      <div key={i} className="flex items-center gap-1.5 mt-1">
+                        <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
+                        <span className="text-[10px] text-amber-300 truncate">{f.summary}</span>
+                      </div>
+                    ))
+                  }
                 </>
               )}
             </div>
@@ -763,6 +782,14 @@ function HandbookDetailPage() {
                             <p className="text-[10px] text-zinc-600 font-mono mt-1">{activeSection.section_key}</p>
                           </div>
                           <div className="flex items-center gap-2">
+                            {(activeSection.section_type === 'custom' || activeSection.section_type === 'uploaded') && activeSection.id && (
+                              <button
+                                onClick={() => handleMarkReviewed(activeSection.id!)}
+                                className="text-[9px] text-zinc-500 hover:text-emerald-400 transition-colors uppercase tracking-wider"
+                              >
+                                Mark Reviewed
+                              </button>
+                            )}
                             <button
                               type="button"
                               onClick={() => toggleSectionHighlight(getSectionTabId(activeSection, activeSectionIndex))}

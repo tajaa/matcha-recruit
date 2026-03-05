@@ -2990,6 +2990,92 @@ If you have any questions about getting started, reach out to your manager or HR
         )
 
 
+    async def send_handbook_freshness_alert(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        company_name: str,
+        handbook_id: str,
+        impacted_sections: int,
+    ) -> bool:
+        """Send a handbook freshness alert to a business admin."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        handbook_url = f"{app_base_url}/app/matcha/handbooks/{handbook_id}"
+        recipient_name = to_name or to_email
+
+        section_word = "section" if impacted_sections == 1 else "sections"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .alert-card {{ background: #fff7ed; border-left: 4px solid #f97316; border-radius: 8px; padding: 16px; margin: 20px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {html.escape(recipient_name)},</p>
+
+            <p>A scheduled freshness check found that your employee handbook may need updates.</p>
+
+            <div class="alert-card">
+                <p style="margin: 0;">
+                    <strong>{impacted_sections}</strong> {section_word} may be outdated based on current requirements or company profile changes.
+                </p>
+            </div>
+
+            <p>Please log in and review your handbook to see pending change requests and recommended updates.</p>
+
+            <p style="text-align: center; margin-top: 24px;">
+                <a href="{handbook_url}" class="btn">Review Handbook</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {recipient_name},
+
+A scheduled freshness check found that your employee handbook may need updates.
+
+{impacted_sections} {section_word} may be outdated based on current requirements or company profile changes.
+
+Please log in and review your handbook:
+{handbook_url}
+
+- Matcha Recruit
+"""
+
+        return await self.send_email(
+            to_email=to_email,
+            to_name=to_name,
+            subject=f"{html.escape(company_name)}: Handbook may need updates ({impacted_sections} {section_word} affected)",
+            html_content=html_content,
+            text_content=text_content,
+        )
+
+
 # Singleton instance
 _email_service: Optional[EmailService] = None
 

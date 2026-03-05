@@ -98,6 +98,9 @@ ADDENDUM_CORE_CATEGORIES = (
     "sick_leave",
     "meal_breaks",
     "pay_frequency",
+    "final_pay",
+    "minor_work_permit",
+    "scheduling_reporting",
 )
 
 ADDENDUM_FALLBACK_REVIEW_LINE = (
@@ -115,6 +118,15 @@ ADDENDUM_KEYWORD_PATTERNS = (
     "%reasonable accommodation%",
     "%anti-retaliation%",
     "%domestic violence%",
+    "%final pay%",
+    "%final paycheck%",
+    "%separation pay%",
+    "%minor work%",
+    "%youth employment%",
+    "%child labor%",
+    "%predictive scheduling%",
+    "%fair workweek%",
+    "%reporting time%",
 )
 
 STRICT_TEMPLATE_INDUSTRIES = {"hospitality"}
@@ -125,6 +137,9 @@ MANDATORY_STATE_TOPIC_RULES: dict[str, tuple[str, ...]] = {
     "pay_frequency": ("pay_frequency", "pay frequency", "payday", "pay period"),
     "sick_leave": ("sick_leave", "paid sick", "sick leave"),
     "meal_breaks": ("meal_break", "meal period", "rest break", "meal and rest"),
+    "final_pay": ("final_pay", "final pay", "final paycheck", "separation pay"),
+    "minor_work_permit": ("minor_work_permit", "minor work", "youth employment", "child labor"),
+    "scheduling_reporting": ("scheduling_reporting", "predictive scheduling", "fair workweek", "reporting time"),
 }
 
 MANDATORY_STATE_TOPIC_LABELS: dict[str, str] = {
@@ -133,6 +148,9 @@ MANDATORY_STATE_TOPIC_LABELS: dict[str, str] = {
     "pay_frequency": "pay frequency",
     "sick_leave": "paid sick leave",
     "meal_breaks": "meal/rest breaks",
+    "final_pay": "final pay",
+    "minor_work_permit": "youth employment",
+    "scheduling_reporting": "scheduling/reporting time",
 }
 
 LEGAL_OPERATIONAL_HOOKS = {
@@ -892,6 +910,9 @@ def _build_state_addendum_content(
     sick_leave_rows = _category_rows("sick_leave")
     meal_break_rows = _category_rows("meal_breaks")
     other_rights_rows = _other_rights_rows()
+    final_pay_rows = _category_rows("final_pay")
+    minor_work_rows = _category_rows("minor_work_permit")
+    scheduling_rows = _category_rows("scheduling_reporting")
 
     source_refs: list[str] = []
     for req in requirements:
@@ -983,6 +1004,42 @@ def _build_state_addendum_content(
             "- Lactation, disability-benefit, and other state-specific rights must be reviewed against current statutory guidance before final publication."
         )
 
+    lines.extend([
+        "",
+        "5) Final Pay and Separation",
+        "When employment ends, the company must issue final pay within the timeline required by state law, including any accrued and unused benefits owed.",
+    ])
+    if final_pay_rows:
+        lines.extend(_format_requirement_line(req) for req in final_pay_rows)
+    else:
+        lines.append(f"- {ADDENDUM_FALLBACK_REVIEW_LINE}")
+
+    lines.extend([
+        "",
+        "6) Youth Employment",
+        (
+            "Where minors are employed, the company must comply with all youth-employment hour limits, "
+            "duty restrictions, and work-permit requirements under state and local law."
+        ),
+    ])
+    if minor_work_rows:
+        lines.extend(_format_requirement_line(req) for req in minor_work_rows)
+    else:
+        lines.append(f"- {ADDENDUM_FALLBACK_REVIEW_LINE}")
+
+    lines.extend([
+        "",
+        "7) Scheduling and Reporting Time",
+        (
+            "Where predictive-scheduling or reporting-time-pay laws apply, the company must provide advance "
+            "notice of schedules and compensate employees for last-minute changes as required."
+        ),
+    ])
+    if scheduling_rows:
+        lines.extend(_format_requirement_line(req) for req in scheduling_rows)
+    else:
+        lines.append(f"- {ADDENDUM_FALLBACK_REVIEW_LINE}")
+
     tip_pooling_clause = (
         "Tip pooling is used and must follow state/local eligibility, notice, and distribution restrictions."
         if profile.get("tip_pooling")
@@ -991,7 +1048,7 @@ def _build_state_addendum_content(
 
     lines.extend([
         "",
-        "5) Safe Harbor and Legal Control",
+        "8) Safe Harbor and Legal Control",
         "This addendum is intended as a compliance control and does not reduce rights provided by federal, state, or local law.",
         "If any provision conflicts with applicable law or a collective bargaining agreement, governing law/CBA controls and remaining provisions stay in effect.",
         tip_pooling_clause,
@@ -2521,7 +2578,7 @@ class HandbookService:
             )
             section_rows = await conn.fetch(
                 """
-                SELECT id, section_key, title, content, section_order, section_type, jurisdiction_scope
+                SELECT id, section_key, title, content, section_order, section_type, jurisdiction_scope, last_reviewed_at
                 FROM handbook_sections
                 WHERE handbook_version_id = $1
                 ORDER BY section_order ASC, created_at ASC
@@ -2900,6 +2957,7 @@ class HandbookService:
                 change_request_id=row.get("change_request_id"),
                 source_url=row.get("source_url"),
                 effective_date=row.get("effective_date"),
+                age_days=row.get("age_days"),
             )
             for row in findings_rows
         ]
@@ -2970,7 +3028,7 @@ class HandbookService:
             try:
                 finding_rows = await conn.fetch(
                     """
-                    SELECT section_key, finding_type, summary, change_request_id, source_url, effective_date
+                    SELECT section_key, finding_type, summary, change_request_id, source_url, effective_date, age_days
                     FROM handbook_freshness_findings
                     WHERE freshness_check_id = $1
                     ORDER BY created_at ASC
@@ -2983,7 +3041,7 @@ class HandbookService:
                 await HandbookService._ensure_freshness_tables(conn)
                 finding_rows = await conn.fetch(
                     """
-                    SELECT section_key, finding_type, summary, change_request_id, source_url, effective_date
+                    SELECT section_key, finding_type, summary, change_request_id, source_url, effective_date, age_days
                     FROM handbook_freshness_findings
                     WHERE freshness_check_id = $1
                     ORDER BY created_at ASC
@@ -3066,7 +3124,7 @@ class HandbookService:
                     )
 
                     handbook_row = await conn.fetchrow(
-                        "SELECT id, active_version FROM handbooks WHERE id = $1 AND company_id = $2",
+                        "SELECT id, active_version, mode FROM handbooks WHERE id = $1 AND company_id = $2",
                         handbook_id,
                         company_id,
                     )
@@ -3097,6 +3155,9 @@ class HandbookService:
                         exclude={"company_id", "updated_by", "updated_at"},
                     )
                     normalized_profile = _normalize_profile(CompanyHandbookProfileInput(**profile_data))
+                    profile_fingerprint = sha256(
+                        json.dumps(normalized_profile, sort_keys=True, default=str).encode()
+                    ).hexdigest()
 
                     requirement_map = await _fetch_state_requirements(conn, scopes)
                     current_fingerprint, latest_requirement_update, _ = _build_requirements_fingerprint(
@@ -3115,10 +3176,24 @@ class HandbookService:
                         handbook_id,
                         company_id,
                     )
+                    previous_profile_fingerprint = await conn.fetchval(
+                        """
+                        SELECT profile_fingerprint
+                        FROM handbook_freshness_checks
+                        WHERE handbook_id = $1
+                          AND company_id = $2
+                          AND status = 'completed'
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """,
+                        handbook_id,
+                        company_id,
+                    )
 
                     section_rows = await conn.fetch(
                         """
-                        SELECT section_key, content
+                        SELECT section_key, content, section_type, title,
+                               last_reviewed_at, updated_at, created_at
                         FROM handbook_sections
                         WHERE handbook_version_id = $1
                         """,
@@ -3232,12 +3307,143 @@ class HandbookService:
                             change_request_id,
                         )
 
+                    # --- Core section re-evaluation ---
+                    handbook_mode = handbook_row.get("mode") or "single_state"
+                    regenerated_core = _build_core_sections(normalized_profile, handbook_mode, states)
+                    for core_sec in regenerated_core:
+                        core_key = core_sec["section_key"]
+                        old_core = sections_by_key.get(core_key)
+                        if old_core is None:
+                            continue
+                        proposed_core = core_sec["content"]
+                        if _normalize_section_content(old_core) == _normalize_section_content(proposed_core):
+                            continue
+
+                        impacted_sections += 1
+
+                        existing_core_change = await conn.fetchval(
+                            """
+                            SELECT id
+                            FROM handbook_change_requests
+                            WHERE handbook_id = $1
+                              AND handbook_version_id = $2
+                              AND section_key = $3
+                              AND status = 'pending'
+                              AND proposed_content = $4
+                            LIMIT 1
+                            """,
+                            handbook_id,
+                            version_id,
+                            core_key,
+                            proposed_core,
+                        )
+
+                        core_cr_id = existing_core_change
+                        core_finding_type = "already_pending" if existing_core_change else "change_request_created"
+
+                        if not existing_core_change:
+                            core_cr_id = await conn.fetchval(
+                                """
+                                INSERT INTO handbook_change_requests (
+                                    handbook_id,
+                                    handbook_version_id,
+                                    section_key,
+                                    old_content,
+                                    proposed_content,
+                                    rationale,
+                                    status,
+                                    created_at
+                                )
+                                VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW())
+                                RETURNING id
+                                """,
+                                handbook_id,
+                                version_id,
+                                core_key,
+                                old_core,
+                                proposed_core,
+                                "Company profile changes require core section updates.",
+                            )
+                            changes_created += 1
+
+                        await conn.execute(
+                            """
+                            INSERT INTO handbook_freshness_findings (
+                                freshness_check_id,
+                                handbook_id,
+                                section_key,
+                                finding_type,
+                                summary,
+                                old_content,
+                                proposed_content,
+                                change_request_id,
+                                created_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+                            """,
+                            check_id,
+                            handbook_id,
+                            core_key,
+                            core_finding_type,
+                            f"Core section '{core_sec['title']}' content differs from current company profile.",
+                            old_core,
+                            proposed_core,
+                            core_cr_id,
+                        )
+
+                    # --- Custom/uploaded section age tracking ---
+                    now_utc = datetime.utcnow()
+                    for sec_row in section_rows:
+                        sec_type = (sec_row.get("section_type") or "").strip().lower()
+                        if sec_type not in ("custom", "uploaded"):
+                            continue
+                        review_anchor = (
+                            sec_row.get("last_reviewed_at")
+                            or sec_row.get("updated_at")
+                            or sec_row.get("created_at")
+                        )
+                        if review_anchor is None:
+                            continue
+                        age_days = (now_utc - review_anchor.replace(tzinfo=None)).days
+                        if age_days <= 365:
+                            continue
+
+                        months = age_days // 30
+                        sec_title = sec_row.get("title") or sec_row.get("section_key") or "Untitled"
+                        impacted_sections += 1
+
+                        await conn.execute(
+                            """
+                            INSERT INTO handbook_freshness_findings (
+                                freshness_check_id,
+                                handbook_id,
+                                section_key,
+                                finding_type,
+                                summary,
+                                age_days,
+                                created_at
+                            )
+                            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                            """,
+                            check_id,
+                            handbook_id,
+                            sec_row["section_key"],
+                            "review_recommended",
+                            f"'{sec_title}' has not been reviewed in {months} months.",
+                            age_days,
+                        )
+
                     is_outdated = bool(
                         impacted_sections > 0
                         or (
                             previous_fingerprint
                             and current_fingerprint
                             and previous_fingerprint != current_fingerprint
+                        )
+                        or (
+                            previous_profile_fingerprint
+                            and profile_fingerprint
+                            and previous_profile_fingerprint != profile_fingerprint
                         )
                     )
                     data_staleness_days = (
@@ -3258,8 +3464,9 @@ class HandbookService:
                             previous_fingerprint = $5,
                             requirements_last_updated_at = $6,
                             data_staleness_days = $7,
+                            profile_fingerprint = $8,
                             completed_at = NOW()
-                        WHERE id = $8
+                        WHERE id = $9
                         """,
                         is_outdated,
                         impacted_sections,
@@ -3268,6 +3475,7 @@ class HandbookService:
                         previous_fingerprint,
                         latest_requirement_update,
                         data_staleness_days,
+                        profile_fingerprint,
                         check_id,
                     )
 
@@ -3287,7 +3495,7 @@ class HandbookService:
                     )
                     finding_rows = await conn.fetch(
                         """
-                        SELECT section_key, finding_type, summary, change_request_id, source_url, effective_date
+                        SELECT section_key, finding_type, summary, change_request_id, source_url, effective_date, age_days
                         FROM handbook_freshness_findings
                         WHERE freshness_check_id = $1
                         ORDER BY created_at ASC

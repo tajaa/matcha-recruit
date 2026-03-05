@@ -2169,6 +2169,7 @@ export interface HandbookSection {
   section_order: number;
   section_type: HandbookSectionType;
   jurisdiction_scope?: Record<string, unknown>;
+  last_reviewed_at?: string | null;
 }
 
 export interface HandbookListItem {
@@ -2284,6 +2285,7 @@ export interface HandbookFreshnessFinding {
   change_request_id: string | null;
   source_url: string | null;
   effective_date: string | null;
+  age_days: number | null;
 }
 
 export interface HandbookFreshnessCheck {

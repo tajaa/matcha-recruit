@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.workers.tasks.compliance_action_reminders",
         "app.workers.tasks.resume_screening",
         "app.workers.tasks.project_close",
+        "app.workers.tasks.handbook_freshness",
     ],
 )
 
@@ -164,3 +165,10 @@ def on_worker_ready(**kwargs):
         check_project_deadlines.delay()
     else:
         print("[Worker] Project deadline checks scheduler is disabled, skipping.")
+
+    from app.workers.tasks.handbook_freshness import run_handbook_freshness_checks
+
+    if _is_scheduler_enabled("handbook_freshness"):
+        run_handbook_freshness_checks.delay()
+    else:
+        print("[Worker] Handbook freshness checks scheduler is disabled, skipping.")

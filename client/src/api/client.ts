@@ -2797,6 +2797,11 @@ export const handbooks = {
       method: 'POST',
     }),
 
+  markSectionReviewed: (handbookId: string, sectionId: string) =>
+    request(`/handbooks/${handbookId}/sections/${sectionId}/mark-reviewed`, {
+      method: 'POST',
+    }),
+
   downloadPdf: async (id: string, title: string): Promise<void> => {
     const token = getAccessToken();
     const headers: HeadersInit = {};

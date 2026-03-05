@@ -104,6 +104,7 @@ class HandbookSectionResponse(BaseModel):
     section_order: int
     section_type: HandbookSectionType
     jurisdiction_scope: dict = Field(default_factory=dict)
+    last_reviewed_at: Optional[datetime] = None
 
 
 class CompanyHandbookProfileResponse(CompanyHandbookProfileInput):
@@ -205,6 +206,7 @@ class HandbookFreshnessFindingResponse(BaseModel):
     change_request_id: Optional[UUID] = None
     source_url: Optional[str] = None
     effective_date: Optional[date] = None
+    age_days: Optional[int] = None
 
 
 class HandbookFreshnessCheckResponse(BaseModel):

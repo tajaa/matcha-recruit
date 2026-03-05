@@ -1717,6 +1717,7 @@ async def init_db():
                     CHECK (section_type IN ('core', 'state', 'custom', 'uploaded')),
                 jurisdiction_scope JSONB DEFAULT '{}'::jsonb,
                 content TEXT NOT NULL DEFAULT '',
+                last_reviewed_at TIMESTAMPTZ,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(handbook_version_id, section_key)
@@ -1733,6 +1734,10 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE handbook_sections
             ADD COLUMN IF NOT EXISTS jurisdiction_scope JSONB DEFAULT '{}'::jsonb
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_sections
+            ADD COLUMN IF NOT EXISTS last_reviewed_at TIMESTAMPTZ
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_handbook_sections_version_id
@@ -1782,12 +1787,17 @@ async def init_db():
                 changes_created INTEGER NOT NULL DEFAULT 0,
                 requirements_fingerprint VARCHAR(128),
                 previous_fingerprint VARCHAR(128),
+                profile_fingerprint VARCHAR(128),
                 requirements_last_updated_at TIMESTAMPTZ,
                 data_staleness_days INTEGER,
                 error_message TEXT,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 completed_at TIMESTAMPTZ
             )
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_freshness_checks
+            ADD COLUMN IF NOT EXISTS profile_fingerprint VARCHAR(128)
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_handbook_freshness_checks_handbook_created
@@ -1810,6 +1820,7 @@ async def init_db():
                 proposed_content TEXT,
                 source_url VARCHAR(1000),
                 effective_date DATE,
+                age_days INTEGER,
                 change_request_id UUID REFERENCES handbook_change_requests(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -1821,6 +1832,10 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_handbook_freshness_findings_handbook
             ON handbook_freshness_findings(handbook_id)
+        """)
+        await conn.execute("""
+            ALTER TABLE handbook_freshness_findings
+            ADD COLUMN IF NOT EXISTS age_days INTEGER
         """)
 
         await conn.execute("""
@@ -2855,6 +2870,14 @@ async def init_db():
         await conn.execute("""
             INSERT INTO scheduler_settings (task_key, enabled, max_per_cycle)
             VALUES ('compliance_action_reminders', TRUE, 100)
+            ON CONFLICT (task_key) DO NOTHING
+        """)
+
+        # Add scheduler setting for handbook freshness checks
+        await conn.execute("""
+            INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
+            VALUES ('handbook_freshness', 'Handbook Freshness Checks',
+                    'Automated freshness checks for published handbooks.', false, 5)
             ON CONFLICT (task_key) DO NOTHING
         """)
 

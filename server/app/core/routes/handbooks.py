@@ -405,6 +405,58 @@ async def run_handbook_freshness_check(
     return result
 
 
+@router.post("/{handbook_id}/sections/{section_id}/mark-reviewed")
+async def mark_section_reviewed(
+    handbook_id: str,
+    section_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    async with get_connection() as conn:
+        hb_exists = await conn.fetchval(
+            "SELECT 1 FROM handbooks WHERE id = $1 AND company_id = $2",
+            handbook_id,
+            str(company_id),
+        )
+        if not hb_exists:
+            raise HTTPException(status_code=404, detail="Handbook not found")
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE handbook_sections
+            SET last_reviewed_at = NOW()
+            WHERE id = $1
+              AND handbook_version_id IN (
+                  SELECT hv.id FROM handbook_versions hv
+                  JOIN handbooks h ON h.id = hv.handbook_id AND h.active_version = hv.version_number
+                  WHERE h.id = $2 AND h.company_id = $3
+              )
+            RETURNING id, section_key, title, content, section_order, section_type, jurisdiction_scope, last_reviewed_at
+            """,
+            section_id,
+            handbook_id,
+            str(company_id),
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail="Section not found")
+
+    from ..models.handbook import HandbookSectionResponse
+    from ..services.handbook_service import _coerce_jurisdiction_scope
+    return HandbookSectionResponse(
+        id=updated["id"],
+        section_key=updated["section_key"],
+        title=updated["title"],
+        content=updated["content"],
+        section_order=updated["section_order"],
+        section_type=updated["section_type"],
+        jurisdiction_scope=_coerce_jurisdiction_scope(updated["jurisdiction_scope"]),
+        last_reviewed_at=updated["last_reviewed_at"],
+    )
+
+
 @router.get("/{handbook_id}/pdf")
 async def download_handbook_pdf(
     handbook_id: str,
