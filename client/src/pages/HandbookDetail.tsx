@@ -77,12 +77,12 @@ const LT = {
   highlightEntry: 'border border-amber-300 bg-amber-50 hover:border-amber-400',
   highlightEntryText: 'text-amber-800',
   clearHighlights: 'border border-stone-300 text-stone-500 hover:text-zinc-900',
-  changeCard: 'border border-stone-200 bg-stone-50 rounded-xl',
-  changeSection: 'text-zinc-700',
+  changeCard: 'border border-stone-300 bg-white rounded-xl shadow-sm',
+  changeSection: 'text-zinc-800 font-bold',
   changeDate: 'text-stone-500',
   changeRationale: 'text-stone-600',
   changeProposedLabel: 'text-stone-500',
-  changeProposedText: 'text-zinc-700',
+  changeProposedText: 'text-zinc-800',
   jumpBtn: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900 rounded-lg',
   acceptBtn: 'bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg',
   rejectBtn: 'border border-stone-300 hover:border-stone-400 text-zinc-700 rounded-lg',
@@ -151,12 +151,12 @@ const DK = {
   highlightEntry: 'border border-amber-400/30 bg-amber-500/10 hover:border-amber-300',
   highlightEntryText: 'text-amber-100',
   clearHighlights: 'border border-white/10 text-zinc-500 hover:text-white',
-  changeCard: 'border border-white/10 bg-white/5 rounded-xl',
-  changeSection: 'text-zinc-300',
+  changeCard: 'border border-white/10 bg-zinc-900/50 rounded-xl shadow-sm',
+  changeSection: 'text-zinc-100 font-bold',
   changeDate: 'text-zinc-500',
   changeRationale: 'text-zinc-400',
   changeProposedLabel: 'text-zinc-500',
-  changeProposedText: 'text-zinc-300',
+  changeProposedText: 'text-zinc-200',
   jumpBtn: 'border border-zinc-600 hover:border-zinc-500 text-zinc-300 hover:text-white rounded-lg',
   acceptBtn: 'bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg',
   rejectBtn: 'border border-zinc-600 hover:border-zinc-500 text-zinc-200 rounded-lg',
@@ -1039,7 +1039,7 @@ function HandbookDetailPage() {
             ) : (
               <div className="space-y-4">
                     {pendingChanges.map((change) => (
-                      <div key={change.id} className={`${t.changeCard} p-4 space-y-3`}>
+                      <div key={change.id} className={`${t.changeCard} p-6 space-y-4`}>
                     <div className="flex items-center justify-between">
                       <p className={`text-xs ${t.changeSection} uppercase tracking-wider`}>
                         Section: {change.section_key || 'general'}
