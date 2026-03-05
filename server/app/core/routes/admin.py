@@ -32,6 +32,8 @@ from ..services.platform_settings import (
     get_visible_features, prime_visible_features_cache,
     get_matcha_work_model_mode, prime_matcha_work_model_mode_cache,
     get_jurisdiction_research_model_mode, prime_jurisdiction_research_model_mode_cache,
+    get_er_similarity_weights, prime_er_similarity_weights_cache,
+    DEFAULT_ER_SIMILARITY_WEIGHTS, EXPECTED_WEIGHT_KEYS,
 )
 from ...matcha.services import billing_service as mw_billing_service
 from ...config import get_settings
@@ -59,10 +61,15 @@ class JurisdictionResearchModelModeUpdate(BaseModel):
     mode: str = Field(..., pattern="^(light|heavy)$")
 
 
+class ERSimilarityWeightsUpdate(BaseModel):
+    weights: dict[str, float]
+
+
 class PlatformSettingsResponse(BaseModel):
     visible_features: list[str]
     matcha_work_model_mode: str
     jurisdiction_research_model_mode: str
+    er_similarity_weights: dict[str, float]
 
 
 STRICT_CONFIDENCE_THRESHOLD = 0.95
@@ -4878,10 +4885,12 @@ async def get_all_platform_settings():
     visible = await get_visible_features()
     mw_mode = await get_matcha_work_model_mode()
     jr_mode = await get_jurisdiction_research_model_mode()
+    er_weights = await get_er_similarity_weights()
     return {
         "visible_features": visible,
         "matcha_work_model_mode": mw_mode,
-        "jurisdiction_research_model_mode": jr_mode
+        "jurisdiction_research_model_mode": jr_mode,
+        "er_similarity_weights": er_weights,
     }
 
 
@@ -4946,6 +4955,42 @@ async def update_jurisdiction_research_model_mode(
         )
     mode = prime_jurisdiction_research_model_mode_cache(body.mode)
     return {"jurisdiction_research_model_mode": mode}
+
+
+@router.get("/platform-settings/er-similarity-weights", dependencies=[Depends(require_admin)])
+async def get_er_similarity_weights_endpoint():
+    weights = await get_er_similarity_weights()
+    return {"er_similarity_weights": weights}
+
+
+@router.put("/platform-settings/er-similarity-weights", dependencies=[Depends(require_admin)])
+async def update_er_similarity_weights(
+    body: ERSimilarityWeightsUpdate,
+    admin=Depends(require_admin)
+):
+    if set(body.weights.keys()) != EXPECTED_WEIGHT_KEYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Keys must be exactly: {sorted(EXPECTED_WEIGHT_KEYS)}"
+        )
+    for k, v in body.weights.items():
+        if not (0.0 <= v <= 1.0):
+            raise HTTPException(status_code=400, detail=f"Weight '{k}' must be between 0 and 1")
+    weight_sum = sum(body.weights.values())
+    if abs(weight_sum - 1.0) > 0.05:
+        raise HTTPException(status_code=400, detail=f"Weights must sum to ~1.0 (got {weight_sum:.3f})")
+
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value, updated_at)
+            VALUES ('er_similarity_weights', $1::jsonb, NOW())
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()
+            """,
+            json.dumps(body.weights)
+        )
+    weights = prime_er_similarity_weights_cache(body.weights)
+    return {"er_similarity_weights": weights}
 
 
 # ── Industry Compliance Profiles ──────────────────────────────────────────────

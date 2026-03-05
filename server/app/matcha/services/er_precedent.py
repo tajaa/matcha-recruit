@@ -4,7 +4,7 @@ Two-phase pipeline:
   Phase 1: Structured pre-filter (pure Python, no AI)
   Phase 2: Semantic enrichment (single Gemini call for top candidates)
 
-Combines 8 scoring dimensions into a final weighted score per precedent.
+Combines 7 scoring dimensions into a final weighted score per precedent.
 """
 
 import json
@@ -26,16 +26,18 @@ STRUCTURAL_THRESHOLD = 0.15
 PHASE1_KEEP = 15
 FINAL_KEEP = 8
 GEMINI_CALL_TIMEOUT = 45
+SIMILARITY_MIN_SCORE = 0.50
 
-# Scoring weights (total = 1.0)
-W_CATEGORY = 0.25       # category_match
-W_OUTCOME = 0.15        # outcome_relevance
-W_STATUS = 0.05         # status_maturity
-W_EVIDENCE = 0.10       # evidence_profile
-W_TEMPORAL = 0.05       # temporal_recency
-W_INTAKE = 0.05         # intake_context_overlap
-W_TEXT = 0.25            # text_similarity (semantic)
-W_INVESTIGATION = 0.10  # investigation_pattern_similarity (semantic)
+# Default scoring weights (total = 1.0) — overridable via platform_settings
+DEFAULT_SIMILARITY_WEIGHTS = {
+    "category": 0.30,
+    "status": 0.05,
+    "evidence": 0.10,
+    "temporal": 0.05,
+    "intake": 0.05,
+    "text": 0.35,
+    "investigation": 0.10,
+}
 
 STATUS_ORDINAL = {"open": 1, "in_review": 2, "pending_determination": 3, "closed": 4}
 
@@ -66,17 +68,6 @@ def _score_category_match(current: dict, candidate: dict) -> float:
         (c_cat, h_cat),
         CATEGORY_RELATEDNESS.get((h_cat, c_cat), 0.0),
     )
-
-
-def _score_outcome_relevance(current: dict, candidate: dict) -> float:
-    """Prioritize resolved cases with learnings. Closed + outcome = 1.0, closed w/o = 0.5, open = 0.0."""
-    status = (candidate.get("status") or "").lower()
-    outcome = candidate.get("outcome")
-    if status == "closed" and outcome is not None:
-        return 1.0
-    if status == "closed":
-        return 0.5
-    return 0.0
 
 
 def _score_status_maturity(current: dict, candidate: dict) -> float:
@@ -163,28 +154,27 @@ def _score_intake_context_overlap(current: dict, candidate: dict) -> float:
     return matches / total if total > 0 else 0.0
 
 
-def compute_structural_scores(current: dict, candidates: list[dict]) -> list[dict]:
+def compute_structural_scores(current: dict, candidates: list[dict], weights: dict[str, float] | None = None) -> list[dict]:
     """Phase 1: Compute structured scores for all candidates.
 
     Returns candidates with `structural_score` and individual dimension scores,
     filtered to those above STRUCTURAL_THRESHOLD, sorted descending, limited to PHASE1_KEEP.
     """
+    w = weights or DEFAULT_SIMILARITY_WEIGHTS
     scored = []
     for cand in candidates:
         cat_s = _score_category_match(current, cand)
-        out_s = _score_outcome_relevance(current, cand)
         sta_s = _score_status_maturity(current, cand)
         evi_s = _score_evidence_profile(current, cand)
         tmp_s = _score_temporal_recency(current, cand)
         int_s = _score_intake_context_overlap(current, cand)
 
         structural_score = (
-            cat_s * W_CATEGORY +
-            out_s * W_OUTCOME +
-            sta_s * W_STATUS +
-            evi_s * W_EVIDENCE +
-            tmp_s * W_TEMPORAL +
-            int_s * W_INTAKE
+            cat_s * w["category"] +
+            sta_s * w["status"] +
+            evi_s * w["evidence"] +
+            tmp_s * w["temporal"] +
+            int_s * w["intake"]
         )
 
         if structural_score >= STRUCTURAL_THRESHOLD:
@@ -192,7 +182,6 @@ def compute_structural_scores(current: dict, candidates: list[dict]) -> list[dic
                 **cand,
                 "scores": {
                     "category_match": round(cat_s, 3),
-                    "outcome_relevance": round(out_s, 3),
                     "status_maturity": round(sta_s, 3),
                     "evidence_profile": round(evi_s, 3),
                     "temporal_recency": round(tmp_s, 3),
@@ -439,6 +428,9 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
     and a final {"type": "result", "data": {...}} with the result dict.
     """
     from ...config import get_settings
+    from ...core.services.platform_settings import get_er_similarity_weights
+
+    weights = await get_er_similarity_weights(conn=conn)
 
     if case_row:
         row = case_row
@@ -520,7 +512,7 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
                 d["intake_context"] = {}
         candidates.append(d)
 
-    top = compute_structural_scores(current, candidates)
+    top = compute_structural_scores(current, candidates, weights=weights)
 
     if not top:
         yield {"type": "phase", "step": "no_matches", "message": "No structurally similar cases found"}
@@ -588,14 +580,13 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
 
         scores = cand["scores"]
         final_score = (
-            scores["category_match"] * W_CATEGORY +
-            scores["outcome_relevance"] * W_OUTCOME +
-            scores["status_maturity"] * W_STATUS +
-            scores["evidence_profile"] * W_EVIDENCE +
-            scores["temporal_recency"] * W_TEMPORAL +
-            scores["intake_context_overlap"] * W_INTAKE +
-            text_sim * W_TEXT +
-            inv_sim * W_INVESTIGATION
+            scores["category_match"] * weights["category"] +
+            scores["status_maturity"] * weights["status"] +
+            scores["evidence_profile"] * weights["evidence"] +
+            scores["temporal_recency"] * weights["temporal"] +
+            scores["intake_context_overlap"] * weights["intake"] +
+            text_sim * weights["text"] +
+            inv_sim * weights["investigation"]
         )
 
         # Resolution days
@@ -624,7 +615,6 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
             "similarity_score": round(final_score, 3),
             "score_breakdown": {
                 "category_match": scores["category_match"],
-                "outcome_relevance": scores["outcome_relevance"],
                 "status_maturity": scores["status_maturity"],
                 "evidence_profile": scores["evidence_profile"],
                 "temporal_recency": scores["temporal_recency"],
@@ -637,6 +627,7 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
         })
 
     matches.sort(key=lambda x: x["similarity_score"], reverse=True)
+    matches = [m for m in matches if m["similarity_score"] >= SIMILARITY_MIN_SCORE]
     matches = matches[:FINAL_KEEP]
 
     # Build outcome distribution across matches

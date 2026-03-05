@@ -32,6 +32,20 @@ _matcha_work_model_mode_cached_at: float = 0.0
 _jurisdiction_research_model_mode_cache: str | None = None
 _jurisdiction_research_model_mode_cached_at: float = 0.0
 
+_er_similarity_weights_cache: dict[str, float] | None = None
+_er_similarity_weights_cached_at: float = 0.0
+
+DEFAULT_ER_SIMILARITY_WEIGHTS = {
+    "category": 0.30,
+    "status": 0.05,
+    "evidence": 0.10,
+    "temporal": 0.05,
+    "intake": 0.05,
+    "text": 0.35,
+    "investigation": 0.10,
+}
+EXPECTED_WEIGHT_KEYS = set(DEFAULT_ER_SIMILARITY_WEIGHTS.keys())
+
 
 def _normalize_visible_features(value: object) -> list[str]:
     if value is None:
@@ -183,3 +197,61 @@ async def get_jurisdiction_research_model_mode(*, conn=None) -> str:
     _jurisdiction_research_model_mode_cache = mode
     _jurisdiction_research_model_mode_cached_at = now
     return mode
+
+
+def invalidate_er_similarity_weights_cache() -> None:
+    global _er_similarity_weights_cache, _er_similarity_weights_cached_at
+    _er_similarity_weights_cache = None
+    _er_similarity_weights_cached_at = 0.0
+
+
+def prime_er_similarity_weights_cache(weights: dict[str, float]) -> dict[str, float]:
+    global _er_similarity_weights_cache, _er_similarity_weights_cached_at
+    _er_similarity_weights_cache = dict(weights)
+    _er_similarity_weights_cached_at = time.monotonic()
+    return dict(weights)
+
+
+async def get_er_similarity_weights(*, conn=None) -> dict[str, float]:
+    global _er_similarity_weights_cache, _er_similarity_weights_cached_at
+
+    now = time.monotonic()
+    if (
+        _er_similarity_weights_cache is not None
+        and now - _er_similarity_weights_cached_at < VISIBLE_FEATURES_CACHE_TTL_SECONDS
+    ):
+        return dict(_er_similarity_weights_cache)
+
+    if conn is None:
+        async with get_connection() as managed_conn:
+            raw = await managed_conn.fetchval(
+                "SELECT value FROM platform_settings WHERE key = 'er_similarity_weights'"
+            )
+    else:
+        raw = await conn.fetchval(
+            "SELECT value FROM platform_settings WHERE key = 'er_similarity_weights'"
+        )
+
+    if raw is None:
+        return dict(DEFAULT_ER_SIMILARITY_WEIGHTS)
+
+    parsed = raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("Invalid er_similarity_weights payload; using defaults")
+            return dict(DEFAULT_ER_SIMILARITY_WEIGHTS)
+
+    if not isinstance(parsed, dict) or set(parsed.keys()) != EXPECTED_WEIGHT_KEYS:
+        logger.warning("er_similarity_weights keys mismatch; using defaults")
+        return dict(DEFAULT_ER_SIMILARITY_WEIGHTS)
+
+    try:
+        weights = {k: float(v) for k, v in parsed.items()}
+    except (ValueError, TypeError):
+        return dict(DEFAULT_ER_SIMILARITY_WEIGHTS)
+
+    _er_similarity_weights_cache = weights
+    _er_similarity_weights_cached_at = now
+    return dict(weights)

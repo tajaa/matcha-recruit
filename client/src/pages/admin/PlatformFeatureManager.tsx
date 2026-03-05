@@ -113,10 +113,16 @@ export function PlatformFeatureManager({ onClose }: Props) {
   const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set(platformFeatures));
   const [modelMode, setModelMode] = useState<'light' | 'heavy'>('light');
   const [jurisdictionModelMode, setJurisdictionModelMode] = useState<'light' | 'heavy'>('light');
+  const [erWeights, setErWeights] = useState<Record<string, number>>({
+    category: 0.30, status: 0.05, evidence: 0.10, temporal: 0.05, intake: 0.05, text: 0.35, investigation: 0.10,
+  });
+  const [showErWeights, setShowErWeights] = useState(false);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const erWeightSum = Object.values(erWeights).reduce((a, b) => a + b, 0);
 
   // Fetch initial settings
   useState(() => {
@@ -125,9 +131,9 @@ export function PlatformFeatureManager({ onClose }: Props) {
       .then(data => {
         setModelMode(data.matcha_work_model_mode as 'light' | 'heavy');
         setJurisdictionModelMode(data.jurisdiction_research_model_mode as 'light' | 'heavy');
+        if (data.er_similarity_weights) setErWeights(data.er_similarity_weights);
       })
       .catch(() => {
-        // Fallback if settings don't exist yet
         setModelMode('light');
         setJurisdictionModelMode('light');
       })
@@ -180,6 +186,7 @@ export function PlatformFeatureManager({ onClose }: Props) {
         adminPlatformSettings.update(Array.from(activeKeys)),
         adminPlatformSettings.updateMatchaWorkModelMode(modelMode),
         adminPlatformSettings.updateJurisdictionResearchModelMode(jurisdictionModelMode),
+        adminPlatformSettings.updateERSimilarityWeights(erWeights),
       ]);
       setPlatformFeatures(new Set(featuresResult.visible_features));
       window.dispatchEvent(new Event('platform-settings-updated'));
@@ -311,7 +318,34 @@ export function PlatformFeatureManager({ onClose }: Props) {
                     </button>
                   </div>
                 </div>
+
+                <button
+                  onClick={() => setShowErWeights(!showErWeights)}
+                  className="text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold hover:text-zinc-300 transition-colors"
+                >
+                  ER Weights {showErWeights ? '▾' : '▸'}
+                </button>
               </div>
+
+              {showErWeights && (
+                <div className="flex flex-wrap items-end gap-3 mt-1">
+                  {Object.entries(erWeights).map(([key, val]) => (
+                    <div key={key} className="flex flex-col items-center gap-0.5">
+                      <span className="text-[8px] tracking-[0.1em] uppercase text-zinc-600">{key}</span>
+                      <input
+                        type="number"
+                        min={0} max={1} step={0.05}
+                        value={val}
+                        onChange={e => setErWeights(prev => ({ ...prev, [key]: parseFloat(e.target.value) || 0 }))}
+                        className="w-14 bg-zinc-900 border border-white/10 text-[10px] text-zinc-300 text-center py-1 font-mono focus:border-white/30 focus:outline-none"
+                      />
+                    </div>
+                  ))}
+                  <span className={`text-[9px] font-mono ${Math.abs(erWeightSum - 1.0) > 0.05 ? 'text-red-400' : 'text-zinc-600'}`}>
+                    = {erWeightSum.toFixed(2)}
+                  </span>
+                </div>
+              )}
               
               <div className="flex items-center gap-4">
                 {error && <span className="text-red-400 text-[10px] font-mono">{error}</span>}

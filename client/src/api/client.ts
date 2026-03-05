@@ -3838,10 +3838,11 @@ export const onboardingDraft = {
 };
 
 export const adminPlatformSettings = {
-  get: (): Promise<{ 
-    visible_features: string[]; 
+  get: (): Promise<{
+    visible_features: string[];
     matcha_work_model_mode: string;
     jurisdiction_research_model_mode: string;
+    er_similarity_weights: Record<string, number>;
   }> =>
     request('/admin/platform-settings'),
   update: (visible_features: string[]): Promise<{ visible_features: string[] }> =>
@@ -3858,5 +3859,12 @@ export const adminPlatformSettings = {
     request('/admin/platform-settings/jurisdiction-research-model-mode', {
       method: 'PUT',
       body: JSON.stringify({ mode }),
+    }),
+  getERSimilarityWeights: (): Promise<{ er_similarity_weights: Record<string, number> }> =>
+    request('/admin/platform-settings/er-similarity-weights'),
+  updateERSimilarityWeights: (weights: Record<string, number>): Promise<{ er_similarity_weights: Record<string, number> }> =>
+    request('/admin/platform-settings/er-similarity-weights', {
+      method: 'PUT',
+      body: JSON.stringify({ weights }),
     }),
 };
