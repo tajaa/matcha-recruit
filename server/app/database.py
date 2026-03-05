@@ -192,6 +192,8 @@ async def init_db():
                 compensation_notes TEXT,
                 company_values TEXT,
                 ai_guidance_notes TEXT,
+                report_email_token VARCHAR(32) UNIQUE,
+                report_token_used_at TIMESTAMPTZ,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)

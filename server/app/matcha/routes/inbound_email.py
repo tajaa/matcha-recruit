@@ -87,58 +87,57 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
     if _is_rate_limited(client_ip):
         raise HTTPException(status_code=429, detail="Too many reports. Please try again later.")
 
-    # Look up company by token
-    async with get_connection() as conn:
-        company = await conn.fetchrow(
-            "SELECT id, name, enabled_features, report_token_used_at FROM companies WHERE report_email_token = $1",
-            token.lower(),
-        )
-
-    if not company:
-        raise HTTPException(status_code=404, detail="Invalid reporting link")
-
-    if company["report_token_used_at"] is not None:
-        raise HTTPException(status_code=410, detail="This reporting link has already been used")
-
-    # Check incidents feature
-    features = company.get("enabled_features")
-    if features:
-        if isinstance(features, str):
-            features = json.loads(features)
-        if not features.get("incidents", False):
-            raise HTTPException(status_code=404, detail="Invalid reporting link")
-
-    company_id = str(company["id"])
+    # Look up company, insert incident, and mark token used atomically
     incident_number = generate_incident_number()
     now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
 
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO ir_incidents (
-                incident_number, title, description, incident_type, severity,
-                occurred_at, reported_by_name, company_id, created_by
+        async with conn.transaction():
+            company = await conn.fetchrow(
+                """SELECT id, name, enabled_features, report_token_used_at
+                   FROM companies WHERE report_email_token = $1 FOR UPDATE""",
+                token.lower(),
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-            RETURNING id, incident_number, title, status
-            """,
-            incident_number,
-            body.title.strip(),
-            body.description.strip(),
-            "other",
-            "medium",
-            now_naive,
-            "Anonymous",
-            company_id,
-            None,
-        )
 
-    # Mark token as used
-    async with get_connection() as conn:
-        await conn.execute(
-            "UPDATE companies SET report_token_used_at = NOW() WHERE report_email_token = $1",
-            token.lower(),
-        )
+            if not company:
+                raise HTTPException(status_code=404, detail="Invalid reporting link")
+
+            if company["report_token_used_at"] is not None:
+                raise HTTPException(status_code=410, detail="This reporting link has already been used")
+
+            # Check incidents feature — deny when NULL or missing
+            features = company.get("enabled_features")
+            if isinstance(features, str):
+                features = json.loads(features)
+            if not (features or {}).get("incidents", False):
+                raise HTTPException(status_code=404, detail="Invalid reporting link")
+
+            company_id = str(company["id"])
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO ir_incidents (
+                    incident_number, title, description, incident_type, severity,
+                    occurred_at, reported_by_name, company_id, created_by
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                RETURNING id, incident_number, title, status
+                """,
+                incident_number,
+                body.title.strip(),
+                body.description.strip(),
+                "other",
+                "medium",
+                now_naive,
+                "Anonymous",
+                company_id,
+                None,
+            )
+
+            await conn.execute(
+                "UPDATE companies SET report_token_used_at = NOW() WHERE report_email_token = $1",
+                token.lower(),
+            )
 
     if row:
         logger.info(f"[Anon Report] Created incident {row['incident_number']} for company {company_id}")

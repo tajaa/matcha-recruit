@@ -1,4 +1,5 @@
 """Email service using MailerSend."""
+import html
 import httpx
 from datetime import date, datetime
 from typing import Optional
@@ -1859,6 +1860,12 @@ Sent by Matcha on behalf of {company_name}"""
         actor = changed_by_email or "a team member"
         occurred_text = occurred_at.strftime("%B %d, %Y at %I:%M %p") if occurred_at else "Not provided"
         location_text = location_name or "Not provided"
+
+        # Escape user-supplied values for HTML email
+        recipient_name = html.escape(recipient_name)
+        incident_title = html.escape(incident_title)
+        actor = html.escape(actor)
+        location_text = html.escape(location_text)
 
         if event_type == "created":
             subject = f"{company_name}: New incident reported ({incident_number})"

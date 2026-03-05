@@ -183,7 +183,7 @@ export function AnonymousReport() {
         </form>
 
         <p className="text-center text-[10px] text-zinc-600 font-mono">
-          This form does not collect your name, email, or IP address.
+          This form does not collect your name or email. Your IP address is used briefly for rate limiting and is not stored.
         </p>
       </div>
     </div>

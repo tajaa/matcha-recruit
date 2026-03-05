@@ -135,12 +135,10 @@ export function IRList() {
     fetchIncidents();
   }, [fetchIncidents]);
 
-  const appOrigin = 'https://hey-matcha.com';
-
   // Load anonymous reporting status
   useEffect(() => {
     irIncidents.getAnonymousReportingStatus().then((res: any) => {
-      setAnonLink(res.token ? `${appOrigin}/report/${res.token}` : null);
+      setAnonLink(res.token ? `${window.location.origin}/report/${res.token}` : null);
       setAnonEnabled(res.enabled);
       setAnonUsed(res.used ?? false);
     }).catch(() => {});
@@ -150,7 +148,7 @@ export function IRList() {
     setAnonLoading(true);
     try {
       const res = await irIncidents.generateAnonymousReportingToken();
-      setAnonLink(`${appOrigin}/report/${res.token}`);
+      setAnonLink(`${window.location.origin}/report/${res.token}`);
       setAnonEnabled(true);
       setAnonUsed(false);
     } catch { /* ignore */ }
@@ -162,7 +160,7 @@ export function IRList() {
     setAnonLoading(true);
     try {
       const res = await irIncidents.generateAnonymousReportingToken();
-      setAnonLink(`${appOrigin}/report/${res.token}`);
+      setAnonLink(`${window.location.origin}/report/${res.token}`);
       setAnonEnabled(true);
       setAnonUsed(false);
     } catch { /* ignore */ }
