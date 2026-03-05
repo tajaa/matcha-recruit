@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from typing import Any, Optional
 from uuid import UUID
@@ -783,7 +783,6 @@ async def export_case_file(
 async def create_share_link(
     case_id: UUID,
     body: CreateShareLinkRequest,
-    request: Request,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a shareable download link for a case export."""
@@ -802,7 +801,6 @@ async def create_share_link(
 
     expires_at = None
     if body.expires_in_days is not None:
-        from datetime import timedelta
         expires_at = datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
 
     async with get_connection() as conn:
@@ -816,9 +814,7 @@ async def create_share_link(
             case_id, company_id, token, pw_hash, storage_path, filename, current_user.id, expires_at,
         )
 
-    settings = get_settings()
-    base_url = settings.frontend_url if hasattr(settings, "frontend_url") and settings.frontend_url else str(request.base_url).rstrip("/")
-    url = f"{base_url}/shared/er-export/{token}"
+    url = f"/shared/er-export/{token}"
 
     return ShareLinkResponse(
         token=token,
@@ -927,10 +923,12 @@ async def share_link_info(token: str):
 @public_router.post("/{token}/download")
 async def share_link_download(token: str, body: ShareLinkDownloadRequest):
     """Download a shared export (public, password-protected)."""
+    lockout_minutes = 15
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT id, password_hash, storage_path, filename, expires_at, revoked_at, failed_attempts
+            SELECT id, password_hash, storage_path, filename, expires_at, revoked_at,
+                   failed_attempts, last_failed_at
             FROM er_case_export_links WHERE token = $1
             """,
             token,
@@ -941,19 +939,29 @@ async def share_link_download(token: str, body: ShareLinkDownloadRequest):
             raise HTTPException(status_code=404, detail="Link not found")
         if row["expires_at"] is not None and row["expires_at"] < datetime.now(timezone.utc):
             raise HTTPException(status_code=410, detail="Link has expired")
-        if row["failed_attempts"] >= 5:
-            raise HTTPException(status_code=429, detail="Too many failed attempts")
+
+        # Time-windowed lockout: reset counter if lockout period has elapsed
+        failed = row["failed_attempts"]
+        last_failed = row["last_failed_at"]
+        if failed >= 5 and last_failed and last_failed > datetime.now(timezone.utc) - timedelta(minutes=lockout_minutes):
+            raise HTTPException(status_code=429, detail=f"Too many failed attempts. Try again in {lockout_minutes} minutes.")
+        if failed >= 5:
+            # Lockout window expired — reset counter
+            await conn.execute(
+                "UPDATE er_case_export_links SET failed_attempts = 0, last_failed_at = NULL WHERE id = $1",
+                row["id"],
+            )
 
         valid = await verify_password_async(body.password, row["password_hash"])
         if not valid:
             await conn.execute(
-                "UPDATE er_case_export_links SET failed_attempts = failed_attempts + 1 WHERE id = $1",
+                "UPDATE er_case_export_links SET failed_attempts = failed_attempts + 1, last_failed_at = now() WHERE id = $1",
                 row["id"],
             )
             raise HTTPException(status_code=403, detail="Invalid password")
 
         await conn.execute(
-            "UPDATE er_case_export_links SET download_count = download_count + 1, last_downloaded_at = now(), failed_attempts = 0 WHERE id = $1",
+            "UPDATE er_case_export_links SET download_count = download_count + 1, last_downloaded_at = now(), failed_attempts = 0, last_failed_at = NULL WHERE id = $1",
             row["id"],
         )
 
