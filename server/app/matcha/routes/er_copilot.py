@@ -19,6 +19,7 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request
+from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
@@ -572,22 +573,21 @@ async def delete_case(
 # Case Export
 # ===========================================
 
+class ExportCaseFileRequest(BaseModel):
+    password: str = Field(..., min_length=4, max_length=128)
+
+
 @router.post("/{case_id}/export")
 async def export_case_file(
     case_id: UUID,
-    request: Request,
+    body: ExportCaseFileRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Export a case as a password-protected PDF."""
     from io import BytesIO
     from fastapi.responses import StreamingResponse
-    from pydantic import BaseModel, Field
 
-    # Parse password from body
-    body = await request.json()
-    password = body.get("password", "")
-    if not password or len(password) < 4 or len(password) > 128:
-        raise HTTPException(status_code=422, detail="Password must be 4-128 characters")
+    password = body.password
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
