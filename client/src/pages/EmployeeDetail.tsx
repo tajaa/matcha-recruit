@@ -4,7 +4,8 @@ import { getAccessToken, provisioning } from '../api/client';
 import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioningStatus, ProvisioningRunStatus } from '../types';
 import {
   ArrowLeft, Mail, Phone, MapPin, Calendar, Users, CheckCircle, Clock, FileText,
-  Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw
+  Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw,
+  Pencil, DollarSign, Briefcase, Save
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -17,6 +18,7 @@ interface Employee {
   first_name: string;
   last_name: string;
   work_state: string | null;
+  work_city: string | null;
   employment_type: string | null;
   start_date: string | null;
   termination_date: string | null;
@@ -26,8 +28,25 @@ interface Employee {
   invitation_status: string | null;
   phone: string | null;
   address: string | null;
+  pay_classification: string | null;
+  pay_rate: number | null;
   emergency_contact: object | null;
   created_at: string;
+}
+
+interface EditFields {
+  first_name: string;
+  last_name: string;
+  work_email: string;
+  personal_email: string;
+  phone: string;
+  address: string;
+  work_state: string;
+  work_city: string;
+  employment_type: string;
+  start_date: string;
+  pay_classification: string;
+  pay_rate: string;
 }
 
 interface OnboardingTask {
@@ -91,6 +110,82 @@ export default function EmployeeDetail() {
   const [provisioningActionLoading, setProvisioningActionLoading] = useState(false);
   const [slackActionLoading, setSlackActionLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [editFields, setEditFields] = useState<EditFields | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const startEditing = () => {
+    if (!employee) return;
+    setEditFields({
+      first_name: employee.first_name || '',
+      last_name: employee.last_name || '',
+      work_email: employee.work_email || employee.email || '',
+      personal_email: employee.personal_email || '',
+      phone: employee.phone || '',
+      address: employee.address || '',
+      work_state: employee.work_state || '',
+      work_city: employee.work_city || '',
+      employment_type: employee.employment_type || '',
+      start_date: employee.start_date || '',
+      pay_classification: employee.pay_classification || '',
+      pay_rate: employee.pay_rate != null ? String(employee.pay_rate) : '',
+    });
+    setEditing(true);
+  };
+
+  const cancelEditing = () => {
+    setEditing(false);
+    setEditFields(null);
+  };
+
+  const handleSave = async () => {
+    if (!employeeId || !editFields) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const token = getAccessToken();
+      const body: Record<string, unknown> = {};
+      if (editFields.first_name !== (employee?.first_name || '')) body.first_name = editFields.first_name;
+      if (editFields.last_name !== (employee?.last_name || '')) body.last_name = editFields.last_name;
+      if (editFields.work_email !== (employee?.work_email || employee?.email || '')) body.work_email = editFields.work_email;
+      if (editFields.personal_email !== (employee?.personal_email || '')) body.personal_email = editFields.personal_email || null;
+      if (editFields.phone !== (employee?.phone || '')) body.phone = editFields.phone || null;
+      if (editFields.address !== (employee?.address || '')) body.address = editFields.address || null;
+      if (editFields.work_state !== (employee?.work_state || '')) body.work_state = editFields.work_state || null;
+      if (editFields.work_city !== (employee?.work_city || '')) body.work_city = editFields.work_city || null;
+      if (editFields.employment_type !== (employee?.employment_type || '')) body.employment_type = editFields.employment_type || null;
+      if (editFields.start_date !== (employee?.start_date || '')) body.start_date = editFields.start_date || null;
+      if (editFields.pay_classification !== (employee?.pay_classification || '')) body.pay_classification = editFields.pay_classification || null;
+      const newRate = editFields.pay_rate ? parseFloat(editFields.pay_rate) : null;
+      const oldRate = employee?.pay_rate ?? null;
+      if (newRate !== oldRate) body.pay_rate = newRate;
+
+      if (Object.keys(body).length === 0) {
+        setEditing(false);
+        setEditFields(null);
+        return;
+      }
+
+      const response = await fetch(`${API_BASE}/employees/${employeeId}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ detail: 'Failed to save' }));
+        throw new Error(data.detail || 'Failed to save');
+      }
+      const updated = await response.json();
+      setEmployee(updated);
+      setEditing(false);
+      setEditFields(null);
+      setStatusMessage('Employee updated successfully.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const fetchEmployee = async () => {
     if (!employeeId) return;
@@ -388,69 +483,170 @@ export default function EmployeeDetail() {
         {/* Employee Info */}
         <div className="lg:col-span-1 space-y-6">
           <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Contact Info</h2>
-            <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <Mail size={16} className="text-zinc-500" />
-                <span className="text-sm text-white">{displayWorkEmail}</span>
-              </div>
-              {employee.personal_email && (
-                <div className="flex items-center gap-3">
-                  <Mail size={16} className="text-zinc-600" />
-                  <span className="text-sm text-zinc-300">Personal: {employee.personal_email}</span>
-                </div>
-              )}
-              {employee.phone && (
-                <div className="flex items-center gap-3">
-                  <Phone size={16} className="text-zinc-500" />
-                  <span className="text-sm text-white">{employee.phone}</span>
-                </div>
-              )}
-              {employee.address && (
-                <div className="flex items-center gap-3">
-                  <MapPin size={16} className="text-zinc-500" />
-                  <span className="text-sm text-white">{employee.address}</span>
-                </div>
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Contact Info</h2>
+              {!editing && (
+                <button onClick={startEditing} className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-colors" title="Edit">
+                  <Pencil size={14} />
+                </button>
               )}
             </div>
+            {editing && editFields ? (
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">First Name</label>
+                    <input value={editFields.first_name} onChange={(e) => setEditFields({ ...editFields, first_name: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Last Name</label>
+                    <input value={editFields.last_name} onChange={(e) => setEditFields({ ...editFields, last_name: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Work Email</label>
+                  <input type="email" value={editFields.work_email} onChange={(e) => setEditFields({ ...editFields, work_email: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Personal Email</label>
+                  <input type="email" value={editFields.personal_email} onChange={(e) => setEditFields({ ...editFields, personal_email: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="Optional" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Phone</label>
+                  <input value={editFields.phone} onChange={(e) => setEditFields({ ...editFields, phone: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="Optional" />
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Address</label>
+                  <input value={editFields.address} onChange={(e) => setEditFields({ ...editFields, address: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="Optional" />
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <Mail size={16} className="text-zinc-500" />
+                  <span className="text-sm text-white">{displayWorkEmail}</span>
+                </div>
+                {employee.personal_email && (
+                  <div className="flex items-center gap-3">
+                    <Mail size={16} className="text-zinc-600" />
+                    <span className="text-sm text-zinc-300">Personal: {employee.personal_email}</span>
+                  </div>
+                )}
+                {employee.phone && (
+                  <div className="flex items-center gap-3">
+                    <Phone size={16} className="text-zinc-500" />
+                    <span className="text-sm text-white">{employee.phone}</span>
+                  </div>
+                )}
+                {employee.address && (
+                  <div className="flex items-center gap-3">
+                    <MapPin size={16} className="text-zinc-500" />
+                    <span className="text-sm text-white">{employee.address}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
             <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Employment</h2>
-            <div className="space-y-3">
-              {employee.start_date && (
-                <div className="flex items-center gap-3">
-                  <Calendar size={16} className="text-zinc-500" />
-                  <span className="text-sm text-zinc-400">
-                    Started: <span className="text-white">{employee.start_date}</span>
-                  </span>
+            {editing && editFields ? (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Employment Type</label>
+                  <select value={editFields.employment_type} onChange={(e) => setEditFields({ ...editFields, employment_type: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30">
+                    <option value="">Select...</option>
+                    <option value="full_time">Full Time</option>
+                    <option value="part_time">Part Time</option>
+                    <option value="contract">Contract</option>
+                    <option value="intern">Intern</option>
+                  </select>
                 </div>
-              )}
-              {employee.employment_type && (
-                <div className="flex items-center gap-3">
-                  <Users size={16} className="text-zinc-500" />
-                  <span className="text-sm text-zinc-400">
-                    Type: <span className="text-white">{employee.employment_type.replace('_', ' ')}</span>
-                  </span>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Start Date</label>
+                  <input type="date" value={editFields.start_date} onChange={(e) => setEditFields({ ...editFields, start_date: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" />
                 </div>
-              )}
-              {employee.work_state && (
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Work State</label>
+                    <input value={editFields.work_state} onChange={(e) => setEditFields({ ...editFields, work_state: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. CA" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Work City</label>
+                    <input value={editFields.work_city} onChange={(e) => setEditFields({ ...editFields, work_city: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. San Francisco" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Pay Classification</label>
+                  <select value={editFields.pay_classification} onChange={(e) => setEditFields({ ...editFields, pay_classification: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30">
+                    <option value="">Select...</option>
+                    <option value="exempt">Exempt (Salary)</option>
+                    <option value="hourly">Hourly</option>
+                  </select>
+                </div>
+                {editFields.pay_classification && (
+                  <div>
+                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                      {editFields.pay_classification === 'hourly' ? 'Hourly Rate ($)' : 'Annual Salary ($)'}
+                    </label>
+                    <input type="number" step="0.01" min="0" value={editFields.pay_rate} onChange={(e) => setEditFields({ ...editFields, pay_rate: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder={editFields.pay_classification === 'hourly' ? '18.50' : '65000'} />
+                  </div>
+                )}
+                <div className="flex items-center gap-2 pt-2">
+                  <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-4 py-1.5 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50 transition-colors">
+                    <Save size={12} />
+                    {saving ? 'Saving...' : 'Save Changes'}
+                  </button>
+                  <button onClick={cancelEditing} disabled={saving} className="px-4 py-1.5 text-zinc-400 hover:text-white text-[10px] font-bold uppercase tracking-wider transition-colors">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {employee.start_date && (
+                  <div className="flex items-center gap-3">
+                    <Calendar size={16} className="text-zinc-500" />
+                    <span className="text-sm text-zinc-400">
+                      Started: <span className="text-white">{employee.start_date}</span>
+                    </span>
+                  </div>
+                )}
+                {employee.employment_type && (
+                  <div className="flex items-center gap-3">
+                    <Briefcase size={16} className="text-zinc-500" />
+                    <span className="text-sm text-zinc-400">
+                      Type: <span className="text-white">{employee.employment_type.replace('_', ' ')}</span>
+                    </span>
+                  </div>
+                )}
                 <div className="flex items-center gap-3">
                   <MapPin size={16} className="text-zinc-500" />
                   <span className="text-sm text-zinc-400">
-                    State: <span className="text-white">{employee.work_state}</span>
+                    Location: <span className="text-white">{employee.work_city && employee.work_state ? `${employee.work_city}, ${employee.work_state}` : employee.work_state || employee.work_city || '—'}</span>
                   </span>
                 </div>
-              )}
-              {employee.manager_name && (
-                <div className="flex items-center gap-3">
-                  <Users size={16} className="text-zinc-500" />
-                  <span className="text-sm text-zinc-400">
-                    Manager: <span className="text-white">{employee.manager_name}</span>
-                  </span>
-                </div>
-              )}
-            </div>
+                {employee.pay_classification && (
+                  <div className="flex items-center gap-3">
+                    <DollarSign size={16} className="text-zinc-500" />
+                    <span className="text-sm text-zinc-400">
+                      Pay: <span className="text-white">
+                        {employee.pay_classification === 'hourly' ? `$${employee.pay_rate?.toFixed(2) || '—'}/hr` : `$${employee.pay_rate?.toLocaleString() || '—'}/yr`}
+                        {' '}({employee.pay_classification})
+                      </span>
+                    </span>
+                  </div>
+                )}
+                {employee.manager_name && (
+                  <div className="flex items-center gap-3">
+                    <Users size={16} className="text-zinc-500" />
+                    <span className="text-sm text-zinc-400">
+                      Manager: <span className="text-white">{employee.manager_name}</span>
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
