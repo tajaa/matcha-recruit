@@ -708,7 +708,7 @@ export function Layout() {
     }
   }, [themeMode]);
 
-  const isMatchaRoute = location.pathname.startsWith('/app/matcha');
+  const isMatchaRoute = location.pathname.startsWith('/app/matcha') || location.pathname.startsWith('/app/ir') || location.pathname === '/app';
   const shouldInvertPages = themeMode === 'light' && !isMatchaRoute;
 
   const toggleSection = (title: string) => {
