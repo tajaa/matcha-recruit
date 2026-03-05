@@ -345,36 +345,37 @@ export function IRList() {
           </button>
         </div>
       ) : (
-        <div data-tour="ir-list-rows" className={`space-y-px ${isLight ? 'bg-stone-300' : 'bg-white/10'} ${isLight ? 'border border-stone-200' : 'border border-white/10'} rounded-2xl overflow-hidden`}>
+        <div data-tour="ir-list-rows" className="bg-zinc-900 rounded-2xl overflow-hidden">
           {/* Header row */}
-          <div className={`flex items-center gap-4 py-3 px-6 ${t.rowBg} ${t.label} border-b ${t.border}`}>
+          <div className="flex items-center gap-4 py-3 px-6 text-[10px] text-zinc-600 uppercase tracking-widest font-bold border-b border-zinc-800">
             <div className="w-3" />
             <div className="w-24">ID</div>
             <div className="flex-1">Incident Details</div>
-              <div className="w-24">Type</div>
-              <div className="w-24">Status</div>
-              <div className="w-40">Manager Update</div>
-              <div className="w-24 text-right">Date</div>
-              <div className="w-12" />
-            </div>
+            <div className="w-24">Type</div>
+            <div className="w-24">Status</div>
+            <div className="w-40">Manager Update</div>
+            <div className="w-24 text-right">Date</div>
+            <div className="w-12" />
+          </div>
 
+          <div className="divide-y divide-zinc-800">
           {incidents.map((incident) => (
             <div
               key={incident.id}
               onClick={() => navigate(`/app/ir/incidents/${incident.id}`)}
-              className={`flex items-center gap-4 py-4 px-6 ${t.rowBg} ${t.rowHover} cursor-pointer group transition-colors`}
+              className="flex items-center gap-4 py-4 px-6 hover:bg-white/5 cursor-pointer group transition-colors"
             >
               <div className={`w-1.5 h-1.5 rounded-full ${t.sevDots[incident.severity]}`} />
-              <div className={`text-[10px] ${t.textMuted} font-mono w-24`}>{incident.incident_number}</div>
+              <div className="text-[10px] text-zinc-500 font-mono w-24">{incident.incident_number}</div>
               <div className="flex-1 min-w-0">
-                <div className={`text-xs font-bold ${isLight ? 'text-zinc-700 group-hover:text-zinc-900' : 'text-zinc-300 group-hover:text-white'} truncate transition-colors uppercase tracking-wide`}>
+                <div className="text-xs font-bold text-zinc-300 group-hover:text-white truncate transition-colors uppercase tracking-wide">
                   {incident.title}
                 </div>
                 {incident.description && (
-                  <div className={`text-[10px] ${t.textFaint} truncate mt-1 font-mono max-w-xl`}>{incident.description}</div>
+                  <div className="text-[10px] text-zinc-600 truncate mt-1 font-mono max-w-xl">{incident.description}</div>
                 )}
               </div>
-              <div className={`text-[10px] ${t.textMuted} w-24 uppercase tracking-wider font-bold`}>{TYPE_LABELS[incident.incident_type]}</div>
+              <div className="text-[10px] text-zinc-500 w-24 uppercase tracking-wider font-bold">{TYPE_LABELS[incident.incident_type]}</div>
               <div className={`text-[10px] w-24 uppercase tracking-wider font-bold ${t.statusColors[incident.status]}`}>
                 {incident.status.replace('_', ' ')}
               </div>
@@ -385,7 +386,7 @@ export function IRList() {
                   onClick={(e) => e.stopPropagation()}
                   onChange={(e) => handleStatusUpdate(incident.id, e.target.value as IRStatus, e)}
                   disabled={updatingIncidentId === incident.id}
-                  className={`w-full px-2 py-1 ${t.select} text-[10px] font-bold uppercase tracking-wider focus:outline-none disabled:opacity-50`}
+                  className="w-full px-2 py-1 bg-zinc-800 border border-white/10 rounded-xl text-zinc-100 text-[10px] font-bold uppercase tracking-wider focus:outline-none disabled:opacity-50"
                 >
                   <option value="reported">Reported</option>
                   <option value="investigating">Investigating</option>
@@ -394,17 +395,18 @@ export function IRList() {
                   <option value="closed">Closed</option>
                 </select>
               </div>
-              <div className={`text-[10px] ${t.textFaint} w-24 text-right font-mono`}>{formatDate(incident.occurred_at)}</div>
+              <div className="text-[10px] text-zinc-600 w-24 text-right font-mono">{formatDate(incident.occurred_at)}</div>
               <div className="w-12 text-right">
                 <button
                   onClick={(e) => handleDelete(incident.id, e)}
-                  className={`p-2 ${t.btnGhost} hover:text-red-500 hover:bg-red-900/20 rounded-xl transition-colors opacity-0 group-hover:opacity-100`}
+                  className="p-2 text-zinc-600 hover:text-red-400 hover:bg-red-900/20 rounded-xl transition-colors opacity-0 group-hover:opacity-100"
                 >
                   <Trash2 size={14} />
                 </button>
               </div>
             </div>
           ))}
+          </div>
         </div>
       )}
     </div>

@@ -11,7 +11,7 @@ import { useIsLightMode } from '../hooks/useIsLightMode';
 const LT = {
   pageBg: 'bg-stone-300',
   card: 'bg-stone-100 rounded-2xl',
-  cardDark: 'bg-stone-200 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-2xl',
   statBg: 'bg-stone-200',
   statGap: 'bg-stone-300',
   textMain: 'text-zinc-900',
@@ -22,6 +22,12 @@ const LT = {
   btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl',
   btnSecondary: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900 rounded-xl',
   rowHover: 'hover:bg-stone-50',
+  divide: 'divide-stone-300',
+  recentId: 'text-stone-500 group-hover:text-stone-700',
+  recentTitle: 'text-zinc-700 group-hover:text-zinc-900',
+  recentDate: 'text-stone-400',
+  recentChevron: 'text-stone-400 group-hover:text-zinc-900',
+  recentAllHover: 'hover:text-zinc-900',
   barBg: 'bg-stone-300',
   barHover: 'hover:bg-zinc-900',
   tooltipBg: 'bg-zinc-900 text-zinc-50',
@@ -43,6 +49,12 @@ const DK = {
   btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600 rounded-xl',
   btnSecondary: 'border border-white/10 hover:border-white/20 text-zinc-500 hover:text-zinc-100 rounded-xl',
   rowHover: 'hover:bg-white/5',
+  divide: 'divide-zinc-800',
+  recentId: 'text-zinc-500 group-hover:text-zinc-400',
+  recentTitle: 'text-zinc-300 group-hover:text-white',
+  recentDate: 'text-zinc-600',
+  recentChevron: 'text-zinc-600 group-hover:text-zinc-400',
+  recentAllHover: 'hover:text-zinc-100',
   barBg: 'bg-zinc-800',
   barHover: 'hover:bg-white',
   tooltipBg: 'bg-white text-black',
@@ -280,11 +292,11 @@ export function IRDashboard() {
 
       {/* Recent Incidents */}
       <div data-tour="ir-dash-recent" className={`${t.cardDark} overflow-hidden`}>
-        <div className={`flex justify-between items-center p-4 border-b ${t.border}`}>
-          <div className={t.label}>Recent Incidents</div>
+        <div className="flex justify-between items-center p-4 border-b border-zinc-800">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Recent Incidents</div>
           <button
             onClick={() => navigate('/app/ir')}
-            className={`text-[10px] ${t.textMuted} hover:text-zinc-100 uppercase tracking-wider transition-colors flex items-center gap-1`}
+            className="text-[10px] text-zinc-500 hover:text-zinc-100 uppercase tracking-wider transition-colors flex items-center gap-1"
           >
             All <ArrowRight size={10} />
           </button>
