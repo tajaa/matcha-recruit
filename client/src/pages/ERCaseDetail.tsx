@@ -529,7 +529,7 @@ export function ERCaseDetail() {
     streaming: similarStreaming,
     messages: similarMessages,
     result: similarResult,
-    error: _similarError,
+    error: similarError,
     runAnalysis: runSimilarAnalysis,
     reset: resetSimilar,
   } = useERSimilarCasesStream();
@@ -2614,6 +2614,9 @@ export function ERCaseDetail() {
         analysis={similarResult}
         streaming={similarStreaming}
         messages={similarMessages}
+        error={similarError}
+        onRetry={() => id && runSimilarAnalysis(id)}
+        onRefresh={() => id && runSimilarAnalysis(id, { refresh: true })}
       />
 
       {/* Export Modal */}

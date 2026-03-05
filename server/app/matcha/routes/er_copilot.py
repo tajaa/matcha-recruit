@@ -1713,6 +1713,7 @@ async def get_policy_check(
 @router.post("/{case_id}/analysis/similar-cases")
 async def analyze_similar_cases(
     case_id: UUID,
+    refresh: bool = Query(False, description="Skip cache and recompute"),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Stream SSE progress events during similar cases analysis."""
@@ -1729,15 +1730,31 @@ async def analyze_similar_cases(
         async with get_connection() as conn:
             await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
 
+            use_cache = not refresh
+
+            if use_cache:
+                # Invalidate cache if the case was updated after the cached analysis
+                case_updated_at = await conn.fetchval(
+                    "SELECT updated_at FROM er_cases WHERE id = $1", case_id
+                )
+                cached_generated_at = await conn.fetchval(
+                    "SELECT generated_at FROM er_case_analysis WHERE case_id = $1 AND analysis_type = 'similar_cases'",
+                    case_id,
+                )
+                if case_updated_at and cached_generated_at and case_updated_at > cached_generated_at:
+                    use_cache = False
+
             # Check cache first
-            cached = await conn.fetchrow(
-                """
-                SELECT analysis_data, generated_at
-                FROM er_case_analysis
-                WHERE case_id = $1 AND analysis_type = 'similar_cases'
-                """,
-                case_id,
-            )
+            cached = None
+            if use_cache:
+                cached = await conn.fetchrow(
+                    """
+                    SELECT analysis_data, generated_at
+                    FROM er_case_analysis
+                    WHERE case_id = $1 AND analysis_type = 'similar_cases'
+                    """,
+                    case_id,
+                )
             if cached:
                 analysis = cached["analysis_data"]
                 if isinstance(analysis, str):

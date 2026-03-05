@@ -9,6 +9,9 @@ interface SimilarCasesAnalysisModalProps {
   analysis: ERSimilarCasesAnalysis | null;
   streaming?: boolean;
   messages?: { type: string; message: string; done?: boolean }[];
+  error?: string | null;
+  onRetry?: () => void;
+  onRefresh?: () => void;
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -277,6 +280,9 @@ export function SimilarCasesAnalysisModal({
   analysis,
   streaming,
   messages,
+  error,
+  onRetry,
+  onRefresh,
 }: SimilarCasesAnalysisModalProps) {
   const formatDate = (dateStr: string) => {
     return new Date(dateStr).toLocaleString('en-US', {
@@ -287,6 +293,28 @@ export function SimilarCasesAnalysisModal({
       minute: '2-digit',
     });
   };
+
+  // Show error state
+  if (error && !streaming) {
+    return (
+      <Modal isOpen={isOpen} onClose={onClose} title="Similar Cases Analysis">
+        <div className="space-y-4">
+          <div className="bg-red-950/40 border border-red-800/50 rounded-md px-4 py-3">
+            <div className="text-xs text-red-400 font-medium mb-1">Analysis Failed</div>
+            <div className="text-xs text-red-300/70">{error}</div>
+          </div>
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            >
+              Retry analysis
+            </button>
+          )}
+        </div>
+      </Modal>
+    );
+  }
 
   // Show streaming state when no analysis yet
   if (!analysis && streaming) {
@@ -373,6 +401,15 @@ export function SimilarCasesAnalysisModal({
                 )}
               </div>
             </div>
+          )}
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              disabled={streaming}
+              className="text-xs text-blue-400 hover:text-blue-300 disabled:text-zinc-600 transition-colors"
+            >
+              {streaming ? 'Refreshing...' : 'Refresh analysis'}
+            </button>
           )}
         </div>
       </div>

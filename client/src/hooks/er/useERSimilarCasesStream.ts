@@ -20,13 +20,17 @@ export function useERSimilarCasesStream() {
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = useCallback(() => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
     setStreaming(false);
     setMessages([]);
     setResult(null);
     setError(null);
   }, []);
 
-  const runAnalysis = useCallback(async (caseId: string) => {
+  const runAnalysis = useCallback(async (caseId: string, options?: { refresh?: boolean }) => {
     if (abortRef.current) {
       abortRef.current.abort();
     }
@@ -42,8 +46,11 @@ export function useERSimilarCasesStream() {
     const token = getAccessToken();
 
     try {
+      const url = options?.refresh
+        ? `${API_BASE}/er/cases/${caseId}/analysis/similar-cases?refresh=true`
+        : `${API_BASE}/er/cases/${caseId}/analysis/similar-cases`;
       const response = await fetch(
-        `${API_BASE}/er/cases/${caseId}/analysis/similar-cases`,
+        url,
         {
           method: 'POST',
           headers: {

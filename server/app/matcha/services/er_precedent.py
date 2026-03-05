@@ -244,6 +244,22 @@ Return ONLY a JSON object:
 }}"""
 
 
+PRECEDENT_FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
+
+
+def _is_model_unavailable_error(error: Exception) -> bool:
+    """Return True when the model is unavailable for the current account/project."""
+    message = str(error).lower()
+    if "model" not in message:
+        return False
+    return (
+        "not found" in message
+        or "does not have access" in message
+        or "unsupported model" in message
+        or "404" in message
+    )
+
+
 async def enrich_with_semantics(
     current: dict,
     top_candidates: list[dict],
@@ -255,6 +271,7 @@ async def enrich_with_semantics(
     Returns dict with 'scores' list and 'pattern_summary'.
     """
     from google import genai
+    from ...config import get_settings
     from ...core.services.rate_limiter import get_rate_limiter
 
     if vertex_project:
@@ -290,26 +307,55 @@ async def enrich_with_semantics(
         candidates_text="\n\n".join(candidates_lines),
     )
 
+    # Build model candidates: configured model first, then stable fallbacks
+    settings = get_settings()
+    primary_model = getattr(settings, "analysis_model", None) or "gemini-2.5-flash"
+    model_candidates: list[str] = []
+    for m in [primary_model, *PRECEDENT_FALLBACK_MODELS]:
+        if m and m not in model_candidates:
+            model_candidates.append(m)
+
     try:
-        response = await asyncio.wait_for(
-            client.aio.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-            ),
-            timeout=GEMINI_CALL_TIMEOUT,
-        )
+        last_model_error: Exception | None = None
+        response = None
+        for model_name in model_candidates:
+            try:
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                    ),
+                    timeout=GEMINI_CALL_TIMEOUT,
+                )
+                if model_name != primary_model:
+                    logger.warning(
+                        "Precedent semantic model '%s' unavailable; fell back to '%s'",
+                        primary_model,
+                        model_name,
+                    )
+                break
+            except Exception as exc:
+                if _is_model_unavailable_error(exc):
+                    last_model_error = exc
+                    logger.warning("Precedent model candidate '%s' unavailable: %s", model_name, exc)
+                    continue
+                raise
+
+        if response is None:
+            if last_model_error:
+                raise last_model_error
+            raise RuntimeError("No Gemini model candidates available for precedent semantic enrichment")
 
         await rate_limiter.record_call("er_analysis", "precedent_semantic")
 
         text = response.text.strip()
-        if text.startswith("```json"):
-            text = text[7:]
-        elif text.startswith("```"):
-            text = text[3:]
-        if text.endswith("```"):
-            text = text[:-3]
+        # Extract JSON object robustly — handles any fence format or stray text
+        json_match = re.search(r'\{[\s\S]*\}', text)
+        if not json_match:
+            logger.warning("Gemini semantic enrichment returned no JSON object")
+            return {"scores": [], "pattern_summary": None}
 
-        result = json.loads(text.strip())
+        result = json.loads(json_match.group())
         return result
 
     except Exception as e:
