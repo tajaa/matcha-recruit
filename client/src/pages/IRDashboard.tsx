@@ -11,7 +11,7 @@ import { useIsLightMode } from '../hooks/useIsLightMode';
 const LT = {
   pageBg: 'bg-stone-300',
   card: 'bg-stone-100 rounded-2xl',
-  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDark: 'bg-stone-200 rounded-2xl',
   statBg: 'bg-stone-200',
   statGap: 'bg-stone-300',
   textMain: 'text-zinc-900',
