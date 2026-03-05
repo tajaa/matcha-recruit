@@ -1002,7 +1002,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
   return (
     <div className={wrapperClass}>
-    <div className="max-w-7xl mx-auto space-y-8 overflow-x-hidden">
+    <div className={`mx-auto ${mode === 'directory' ? 'max-w-5xl animate-in fade-in duration-500' : 'max-w-7xl space-y-8'}`}>
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-8">
         {mode === 'directory' ? (

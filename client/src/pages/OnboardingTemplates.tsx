@@ -334,7 +334,7 @@ export default function OnboardingTemplates() {
           <p className={`${t.textMuted} text-xs mb-6 font-mono uppercase`}>You haven't defined any onboarding tasks yet. Build your first checklist to get started.</p>
         </div>
       ) : (
-        <div className="space-y-8">
+        <div className="space-y-6 animate-in fade-in duration-500">
           {CATEGORIES.filter(cat => !categoryFilter || cat.value === categoryFilter).map((cat) => {
             const categoryTemplates = groupedTemplates[cat.value] || [];
             if (categoryTemplates.length === 0) return null;
