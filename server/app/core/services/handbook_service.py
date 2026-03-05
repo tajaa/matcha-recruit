@@ -1957,6 +1957,21 @@ class HandbookService:
             ON handbook_freshness_findings(freshness_check_id)
             """
         )
+
+        # Enable RLS on dynamically-created tables
+        await conn.execute(
+            "ALTER TABLE handbook_freshness_checks ENABLE ROW LEVEL SECURITY"
+        )
+        await conn.execute(
+            "ALTER TABLE handbook_freshness_checks FORCE ROW LEVEL SECURITY"
+        )
+        await conn.execute("""
+            DO $$ BEGIN
+                CREATE POLICY tenant_isolation ON handbook_freshness_checks
+                    USING (company_id::text = current_setting('app.current_tenant_id', true));
+            EXCEPTION WHEN duplicate_object THEN NULL;
+            END $$
+        """)
         await conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_handbook_freshness_findings_handbook

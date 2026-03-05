@@ -20,12 +20,21 @@ This is the matcha app (`server/` + `client/`). A second app, Gummfit Agency (cr
 
 ## Database
 
-**Do NOT start, check, or create any local Postgres containers.** The app reads `DATABASE_URL` from `.env` and that's it. The database is already running — just use it.
+**⚠️ CRITICAL: The database is a PRODUCTION PostgreSQL on a remote EC2 instance (3.101.83.217), NOT a local container.** `DATABASE_URL` in `.env` connects to it (possibly via SSH tunnel). Treat every database operation as production.
 
-```
-# .env already has this configured:
-DATABASE_URL=postgresql://...
-```
+**NEVER do any of the following without explicit user approval:**
+- CREATE ROLE / DROP ROLE
+- CREATE TABLE / DROP TABLE on real tables
+- Run Alembic migrations (`alembic upgrade head`)
+- Any DDL (ALTER TABLE, CREATE INDEX, etc.) directly
+- Write tests that create/drop tables, roles, or modify schema on the live DB
+- Assume you can freely experiment with the database
+
+**For integration tests that need DB access:** write them to be run manually by the user, and use temporary/test data that won't affect production. Never auto-run DB-mutating tests.
+
+**SSH access to DB server:** `ssh -i roonMT-arm.pem ec2-user@3.101.83.217`
+**DB name in production:** `matcha` (not `matcha_recruit`)
+**DB user:** `matcha` (currently superuser — this is part of the RLS problem)
 
 Schema is managed via Alembic migrations in `server/alembic/versions/`. Tables are also bootstrapped in `server/app/database.py:init_db()` for fresh setups. When adding new tables, use Alembic migrations.
 

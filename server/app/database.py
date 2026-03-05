@@ -1,3 +1,4 @@
+import contextvars
 import json
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -5,6 +6,41 @@ from typing import Optional
 import asyncpg
 
 _pool: Optional[asyncpg.Pool] = None
+
+# ── Request-scoped tenant context (set by auth dependencies) ──────────
+_tenant_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "tenant_id", default=""
+)
+_user_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "user_id", default=""
+)
+_is_admin_var: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "is_admin", default=False
+)
+
+
+def set_tenant_id(value: str) -> None:
+    _tenant_id_var.set(value)
+
+
+def get_tenant_id() -> str:
+    return _tenant_id_var.get()
+
+
+def set_user_id(value: str) -> None:
+    _user_id_var.set(value)
+
+
+def get_user_id() -> str:
+    return _user_id_var.get()
+
+
+def set_is_admin(value: bool) -> None:
+    _is_admin_var.set(value)
+
+
+def get_is_admin() -> bool:
+    return _is_admin_var.get()
 
 
 async def init_pool(database_url: str):
@@ -45,17 +81,44 @@ async def get_connection(tenant_id: str | None = None):
         tenant_id: Optional company/org UUID string. When provided, sets
             ``app.current_tenant_id`` for the duration of the connection so
             that PostgreSQL row-level security policies can filter rows
-            automatically.  The setting is transaction-local and resets
-            when the connection returns to the pool.
+            automatically.  The setting is session-level (connection-scoped)
+            and is reset when the connection returns to the pool.
     """
     pool = await get_pool()
+    effective_tenant = tenant_id or _tenant_id_var.get() or None
+    effective_user = _user_id_var.get() or None
+    is_admin = _is_admin_var.get()
+
     async with pool.acquire() as conn:
-        if tenant_id:
+        if effective_tenant:
             await conn.execute(
-                "SELECT set_config('app.current_tenant_id', $1, true)",
-                str(tenant_id),
+                "SELECT set_config('app.current_tenant_id', $1, false)",
+                str(effective_tenant),
             )
-        yield conn
+        if effective_user:
+            await conn.execute(
+                "SELECT set_config('app.current_user_id', $1, false)",
+                str(effective_user),
+            )
+        if is_admin:
+            await conn.execute(
+                "SELECT set_config('app.is_admin', 'true', false)"
+            )
+        try:
+            yield conn
+        finally:
+            if effective_tenant:
+                await conn.execute(
+                    "SELECT set_config('app.current_tenant_id', '', false)"
+                )
+            if effective_user:
+                await conn.execute(
+                    "SELECT set_config('app.current_user_id', '', false)"
+                )
+            if is_admin:
+                await conn.execute(
+                    "SELECT set_config('app.is_admin', '', false)"
+                )
 
 
 async def init_db():

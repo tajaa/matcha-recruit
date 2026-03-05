@@ -7,7 +7,7 @@ from fastapi import Depends, HTTPException, status
 
 from ..core.feature_flags import default_company_features_json, merge_company_features
 from ..core.dependencies import get_current_user, require_roles
-from ..database import get_connection
+from ..database import get_connection, set_tenant_id
 
 # Matcha role dependencies
 require_client = require_roles("client")
@@ -44,6 +44,8 @@ async def resolve_accessible_company_scope(
     Centralized tenant access resolver.
 
     Returns scope metadata used by company-scoped routes and dependencies.
+    Also sets the tenant contextvar so that subsequent ``get_connection()``
+    calls automatically propagate the tenant to PostgreSQL RLS.
     """
     async with get_connection() as conn:
         if current_user.role == "admin":
@@ -55,6 +57,8 @@ async def resolve_accessible_company_scope(
             else:
                 selected_company_id = await conn.fetchval("SELECT id FROM companies ORDER BY created_at LIMIT 1")
 
+            if selected_company_id:
+                set_tenant_id(str(selected_company_id))
             company_ids = [selected_company_id] if selected_company_id else []
             return {
                 "company_id": selected_company_id,
@@ -92,6 +96,7 @@ async def resolve_accessible_company_scope(
             if requested_company_id and requested_company_id != company_id:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for requested company")
 
+            set_tenant_id(str(company_id))
             return {
                 "company_id": company_id,
                 "company_ids": [company_id],
@@ -128,6 +133,7 @@ async def resolve_accessible_company_scope(
             if requested_company_id and requested_company_id != company_id:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied for requested company")
 
+            set_tenant_id(str(company_id))
             return {
                 "company_id": company_id,
                 "company_ids": [company_id],
@@ -213,6 +219,7 @@ async def resolve_accessible_company_scope(
                     )
                 _ensure_company_is_accessible(row["company_status"], row["rejection_reason"])
                 link_permissions = row["permissions"] if isinstance(row["permissions"], dict) else {}
+                set_tenant_id(str(row["company_id"]))
                 return {
                     "company_id": row["company_id"],
                     "company_ids": [row["company_id"]],
@@ -251,6 +258,8 @@ async def resolve_accessible_company_scope(
                     selected_permissions = row["permissions"] if isinstance(row["permissions"], dict) else {}
 
             selected_company_id = valid_company_ids[0] if valid_company_ids else None
+            if selected_company_id:
+                set_tenant_id(str(selected_company_id))
             return {
                 "company_id": selected_company_id,
                 "company_ids": valid_company_ids,

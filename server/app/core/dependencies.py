@@ -5,7 +5,7 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
-from ..database import get_connection
+from ..database import get_connection, set_is_admin, set_user_id
 
 security = HTTPBearer()
 
@@ -66,6 +66,12 @@ async def get_current_user(
         if isinstance(allowed_roles, str):
             import json
             allowed_roles = json.loads(allowed_roles)
+
+        # Propagate identity to contextvars so get_connection() can set
+        # the corresponding PostgreSQL session variables for RLS.
+        set_user_id(str(user_row["id"]))
+        if user_row["role"] == "admin":
+            set_is_admin(True)
 
         return CurrentUser(
             id=user_row["id"],
