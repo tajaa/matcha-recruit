@@ -130,7 +130,7 @@ async def submit_anonymous_report(token: str, body: AnonymousReportRequest, requ
             now_naive,
             "Anonymous",
             company_id,
-            "anonymous-report",
+            None,
         )
 
     # Mark token as used
