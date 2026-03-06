@@ -772,6 +772,20 @@ export function HandbookForm() {
     }
   }, [profile.tipped_employees, profile.tip_pooling]);
 
+  // Auto-add conditional policy sections for legacy drafts where profile flag is on but section is missing
+  useEffect(() => {
+    if (sourceType !== 'template') return;
+    const missing: { title: string; content: string }[] = [];
+    for (const cond of CONDITIONAL_POLICY_SECTIONS) {
+      if (profile[cond.profileKey] && !customSections.some((s) => s.title === cond.title)) {
+        missing.push({ title: cond.title, content: cond.defaultContent });
+      }
+    }
+    if (missing.length > 0) {
+      setCustomSections((prev) => [...prev, ...missing]);
+    }
+  }, [sourceType, profile.remote_workers, profile.group_health_insurance]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!isWizard) return;
     setWizardCardIndex((prev) => {
