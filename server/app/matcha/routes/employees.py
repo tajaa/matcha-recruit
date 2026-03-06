@@ -290,71 +290,74 @@ async def send_single_invitation(
 
     Returns: {"invitation_id": UUID, "token": str, "expires_at": datetime}
     """
-    should_close = False
     if conn is None:
-        conn = await get_connection().__aenter__()
-        should_close = True
+        async with get_connection() as own_conn:
+            return await _send_invitation_with_conn(employee_id, org_id, invited_by, own_conn)
+    return await _send_invitation_with_conn(employee_id, org_id, invited_by, conn)
 
-    try:
-        async with conn.transaction():
-            # Lock the employee row to serialize concurrent invite/resend calls so
-            # only one active invitation per employee can be created at a time.
-            employee = await conn.fetchrow(
-                "SELECT * FROM employees WHERE id = $1 AND org_id = $2 FOR UPDATE",
-                employee_id, org_id
-            )
 
-            if not employee:
-                raise HTTPException(status_code=404, detail="Employee not found")
-
-            if employee["user_id"]:
-                raise HTTPException(status_code=400, detail="Employee already has an account")
-
-            # Cancel all existing pending invitations for this employee
-            await conn.execute(
-                """
-                UPDATE employee_invitations SET status = 'cancelled'
-                WHERE employee_id = $1 AND status = 'pending'
-                """,
-                employee_id
-            )
-
-            # Generate new invitation token
-            token = secrets.token_urlsafe(32)
-            expires_at = datetime.utcnow() + timedelta(days=7)
-
-            # Create invitation record
-            invitation = await conn.fetchrow(
-                """
-                INSERT INTO employee_invitations (org_id, employee_id, invited_by, token, expires_at)
-                VALUES ($1, $2, $3, $4, $5)
-                RETURNING id, employee_id, token, status, expires_at, created_at
-                """,
-                org_id, employee_id, invited_by, token, expires_at
-            )
-
-        # Get company name for email (outside transaction — read-only)
-        company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", org_id)
-        company_name = company["name"] if company else "Your Company"
-
-        # Send invitation email
-        email_service = EmailService()
-        await email_service.send_employee_invitation_email(
-            to_email=employee["email"],
-            to_name=f"{employee['first_name']} {employee['last_name']}",
-            company_name=company_name,
-            token=token,
-            expires_at=expires_at,
+async def _send_invitation_with_conn(
+    employee_id: UUID,
+    org_id: UUID,
+    invited_by: UUID,
+    conn,
+) -> dict:
+    async with conn.transaction():
+        # Lock the employee row to serialize concurrent invite/resend calls so
+        # only one active invitation per employee can be created at a time.
+        employee = await conn.fetchrow(
+            "SELECT * FROM employees WHERE id = $1 AND org_id = $2 FOR UPDATE",
+            employee_id, org_id
         )
 
-        return {
-            "invitation_id": invitation["id"],
-            "token": invitation["token"],
-            "expires_at": invitation["expires_at"]
-        }
-    finally:
-        if should_close:
-            await conn.close()
+        if not employee:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        if employee["user_id"]:
+            raise HTTPException(status_code=400, detail="Employee already has an account")
+
+        # Cancel all existing pending invitations for this employee
+        await conn.execute(
+            """
+            UPDATE employee_invitations SET status = 'cancelled'
+            WHERE employee_id = $1 AND status = 'pending'
+            """,
+            employee_id
+        )
+
+        # Generate new invitation token
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.utcnow() + timedelta(days=7)
+
+        # Create invitation record
+        invitation = await conn.fetchrow(
+            """
+            INSERT INTO employee_invitations (org_id, employee_id, invited_by, token, expires_at)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, employee_id, token, status, expires_at, created_at
+            """,
+            org_id, employee_id, invited_by, token, expires_at
+        )
+
+    # Get company name for email (outside transaction — read-only)
+    company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", org_id)
+    company_name = company["name"] if company else "Your Company"
+
+    # Send invitation email
+    email_service = EmailService()
+    await email_service.send_employee_invitation_email(
+        to_email=employee["email"],
+        to_name=f"{employee['first_name']} {employee['last_name']}",
+        company_name=company_name,
+        token=token,
+        expires_at=expires_at,
+    )
+
+    return {
+        "invitation_id": invitation["id"],
+        "token": invitation["token"],
+        "expires_at": invitation["expires_at"]
+    }
 
 
 async def _auto_send_invitation(

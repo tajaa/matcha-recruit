@@ -1301,7 +1301,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
             {/* Invite All button — only in onboarding mode when uninvited employees exist */}
             {mode === 'onboarding' && (() => {
-              const uninvitedCount = employees.filter(e => !e.user_id && e.invitation_status !== 'pending').length;
+              const uninvitedCount = employees.filter(e => !e.user_id && !e.termination_date && e.invitation_status !== 'pending').length;
               if (uninvitedCount === 0) return null;
               return (
                 <button
