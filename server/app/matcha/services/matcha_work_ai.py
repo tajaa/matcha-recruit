@@ -12,7 +12,7 @@ from google.genai import types
 
 from ...config import get_settings
 from ...core.services.platform_settings import get_matcha_work_model_mode
-from ..models.matcha_work import OfferLetterDocument, OnboardingDocument, PresentationDocument, ReviewDocument, WorkbookDocument
+from ..models.matcha_work import HandbookDocument, OfferLetterDocument, OnboardingDocument, PresentationDocument, ReviewDocument, WorkbookDocument
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +23,10 @@ REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
 WORKBOOK_FIELDS = list(WorkbookDocument.model_fields.keys())
 ONBOARDING_FIELDS = list(OnboardingDocument.model_fields.keys())
 PRESENTATION_FIELDS = list(PresentationDocument.model_fields.keys())
+HANDBOOK_FIELDS = list(HandbookDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "none"}
+SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -36,6 +37,7 @@ SUPPORTED_AI_OPERATIONS = {
     "track",
     "create_employees",
     "generate_presentation",
+    "generate_handbook",
     "none",
 }
 
@@ -70,6 +72,27 @@ Supported skills:
   Set batch_status to "collecting" while gathering info, "ready" when user confirms the list.
   Use create_employees operation ONLY when user explicitly confirms the employee list is ready.
   Always collect ALL employees before creating. Do not create one at a time unless asked.
+- handbook: create employee handbooks through guided conversation. Source type is always "template".
+  Collect these fields progressively through natural conversation:
+  1. handbook_title (string) — descriptive name like "2026 CA Employee Handbook"
+  2. handbook_states (array of 2-letter US state codes) — where the handbook applies
+  3. handbook_industry (string: general/technology/hospitality/retail/manufacturing/healthcare)
+  4. handbook_sub_industry (string) — specific business description
+  5. handbook_legal_name (string) — registered legal entity name
+  6. handbook_ceo (string) — CEO or President full name
+  7. handbook_dba (string, optional) — DBA name if used
+  8. handbook_headcount (integer, optional) — approximate employee count
+  9. handbook_profile (object with boolean flags):
+     remote_workers, minors, tipped_employees, tip_pooling, union_employees,
+     federal_contracts, group_health_insurance, background_checks,
+     hourly_employees (default true), salaried_employees, commissioned_employees
+  10. handbook_custom_sections (array of {{title, content}}, optional) — extra company policies
+  11. handbook_guided_answers (object, optional) — answers to follow-up questions
+  handbook_mode is auto-derived: 1 state = "single_state", 2+ = "multi_state".
+  Set handbook_status to "collecting" while gathering, "ready" when user confirms.
+  Use generate_handbook operation ONLY when user explicitly says to generate/create.
+  Required before generation: handbook_title, handbook_states (>=1), handbook_legal_name, handbook_ceo.
+  Ask about profile booleans naturally based on industry context (e.g., for hospitality ask about tips).
 
 Mode selection:
 - mode=skill when user clearly asks for a supported action.
@@ -91,8 +114,8 @@ Output constraints:
 - JSON format:
 {{
   "mode": "skill|general|clarify|refuse",
-  "skill": "offer_letter|review|workbook|onboarding|presentation|none",
-  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|none",
+  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|none",
+  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|generate_handbook|none",
   "confidence": 0.0,
   "updates": {{}},
   "missing_fields": [],
@@ -156,6 +179,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "offer_letter"
     if any(k in current_state for k in ("overall_rating", "review_title", "review_request_statuses", "review_expected_responses")):
         return "review"
+    if any(k.startswith("handbook_") for k in current_state):
+        return "handbook"
     if "sections" in current_state or "workbook_title" in current_state:
         return "workbook"
     if any(k in current_state for k in ("employees", "batch_status")):
@@ -383,9 +408,11 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields = ONBOARDING_FIELDS
         elif current_skill == "presentation":
             valid_fields = PRESENTATION_FIELDS
+        elif current_skill == "handbook":
+            valid_fields = HANDBOOK_FIELDS
         else:
             # No active skill yet — allow any skill to be initiated
-            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS
+            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS
 
         system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
             today=date.today().isoformat(),

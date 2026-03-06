@@ -77,6 +77,23 @@ struct SkillsView: View {
                     )
 
                     SkillCard(
+                        icon: "book.closed.fill",
+                        name: "Employee Handbooks",
+                        color: .teal,
+                        description: "Create state-compliant employee handbooks through guided conversation. The AI collects company details, profile flags, and industry context, then generates a full handbook with coverage scoring.",
+                        triggers: [
+                            "Create an employee handbook for our California team",
+                            "Build a multi-state handbook for CA and NY",
+                            "Start a new employee handbook for our restaurant"
+                        ],
+                        operations: [
+                            SkillOperation(name: "Collect info", description: "Answer questions about your company, states, and workforce profile"),
+                            SkillOperation(name: "Generate", description: "\"Generate the handbook\" — creates all sections from templates"),
+                            SkillOperation(name: "Coverage score", description: "Automatic strength analysis after generation"),
+                        ]
+                    )
+
+                    SkillCard(
                         icon: "person.badge.plus.fill",
                         name: "Onboarding",
                         color: .purple,

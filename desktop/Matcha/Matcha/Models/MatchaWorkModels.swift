@@ -22,6 +22,7 @@ enum MWTaskType: String, Codable {
     case workbook
     case onboarding
     case presentation
+    case handbook
     case chat
 
     var label: String {
@@ -36,6 +37,8 @@ enum MWTaskType: String, Codable {
             return "employee onboarding"
         case .presentation:
             return "presentation"
+        case .handbook:
+            return "employee handbook"
         case .offerLetter:
             return "offer letter"
         }
@@ -48,6 +51,9 @@ func inferMWTaskType(from state: [String: AnyCodable]) -> MWTaskType {
     }
     if state["overall_rating"] != nil || state["review_title"] != nil || state["review_request_statuses"] != nil {
         return .review
+    }
+    if state.keys.contains(where: { $0.hasPrefix("handbook_") }) {
+        return .handbook
     }
     if state["sections"] != nil || state["workbook_title"] != nil {
         return .workbook

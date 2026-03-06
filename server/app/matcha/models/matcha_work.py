@@ -110,6 +110,55 @@ class WorkbookDocument(BaseModel):
     images: Optional[list[str]] = None  # S3/CDN URLs for presentation images
 
 
+class HandbookProfileFlags(BaseModel):
+    remote_workers: Optional[bool] = None
+    minors: Optional[bool] = None
+    tipped_employees: Optional[bool] = None
+    tip_pooling: Optional[bool] = None
+    union_employees: Optional[bool] = None
+    federal_contracts: Optional[bool] = None
+    group_health_insurance: Optional[bool] = None
+    background_checks: Optional[bool] = None
+    hourly_employees: Optional[bool] = None
+    salaried_employees: Optional[bool] = None
+    commissioned_employees: Optional[bool] = None
+
+
+class HandbookCustomSection(BaseModel):
+    title: str
+    content: str
+
+
+class HandbookSectionPreview(BaseModel):
+    section_key: str
+    title: str
+    content: str  # truncated to 500 chars
+    section_type: Optional[str] = None
+
+
+class HandbookDocument(BaseModel):
+    """Incremental handbook state — builds turn by turn via conversation."""
+
+    handbook_title: Optional[str] = None
+    handbook_mode: Optional[str] = None  # single_state, multi_state
+    handbook_industry: Optional[str] = None
+    handbook_sub_industry: Optional[str] = None
+    handbook_states: Optional[list[str]] = None
+    handbook_legal_name: Optional[str] = None
+    handbook_dba: Optional[str] = None
+    handbook_ceo: Optional[str] = None
+    handbook_headcount: Optional[int] = None
+    handbook_profile: Optional[HandbookProfileFlags] = None
+    handbook_custom_sections: Optional[list[HandbookCustomSection]] = None
+    handbook_guided_answers: Optional[dict[str, str]] = None
+    handbook_status: Optional[str] = None
+    handbook_id: Optional[str] = None
+    handbook_sections: Optional[list[HandbookSectionPreview]] = None
+    handbook_error: Optional[str] = None
+    handbook_strength_score: Optional[int] = None
+    handbook_strength_label: Optional[str] = None
+
+
 class PresentationSlide(BaseModel):
     title: str
     bullets: Optional[list[str]] = None

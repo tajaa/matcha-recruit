@@ -36,6 +36,9 @@ class ThreadDetailViewModel {
             return currentState["employees"] != nil
         case .presentation:
             return currentState["presentation_title"] != nil || currentState["slides"] != nil
+        case .handbook:
+            return currentState["handbook_title"] != nil
+                || currentState["handbook_sections"] != nil
         case .chat:
             return false
         }

@@ -21,6 +21,7 @@ from ..models.matcha_work import (
     DocumentVersionResponse,
     ElementListItem,
     FinalizeResponse,
+    HandbookDocument,
     MWMessageOut,
     OnboardingDocument,
     PresentationDocument,
@@ -68,6 +69,7 @@ VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
 VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys()) - {"images"}
 VALID_ONBOARDING_FIELDS = set(OnboardingDocument.model_fields.keys())
 VALID_PRESENTATION_FIELDS = set(PresentationDocument.model_fields.keys()) - {"cover_image_url"}
+VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys())
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
@@ -84,6 +86,8 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
         valid_fields = VALID_WORKBOOK_FIELDS
     elif skill == "presentation":
         valid_fields = VALID_PRESENTATION_FIELDS
+    elif skill == "handbook":
+        valid_fields = VALID_HANDBOOK_FIELDS
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -497,7 +501,7 @@ async def _apply_ai_updates_and_operations(
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
     # inferring from the update keys themselves so workbook/review/etc. updates
     # created on a fresh thread aren't silently dropped.
-    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
         skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
         if skill_from_updates != "chat":
             skill = skill_from_updates
@@ -678,6 +682,120 @@ async def _apply_ai_updates_and_operations(
                         f"Generated a presentation with {generated['slide_count']} slides. "
                         "Open Preview to review and download."
                     )
+            elif operation == "generate_handbook":
+                if skill != "handbook":
+                    action_note = "Handbook generation is only available in handbook threads."
+                else:
+                    title = current_state.get("handbook_title")
+                    states = current_state.get("handbook_states") or []
+                    legal_name = current_state.get("handbook_legal_name")
+                    ceo = current_state.get("handbook_ceo")
+
+                    if not title or not states or not legal_name or not ceo:
+                        missing = []
+                        if not title: missing.append("handbook_title")
+                        if not states: missing.append("handbook_states")
+                        if not legal_name: missing.append("handbook_legal_name")
+                        if not ceo: missing.append("handbook_ceo")
+                        action_note = f"Cannot generate — missing required fields: {', '.join(missing)}"
+                    else:
+                        await doc_svc.apply_update(thread_id, {"handbook_status": "generating"})
+
+                        from ...core.models.handbook import (
+                            HandbookCreateRequest, HandbookScopeInput,
+                            CompanyHandbookProfileInput, HandbookSectionInput,
+                        )
+                        profile_data = current_state.get("handbook_profile") or {}
+                        raw = profile_data if isinstance(profile_data, dict) else {}
+
+                        scopes = [HandbookScopeInput(state=s.upper()) for s in states]
+                        mode = "single_state" if len(scopes) == 1 else "multi_state"
+
+                        profile = CompanyHandbookProfileInput(
+                            legal_name=legal_name,
+                            dba=current_state.get("handbook_dba"),
+                            ceo_or_president=ceo,
+                            headcount=current_state.get("handbook_headcount"),
+                            remote_workers=raw.get("remote_workers", False),
+                            minors=raw.get("minors", False),
+                            tipped_employees=raw.get("tipped_employees", False),
+                            tip_pooling=raw.get("tip_pooling", False),
+                            union_employees=raw.get("union_employees", False),
+                            federal_contracts=raw.get("federal_contracts", False),
+                            group_health_insurance=raw.get("group_health_insurance", False),
+                            background_checks=raw.get("background_checks", False),
+                            hourly_employees=raw.get("hourly_employees", True),
+                            salaried_employees=raw.get("salaried_employees", False),
+                            commissioned_employees=raw.get("commissioned_employees", False),
+                        )
+
+                        custom_sections_raw = current_state.get("handbook_custom_sections") or []
+                        custom_sections = [
+                            HandbookSectionInput(
+                                section_key=f"custom_{i}",
+                                title=s.get("title", ""),
+                                content=s.get("content", ""),
+                                section_order=900 + i,
+                                section_type="custom",
+                            )
+                            for i, s in enumerate(custom_sections_raw)
+                            if isinstance(s, dict) and s.get("title")
+                        ]
+
+                        req = HandbookCreateRequest(
+                            title=title,
+                            mode=mode,
+                            source_type="template",
+                            industry=current_state.get("handbook_industry"),
+                            scopes=scopes,
+                            profile=profile,
+                            custom_sections=custom_sections,
+                            guided_answers=current_state.get("handbook_guided_answers") or {},
+                            create_from_template=True,
+                        )
+
+                        handbook = await HandbookService.create_handbook(
+                            company_id=str(company_id),
+                            data=req,
+                            created_by=str(current_user_id) if current_user_id else None,
+                        )
+
+                        section_previews = [
+                            {"section_key": s.section_key, "title": s.title,
+                             "content": (s.content or "")[:500], "section_type": s.section_type}
+                            for s in (handbook.sections or [])
+                        ]
+
+                        coverage_updates = {}
+                        try:
+                            async with get_connection() as cov_conn:
+                                industry_key = await cov_conn.fetchval(
+                                    "SELECT industry FROM companies WHERE id = $1", str(company_id)
+                                )
+                            coverage = HandbookService.compute_coverage(handbook, industry_key or "")
+                            coverage_updates = {
+                                "handbook_strength_score": coverage.strength_score,
+                                "handbook_strength_label": coverage.strength_label,
+                            }
+                        except Exception as cov_err:
+                            logger.warning("Coverage computation failed: %s", cov_err)
+
+                        result = await doc_svc.apply_update(thread_id, {
+                            "handbook_status": "created",
+                            "handbook_id": str(handbook.id),
+                            "handbook_mode": mode,
+                            "handbook_sections": section_previews,
+                            **coverage_updates,
+                        })
+                        current_version = result["version"]
+                        current_state = result["current_state"]
+                        changed = True
+
+                        section_count = len(handbook.sections or [])
+                        score_note = ""
+                        if coverage_updates.get("handbook_strength_score") is not None:
+                            score_note = f" Coverage score: {coverage_updates['handbook_strength_score']}/100 ({coverage_updates['handbook_strength_label']})."
+                        action_note = f"Handbook created with {section_count} sections.{score_note}"
             else:
                 action_note = f"The action '{operation}' is not supported yet."
         except ValueError as e:

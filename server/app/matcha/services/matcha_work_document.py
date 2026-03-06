@@ -232,6 +232,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "offer_letter"
     if any(k in current_state for k in ("overall_rating", "review_title", "review_request_statuses", "review_expected_responses")):
         return "review"
+    if any(k.startswith("handbook_") for k in current_state):
+        return "handbook"
     if "sections" in current_state or "workbook_title" in current_state:
         return "workbook"
     if any(k in current_state for k in ("employees", "batch_status")):
