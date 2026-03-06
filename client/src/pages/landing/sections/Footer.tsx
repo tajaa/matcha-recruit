@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-import { fonts } from "../constants";
 
 export const Footer = () => {
   const landingBuildVersion = import.meta.env.VITE_LANDING_BUILD_VERSION || "dev";
