@@ -14,6 +14,7 @@ import { PricingContactModal } from "./components/PricingContactModal";
 import { Hero } from "./sections/Hero";
 import { Compliance } from "./sections/Compliance";
 import { ERCopilot } from "./sections/ERCopilot";
+import { RiskSnapshot } from "./sections/RiskSnapshot";
 import { Footer } from "./sections/Footer";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -149,6 +150,8 @@ export function Landing() {
       <Compliance />
 
       <ERCopilot ref={manifestoRef} />
+
+      <RiskSnapshot ref={manifestoRef} />
 
       {/* <Interviewer ref={manifestoRef} />
 

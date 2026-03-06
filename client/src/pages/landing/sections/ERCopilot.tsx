@@ -1,6 +1,6 @@
 import { forwardRef } from "react";
 import { motion, type Variants } from "framer-motion";
-import { Scale, FileText, AlertTriangle, BookOpen, ShieldAlert } from "lucide-react";
+import { Scale, BookOpen, ShieldAlert } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { fonts, ER_INFERENCE_WIDTHS } from "../constants";

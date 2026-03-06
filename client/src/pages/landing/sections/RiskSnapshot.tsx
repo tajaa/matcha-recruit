@@ -1,0 +1,191 @@
+import { forwardRef } from "react";
+import { motion, type Variants } from "framer-motion";
+import { Radar, Activity, ShieldCheck } from "lucide-react";
+import { TelemetryBadge } from "../components/TelemetryBadge";
+import { TechnicalSpecs } from "../components/TechnicalSpecs";
+import { fonts } from "../constants";
+
+export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
+  const containerVariants: Variants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { staggerChildren: 0.25 }
+    }
+  };
+
+  const featureVariants: Variants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: { 
+      opacity: 1, 
+      y: 0,
+      transition: { duration: 0.6, ease: "easeOut" }
+    }
+  };
+
+  return (
+    <motion.section
+      ref={ref}
+      variants={containerVariants}
+      initial="hidden"
+      whileInView="visible"
+      viewport={{ once: true, margin: "-100px" }}
+      className="risk-snapshot-trigger py-64 px-6 md:px-16 lg:px-32 relative bg-[#060807] overflow-hidden border-t border-white/5"
+    >
+      {/* Background Depth */}
+      <div className="absolute inset-0 z-0 pointer-events-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] bg-white/[0.01] rounded-full blur-[100px] mix-blend-screen" />
+      </div>
+
+      <div className="max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center relative z-10">
+        
+        <div className="space-y-12 pr-12">
+          <motion.div variants={featureVariants} className="flex items-center gap-4">
+            <TelemetryBadge text="Active Surveillance" active={true} />
+            <TechnicalSpecs 
+              title="Threat Detection"
+              specs={[
+                "Continuous state synchronization",
+                "Heuristic risk mapping",
+                "Automated gap analysis",
+                "Real-time compliance alerts"
+              ]}
+            />
+          </motion.div>
+
+          <motion.h2
+            variants={featureVariants}
+            className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.85]"
+            style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
+          >
+            RISK <br />
+            <span
+              className="italic text-zinc-500 font-light lowercase"
+              style={{ fontFamily: fonts.serif, letterSpacing: 'normal' }}
+            >
+              Snapshot.
+            </span>
+          </motion.h2>
+
+          <motion.p 
+            variants={featureVariants}
+            className="text-zinc-500 text-xl md:text-2xl font-light leading-relaxed max-w-xl"
+            style={{ fontFamily: fonts.sans }}
+          >
+            The biggest risk is the one you don’t see coming. 
+          </motion.p>
+          
+          <motion.p 
+            variants={featureVariants}
+            className="text-zinc-400 text-base md:text-lg font-light leading-relaxed max-w-xl"
+            style={{ fontFamily: fonts.sans }}
+          >
+            Matcha actively monitors your compliance landscape, acting as an early warning system to help you stay compliant day-to-day.
+          </motion.p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
+            <motion.div variants={featureVariants} className="space-y-4 group">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
+                  <Radar size={20} />
+                </div>
+                <h4 className="font-bold text-white uppercase tracking-[0.2em] text-xs font-mono">
+                  Continuous Sweep
+                </h4>
+              </div>
+              <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
+                Constant surveillance of active operations against local regulations.
+              </p>
+            </motion.div>
+
+            <motion.div variants={featureVariants} className="space-y-4 group">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
+                  <Activity size={20} />
+                </div>
+                <h4 className="font-bold text-white uppercase tracking-[0.2em] text-xs font-mono">
+                  Early Warning
+                </h4>
+              </div>
+              <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
+                Proactive alerts for pending compliance deadlines and exposure risks.
+              </p>
+            </motion.div>
+          </div>
+        </div>
+
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9, x: 50 }}
+          whileInView={{ opacity: 1, scale: 1, x: 0 }}
+          transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
+          className="relative"
+        >
+          {/* Radar / Snapshot Visual */}
+          <div className="relative aspect-square max-w-lg mx-auto bg-[#0A0E0C] border border-white/10 flex items-center justify-center p-12 overflow-hidden shadow-[0_0_80px_rgba(255,255,255,0.02)] group rounded-full">
+            
+            {/* Radar Sweep */}
+            <div className="absolute inset-0 z-0">
+              <motion.div
+                animate={{ rotate: 360 }}
+                transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+                className="w-full h-full rounded-full"
+                style={{
+                  background: "conic-gradient(from 0deg, transparent 70%, rgba(255,255,255,0.08) 100%)",
+                }}
+              />
+            </div>
+
+            {/* Concentric Circles */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-[80%] h-[80%] border border-white/5 rounded-full" />
+              <div className="w-[60%] h-[60%] border border-white/5 rounded-full absolute" />
+              <div className="w-[40%] h-[40%] border border-white/10 rounded-full absolute" />
+              <div className="w-[20%] h-[20%] border border-white/20 rounded-full absolute bg-white/5" />
+            </div>
+
+            {/* Crosshairs */}
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-full h-[1px] bg-white/5" />
+              <div className="h-full w-[1px] bg-white/5 absolute" />
+            </div>
+
+            {/* Threat Nodes / Blips */}
+            <div className="absolute inset-0 z-10">
+              {[
+                { top: "30%", left: "65%", delay: 0 },
+                { top: "75%", left: "35%", delay: 1.5 },
+                { top: "45%", left: "20%", delay: 3 },
+                { top: "25%", left: "35%", delay: 4.5 },
+              ].map((pos, i) => (
+                <motion.div
+                  key={i}
+                  className="absolute w-2 h-2 bg-white rounded-full"
+                  style={{ top: pos.top, left: pos.left }}
+                  initial={{ opacity: 0, scale: 0 }}
+                  animate={{ opacity: [0, 0.8, 0], scale: [0.5, 1.5, 0.5] }}
+                  transition={{ duration: 4, repeat: Infinity, delay: pos.delay }}
+                >
+                  <div className="absolute inset-0 bg-white rounded-full animate-ping opacity-50" />
+                </motion.div>
+              ))}
+            </div>
+
+            {/* Center Eye / Core */}
+            <div className="relative z-20 flex flex-col items-center gap-3">
+               <div className="bg-black border border-white/20 p-4 rounded-full shadow-[0_0_30px_rgba(255,255,255,0.1)]">
+                 <ShieldCheck size={24} className="text-zinc-300" />
+               </div>
+               <span className="text-[9px] font-mono uppercase tracking-[0.3em] text-white/50 bg-[#0A0E0C] px-3 py-1.5 border border-white/10 rounded-full shadow-xl">
+                 Scanning
+               </span>
+            </div>
+
+          </div>
+        </motion.div>
+
+      </div>
+    </motion.section>
+  );
+});
+
+RiskSnapshot.displayName = "RiskSnapshot";
