@@ -14,3 +14,7 @@ htmlcov/
 .git
 .idea
 .vscode
+
+# Agent local models and workspace (1.7GB+ of GGUF files)
+agent/models/
+agent/workspace/
