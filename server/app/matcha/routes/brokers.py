@@ -947,3 +947,23 @@ async def list_referred_clients(current_user: CurrentUser = Depends(require_brok
             "total": len(clients),
             "clients": clients,
         }
+
+
+@router.get("/reporting/handbook-coverage")
+async def get_broker_handbook_coverage(current_user: CurrentUser = Depends(require_broker)):
+    from ...core.services.handbook_service import HandbookService
+
+    async with get_connection() as conn:
+        membership = await _get_broker_membership(conn, user_id=current_user.id)
+        await _assert_terms_accepted(conn, broker_id=membership["broker_id"], user_id=current_user.id)
+
+        company_ids = [
+            str(row["company_id"])
+            for row in await conn.fetch(
+                "SELECT company_id FROM broker_company_links WHERE broker_id = $1 AND status <> 'terminated'",
+                membership["broker_id"],
+            )
+        ]
+
+    summaries = await HandbookService.compute_coverage_summaries(company_ids)
+    return summaries

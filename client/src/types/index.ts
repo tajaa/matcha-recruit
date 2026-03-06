@@ -2395,6 +2395,52 @@ export interface HandbookWizardDraft {
 }
 
 
+export interface HandbookCoverageByState {
+  state: string;
+  state_name: string;
+  has_addendum: boolean;
+  covered_categories: string[];
+  missing_categories: string[];
+  city_scopes: string[];
+}
+
+export interface HandbookMissingSection {
+  section_key: string;
+  title: string;
+  reason: string;
+  priority: 'required' | 'recommended';
+}
+
+export interface HandbookCoverage {
+  handbook_id: string;
+  strength_score: number;
+  strength_label: 'Strong' | 'Moderate' | 'Weak';
+  total_sections: number;
+  core_sections: number;
+  state_sections: number;
+  custom_sections: number;
+  uploaded_sections: number;
+  federal_core_count: number;
+  state_level_count: number;
+  city_level_count: number;
+  state_coverage: HandbookCoverageByState[];
+  missing_sections: HandbookMissingSection[];
+  industry: string;
+  industry_label: string;
+}
+
+export interface HandbookCoverageSummary {
+  handbook_id: string;
+  handbook_title: string;
+  company_id: string;
+  company_name: string;
+  strength_score: number;
+  strength_label: 'Strong' | 'Moderate' | 'Weak';
+  total_sections: number;
+  state_count: number;
+  missing_section_count: number;
+}
+
 export interface IRAuditLogResponse {
   entries: IRAuditLogEntry[];
   total: number;

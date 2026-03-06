@@ -12,6 +12,7 @@ from ..models.handbook import (
     CompanyHandbookProfileResponse,
     HandbookAcknowledgementSummary,
     HandbookChangeRequestResponse,
+    HandbookCoverageResponse,
     HandbookCreateRequest,
     HandbookDetailResponse,
     HandbookDistributionRecipientResponse,
@@ -167,6 +168,27 @@ async def delete_handbook_wizard_draft(
         raise HTTPException(status_code=400, detail="No company found")
     deleted = await HandbookService.delete_wizard_draft(str(company_id), str(current_user.id))
     return {"deleted": deleted}
+
+
+@router.get("/{handbook_id}/coverage", response_model=HandbookCoverageResponse)
+async def get_handbook_coverage(
+    handbook_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    handbook = await HandbookService.get_handbook_by_id(handbook_id, str(company_id))
+    if handbook is None:
+        raise HTTPException(status_code=404, detail="Handbook not found")
+
+    async with get_connection() as conn:
+        industry = await conn.fetchval(
+            "SELECT industry FROM companies WHERE id = $1", str(company_id)
+        )
+
+    return HandbookService.compute_coverage(handbook, company_industry=industry)
 
 
 @router.get("/{handbook_id}", response_model=HandbookDetailResponse)

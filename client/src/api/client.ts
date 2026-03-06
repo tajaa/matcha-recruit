@@ -533,6 +533,9 @@ export const brokerPortal = {
   getPortfolioReport: () =>
     request<BrokerPortfolioReportResponse>('/brokers/reporting/portfolio'),
 
+  getHandbookCoverage: () =>
+    request<import('../types').HandbookCoverageSummary[]>('/brokers/reporting/handbook-coverage'),
+
   getReferredClients: () =>
     request<{
       broker_slug: string;
@@ -2844,6 +2847,9 @@ export const handbooks = {
     request<HandbookFreshnessCheck>(`/handbooks/${id}/freshness-check`, {
       method: 'POST',
     }),
+
+  getCoverage: (id: string) =>
+    request<import('../types').HandbookCoverage>(`/handbooks/${id}/coverage`),
 
   markSectionReviewed: (handbookId: string, sectionId: string) =>
     request(`/handbooks/${handbookId}/sections/${sectionId}/mark-reviewed`, {

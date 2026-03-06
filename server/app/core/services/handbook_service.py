@@ -17,6 +17,9 @@ from ..models.handbook import (
     CompanyHandbookProfileResponse,
     HandbookAcknowledgementSummary,
     HandbookChangeRequestResponse,
+    HandbookCoverageByState,
+    HandbookCoverageResponse,
+    HandbookCoverageSummary,
     HandbookCreateRequest,
     HandbookDetailResponse,
     HandbookDistributionRecipientResponse,
@@ -28,6 +31,7 @@ from ..models.handbook import (
     HandbookGuidedQuestion,
     HandbookGuidedSectionSuggestion,
     HandbookListItemResponse,
+    HandbookMissingSectionResponse,
     HandbookPublishResponse,
     HandbookScopeInput,
     HandbookScopeResponse,
@@ -3894,3 +3898,348 @@ class HandbookService:
         pdf_bytes = HTML(string=html_content).write_pdf()
         filename = _handbook_filename(handbook.title, handbook.active_version)
         return pdf_bytes, filename
+
+    @staticmethod
+    def compute_coverage(
+        handbook: HandbookDetailResponse,
+        company_industry: Optional[str] = None,
+    ) -> HandbookCoverageResponse:
+        scopes = handbook.scopes
+        profile = handbook.profile
+
+        # Uploaded handbooks have only a placeholder section — score them
+        # as unscored so the UI doesn't report misleading numbers.
+        if handbook.source_type == "upload":
+            scoped_states = sorted({s.state.upper() for s in scopes})
+            industry_key = _normalize_industry(None, company_industry)
+            playbook = GUIDED_INDUSTRY_PLAYBOOK.get(industry_key, {})
+            return HandbookCoverageResponse(
+                handbook_id=handbook.id,
+                strength_score=0,
+                strength_label="Weak",
+                total_sections=len(handbook.sections),
+                core_sections=0,
+                state_sections=0,
+                custom_sections=0,
+                uploaded_sections=len(handbook.sections),
+                federal_core_count=0,
+                state_level_count=len(scoped_states),
+                city_level_count=sum(1 for s in scopes if s.city),
+                state_coverage=[],
+                missing_sections=[HandbookMissingSectionResponse(
+                    section_key="uploaded_not_scored",
+                    title="Uploaded handbook",
+                    reason="Uploaded handbooks cannot be scored — only template-based handbooks are analyzed",
+                    priority="recommended",
+                )],
+                industry=industry_key,
+                industry_label=playbook.get("label", industry_key.replace("_", " ").title()),
+            )
+
+        sections = handbook.sections
+
+        section_keys = {s.section_key for s in sections}
+        all_text = "\n".join(
+            f"{s.section_key} {s.title} {s.content}".lower() for s in sections
+        )
+
+        # ── 1. Core sections (30 pts) ──
+        CORE_KEYS = {
+            "welcome", "employment_relationship", "equal_opportunity",
+            "hours_and_pay", "attendance_and_remote", "benefits_and_leave",
+            "workplace_standards", "investigations", "acknowledgement",
+        }
+        present_core = sum(1 for k in CORE_KEYS if k in section_keys)
+        core_score = (present_core / len(CORE_KEYS)) * 30
+
+        # ── 2. State addenda (30 pts) ──
+        # _build_state_addendum_content always emits heading text containing
+        # category keywords (e.g. "Paid Sick Leave") even when no compliance
+        # data exists, plus a fallback review line. We strip out heading lines
+        # and fallback lines so only actual requirement data drives coverage.
+        _fallback_lower = ADDENDUM_FALLBACK_REVIEW_LINE.lower()
+
+        scoped_states = sorted({s.state.upper() for s in scopes})
+        state_coverage_list: list[HandbookCoverageByState] = []
+        state_scores: list[float] = []
+        for st in scoped_states:
+            addendum_key = f"state_addendum_{st.lower()}"
+            has_addendum = any(
+                s.section_key == addendum_key or s.section_key.startswith(f"state_addendum_{st.lower()}_")
+                for s in sections
+            )
+            # Collect only substantive content lines: exclude numbered
+            # headings (e.g. "1) Wage...") and the fallback review line.
+            raw_lines: list[str] = []
+            for s in sections:
+                if s.section_key == addendum_key or s.section_key.startswith(f"state_addendum_{st.lower()}_"):
+                    for line in s.content.lower().split("\n"):
+                        stripped = line.strip().lstrip("- ")
+                        if not stripped:
+                            continue
+                        if _fallback_lower in stripped:
+                            continue
+                        if re.match(r"^\d+\)\s", stripped):
+                            continue
+                        raw_lines.append(stripped)
+            addendum_content = "\n".join(raw_lines)
+            covered = []
+            missing = []
+            for cat, keywords in MANDATORY_STATE_TOPIC_RULES.items():
+                if any(kw in addendum_content for kw in keywords):
+                    covered.append(cat)
+                else:
+                    missing.append(cat)
+            cat_coverage = len(covered) / len(MANDATORY_STATE_TOPIC_RULES) if MANDATORY_STATE_TOPIC_RULES else 1.0
+            state_scores.append(cat_coverage)
+            city_scopes = sorted({s.city for s in scopes if s.state.upper() == st and s.city})
+            state_coverage_list.append(HandbookCoverageByState(
+                state=st,
+                state_name=STATE_NAMES.get(st, st),
+                has_addendum=has_addendum,
+                covered_categories=covered,
+                missing_categories=missing,
+                city_scopes=city_scopes,
+            ))
+        avg_state = sum(state_scores) / len(state_scores) if state_scores else 1.0
+        state_score = avg_state * 30
+
+        # ── 3. Profile requirements (25 pts) ──
+        PROFILE_GAP_RULES = [
+            ("tipped_employees", ["tip"], "Tipped employees flagged but no tip compliance policy"),
+            ("tip_pooling", ["tip pool"], "Tip pooling enabled but no tip pool governance section"),
+            ("union_employees", ["union", "collective bargaining"], "Union employees but no CBA/union policy section"),
+            ("federal_contracts", ["federal contract"], "Federal contracts but no contractor compliance section"),
+            ("remote_workers", ["remote work"], "Remote workers but no remote work compliance section"),
+            ("background_checks", ["background check", "fair chance"], "Background checks enabled but no background check policy"),
+            ("group_health_insurance", ["health insurance", "benefits enrollment"], "Group health insurance but no benefits enrollment section"),
+        ]
+        missing_sections: list[HandbookMissingSectionResponse] = []
+        total_profile_checks = 0
+        profile_missing_count = 0
+
+        for flag, keywords, reason in PROFILE_GAP_RULES:
+            if getattr(profile, flag, False):
+                total_profile_checks += 1
+                if not any(kw in all_text for kw in keywords):
+                    profile_missing_count += 1
+                    missing_sections.append(HandbookMissingSectionResponse(
+                        section_key=flag,
+                        title=reason.split(" but ")[0] if " but " in reason else flag.replace("_", " ").title(),
+                        reason=reason,
+                        priority="required",
+                    ))
+
+        # Special case: minors — check per-state
+        if getattr(profile, "minors", False):
+            for st in scoped_states:
+                total_profile_checks += 1
+                addendum_text_st = "\n".join(
+                    f"{s.section_key} {s.title} {s.content}".lower()
+                    for s in sections
+                    if s.section_key.startswith(f"state_addendum_{st.lower()}")
+                )
+                minor_keywords = MANDATORY_STATE_TOPIC_RULES.get("minor_work_permit", ())
+                if not any(kw in addendum_text_st for kw in minor_keywords):
+                    profile_missing_count += 1
+                    missing_sections.append(HandbookMissingSectionResponse(
+                        section_key=f"minors_{st.lower()}",
+                        title=f"Youth employment coverage for {STATE_NAMES.get(st, st)}",
+                        reason=f"Minors employed but no youth employment coverage for {STATE_NAMES.get(st, st)}",
+                        priority="required",
+                    ))
+
+        if total_profile_checks == 0:
+            profile_score = 25.0
+        else:
+            profile_score = ((total_profile_checks - profile_missing_count) / total_profile_checks) * 25
+
+        # ── 4. Industry sections (15 pts) ──
+        industry_key = _normalize_industry(None, company_industry)
+        playbook = GUIDED_INDUSTRY_PLAYBOOK.get(industry_key, {})
+        industry_label = playbook.get("label", industry_key.replace("_", " ").title())
+        expected_industry_sections = playbook.get("sections", [])
+        industry_found = 0
+        for exp in expected_industry_sections:
+            exp_title = exp.get("title", "")
+            slug = re.sub(r"[^a-z0-9]+", "_", exp_title.lower()).strip("_")
+            if any(
+                slug in s.section_key or slug in re.sub(r"[^a-z0-9]+", "_", s.title.lower()).strip("_")
+                for s in sections
+            ):
+                industry_found += 1
+            else:
+                missing_sections.append(HandbookMissingSectionResponse(
+                    section_key=slug,
+                    title=exp_title,
+                    reason=f"Industry playbook ({industry_label}) recommends this section",
+                    priority="recommended",
+                ))
+        if expected_industry_sections:
+            industry_score = (industry_found / len(expected_industry_sections)) * 15
+        else:
+            industry_score = 15.0
+
+        # ── Final score ──
+        strength_score = min(100, max(0, round(core_score + state_score + profile_score + industry_score)))
+        if strength_score >= 80:
+            strength_label = "Strong"
+        elif strength_score >= 50:
+            strength_label = "Moderate"
+        else:
+            strength_label = "Weak"
+
+        core_count = sum(1 for s in sections if s.section_type == "core")
+        state_count = sum(1 for s in sections if s.section_type == "state")
+        custom_count = sum(1 for s in sections if s.section_type == "custom")
+        uploaded_count = sum(1 for s in sections if s.section_type == "uploaded")
+
+        federal_core_count = core_count
+        state_level_count = len(scoped_states)
+        city_level_count = sum(1 for s in scopes if s.city)
+
+        return HandbookCoverageResponse(
+            handbook_id=handbook.id,
+            strength_score=strength_score,
+            strength_label=strength_label,
+            total_sections=len(sections),
+            core_sections=core_count,
+            state_sections=state_count,
+            custom_sections=custom_count,
+            uploaded_sections=uploaded_count,
+            federal_core_count=federal_core_count,
+            state_level_count=state_level_count,
+            city_level_count=city_level_count,
+            state_coverage=state_coverage_list,
+            missing_sections=missing_sections,
+            industry=industry_key,
+            industry_label=industry_label,
+        )
+
+    @staticmethod
+    async def compute_coverage_summaries(company_ids: list[str]) -> list[HandbookCoverageSummary]:
+        if not company_ids:
+            return []
+
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    h.id AS handbook_id,
+                    h.title AS handbook_title,
+                    h.company_id,
+                    c.name AS company_name,
+                    c.industry,
+                    h.active_version,
+                    h.source_type,
+                    hs2.section_key,
+                    hs2.title AS section_title,
+                    hs2.content,
+                    hs2.section_type,
+                    hsc.state AS scope_state,
+                    hsc.city AS scope_city
+                FROM handbooks h
+                JOIN companies c ON c.id = h.company_id
+                JOIN handbook_versions hv
+                    ON hv.handbook_id = h.id AND hv.version_number = h.active_version
+                LEFT JOIN handbook_sections hs2 ON hs2.handbook_version_id = hv.id
+                LEFT JOIN handbook_scopes hsc ON hsc.handbook_id = h.id
+                WHERE h.company_id = ANY($1::uuid[])
+                  AND h.status = 'active'
+                  AND h.source_type = 'template'
+                ORDER BY h.company_id, h.id
+                """,
+                company_ids,
+            )
+
+        # Group by handbook
+        from collections import defaultdict
+        _fallback_lower = ADDENDUM_FALLBACK_REVIEW_LINE.lower()
+        hb_data: dict[str, dict] = {}
+        hb_sections: dict[str, dict[str, dict]] = defaultdict(dict)
+        hb_scopes: dict[str, set[str]] = defaultdict(set)
+
+        for row in rows:
+            hb_id = str(row["handbook_id"])
+            if hb_id not in hb_data:
+                hb_data[hb_id] = {
+                    "handbook_id": hb_id,
+                    "handbook_title": row["handbook_title"],
+                    "company_id": str(row["company_id"]),
+                    "company_name": row["company_name"],
+                    "industry": row["industry"],
+                }
+            if row["section_key"]:
+                hb_sections[hb_id][row["section_key"]] = {
+                    "section_key": row["section_key"],
+                    "title": row["section_title"] or "",
+                    "content": row["content"] or "",
+                    "section_type": row["section_type"] or "custom",
+                }
+            if row["scope_state"]:
+                hb_scopes[hb_id].add(row["scope_state"].upper())
+
+        summaries: list[HandbookCoverageSummary] = []
+        for hb_id, meta in hb_data.items():
+            secs = list(hb_sections[hb_id].values())
+            states = hb_scopes[hb_id]
+            section_keys = {s["section_key"] for s in secs}
+
+            CORE_KEYS = {
+                "welcome", "employment_relationship", "equal_opportunity",
+                "hours_and_pay", "attendance_and_remote", "benefits_and_leave",
+                "workplace_standards", "investigations", "acknowledgement",
+            }
+            core_score = (sum(1 for k in CORE_KEYS if k in section_keys) / len(CORE_KEYS)) * 30
+
+            state_scores_l: list[float] = []
+            for st in states:
+                raw_lines: list[str] = []
+                for s in secs:
+                    if s["section_key"].startswith(f"state_addendum_{st.lower()}"):
+                        for line in s["content"].lower().split("\n"):
+                            stripped = line.strip().lstrip("- ")
+                            if not stripped or _fallback_lower in stripped or re.match(r"^\d+\)\s", stripped):
+                                continue
+                            raw_lines.append(stripped)
+                addendum_content = "\n".join(raw_lines)
+                covered = sum(
+                    1 for keywords in MANDATORY_STATE_TOPIC_RULES.values()
+                    if any(kw in addendum_content for kw in keywords)
+                )
+                state_scores_l.append(covered / len(MANDATORY_STATE_TOPIC_RULES) if MANDATORY_STATE_TOPIC_RULES else 1.0)
+            avg_state = sum(state_scores_l) / len(state_scores_l) if state_scores_l else 1.0
+            state_score = avg_state * 30
+
+            industry_key = _normalize_industry(None, meta["industry"])
+            playbook = GUIDED_INDUSTRY_PLAYBOOK.get(industry_key, {})
+            expected = playbook.get("sections", [])
+            ind_found = 0
+            ind_missing = 0
+            for exp in expected:
+                slug = re.sub(r"[^a-z0-9]+", "_", exp.get("title", "").lower()).strip("_")
+                if any(slug in s["section_key"] or slug in re.sub(r"[^a-z0-9]+", "_", s["title"].lower()).strip("_") for s in secs):
+                    ind_found += 1
+                else:
+                    ind_missing += 1
+            industry_score = (ind_found / len(expected)) * 15 if expected else 15.0
+
+            # Profile score: simplified — award full 25 for broker summary
+            profile_score = 25.0
+
+            total_score = min(100, max(0, round(core_score + state_score + profile_score + industry_score)))
+            label = "Strong" if total_score >= 80 else ("Moderate" if total_score >= 50 else "Weak")
+
+            summaries.append(HandbookCoverageSummary(
+                handbook_id=hb_id,
+                handbook_title=meta["handbook_title"],
+                company_id=meta["company_id"],
+                company_name=meta["company_name"],
+                strength_score=total_score,
+                strength_label=label,
+                total_sections=len(secs),
+                state_count=len(states),
+                missing_section_count=ind_missing,
+            ))
+
+        return summaries

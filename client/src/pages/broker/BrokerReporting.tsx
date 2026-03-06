@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { auth, brokerPortal } from '../../api/client';
 import { useAuth } from '../../context/AuthContext';
 import { FeatureGuideTrigger } from '../../features/feature-guides';
-import type { BrokerAuthProfile, BrokerPortfolioReportResponse } from '../../types';
+import type { BrokerAuthProfile, BrokerPortfolioReportResponse, HandbookCoverageSummary } from '../../types';
 
 function asBrokerProfile(profile: unknown): BrokerAuthProfile | null {
   if (!profile || typeof profile !== 'object') return null;
@@ -19,13 +19,32 @@ export default function BrokerReporting() {
   const [acceptingTerms, setAcceptingTerms] = useState(false);
   const [agreedToTerms, setAgreedToTerms] = useState(false);
   const [report, setReport] = useState<BrokerPortfolioReportResponse | null>(null);
+  const [handbookCoverage, setHandbookCoverage] = useState<Record<string, HandbookCoverageSummary>>({});
+  const [handbookCoverageError, setHandbookCoverageError] = useState(false);
 
   const loadReport = async () => {
     setLoading(true);
     setError('');
+    setHandbookCoverageError(false);
     try {
-      const data = await brokerPortal.getPortfolioReport();
+      const [data, coverageResult] = await Promise.all([
+        brokerPortal.getPortfolioReport(),
+        brokerPortal.getHandbookCoverage().then(
+          (list) => ({ ok: true as const, data: list }),
+          () => ({ ok: false as const, data: [] as HandbookCoverageSummary[] }),
+        ),
+      ]);
       setReport(data);
+      if (!coverageResult.ok) {
+        setHandbookCoverageError(true);
+      }
+      const map: Record<string, HandbookCoverageSummary> = {};
+      for (const s of coverageResult.data) {
+        if (!map[s.company_id] || s.strength_score > map[s.company_id].strength_score) {
+          map[s.company_id] = s;
+        }
+      }
+      setHandbookCoverage(map);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load broker reporting');
     } finally {
@@ -146,6 +165,7 @@ export default function BrokerReporting() {
                     <th className="text-left p-3 font-medium">Compliance</th>
                     <th className="text-left p-3 font-medium">Open Items</th>
                     <th className="text-left p-3 font-medium">Employees</th>
+                    <th className="text-left p-3 font-medium">Handbook</th>
                     <th className="text-left p-3 font-medium">Risk</th>
                   </tr>
                 </thead>
@@ -157,6 +177,25 @@ export default function BrokerReporting() {
                       <td className="p-3 text-zinc-300">{company.policy_compliance_rate}%</td>
                       <td className="p-3 text-zinc-300">{company.open_action_items}</td>
                       <td className="p-3 text-zinc-300">{company.active_employee_count}</td>
+                      <td className="p-3">
+                        {handbookCoverageError ? (
+                          <span className="text-zinc-600 text-[10px]">Unavailable</span>
+                        ) : handbookCoverage[company.company_id] ? (
+                          <span
+                            className={`px-2 py-1 text-[10px] uppercase tracking-wide border ${
+                              handbookCoverage[company.company_id].strength_score >= 80
+                                ? 'border-emerald-700 text-emerald-300'
+                                : handbookCoverage[company.company_id].strength_score >= 50
+                                ? 'border-amber-700 text-amber-300'
+                                : 'border-red-700 text-red-300'
+                            }`}
+                          >
+                            {handbookCoverage[company.company_id].strength_score} {handbookCoverage[company.company_id].strength_label}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-600 text-[10px]">No handbook</span>
+                        )}
+                      </td>
                       <td className="p-3">
                         <span
                           className={`px-2 py-1 text-[10px] uppercase tracking-wide border ${

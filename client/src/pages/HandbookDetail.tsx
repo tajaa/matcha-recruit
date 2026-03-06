@@ -19,6 +19,7 @@ import {
 import { handbooks } from '../api/client';
 import type {
   HandbookChangeRequest,
+  HandbookCoverage,
   HandbookDetail as HandbookDetailData,
   HandbookFreshnessCheck,
   HandbookSection,
@@ -210,6 +211,7 @@ function HandbookDetailPage() {
   const [freshnessLoading, setFreshnessLoading] = useState(false);
   const [showDistributeModal, setShowDistributeModal] = useState(false);
   const [freshnessCheck, setFreshnessCheck] = useState<HandbookFreshnessCheck | null>(null);
+  const [coverage, setCoverage] = useState<HandbookCoverage | null>(null);
   const [activeSectionTabId, setActiveSectionTabId] = useState<string | null>(null);
   const [sectionSearch, setSectionSearch] = useState('');
   const [highlightedSectionTabIds, setHighlightedSectionTabIds] = useState<string[]>([]);
@@ -225,17 +227,19 @@ function HandbookDetailPage() {
     try {
       setLoading(true);
       setLoadError(null);
-      const [detail, changeRows, ack, latestFreshness] = await Promise.all([
+      const [detail, changeRows, ack, latestFreshness, coverageData] = await Promise.all([
         handbooks.get(id),
         handbooks.listChanges(id).catch(() => []),
         handbooks.acknowledgements(id).catch(() => null),
         handbooks.getLatestFreshnessCheck(id).catch(() => null),
+        handbooks.getCoverage(id).catch(() => null),
       ]);
       setHandbook(detail);
       setSections(detail.sections || []);
       setChanges(changeRows || []);
       setAckSummary(ack);
       setFreshnessCheck(latestFreshness);
+      setCoverage(coverageData);
     } catch (error) {
       console.error('Failed to load handbook detail:', error);
       setLoadError(error instanceof Error ? error.message : 'Failed to load handbook');
@@ -708,7 +712,7 @@ function HandbookDetailPage() {
       </div>
 
       {/* Info panels */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {/* Highlighted Sections */}
         <div className={t.panelBg}>
           <button
@@ -838,6 +842,74 @@ function HandbookDetailPage() {
               <div className="text-[10px] text-emerald-400">Signed: {ackSummary?.signed_count ?? 0}</div>
               <div className="text-[10px] text-amber-400">Pending: {ackSummary?.pending_count ?? 0}</div>
               <div className={`text-[10px] ${t.panelTextMuted}`}>Expired: {ackSummary?.expired_count ?? 0}</div>
+            </div>
+          )}
+        </div>
+
+        {/* Coverage */}
+        <div className={t.panelBg}>
+          <button
+            type="button"
+            onClick={() => toggleSidebarPanel('coverage')}
+            className={`w-full flex items-center justify-between px-3 py-2.5 ${t.panelHover} transition-colors rounded-2xl`}
+          >
+            <span className={`text-[9px] uppercase tracking-widest ${t.panelHeader} flex items-center gap-1.5`}>
+              {coverage && (
+                <span className={`inline-block w-2 h-2 rounded-full ${
+                  coverage.strength_score >= 80 ? 'bg-emerald-400' : coverage.strength_score >= 50 ? 'bg-amber-400' : 'bg-red-400'
+                }`} />
+              )}
+              Coverage
+            </span>
+            <ChevronDown size={10} className={`${t.panelChevron} transition-transform ${sidebarCollapsed['coverage'] ? '-rotate-90' : ''}`} />
+          </button>
+          {!sidebarCollapsed['coverage'] && (
+            <div className={`px-3 pb-3 space-y-1.5 border-t ${t.panelBorder} pt-2`}>
+              {!coverage ? (
+                <p className={`text-[10px] ${t.textFaint}`}>Loading...</p>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2">
+                    <span className={`text-lg font-bold ${
+                      coverage.strength_score >= 80 ? 'text-emerald-400' : coverage.strength_score >= 50 ? 'text-amber-400' : 'text-red-400'
+                    }`}>{coverage.strength_score}</span>
+                    <span className={`text-[10px] font-medium ${
+                      coverage.strength_score >= 80 ? 'text-emerald-400' : coverage.strength_score >= 50 ? 'text-amber-400' : 'text-red-400'
+                    }`}>{coverage.strength_label}</span>
+                  </div>
+                  <div className={`text-[10px] ${t.panelTextMuted}`}>
+                    {coverage.core_sections} core · {coverage.state_sections} state · {coverage.custom_sections} custom
+                  </div>
+                  {coverage.state_coverage.length > 0 && (
+                    <div className="space-y-0.5 mt-1">
+                      {coverage.state_coverage.map((sc) => (
+                        <div key={sc.state} className={`text-[10px] ${t.panelText} flex items-center justify-between`}>
+                          <span>{sc.state}</span>
+                          <span className={sc.missing_categories.length === 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                            {sc.covered_categories.length}/{sc.covered_categories.length + sc.missing_categories.length}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {coverage.missing_sections.length > 0 && (
+                    <div className="mt-1.5 space-y-1">
+                      <div className={`text-[9px] uppercase tracking-wider ${t.textFaint}`}>Missing</div>
+                      {coverage.missing_sections.slice(0, 4).map((ms) => (
+                        <div key={ms.section_key} className="flex items-start gap-1.5">
+                          <span className={`mt-0.5 inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
+                            ms.priority === 'required' ? 'bg-red-400' : 'bg-amber-400'
+                          }`} />
+                          <span className={`text-[10px] ${t.panelTextMuted} leading-tight`}>{ms.title}</span>
+                        </div>
+                      ))}
+                      {coverage.missing_sections.length > 4 && (
+                        <div className={`text-[10px] ${t.textFaint}`}>+{coverage.missing_sections.length - 4} more</div>
+                      )}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>

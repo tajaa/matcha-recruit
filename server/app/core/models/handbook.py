@@ -271,3 +271,49 @@ class HandbookWizardDraftResponse(BaseModel):
     state: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
+
+
+class HandbookMissingSectionResponse(BaseModel):
+    section_key: str
+    title: str
+    reason: str
+    priority: str  # "required" | "recommended"
+
+
+class HandbookCoverageByState(BaseModel):
+    state: str
+    state_name: str
+    has_addendum: bool
+    covered_categories: list[str]
+    missing_categories: list[str]
+    city_scopes: list[str]
+
+
+class HandbookCoverageResponse(BaseModel):
+    handbook_id: UUID
+    strength_score: int
+    strength_label: str
+    total_sections: int
+    core_sections: int
+    state_sections: int
+    custom_sections: int
+    uploaded_sections: int
+    federal_core_count: int
+    state_level_count: int
+    city_level_count: int
+    state_coverage: list[HandbookCoverageByState]
+    missing_sections: list[HandbookMissingSectionResponse]
+    industry: str
+    industry_label: str
+
+
+class HandbookCoverageSummary(BaseModel):
+    handbook_id: UUID
+    handbook_title: str
+    company_id: UUID
+    company_name: str
+    strength_score: int
+    strength_label: str
+    total_sections: int
+    state_count: int
+    missing_section_count: int
