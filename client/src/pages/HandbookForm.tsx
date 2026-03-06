@@ -76,6 +76,32 @@ const QUICK_SIGNAL_FIELDS: Array<{ key: keyof CompanyHandbookProfile; label: str
   { key: 'federal_contracts', label: 'Federal Contracts' },
 ];
 
+const CONDITIONAL_POLICY_SECTIONS: Array<{
+  profileKey: keyof CompanyHandbookProfile;
+  sectionKey: string;
+  title: string;
+  cardTitle: string;
+  description: string;
+  placeholder: string;
+}> = [
+  {
+    profileKey: 'remote_workers',
+    sectionKey: '_conditional_remote_work_policy',
+    title: 'Remote Work Policy',
+    cardTitle: 'Enter your remote work policy',
+    description: 'You indicated you employ remote workers. Add your remote work compliance policy below.',
+    placeholder: 'Describe your remote work expectations, eligibility, equipment, location requirements, and any jurisdiction-specific rules...',
+  },
+  {
+    profileKey: 'group_health_insurance',
+    sectionKey: '_conditional_group_health_insurance_policy',
+    title: 'Group Health Insurance Policy',
+    cardTitle: 'Enter your group health insurance policy',
+    description: 'You indicated you offer group health insurance. Add your benefits enrollment and coverage policy below.',
+    placeholder: 'Describe eligibility, enrollment periods, coverage tiers, COBRA obligations, and any waiting period requirements...',
+  },
+];
+
 const MISSING_BOILERPLATE_COVERAGE_ERROR = 'Missing required state boilerplate coverage';
 const WIZARD_DRAFT_AUTOSAVE_MS = 5000;
 const HANDBOOK_WIZARD_RETURN_PATH = '/app/matcha/handbook/new';
@@ -174,6 +200,9 @@ interface WizardCard {
   required?: boolean;
   profileKey?: keyof CompanyHandbookProfile;
   questionId?: string;
+  /** For conditional_policy cards: the key used to find the entry in customSections */
+  conditionalSectionKey?: string;
+  conditionalPlaceholder?: string;
 }
 
 function normalizeSavedProfile(profile: Partial<CompanyHandbookProfile> | null | undefined): CompanyHandbookProfile {
@@ -562,6 +591,21 @@ export function HandbookForm() {
         description: 'This answer affects required policy language in the generated draft.',
         profileKey: fieldKey,
       });
+      // Insert conditional policy card after the relevant profile bool
+      if (sourceType === 'template' && profile[fieldKey]) {
+        const cond = CONDITIONAL_POLICY_SECTIONS.find((c) => c.profileKey === fieldKey);
+        if (cond) {
+          cards.push({
+            key: `conditional_${cond.sectionKey}`,
+            step: 3,
+            kind: 'conditional_policy',
+            title: cond.cardTitle,
+            description: cond.description,
+            conditionalSectionKey: cond.sectionKey,
+            conditionalPlaceholder: cond.placeholder,
+          });
+        }
+      }
     });
 
     if (sourceType === 'template') {
@@ -611,7 +655,7 @@ export function HandbookForm() {
     });
 
     return cards;
-  }, [boolFieldLabelMap, guidedQuestions, mode, profile.tipped_employees, sourceType]);
+  }, [boolFieldLabelMap, guidedQuestions, mode, profile.tipped_employees, profile.remote_workers, profile.group_health_insurance, sourceType]);
 
   const wizardCurrentCard = isWizard ? wizardCards[wizardCardIndex] : null;
   const wizardCurrentStep = wizardCurrentCard?.step ?? 0;
@@ -1489,6 +1533,32 @@ export function HandbookForm() {
         </div>
       )}
 
+      {sourceType === 'template' && CONDITIONAL_POLICY_SECTIONS.map((cond) =>
+        profile[cond.profileKey] ? (
+          <div key={cond.sectionKey} className={`space-y-2 ${t.panelBg} p-4`}>
+            <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>{cond.title}</label>
+            <p className={`text-[11px] ${t.textMuted}`}>{cond.description}</p>
+            <textarea
+              value={customSections.find((s) => s.title === cond.title)?.content || ''}
+              onChange={(e) => {
+                const value = e.target.value;
+                setCustomSections((prev) => {
+                  const idx = prev.findIndex((s) => s.title === cond.title);
+                  if (idx >= 0) {
+                    if (!value.trim()) return prev.filter((_, i) => i !== idx);
+                    return prev.map((s, i) => (i === idx ? { ...s, content: value } : s));
+                  }
+                  if (value.trim()) return [...prev, { title: cond.title, content: value }];
+                  return prev;
+                });
+              }}
+              placeholder={cond.placeholder}
+              className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[100px] resize-y`}
+            />
+          </div>
+        ) : null
+      )}
+
       {sourceType === 'template' && (
         <div className={`space-y-3 ${t.panelBg} p-4`}>
           <div className="flex items-center justify-between">
@@ -1556,40 +1626,49 @@ export function HandbookForm() {
               </button>
             </div>
           )}
-          {customSections.length === 0 ? (
-            <p className={`text-xs ${t.textMuted}`}>No custom sections added.</p>
-          ) : (
-            <div className="space-y-3">
-              {customSections.map((section, index) => (
-                <div key={index} className={`border ${t.borderLight} p-3 space-y-2`}>
-                  <input
-                    type="text"
-                    value={section.title}
-                    onChange={(e) =>
-                      setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, title: e.target.value } : item)))
-                    }
-                    placeholder="Section title"
-                    className={`w-full px-3 py-2 ${t.textareaBg} text-sm`}
-                  />
-                  <textarea
-                    value={section.content}
-                    onChange={(e) =>
-                      setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, content: e.target.value } : item)))
-                    }
-                    placeholder="Section content"
-                    className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[90px] resize-y`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setCustomSections((prev) => prev.filter((_, i) => i !== index))}
-                    className={`text-[10px] ${t.deleteBtn} uppercase tracking-wider`}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          {(() => {
+            const conditionalTitles = new Set(CONDITIONAL_POLICY_SECTIONS.filter((c) => profile[c.profileKey]).map((c) => c.title));
+            const userSections = customSections.map((s, i) => ({ ...s, _idx: i })).filter((s) => !conditionalTitles.has(s.title));
+            return userSections.length === 0 ? (
+              <p className={`text-xs ${t.textMuted}`}>No custom sections added.</p>
+            ) : (
+              <div className="space-y-3">
+                {userSections.map((section) => (
+                  <div key={section._idx} className={`border ${t.borderLight} p-3 space-y-2`}>
+                    <input
+                      type="text"
+                      value={section.title}
+                      onChange={(e) => {
+                        const idx = section._idx;
+                        setCustomSections((prev) => prev.map((item, i) => (i === idx ? { ...item, title: e.target.value } : item)));
+                      }}
+                      placeholder="Section title"
+                      className={`w-full px-3 py-2 ${t.textareaBg} text-sm`}
+                    />
+                    <textarea
+                      value={section.content}
+                      onChange={(e) => {
+                        const idx = section._idx;
+                        setCustomSections((prev) => prev.map((item, i) => (i === idx ? { ...item, content: e.target.value } : item)));
+                      }}
+                      placeholder="Section content"
+                      className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[90px] resize-y`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const idx = section._idx;
+                        setCustomSections((prev) => prev.filter((_, i) => i !== idx));
+                      }}
+                      className={`text-[10px] ${t.deleteBtn} uppercase tracking-wider`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       )}
     </>
@@ -1923,6 +2002,35 @@ export function HandbookForm() {
       );
     }
 
+    if (card.kind === 'conditional_policy' && card.conditionalSectionKey) {
+      const existing = customSections.find((s) => s.title === CONDITIONAL_POLICY_SECTIONS.find((c) => c.sectionKey === card.conditionalSectionKey)?.title);
+      const currentContent = existing?.content || '';
+      return shell(
+        <textarea
+          value={currentContent}
+          onChange={(e) => {
+            const sectionTitle = CONDITIONAL_POLICY_SECTIONS.find((c) => c.sectionKey === card.conditionalSectionKey)?.title || '';
+            const value = e.target.value;
+            setCustomSections((prev) => {
+              const idx = prev.findIndex((s) => s.title === sectionTitle);
+              if (idx >= 0) {
+                if (!value.trim()) {
+                  return prev.filter((_, i) => i !== idx);
+                }
+                return prev.map((s, i) => (i === idx ? { ...s, content: value } : s));
+              }
+              if (value.trim()) {
+                return [...prev, { title: sectionTitle, content: value }];
+              }
+              return prev;
+            });
+          }}
+          placeholder={card.conditionalPlaceholder}
+          className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[120px] resize-y`}
+        />
+      );
+    }
+
     if (card.kind === 'policy_pack') {
       return shell(
         <div className="space-y-3">
@@ -2017,40 +2125,49 @@ export function HandbookForm() {
           <p className={`text-[11px] ${t.alertAmber} px-3 py-2`}>
             Custom content is not legal boilerplate. Your team is responsible for legal review and final policy ownership.
           </p>
-          {customSections.length === 0 ? (
-            <p className={`text-xs ${t.textMuted}`}>No custom sections added.</p>
-          ) : (
-            <div className="space-y-3">
-              {customSections.map((section, index) => (
-                <div key={index} className={`border ${t.borderLight} p-3 space-y-2`}>
-                  <input
-                    type="text"
-                    value={section.title}
-                    onChange={(e) =>
-                      setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, title: e.target.value } : item)))
-                    }
-                    placeholder="Section title"
-                    className={`w-full px-3 py-2 ${t.textareaBg} text-sm`}
-                  />
-                  <textarea
-                    value={section.content}
-                    onChange={(e) =>
-                      setCustomSections((prev) => prev.map((item, i) => (i === index ? { ...item, content: e.target.value } : item)))
-                    }
-                    placeholder="Section content"
-                    className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[90px] resize-y`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setCustomSections((prev) => prev.filter((_, i) => i !== index))}
-                    className={`text-[10px] ${t.deleteBtn} uppercase tracking-wider`}
-                  >
-                    Remove
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          {(() => {
+            const conditionalTitles = new Set(CONDITIONAL_POLICY_SECTIONS.filter((c) => profile[c.profileKey]).map((c) => c.title));
+            const userSections = customSections.map((s, i) => ({ ...s, _idx: i })).filter((s) => !conditionalTitles.has(s.title));
+            return userSections.length === 0 ? (
+              <p className={`text-xs ${t.textMuted}`}>No custom sections added.</p>
+            ) : (
+              <div className="space-y-3">
+                {userSections.map((section) => (
+                  <div key={section._idx} className={`border ${t.borderLight} p-3 space-y-2`}>
+                    <input
+                      type="text"
+                      value={section.title}
+                      onChange={(e) => {
+                        const idx = section._idx;
+                        setCustomSections((prev) => prev.map((item, i) => (i === idx ? { ...item, title: e.target.value } : item)));
+                      }}
+                      placeholder="Section title"
+                      className={`w-full px-3 py-2 ${t.textareaBg} text-sm`}
+                    />
+                    <textarea
+                      value={section.content}
+                      onChange={(e) => {
+                        const idx = section._idx;
+                        setCustomSections((prev) => prev.map((item, i) => (i === idx ? { ...item, content: e.target.value } : item)));
+                      }}
+                      placeholder="Section content"
+                      className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[90px] resize-y`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const idx = section._idx;
+                        setCustomSections((prev) => prev.filter((_, i) => i !== idx));
+                      }}
+                      className={`text-[10px] ${t.deleteBtn} uppercase tracking-wider`}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
         </div>
       );
     }
