@@ -1,5 +1,5 @@
 import { m, type Variants } from "framer-motion";
-import { MapPin, Shield, Zap, Search, Globe, Users } from "lucide-react";
+import { MapPin, Shield, Zap, Globe, Users } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { JurisdictionRows } from "../components/JurisdictionRows";
