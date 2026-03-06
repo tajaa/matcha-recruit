@@ -16,7 +16,6 @@ export type WizardCardKind =
   | 'ceo'
   | 'headcount'
   | 'profile_bool'
-  | 'conditional_policy'
   | 'policy_pack'
   | 'guided_followup'
   | 'custom_sections'

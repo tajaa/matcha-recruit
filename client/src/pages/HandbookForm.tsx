@@ -80,25 +80,31 @@ const CONDITIONAL_POLICY_SECTIONS: Array<{
   profileKey: keyof CompanyHandbookProfile;
   sectionKey: string;
   title: string;
-  cardTitle: string;
-  description: string;
-  placeholder: string;
+  defaultContent: string;
 }> = [
   {
     profileKey: 'remote_workers',
     sectionKey: '_conditional_remote_work_policy',
     title: 'Remote Work Policy',
-    cardTitle: 'Enter your remote work policy',
-    description: 'You indicated you employ remote workers. Add your remote work compliance policy below.',
-    placeholder: 'Describe your remote work expectations, eligibility, equipment, location requirements, and any jurisdiction-specific rules...',
+    defaultContent:
+      'Remote and hybrid work arrangements are available for eligible roles at the company\'s discretion. ' +
+      'Employees approved for remote work must maintain a dedicated, secure workspace and remain available during core business hours. ' +
+      'Remote workers are expected to comply with all company policies, including confidentiality, data security, and time-reporting requirements. ' +
+      'Employees must notify their manager and HR before relocating to a different state or jurisdiction, as tax and employment law obligations may change. ' +
+      'The company reserves the right to modify or revoke remote work arrangements at any time based on business needs, performance, or compliance requirements. ' +
+      'Equipment provided by the company for remote work remains company property and must be returned upon separation.',
   },
   {
     profileKey: 'group_health_insurance',
     sectionKey: '_conditional_group_health_insurance_policy',
     title: 'Group Health Insurance Policy',
-    cardTitle: 'Enter your group health insurance policy',
-    description: 'You indicated you offer group health insurance. Add your benefits enrollment and coverage policy below.',
-    placeholder: 'Describe eligibility, enrollment periods, coverage tiers, COBRA obligations, and any waiting period requirements...',
+    defaultContent:
+      'The company offers group health insurance coverage to eligible employees. ' +
+      'Eligibility is generally based on employment classification and hours worked, as defined by the current plan documents. ' +
+      'New hires may enroll during their initial eligibility period; otherwise, enrollment changes are permitted during annual open enrollment or upon a qualifying life event. ' +
+      'The company contributes toward premium costs as outlined in current plan materials. ' +
+      'Employees who lose coverage due to separation or reduction in hours may be eligible for continuation coverage under COBRA. ' +
+      'Detailed plan information, including coverage tiers, provider networks, and cost-sharing, is available from Human Resources.',
   },
 ];
 
@@ -200,9 +206,6 @@ interface WizardCard {
   required?: boolean;
   profileKey?: keyof CompanyHandbookProfile;
   questionId?: string;
-  /** For conditional_policy cards: the key used to find the entry in customSections */
-  conditionalSectionKey?: string;
-  conditionalPlaceholder?: string;
 }
 
 function normalizeSavedProfile(profile: Partial<CompanyHandbookProfile> | null | undefined): CompanyHandbookProfile {
@@ -591,21 +594,8 @@ export function HandbookForm() {
         description: 'This answer affects required policy language in the generated draft.',
         profileKey: fieldKey,
       });
-      // Insert conditional policy card after the relevant profile bool
-      if (sourceType === 'template' && profile[fieldKey]) {
-        const cond = CONDITIONAL_POLICY_SECTIONS.find((c) => c.profileKey === fieldKey);
-        if (cond) {
-          cards.push({
-            key: `conditional_${cond.sectionKey}`,
-            step: 3,
-            kind: 'conditional_policy',
-            title: cond.cardTitle,
-            description: cond.description,
-            conditionalSectionKey: cond.sectionKey,
-            conditionalPlaceholder: cond.placeholder,
-          });
-        }
-      }
+      // Conditional policies (remote work, group health insurance) are now auto-added
+      // to customSections when the user toggles the profile bool to "yes" — no wizard card needed.
     });
 
     if (sourceType === 'template') {
@@ -655,7 +645,7 @@ export function HandbookForm() {
     });
 
     return cards;
-  }, [boolFieldLabelMap, guidedQuestions, mode, profile.tipped_employees, profile.remote_workers, profile.group_health_insurance, sourceType]);
+  }, [boolFieldLabelMap, guidedQuestions, mode, profile.tipped_employees, sourceType]);
 
   const wizardCurrentCard = isWizard ? wizardCards[wizardCardIndex] : null;
   const wizardCurrentStep = wizardCurrentCard?.step ?? 0;
@@ -760,6 +750,20 @@ export function HandbookForm() {
 
   const setProfileField = (key: keyof CompanyHandbookProfile, value: string | number | boolean | null) => {
     setProfile((prev) => ({ ...prev, [key]: value }));
+    // Auto-add/remove conditional policy sections when toggling profile bools
+    const cond = CONDITIONAL_POLICY_SECTIONS.find((c) => c.profileKey === key);
+    if (cond && typeof value === 'boolean') {
+      setCustomSections((prev) => {
+        const idx = prev.findIndex((s) => s.title === cond.title);
+        if (value && idx < 0) {
+          return [...prev, { title: cond.title, content: cond.defaultContent }];
+        }
+        if (!value && idx >= 0) {
+          return prev.filter((_, i) => i !== idx);
+        }
+        return prev;
+      });
+    }
   };
 
   useEffect(() => {
@@ -1533,13 +1537,14 @@ export function HandbookForm() {
         </div>
       )}
 
-      {sourceType === 'template' && CONDITIONAL_POLICY_SECTIONS.map((cond) =>
-        profile[cond.profileKey] ? (
+      {sourceType === 'template' && CONDITIONAL_POLICY_SECTIONS.map((cond) => {
+        const section = customSections.find((s) => s.title === cond.title);
+        return profile[cond.profileKey] && section ? (
           <div key={cond.sectionKey} className={`space-y-2 ${t.panelBg} p-4`}>
             <label className={`block text-[10px] uppercase tracking-wider ${t.label}`}>{cond.title}</label>
-            <p className={`text-[11px] ${t.textMuted}`}>{cond.description}</p>
+            <p className={`text-[11px] ${t.textMuted}`}>Auto-added based on your company profile. Customize as needed.</p>
             <textarea
-              value={customSections.find((s) => s.title === cond.title)?.content || ''}
+              value={section.content}
               onChange={(e) => {
                 const value = e.target.value;
                 setCustomSections((prev) => {
@@ -1548,16 +1553,14 @@ export function HandbookForm() {
                     if (!value.trim()) return prev.filter((_, i) => i !== idx);
                     return prev.map((s, i) => (i === idx ? { ...s, content: value } : s));
                   }
-                  if (value.trim()) return [...prev, { title: cond.title, content: value }];
                   return prev;
                 });
               }}
-              placeholder={cond.placeholder}
               className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[100px] resize-y`}
             />
           </div>
-        ) : null
-      )}
+        ) : null;
+      })}
 
       {sourceType === 'template' && (
         <div className={`space-y-3 ${t.panelBg} p-4`}>
@@ -1999,35 +2002,6 @@ export function HandbookForm() {
             Yes
           </button>
         </div>
-      );
-    }
-
-    if (card.kind === 'conditional_policy' && card.conditionalSectionKey) {
-      const existing = customSections.find((s) => s.title === CONDITIONAL_POLICY_SECTIONS.find((c) => c.sectionKey === card.conditionalSectionKey)?.title);
-      const currentContent = existing?.content || '';
-      return shell(
-        <textarea
-          value={currentContent}
-          onChange={(e) => {
-            const sectionTitle = CONDITIONAL_POLICY_SECTIONS.find((c) => c.sectionKey === card.conditionalSectionKey)?.title || '';
-            const value = e.target.value;
-            setCustomSections((prev) => {
-              const idx = prev.findIndex((s) => s.title === sectionTitle);
-              if (idx >= 0) {
-                if (!value.trim()) {
-                  return prev.filter((_, i) => i !== idx);
-                }
-                return prev.map((s, i) => (i === idx ? { ...s, content: value } : s));
-              }
-              if (value.trim()) {
-                return [...prev, { title: sectionTitle, content: value }];
-              }
-              return prev;
-            });
-          }}
-          placeholder={card.conditionalPlaceholder}
-          className={`w-full px-3 py-2 ${t.textareaBg} text-sm min-h-[120px] resize-y`}
-        />
       );
     }
 
