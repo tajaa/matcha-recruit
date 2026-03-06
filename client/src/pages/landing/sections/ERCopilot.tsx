@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { motion, type Variants } from "framer-motion";
+import { m, type Variants } from "framer-motion";
 import { Scale, BookOpen, ShieldAlert } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
@@ -24,7 +24,7 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
   };
 
   return (
-    <motion.section
+    <m.section
       ref={ref}
       variants={containerVariants}
       initial="hidden"
@@ -34,12 +34,12 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
     >
       {/* Background Depth */}
       <div className="absolute inset-0 z-0 pointer-events-none opacity-[0.03]">
-        <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/asfalt-light.png')]" />
+        <div className="absolute top-0 left-0 w-full h-full bg-[url('/textures/asfalt-light.png')]" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-white rounded-full blur-[150px] mix-blend-screen" />
       </div>
 
       <div className="max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center relative z-10">
-        <motion.div 
+        <m.div 
           initial={{ opacity: 0, scale: 0.9, x: -50 }}
           whileInView={{ opacity: 1, scale: 1, x: 0 }}
           transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
@@ -77,7 +77,7 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
                     <span className="text-white">{item.match}</span>
                   </div>
                   <div className="h-[2px] w-full bg-white/5 relative overflow-hidden">
-                    <motion.div 
+                    <m.div 
                       initial={{ width: 0 }}
                       whileInView={{ width: item.match === "Low" ? "15%" : item.match }}
                       transition={{ duration: 1.5, delay: i * 0.2, ease: "easeOut" }}
@@ -95,26 +95,24 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
                 </span>
                 <div className="flex gap-1 items-end h-6">
                   {ER_INFERENCE_WIDTHS.map((h, i) => (
-                    <motion.div 
+                    <div
                       key={i}
-                      animate={{ height: ["20%", "100%", "30%"] }}
-                      transition={{ 
-                        duration: 1.5 + (i * 0.2), 
-                        repeat: Infinity, 
-                        ease: "easeInOut" 
-                      }}
                       className="w-[2px] bg-white/30"
-                      style={{ height: `${h * 100}%` }}
+                      style={{
+                        height: `${h * 100}%`,
+                        animation: `landing-bar-bounce ${1.5 + i * 0.2}s ease-in-out infinite`,
+                        transformOrigin: "bottom",
+                      }}
                     />
                   ))}
                 </div>
               </div>
             </div>
           </div>
-        </motion.div>
+        </m.div>
 
         <div className="order-1 lg:order-2 space-y-12">
-          <motion.div variants={featureVariants} className="flex items-center gap-4">
+          <m.div variants={featureVariants} className="flex items-center gap-4">
             <TelemetryBadge text="Risk Assessment" active={false} />
             <TechnicalSpecs 
               title="Relations Engine"
@@ -125,9 +123,9 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
                 "Actionable Next Steps"
               ]}
             />
-          </motion.div>
+          </m.div>
 
-          <motion.h2
+          <m.h2
             variants={featureVariants}
             className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.85]"
             style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
@@ -139,18 +137,18 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
             >
               Copilot.
             </span>
-          </motion.h2>
+          </m.h2>
 
-          <motion.p 
+          <m.p 
             variants={featureVariants}
             className="text-zinc-500 text-xl md:text-2xl font-light leading-relaxed max-w-xl"
             style={{ fontFamily: fonts.sans }}
           >
             Your intelligent guide for employee relations. Make confident, evidence-based decisions with similarity flags and precedent reminders.
-          </motion.p>
+          </m.p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <BookOpen size={20} />
@@ -162,9 +160,9 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 Instantly cross-references case details with your active company handbook.
               </p>
-            </motion.div>
+            </m.div>
 
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <ShieldAlert size={20} />
@@ -176,11 +174,11 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 Highlights potential liabilities based on historical precedent and labor law.
               </p>
-            </motion.div>
+            </m.div>
           </div>
         </div>
       </div>
-    </motion.section>
+    </m.section>
   );
 });
 

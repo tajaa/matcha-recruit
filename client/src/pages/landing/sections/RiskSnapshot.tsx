@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { motion, type Variants } from "framer-motion";
+import { m, type Variants } from "framer-motion";
 import { Radar, Activity, ShieldCheck, ShieldAlert, Target, AlertTriangle } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
@@ -24,7 +24,7 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
   };
 
   return (
-    <motion.section
+    <m.section
       ref={ref}
       variants={containerVariants}
       initial="hidden"
@@ -40,7 +40,7 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
       <div className="max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center relative z-10">
         
         <div className="space-y-12 pr-12">
-          <motion.div variants={featureVariants} className="flex items-center gap-4">
+          <m.div variants={featureVariants} className="flex items-center gap-4">
             <TelemetryBadge text="Active Surveillance" active={true} />
             <TechnicalSpecs 
               title="Threat Detection"
@@ -51,9 +51,9 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
                 "Real-time compliance alerts"
               ]}
             />
-          </motion.div>
+          </m.div>
 
-          <motion.h2
+          <m.h2
             variants={featureVariants}
             className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.85]"
             style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
@@ -65,19 +65,19 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
             >
               Snapshot.
             </span>
-          </motion.h2>
+          </m.h2>
 
-          <motion.div variants={featureVariants} className="space-y-6">
+          <m.div variants={featureVariants} className="space-y-6">
             <p className="text-zinc-500 text-xl md:text-2xl font-light leading-relaxed max-w-xl" style={{ fontFamily: fonts.sans }}>
               The biggest risk is the one you don’t see coming. 
             </p>
             <p className="text-zinc-400 text-base md:text-lg font-light leading-relaxed max-w-xl" style={{ fontFamily: fonts.sans }}>
               Identify and neutralize compliance gaps before they escalate. Our heuristic engine acts as an early warning system, mapping your footprint to provide a real-time threat matrix.
             </p>
-          </motion.div>
+          </m.div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10 pt-8 border-t border-white/5">
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <Radar size={20} />
@@ -89,9 +89,9 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 Constant surveillance of active operations against local regulations.
               </p>
-            </motion.div>
+            </m.div>
 
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <Activity size={20} />
@@ -103,9 +103,9 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 Proactive alerts for pending compliance deadlines and exposure risks.
               </p>
-            </motion.div>
+            </m.div>
 
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <ShieldAlert size={20} />
@@ -117,9 +117,9 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 Instantly identify discrepancies between active policies and legal requirements.
               </p>
-            </motion.div>
+            </m.div>
 
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <Target size={20} />
@@ -131,18 +131,18 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 Automatically prioritize risks based on financial impact and probability.
               </p>
-            </motion.div>
+            </m.div>
           </div>
         </div>
 
-        <motion.div 
+        <m.div 
           initial={{ opacity: 0, scale: 0.9, x: 50 }}
           whileInView={{ opacity: 1, scale: 1, x: 0 }}
           transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
           className="relative mt-20 lg:mt-0"
         >
           {/* Floating Alert Panels */}
-          <motion.div 
+          <m.div 
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.8, duration: 0.6 }}
@@ -154,9 +154,9 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
             </div>
             <p className="text-[10px] text-white font-mono uppercase tracking-wider mb-1">NY Pay Transparency</p>
             <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-widest">Exposure: High</p>
-          </motion.div>
+          </m.div>
           
-          <motion.div 
+          <m.div 
             initial={{ opacity: 0, y: -20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ delay: 1.2, duration: 0.6 }}
@@ -168,19 +168,18 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
             </div>
             <p className="text-[10px] text-white font-mono uppercase tracking-wider mb-1">CA Meal Breaks</p>
             <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-widest">Mitigated</p>
-          </motion.div>
+          </m.div>
 
           {/* Radar / Snapshot Visual */}
           <div className="relative aspect-square max-w-lg mx-auto bg-[#0A0E0C] border border-white/10 flex items-center justify-center p-12 overflow-hidden shadow-[0_0_80px_rgba(255,255,255,0.02)] group rounded-full">
             
             {/* Radar Sweep */}
             <div className="absolute inset-0 z-0">
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ duration: 6, repeat: Infinity, ease: "linear" }}
+              <div
                 className="w-full h-full rounded-full"
                 style={{
                   background: "conic-gradient(from 0deg, transparent 70%, rgba(255,255,255,0.08) 100%)",
+                  animation: "spin 6s linear infinite",
                 }}
               />
             </div>
@@ -207,16 +206,18 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
                 { top: "45%", left: "20%", delay: 3 },
                 { top: "25%", left: "35%", delay: 4.5 },
               ].map((pos, i) => (
-                <motion.div
+                <div
                   key={i}
                   className="absolute w-2 h-2 bg-white rounded-full"
-                  style={{ top: pos.top, left: pos.left }}
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: [0, 0.8, 0], scale: [0.5, 1.5, 0.5] }}
-                  transition={{ duration: 4, repeat: Infinity, delay: pos.delay }}
+                  style={{
+                    top: pos.top,
+                    left: pos.left,
+                    animation: "landing-blip 2s ease-in-out infinite",
+                    animationDelay: `${pos.delay}s`,
+                  }}
                 >
                   <div className="absolute inset-0 bg-white rounded-full animate-ping opacity-50" />
-                </motion.div>
+                </div>
               ))}
             </div>
 
@@ -231,10 +232,10 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
             </div>
 
           </div>
-        </motion.div>
+        </m.div>
 
       </div>
-    </motion.section>
+    </m.section>
   );
 });
 

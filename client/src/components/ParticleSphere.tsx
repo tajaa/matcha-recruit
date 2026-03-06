@@ -114,7 +114,8 @@ export function ParticleSphere({
     rendererRef.current = renderer;
 
     // Create particle sphere geometry
-    const particleCount = 2500;
+    const isMobile = window.innerWidth < 768;
+    const particleCount = isMobile ? 1000 : 2500;
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);

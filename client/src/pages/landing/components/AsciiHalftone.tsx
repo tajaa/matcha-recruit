@@ -17,6 +17,7 @@ export const AsciiHalftone = () => {
       h = 0;
     let time = 0;
     let animId: number;
+    const isVisible = { current: true };
 
     const chars = ".·:+*#@\u2588";
     const CELL = 8;
@@ -70,6 +71,10 @@ export const AsciiHalftone = () => {
     }
 
     function draw() {
+      if (!isVisible.current) {
+        animId = requestAnimationFrame(draw);
+        return;
+      }
       ctx!.clearRect(0, 0, w, h);
       ctx!.font = `${CELL * 0.85}px "Space Mono", monospace`;
       ctx!.textAlign = "center";
@@ -102,12 +107,20 @@ export const AsciiHalftone = () => {
     }
 
     resize();
+
+    const visObs = new IntersectionObserver(
+      ([entry]) => { isVisible.current = entry.isIntersecting; },
+      { threshold: 0 }
+    );
+    visObs.observe(parent);
+
     draw();
     window.addEventListener("resize", resize);
 
     return () => {
       window.removeEventListener("resize", resize);
       cancelAnimationFrame(animId);
+      visObs.disconnect();
     };
   }, []);
 

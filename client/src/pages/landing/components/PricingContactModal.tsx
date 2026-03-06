@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { m, AnimatePresence } from 'framer-motion';
 import { X, Send, CheckCircle } from 'lucide-react';
 
 interface PricingContactModalProps {
@@ -52,7 +52,7 @@ export const PricingContactModal = ({ isOpen, onClose }: PricingContactModalProp
       {isOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6">
           {/* Backdrop */}
-          <motion.div
+          <m.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -61,7 +61,7 @@ export const PricingContactModal = ({ isOpen, onClose }: PricingContactModalProp
           />
 
           {/* Modal */}
-          <motion.div
+          <m.div
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -80,14 +80,14 @@ export const PricingContactModal = ({ isOpen, onClose }: PricingContactModalProp
             <div className="p-8 md:p-12">
               {submitted ? (
                 <div className="py-12 text-center space-y-6">
-                  <motion.div
+                  <m.div
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     transition={{ type: "spring", damping: 12, stiffness: 200 }}
                     className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-[#4ADE80]/10 text-[#4ADE80] mb-4"
                   >
                     <CheckCircle size={40} />
-                  </motion.div>
+                  </m.div>
                   <h3 className="text-2xl font-bold text-white uppercase tracking-tight">Sequence Initiated</h3>
                   <p className="text-[#F0EFEA]/50 text-sm leading-relaxed max-w-xs mx-auto">
                     Your request for architectural access has been logged. Our systems will synchronize with your endpoint shortly.
@@ -155,7 +155,7 @@ export const PricingContactModal = ({ isOpen, onClose }: PricingContactModalProp
                         {isSubmitting ? 'Processing...' : 'Transmit Request'}
                         {!isSubmitting && <Send size={12} />}
                       </span>
-                      <motion.div 
+                      <m.div 
                         className="absolute inset-0 bg-[#4ADE80] translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
                       />
                     </button>
@@ -163,7 +163,7 @@ export const PricingContactModal = ({ isOpen, onClose }: PricingContactModalProp
                 </>
               )}
             </div>
-          </motion.div>
+          </m.div>
         </div>
       )}
     </AnimatePresence>

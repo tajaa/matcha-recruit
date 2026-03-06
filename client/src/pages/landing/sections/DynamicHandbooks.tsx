@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { motion, type Variants } from "framer-motion";
+import { m, type Variants } from "framer-motion";
 import { BookMarked, RefreshCw, FileCode2, History } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
@@ -24,7 +24,7 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
   };
 
   return (
-    <motion.section
+    <m.section
       ref={ref}
       variants={containerVariants}
       initial="hidden"
@@ -34,13 +34,13 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
     >
       {/* Background Depth */}
       <div className="absolute inset-0 z-0 pointer-events-none opacity-[0.03]">
-        <div className="absolute top-0 left-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/asfalt-light.png')]" />
+        <div className="absolute top-0 left-0 w-full h-full bg-[url('/textures/asfalt-light.png')]" />
       </div>
 
       <div className="max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center relative z-10">
         
         {/* Visual Matrix (Left Side) */}
-        <motion.div 
+        <m.div 
           initial={{ opacity: 0, scale: 0.9, x: -50 }}
           whileInView={{ opacity: 1, scale: 1, x: 0 }}
           transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
@@ -76,7 +76,7 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
                   {line.type === "static" ? (
                     <div className="h-2 bg-white/5 rounded-full" style={{ width: line.w }} />
                   ) : (
-                    <motion.div 
+                    <m.div 
                       initial={{ opacity: 0, x: -10 }}
                       whileInView={{ opacity: 1, x: 0 }}
                       transition={{ duration: 0.5, delay: i * 0.2 }}
@@ -93,25 +93,24 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
                           <div className="h-1 bg-white/20 rounded-full w-[70%]" />
                         </div>
                       )}
-                    </motion.div>
+                    </m.div>
                   )}
                 </div>
               ))}
 
               {/* Scanning Laser */}
-              <motion.div
-                animate={{ top: ["0%", "100%", "0%"] }}
-                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+              <div
+                style={{ animation: "landing-scan-bounce 4s ease-in-out infinite" }}
                 className="absolute left-0 w-full h-[1px] bg-white/40 shadow-[0_0_10px_rgba(255,255,255,0.5)] z-20 pointer-events-none"
               />
             </div>
             
           </div>
-        </motion.div>
+        </m.div>
 
         {/* Text Content (Right Side) */}
         <div className="order-1 lg:order-2 space-y-12">
-          <motion.div variants={featureVariants} className="flex items-center gap-4">
+          <m.div variants={featureVariants} className="flex items-center gap-4">
             <TelemetryBadge text="Living Documents" active={false} />
             <TechnicalSpecs 
               title="Compilation Engine"
@@ -122,9 +121,9 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
                 "Dynamic signature routing"
               ]}
             />
-          </motion.div>
+          </m.div>
 
-          <motion.h2
+          <m.h2
             variants={featureVariants}
             className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.85]"
             style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
@@ -136,18 +135,18 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
             >
               Handbooks.
             </span>
-          </motion.h2>
+          </m.h2>
 
-          <motion.p 
+          <m.p 
             variants={featureVariants}
             className="text-zinc-500 text-xl md:text-2xl font-light leading-relaxed max-w-xl"
             style={{ fontFamily: fonts.sans }}
           >
             Always up-to-date, always compliant.
-          </motion.p>
+          </m.p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <BookMarked size={20} />
@@ -159,9 +158,9 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 Generate comprehensive, state-specific policies tailored to your operational footprint.
               </p>
-            </motion.div>
+            </m.div>
 
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <History size={20} />
@@ -173,12 +172,12 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 When legislation shifts, your handbook suggests an exact diff to maintain compliance.
               </p>
-            </motion.div>
+            </m.div>
           </div>
         </div>
 
       </div>
-    </motion.section>
+    </m.section>
   );
 });
 

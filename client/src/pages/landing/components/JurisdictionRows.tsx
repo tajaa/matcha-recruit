@@ -26,21 +26,40 @@ export const JurisdictionRows = memo(function JurisdictionRows() {
   const [offset, setOffset] = useState(0);
   const [tick, setTick] = useState(0);
   const tickRef = useRef(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setOffset((prev) => (prev + 1) % LAWS.length);
-    }, 1800);
-    return () => clearInterval(timer);
-  }, []);
+    if (!containerRef.current) return;
 
-  // Faster cosmetic tick for the hex/timestamp
-  useEffect(() => {
-    const t = setInterval(() => {
-      tickRef.current += 1;
-      setTick(tickRef.current);
-    }, 400);
-    return () => clearInterval(t);
+    let offsetTimer: ReturnType<typeof setInterval> | null = null;
+    let tickTimer: ReturnType<typeof setInterval> | null = null;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          offsetTimer = setInterval(() => {
+            setOffset((prev) => (prev + 1) % LAWS.length);
+          }, 1800);
+          tickTimer = setInterval(() => {
+            tickRef.current += 1;
+            setTick(tickRef.current);
+          }, 400);
+        } else {
+          if (offsetTimer) clearInterval(offsetTimer);
+          if (tickTimer) clearInterval(tickTimer);
+          offsetTimer = null;
+          tickTimer = null;
+        }
+      },
+      { threshold: 0 }
+    );
+    observer.observe(containerRef.current);
+
+    return () => {
+      observer.disconnect();
+      if (offsetTimer) clearInterval(offsetTimer);
+      if (tickTimer) clearInterval(tickTimer);
+    };
   }, []);
 
   const visibleLaws = Array.from({ length: VISIBLE_COUNT }, (_, i) =>
@@ -50,7 +69,7 @@ export const JurisdictionRows = memo(function JurisdictionRows() {
   const hex = ((tick * 0x1A3F) & 0xFFFF).toString(16).toUpperCase().padStart(4, "0");
 
   return (
-    <div className="space-y-0">
+    <div ref={containerRef} className="space-y-0">
       {/* Column headers */}
       <div className="flex items-center px-4 py-2 text-[7px] font-mono uppercase tracking-[0.25em] text-white/20 border-b border-white/5">
         <span className="w-5" />

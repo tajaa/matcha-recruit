@@ -3,10 +3,8 @@ import React, {
   useEffect,
   useRef,
   useState,
-  useLayoutEffect,
 } from "react";
-import gsap from "gsap";
-import ScrollTrigger from "gsap/ScrollTrigger";
+import { LazyMotion, domAnimation } from "framer-motion";
 
 import { CinematicNoise } from "./components/CinematicNoise";
 import { Navbar } from "./components/Navbar";
@@ -19,12 +17,8 @@ import { DynamicHandbooks } from "./sections/DynamicHandbooks";
 import { ComplianceDashboard } from "./sections/ComplianceDashboard";
 import { Footer } from "./sections/Footer";
 
-gsap.registerPlugin(ScrollTrigger);
-
 export function Landing() {
-  const containerRef = useRef<HTMLDivElement>(null);
   const manifestoRef = useRef<HTMLDivElement>(null);
-  const systemRef = useRef<HTMLDivElement>(null);
 
   const [scrolled, setScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState("Core");
@@ -60,66 +54,27 @@ export function Landing() {
     };
   }, []);
 
-  useLayoutEffect(() => {
-    const ctx = gsap.context(() => {
-      // Section Tracking for Telemetry
-      const sections = [
-        { id: "Hero", trigger: ".hero-trigger" },
-        { id: "Compliance", trigger: ".compliance-trigger" },
-        { id: "Interviewer", trigger: ".interviewer-trigger" },
-        { id: "System", trigger: ".system-trigger" },
-      ];
-
-      sections.forEach((section) => {
-        ScrollTrigger.create({
-          trigger: section.trigger,
-          start: "top center",
-          onEnter: () => setActiveSection(section.id),
-          onEnterBack: () => setActiveSection(section.id),
+  useEffect(() => {
+    const sectionMap = [
+      { id: "Hero", selector: ".hero-trigger" },
+      { id: "Compliance", selector: ".compliance-trigger" },
+    ];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            const s = sectionMap.find(s => entry.target.matches(s.selector));
+            if (s) setActiveSection(s.id);
+          }
         });
-      });
-
-      // Hero Text Fade Up
-      gsap.from(".reveal-text", {
-        y: 60,
-        opacity: 0,
-        stagger: 0.1,
-        duration: 1.2,
-        ease: "power3.out",
-        delay: 0.1,
-      });
-
-      // Parallax optimized
-      gsap.utils.toArray(".parallax-bg").forEach((bg: any) => {
-        gsap.to(bg, {
-          yPercent: 15,
-          ease: "none",
-          scrollTrigger: {
-            trigger: bg.parentElement,
-            start: "top bottom",
-            end: "bottom top",
-            scrub: true,
-          },
-        });
-      });
-
-      // Sticky Archive Animation
-      const cards = gsap.utils.toArray(".system-card");
-      cards.forEach((card: any, i: number) => {
-        if (i === cards.length - 1) return;
-        gsap.to(card, {
-          scale: 0.95,
-          opacity: 0.3,
-          scrollTrigger: {
-            trigger: cards[i + 1] as HTMLElement,
-            start: "top bottom",
-            end: "top top",
-            scrub: true,
-          },
-        });
-      });
-    }, containerRef);
-    return () => ctx.revert();
+      },
+      { rootMargin: "-50% 0px" }
+    );
+    sectionMap.forEach(s => {
+      const el = document.querySelector(s.selector);
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
   }, []);
 
   const scrollTo = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
@@ -128,42 +83,38 @@ export function Landing() {
 
   return (
     <div
-      ref={containerRef}
       className="bg-[#0A0E0C] text-[#F0EFEA] selection:bg-[#4ADE80] selection:text-[#0A0E0C] overflow-x-hidden min-h-screen"
     >
-      <CinematicNoise />
+      <LazyMotion features={domAnimation}>
+        <CinematicNoise />
 
-      <Navbar 
-        scrolled={scrolled} 
-        activeSection={activeSection}
-        scrollTo={scrollTo} 
-        manifestoRef={manifestoRef} 
-        systemRef={systemRef} 
-        onPricingClick={() => setIsPricingModalOpen(true)}
-      />
+        <Navbar
+          scrolled={scrolled}
+          activeSection={activeSection}
+          scrollTo={scrollTo}
+          manifestoRef={manifestoRef}
+          onPricingClick={() => setIsPricingModalOpen(true)}
+        />
 
-      <PricingContactModal 
-        isOpen={isPricingModalOpen} 
-        onClose={() => setIsPricingModalOpen(false)} 
-      />
+        <PricingContactModal
+          isOpen={isPricingModalOpen}
+          onClose={() => setIsPricingModalOpen(false)}
+        />
 
-      <Hero />
+        <Hero />
 
-      <Compliance />
+        <Compliance />
 
-      <ERCopilot ref={manifestoRef} />
+        <ERCopilot ref={manifestoRef} />
 
-      <RiskSnapshot ref={manifestoRef} />
+        <RiskSnapshot ref={manifestoRef} />
 
-      <DynamicHandbooks ref={manifestoRef} />
+        <DynamicHandbooks ref={manifestoRef} />
 
-      <ComplianceDashboard ref={manifestoRef} />
+        <ComplianceDashboard ref={manifestoRef} />
 
-      {/* <Interviewer ref={manifestoRef} />
-
-      <SystemProtocols ref={systemRef} /> */}
-
-      <Footer />
+        <Footer />
+      </LazyMotion>
     </div>
   );
 }

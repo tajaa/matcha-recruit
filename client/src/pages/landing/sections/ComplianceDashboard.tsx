@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { motion, type Variants } from "framer-motion";
+import { m, type Variants } from "framer-motion";
 import { Globe, Users, Activity, LayoutDashboard } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
@@ -32,7 +32,7 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
   ];
 
   return (
-    <motion.section
+    <m.section
       ref={ref}
       variants={containerVariants}
       initial="hidden"
@@ -49,7 +49,7 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
         
         {/* Text Content (Left Side) */}
         <div className="space-y-12 pr-12">
-          <motion.div variants={featureVariants} className="flex items-center gap-4">
+          <m.div variants={featureVariants} className="flex items-center gap-4">
             <TelemetryBadge text="Global Telemetry" active={true} />
             <TechnicalSpecs 
               title="Fleet Status"
@@ -60,9 +60,9 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
                 "Daily regulatory diffs"
               ]}
             />
-          </motion.div>
+          </m.div>
 
-          <motion.h2
+          <m.h2
             variants={featureVariants}
             className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.85]"
             style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
@@ -74,18 +74,18 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
             >
               Dashboard.
             </span>
-          </motion.h2>
+          </m.h2>
 
-          <motion.p 
+          <m.p 
             variants={featureVariants}
             className="text-zinc-500 text-xl md:text-2xl font-light leading-relaxed max-w-xl"
             style={{ fontFamily: fonts.sans }}
           >
             Navigate complex labor laws with a single glance.
-          </motion.p>
+          </m.p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <Globe size={20} />
@@ -97,9 +97,9 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 Aggregate compliance statuses across multiple geographical nodes instantly.
               </p>
-            </motion.div>
+            </m.div>
 
-            <motion.div variants={featureVariants} className="space-y-4 group">
+            <m.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
                   <Users size={20} />
@@ -111,12 +111,12 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
               <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
                 See exact headcount exposure for every local and state-level regulatory shift.
               </p>
-            </motion.div>
+            </m.div>
           </div>
         </div>
 
         {/* Visual Matrix (Right Side) */}
-        <motion.div 
+        <m.div 
           initial={{ opacity: 0, scale: 0.9, x: 50 }}
           whileInView={{ opacity: 1, scale: 1, x: 0 }}
           transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
@@ -154,7 +154,7 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
                   
                   <div className="w-1/4 flex justify-center px-4">
                     <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
-                      <motion.div 
+                      <m.div 
                         initial={{ width: 0 }}
                         whileInView={{ width: `${loc.load * 100}%` }}
                         transition={{ duration: 1, delay: i * 0.15 }}
@@ -180,17 +180,16 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
             </div>
 
             {/* Scanning Overlay */}
-            <motion.div
-              animate={{ opacity: [0.03, 0.08, 0.03] }}
-              transition={{ duration: 3, repeat: Infinity }}
+            <div
+              style={{ animation: "landing-pulse-opacity 3s ease-in-out infinite" }}
               className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.1)_0%,transparent_70%)] pointer-events-none"
             />
             
           </div>
-        </motion.div>
+        </m.div>
 
       </div>
-    </motion.section>
+    </m.section>
   );
 });
 

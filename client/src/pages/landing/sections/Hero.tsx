@@ -1,6 +1,6 @@
 import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
-import { motion, type Variants } from "framer-motion";
+import { m, type Variants } from "framer-motion";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { AsciiHalftone } from "../components/AsciiHalftone";
@@ -108,7 +108,7 @@ export const Hero = () => {
   };
 
   return (
-    <motion.section
+    <m.section
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -118,14 +118,14 @@ export const Hero = () => {
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute inset-0 bg-[#0A0E0C]" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] bg-white/[0.02] blur-[150px] rounded-full mix-blend-screen" />
-        <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/asfalt-light.png')]" />
+        <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none bg-[url('/textures/asfalt-light.png')]" />
       </div>
 
       <AsciiHalftone />
 
       <div className="relative z-10 w-full max-w-[1600px] mx-auto grid lg:grid-cols-[1fr_0.8fr] gap-12 items-center">
         <div className="flex flex-col items-start relative z-10 py-20">
-          <motion.div variants={itemVariants} className="flex items-center gap-4">
+          <m.div variants={itemVariants} className="flex items-center gap-4">
             <TelemetryBadge text="System Core // Offline Mode" active={false} />
             <div className="h-px w-8 bg-white/5" />
             <TechnicalSpecs 
@@ -137,9 +137,9 @@ export const Hero = () => {
                 "AES-256 Protocol Isolation"
               ]}
             />
-          </motion.div>
+          </m.div>
           
-          <motion.h1 variants={itemVariants} className="mt-10 leading-[0.9] tracking-[-0.04em] mix-blend-lighten max-w-2xl">
+          <m.h1 variants={itemVariants} className="mt-10 leading-[0.9] tracking-[-0.04em] mix-blend-lighten max-w-2xl">
             <span
               className="block text-[3.5rem] md:text-[5.5rem] lg:text-[7.5rem] font-bold uppercase text-white"
               style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
@@ -151,9 +151,9 @@ export const Hero = () => {
               className="block text-[4rem] md:text-[6.5rem] lg:text-[8.5rem] italic font-light text-amber-700"
               style={{ fontFamily: fonts.serif }}
             />
-          </motion.h1>
+          </m.h1>
 
-          <motion.div variants={itemVariants} className="space-y-10 mt-10">
+          <m.div variants={itemVariants} className="space-y-10 mt-10">
             <p
               className="text-zinc-300 text-2xl md:text-3xl lg:text-4xl font-light leading-relaxed max-w-lg"
               style={{ fontFamily: fonts.sans }}
@@ -167,15 +167,15 @@ export const Hero = () => {
                 className="group relative px-10 py-4 bg-white text-black text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden"
               >
                 <span className="relative z-10">Initialize Account</span>
-                <motion.div 
+                <m.div 
                   className="absolute inset-0 bg-zinc-200 translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
                 />
               </Link>
             </div>
-          </motion.div>
+          </m.div>
         </div>
 
-        <motion.div
+        <m.div
           initial={{ opacity: 0, scale: 0.9, x: 20 }}
           animate={{ opacity: 1, scale: 1, x: 0 }}
           transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1], delay: 0.4 }}
@@ -194,8 +194,8 @@ export const Hero = () => {
               showCityMarkers
             />
           </Suspense>
-        </motion.div>
+        </m.div>
       </div>
-    </motion.section>
+    </m.section>
   );
 };

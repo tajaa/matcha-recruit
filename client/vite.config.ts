@@ -7,6 +7,17 @@ const backendWsTarget = backendTarget.replace(/^http/, 'ws')
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-three': ['three'],
+          'vendor-framer': ['framer-motion'],
+          'vendor-react': ['react', 'react-dom'],
+        }
+      }
+    }
+  },
   server: {
     port: 5174,
     proxy: {

@@ -5,11 +5,10 @@ interface NavbarProps {
   activeSection: string;
   scrollTo: (ref: React.RefObject<HTMLDivElement | null>) => void;
   manifestoRef: React.RefObject<HTMLDivElement | null>;
-  systemRef: React.RefObject<HTMLDivElement | null>;
   onPricingClick: () => void;
 }
 
-export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, systemRef, onPricingClick }: NavbarProps) => {
+export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPricingClick }: NavbarProps) => {
   return (
     <nav className="fixed top-0 left-0 w-full z-50 pointer-events-none transition-all duration-500">
       <div

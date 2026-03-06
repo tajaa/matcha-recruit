@@ -4,8 +4,8 @@ import { AuthProvider, ChatAuthProvider, useAuth } from './context';
 import { Layout, ProtectedRoute } from './components';
 import { getAppHomePath } from './utils/homeRoute';
 
-// Static imports for critical path (landing + auth)
-import { Landing } from './pages/Landing';
+// Lazy load landing page
+const Landing = lazy(() => import('./pages/Landing'));
 import { Login } from './pages/Login';
 import { Register } from './pages/Register';
 const RegisterInvite = lazy(() => import('./pages/RegisterInvite'));

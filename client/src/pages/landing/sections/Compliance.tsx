@@ -1,4 +1,4 @@
-import { motion, type Variants } from "framer-motion";
+import { m, type Variants } from "framer-motion";
 import { MapPin, Shield, Zap, Search } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
@@ -28,7 +28,7 @@ export const Compliance = () => {
   };
 
   return (
-    <motion.section 
+    <m.section 
       variants={containerVariants}
       initial="hidden"
       whileInView="visible"
@@ -39,7 +39,7 @@ export const Compliance = () => {
 
       <div className="relative z-10 max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center">
         <div className="space-y-16 pr-12">
-          <motion.div variants={textVariants} className="space-y-6">
+          <m.div variants={textVariants} className="space-y-6">
             <div className="flex items-center gap-4">
               <div className="space-y-4">
                 <span className="text-[10px] font-mono uppercase tracking-[0.3em] text-[#4ADE80]">
@@ -72,10 +72,10 @@ export const Compliance = () => {
               Federal, state, and local employment law — automatically mapped to every
               location you operate. One dashboard. Zero blind spots.
             </p>
-          </motion.div>
+          </m.div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-            <motion.div variants={textVariants} className="space-y-4">
+            <m.div variants={textVariants} className="space-y-4">
               <div className="w-10 h-10 rounded-full bg-[#4ADE80]/10 flex items-center justify-center">
                 <Zap size={18} className="text-[#4ADE80]" />
               </div>
@@ -86,8 +86,8 @@ export const Compliance = () => {
                 When a city updates its minimum wage or predictive scheduling laws, 
                 your entire workforce infrastructure adapts in the same pay period.
               </p>
-            </motion.div>
-            <motion.div variants={textVariants} className="space-y-4">
+            </m.div>
+            <m.div variants={textVariants} className="space-y-4">
               <div className="w-10 h-10 rounded-full bg-[#D95A38]/10 flex items-center justify-center">
                 <Shield size={18} className="text-[#D95A38]" />
               </div>
@@ -98,11 +98,11 @@ export const Compliance = () => {
                 Every policy is verified against the highest standard of employee 
                 protection to minimize litigation risk across state lines.
               </p>
-            </motion.div>
+            </m.div>
           </div>
         </div>
 
-        <motion.div 
+        <m.div 
           initial={{ opacity: 0, scale: 0.9, rotateY: -15 }}
           whileInView={{ opacity: 1, scale: 1, rotateY: 0 }}
           transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
@@ -110,9 +110,8 @@ export const Compliance = () => {
           className="relative z-10 space-y-6"
         >
           <div className="bg-[#060906] rounded-2xl border border-white/10 p-6 shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden relative group">
-            <motion.div
-              animate={{ top: ["-10%", "110%"] }}
-              transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+            <div
+              style={{ animation: "landing-scan-down 3s ease-in-out infinite" }}
               className="absolute left-0 right-0 h-[1px] bg-[#4ADE80]/30 shadow-[0_0_20px_#4ADE80] z-30"
             />
 
@@ -140,8 +139,8 @@ export const Compliance = () => {
           <div className="absolute -bottom-12 -right-12 w-64 h-64 border border-white/5 rounded-full flex items-center justify-center opacity-20 pointer-events-none group-hover:opacity-40 transition-opacity">
             <Search size={120} className="text-white/10 rotate-12" />
           </div>
-        </motion.div>
+        </m.div>
       </div>
-    </motion.section>
+    </m.section>
   );
 };
