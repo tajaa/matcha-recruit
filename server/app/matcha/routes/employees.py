@@ -1281,6 +1281,7 @@ async def download_bulk_upload_template(
 
 @router.post("/bulk-upload", response_model=BulkEmployeeCSVUpload)
 async def bulk_upload_employees_csv(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="CSV file with employee data"),
     send_invitations: bool = Query(True, description="Send invitation emails immediately"),
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -1340,6 +1341,34 @@ async def bulk_upload_employees_csv(
 
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
+
+        google_workspace_auto_provision = False
+        slack_auto_provision = False
+        try:
+            integration_rows = await conn.fetch(
+                """
+                SELECT provider, config
+                FROM integration_connections
+                WHERE company_id = $1
+                  AND status = 'connected'
+                """,
+                company_id,
+            )
+            for integration_row in integration_rows:
+                integration_config = _json_object(integration_row["config"])
+                if integration_row["provider"] == PROVIDER_GOOGLE_WORKSPACE:
+                    google_workspace_auto_provision = _coerce_bool(
+                        integration_config.get("auto_provision_on_employee_create"),
+                        True,
+                    )
+                elif integration_row["provider"] == PROVIDER_SLACK:
+                    slack_auto_provision = _coerce_bool(
+                        integration_config.get("auto_invite_on_employee_create"),
+                        True,
+                    )
+        except Exception:
+            logger.exception("Unable to evaluate integration connection statuses for company %s", company_id)
+
         for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 to account for header
             try:
                 # Validate email format
@@ -1489,6 +1518,22 @@ async def bulk_upload_employees_csv(
 
                 employee_ids.append(employee['id'])
                 created += 1
+
+                # Schedule Google Workspace / Slack provisioning
+                run_google = google_workspace_auto_provision
+                run_slack = slack_auto_provision
+                if run_google or run_slack:
+                    background_tasks.add_task(
+                        _run_provisioning_and_notify,
+                        company_id=company_id,
+                        employee_id=employee['id'],
+                        triggered_by=current_user.id,
+                        personal_email=personal_email,
+                        employee_name=f"{first_name} {last_name}".strip(),
+                        work_email=email,
+                        run_google=run_google,
+                        run_slack=run_slack,
+                    )
 
                 # Send invitation if requested
                 if send_invitations:
