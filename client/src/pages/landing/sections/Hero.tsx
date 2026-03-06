@@ -148,19 +148,17 @@ export const Hero = () => {
             </span>
             <GlitchText
               text="Intelligence."
-              className="block text-[4rem] md:text-[6.5rem] lg:text-[8.5rem] italic font-light text-zinc-500"
+              className="block text-[4rem] md:text-[6.5rem] lg:text-[8.5rem] italic font-light text-amber-700"
               style={{ fontFamily: fonts.serif }}
             />
           </motion.h1>
 
           <motion.div variants={itemVariants} className="space-y-10 mt-10">
             <p
-              className="text-zinc-500 text-base md:text-lg lg:text-xl font-light leading-relaxed max-w-lg"
+              className="text-zinc-300 text-2xl md:text-3xl lg:text-4xl font-light leading-relaxed max-w-lg"
               style={{ fontFamily: fonts.sans }}
             >
-              The unified operating system for modern workforce architecture. 
-              <span className="text-zinc-300 font-medium"> Stripped of noise.</span> Optimized for 
-              biological clarity and algorithmic precision.
+              Increase your signal to noise ratio.
             </p>
             
             <div className="flex flex-wrap gap-6 pt-2">
