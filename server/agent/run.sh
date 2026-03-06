@@ -25,9 +25,10 @@ while [[ $# -gt 0 ]]; do
     --chat)   MODE="chat"; shift ;;
     --once)   MODE="once"; shift ;;
     --daemon) MODE="daemon"; shift ;;
+    --email)  MODE="email"; shift ;;
     --gemini) GEMINI_FLAG="--gemini"; shift ;;
     --interval) INTERVAL="--interval $2"; shift 2 ;;
-    *) echo "Usage: $0 [--chat|--once|--daemon] [--gemini] [--interval N]"; exit 1 ;;
+    *) echo "Usage: $0 [--chat|--once|--daemon|--email] [--gemini] [--interval N]"; exit 1 ;;
   esac
 done
 
@@ -35,6 +36,12 @@ done
 if [ "$MODE" = "chat" ]; then
   cd "$SERVER_DIR"
   exec python3 -m agent.cli $GEMINI_FLAG
+fi
+
+# Quick email fetch
+if [ "$MODE" = "email" ]; then
+  cd "$SERVER_DIR"
+  AGENT_GMAIL_ENABLED=true exec python3 -m agent.email_check $GEMINI_FLAG
 fi
 
 # Docker modes (once / daemon) — fully containerized
