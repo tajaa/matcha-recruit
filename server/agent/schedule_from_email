@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SERVER_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Load GEMINI_API_KEY from server/.env
+GEMINI_API_KEY=$(grep '^GEMINI_API_KEY=' "$SERVER_DIR/.env" | cut -d'=' -f2)
+export GEMINI_API_KEY
+
+cd "$SERVER_DIR"
+AGENT_GMAIL_ENABLED=true exec python3 -c "
+import asyncio
+import json
+import re
+from datetime import datetime
+from agent.config import load_config
+from agent.sandbox import Sandbox
+
+async def run():
+    config = load_config()
+    config.gmail_enabled = True
+    sandbox = Sandbox(config)
+
+    if sandbox.gmail is None or not sandbox.gmail.is_configured:
+        print('Gmail not configured. Run: python -m agent.gmail_auth')
+        return
+
+    if sandbox.calendar is None:
+        print('Calendar not configured. Re-auth: python -m agent.gmail_auth')
+        return
+
+    print('Fetching emails...')
+    messages = await sandbox.gmail.fetch_unread(max_results=5)
+    if not messages:
+        print('No unread emails.')
+        if sandbox.local:
+            sandbox.local.stop()
+        return
+
+    emails = []
+    for msg in messages:
+        emails.append(await sandbox.gmail.get_message(msg['id']))
+
+    print()
+    for i, e in enumerate(emails, 1):
+        print(f'  {i}. {e[\"subject\"]}  — {e[\"from\"]}')
+
+    try:
+        choice = input('\nSchedule from which email? (number): ').strip()
+        idx = int(choice) - 1
+        if idx < 0 or idx >= len(emails):
+            print('Invalid choice.')
+            if sandbox.local:
+                sandbox.local.stop()
+            return
+    except (ValueError, EOFError):
+        print('Cancelled.')
+        if sandbox.local:
+            sandbox.local.stop()
+        return
+
+    email = emails[idx]
+    now = datetime.now().strftime('%Y-%m-%d')
+
+    prompt = f'''Extract meeting/event details from this email. Return ONLY valid JSON with these fields:
+- \"summary\": event title (string)
+- \"start\": start datetime in ISO 8601 with timezone, e.g. \"2026-03-10T14:00:00-08:00\" (string)
+- \"end\": end datetime in ISO 8601 with timezone (string) — if duration not specified, default to 1 hour
+- \"description\": brief description or agenda (string or null)
+- \"attendees\": list of email addresses mentioned (list of strings, or empty list)
+- \"location\": meeting location or video link if mentioned (string or null)
+
+If you cannot determine a date/time, use your best guess based on context (today is {now}).
+
+Email:
+From: {email[\"from\"]}
+Subject: {email[\"subject\"]}
+Date: {email[\"date\"]}
+Body:
+{email[\"body\"][:3000]}'''
+
+    print('\nExtracting event details...')
+    raw = await sandbox.llm.generate(prompt)
+
+    json_match = re.search(r'\{.*\}', raw, re.DOTALL)
+    if not json_match:
+        print('Could not parse event details from LLM response.')
+        print(raw)
+        if sandbox.local:
+            sandbox.local.stop()
+        return
+
+    try:
+        event_data = json.loads(json_match.group())
+    except json.JSONDecodeError:
+        print('Invalid JSON from LLM.')
+        print(raw)
+        if sandbox.local:
+            sandbox.local.stop()
+        return
+
+    print()
+    print('=' * 50)
+    print(f'  Title:     {event_data.get(\"summary\", \"(none)\")}')
+    print(f'  Start:     {event_data.get(\"start\", \"(none)\")}')
+    print(f'  End:       {event_data.get(\"end\", \"(none)\")}')
+    if event_data.get('location'):
+        print(f'  Location:  {event_data[\"location\"]}')
+    if event_data.get('attendees'):
+        print(f'  Attendees: {\", \".join(event_data[\"attendees\"])}')
+    if event_data.get('description'):
+        print(f'  Notes:     {event_data[\"description\"][:100]}')
+    print('=' * 50)
+
+    confirm = input('\nCreate this event? (y/n): ').strip().lower()
+    if confirm != 'y':
+        print('Cancelled.')
+        if sandbox.local:
+            sandbox.local.stop()
+        return
+
+    try:
+        result = await sandbox.calendar.create_event(
+            summary=event_data.get('summary', email['subject']),
+            start=event_data['start'],
+            end=event_data['end'],
+            description=event_data.get('description'),
+            attendees=event_data.get('attendees') or None,
+            location=event_data.get('location'),
+        )
+        link = result.get('htmlLink', '')
+        print(f'\nEvent created.')
+        if link:
+            print(f'  {link}')
+    except Exception as e:
+        print(f'Failed to create event: {e}')
+
+    if sandbox.local:
+        sandbox.local.stop()
+
+asyncio.run(run())
+"

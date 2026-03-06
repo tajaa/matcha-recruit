@@ -432,6 +432,63 @@ class SandboxedGmail:
         return text
 
 
+class SandboxedCalendar:
+    """Google Calendar client — creates events using the same OAuth token as Gmail.
+
+    Scope: calendar.events (create/edit own events, cannot delete calendars).
+    """
+
+    CALENDAR_API_BASE = "https://www.googleapis.com/calendar/v3"
+
+    def __init__(self, gmail: SandboxedGmail):
+        self._gmail = gmail
+
+    async def create_event(
+        self,
+        summary: str,
+        start: str,
+        end: str,
+        description: str | None = None,
+        attendees: list[str] | None = None,
+        location: str | None = None,
+    ) -> dict:
+        """Create a calendar event. start/end are ISO 8601 datetime strings."""
+        url = f"{self.CALENDAR_API_BASE}/calendars/primary/events"
+
+        parsed = urlparse(url)
+        if parsed.hostname != "www.googleapis.com" or not parsed.path.startswith("/calendar/v3"):
+            raise SandboxViolation(f"Calendar URL outside allowed scope: {url}")
+
+        body: dict = {
+            "summary": summary,
+            "start": {"dateTime": start},
+            "end": {"dateTime": end},
+        }
+        if description:
+            body["description"] = description
+        if attendees:
+            body["attendees"] = [{"email": a} for a in attendees]
+        if location:
+            body["location"] = location
+
+        token = await self._gmail._get_access_token()
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        logger.info(f"Calendar event created: {data.get('htmlLink')}")
+        return data
+
+
 class Sandbox:
     """Aggregates all sandboxed resources."""
 
@@ -442,10 +499,11 @@ class Sandbox:
             all_urls.append(feed["url"])
         all_urls.extend(config.allowed_url_patterns)
 
-        # Add Gmail API URLs when enabled
+        # Add Gmail + Calendar API URLs when enabled
         if config.gmail_enabled:
             all_urls.append("https://gmail.googleapis.com/gmail/v1/")
             all_urls.append("https://oauth2.googleapis.com/token")
+            all_urls.append("https://www.googleapis.com/calendar/v3/")
 
         self.fetcher = SandboxedFetcher(all_urls)
         self.fs = SandboxedFS(config.workspace_root)
@@ -468,3 +526,8 @@ class Sandbox:
             self.gmail = gmail if gmail.is_configured else None
         else:
             self.gmail = None
+
+        # Calendar — shares Gmail's OAuth token
+        self.calendar: SandboxedCalendar | None = None
+        if self.gmail is not None:
+            self.calendar = SandboxedCalendar(self.gmail)

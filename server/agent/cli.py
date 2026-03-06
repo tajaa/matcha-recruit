@@ -29,6 +29,7 @@ def _make_banner(llm_label: str) -> str:
   /briefing   — run RSS briefing now
   /email      — fetch and summarize Gmail
   /draft      — draft a reply to an email
+  /schedule   — create a calendar event from an email
   /inbox      — show pending inbox files
   /output     — list recent outputs
   /feeds      — show RSS feeds
@@ -70,7 +71,7 @@ class AgentCLI:
             else:
                 asyncio.run(self._chat(user_input))
 
-    _COMMANDS = {"/quit", "/exit", "/briefing", "/email", "/draft", "/inbox", "/output", "/feeds", "/clear", "/help"}
+    _COMMANDS = {"/quit", "/exit", "/briefing", "/email", "/draft", "/schedule", "/inbox", "/output", "/feeds", "/clear", "/help"}
 
     def _is_command(self, text: str) -> bool:
         return text.split()[0].lower() in self._COMMANDS
@@ -194,6 +195,9 @@ User: {message}"""
 
         elif command == "/draft":
             asyncio.run(self._run_draft())
+
+        elif command == "/schedule":
+            asyncio.run(self._run_schedule())
 
         elif command == "/inbox":
             files = self.sandbox.fs.list_dir("inbox")
@@ -351,6 +355,121 @@ Body:
             print(f"\n\033[32mDraft saved.\033[0m Open Gmail to review and send.")
         except Exception as e:
             print(f"\n\033[31mFailed to save draft: {e}\033[0m")
+
+    async def _run_schedule(self):
+        if self.sandbox.calendar is None:
+            print(
+                "\n\033[33mCalendar not configured.\033[0m\n"
+                "  1. Set AGENT_GMAIL_ENABLED=true\n"
+                "  2. Run: python -m agent.gmail_auth  (re-auth to add calendar scope)\n"
+            )
+            return
+
+        print("\n\033[2mFetching recent emails...\033[0m")
+        try:
+            messages = await self.sandbox.gmail.fetch_unread(max_results=5)
+        except Exception as e:
+            print(f"\n\033[31mFetch failed: {e}\033[0m")
+            return
+
+        if not messages:
+            print("\nNo unread emails.")
+            return
+
+        emails = []
+        for msg in messages:
+            email = await self.sandbox.gmail.get_message(msg["id"])
+            emails.append(email)
+
+        print()
+        for i, e in enumerate(emails, 1):
+            print(f"  {i}. {e['subject']}  \033[2m— {e['from']}\033[0m")
+
+        try:
+            choice = input("\n\033[1mSchedule from which email? (number):\033[0m ").strip()
+            idx = int(choice) - 1
+            if idx < 0 or idx >= len(emails):
+                print("Invalid choice.")
+                return
+        except (ValueError, EOFError):
+            print("Cancelled.")
+            return
+
+        email = emails[idx]
+
+        prompt = f"""Extract meeting/event details from this email. Return ONLY valid JSON with these fields:
+- "summary": event title (string)
+- "start": start datetime in ISO 8601 with timezone, e.g. "2026-03-10T14:00:00-08:00" (string)
+- "end": end datetime in ISO 8601 with timezone (string) — if duration not specified, default to 1 hour
+- "description": brief description or agenda (string or null)
+- "attendees": list of email addresses mentioned (list of strings, or empty list)
+- "location": meeting location or video link if mentioned (string or null)
+
+If you cannot determine a date/time, use your best guess based on context (today is {datetime.now().strftime('%Y-%m-%d')}).
+
+Email:
+From: {email['from']}
+Subject: {email['subject']}
+Date: {email['date']}
+Body:
+{email['body'][:3000]}"""
+
+        print("\n\033[2mExtracting event details...\033[0m")
+        try:
+            raw = await self.sandbox.llm.generate(prompt)
+        except Exception as e:
+            print(f"\n\033[31mLLM error: {e}\033[0m")
+            return
+
+        # Parse JSON from LLM response (may be wrapped in ```json blocks)
+        import json
+        import re
+        json_match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not json_match:
+            print(f"\n\033[31mCouldn't parse event details from LLM response.\033[0m")
+            print(raw)
+            return
+
+        try:
+            event_data = json.loads(json_match.group())
+        except json.JSONDecodeError:
+            print(f"\n\033[31mInvalid JSON from LLM.\033[0m")
+            print(raw)
+            return
+
+        # Display parsed event for confirmation
+        print(f"\n{'='*50}")
+        print(f"  Title:     {event_data.get('summary', '(none)')}")
+        print(f"  Start:     {event_data.get('start', '(none)')}")
+        print(f"  End:       {event_data.get('end', '(none)')}")
+        if event_data.get('location'):
+            print(f"  Location:  {event_data['location']}")
+        if event_data.get('attendees'):
+            print(f"  Attendees: {', '.join(event_data['attendees'])}")
+        if event_data.get('description'):
+            print(f"  Notes:     {event_data['description'][:100]}")
+        print(f"{'='*50}")
+
+        confirm = input("\n\033[1mCreate this event? (y/n):\033[0m ").strip().lower()
+        if confirm != "y":
+            print("Cancelled.")
+            return
+
+        try:
+            result = await self.sandbox.calendar.create_event(
+                summary=event_data.get("summary", email["subject"]),
+                start=event_data["start"],
+                end=event_data["end"],
+                description=event_data.get("description"),
+                attendees=event_data.get("attendees") or None,
+                location=event_data.get("location"),
+            )
+            link = result.get("htmlLink", "")
+            print(f"\n\033[32mEvent created.\033[0m")
+            if link:
+                print(f"  {link}")
+        except Exception as e:
+            print(f"\n\033[31mFailed to create event: {e}\033[0m")
 
     def _build_file_prompt(self, filename: str, content: str) -> str:
         context = ""
