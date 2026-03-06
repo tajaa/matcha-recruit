@@ -3,9 +3,11 @@ import { m, type Variants } from "framer-motion";
 import { Radar, Activity, ShieldCheck, ShieldAlert, Target, AlertTriangle } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
+import { useInViewport } from "../hooks/useInViewport";
 import { fonts } from "../constants";
 
 export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
+  const { ref: sectionRef, isVisible } = useInViewport();
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
@@ -32,9 +34,10 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
       viewport={{ once: true, margin: "-100px" }}
       className="risk-snapshot-trigger py-64 px-6 md:px-16 lg:px-32 relative bg-[#060807] overflow-hidden border-t border-white/5"
     >
+      <div ref={sectionRef} />
       {/* Background Depth */}
       <div className="absolute inset-0 z-0 pointer-events-none">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] bg-white/[0.01] rounded-full blur-[100px] mix-blend-screen" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[1000px] rounded-full mix-blend-screen" style={{ background: "radial-gradient(circle, rgba(255,255,255,0.01) 0%, transparent 70%)" }} />
       </div>
 
       <div className="max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center relative z-10">
@@ -146,10 +149,10 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
             initial={{ opacity: 0, y: 20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.8, duration: 0.6 }}
-            className="absolute -top-10 -left-6 lg:-left-12 bg-black/90 backdrop-blur-md border border-zinc-800 p-4 rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-30 hidden md:block w-56"
+            className="absolute -top-10 -left-6 lg:-left-12 bg-[#0A0E0C]/95 border border-zinc-800 p-4 rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-30 hidden md:block w-56"
           >
             <div className="flex items-center gap-3 mb-3 border-b border-white/10 pb-2">
-              <AlertTriangle size={14} className="text-amber-500 animate-pulse" />
+              <AlertTriangle size={14} className={`text-amber-500 ${isVisible ? "animate-pulse" : ""}`} />
               <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400">Threat Detected</span>
             </div>
             <p className="text-[10px] text-white font-mono uppercase tracking-wider mb-1">NY Pay Transparency</p>
@@ -160,7 +163,7 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
             initial={{ opacity: 0, y: -20 }}
             whileInView={{ opacity: 1, y: 0 }}
             transition={{ delay: 1.2, duration: 0.6 }}
-            className="absolute -bottom-10 -right-6 lg:-right-12 bg-black/90 backdrop-blur-md border border-zinc-800 p-4 rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-30 hidden md:block w-56"
+            className="absolute -bottom-10 -right-6 lg:-right-12 bg-[#0A0E0C]/95 border border-zinc-800 p-4 rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-30 hidden md:block w-56"
           >
             <div className="flex items-center gap-3 mb-3 border-b border-white/10 pb-2">
               <ShieldCheck size={14} className="text-zinc-500" />
@@ -179,7 +182,7 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
                 className="w-full h-full rounded-full"
                 style={{
                   background: "conic-gradient(from 0deg, transparent 70%, rgba(255,255,255,0.08) 100%)",
-                  animation: "spin 6s linear infinite",
+                  animation: isVisible ? "spin 6s linear infinite" : "none",
                 }}
               />
             </div>
@@ -212,11 +215,11 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
                   style={{
                     top: pos.top,
                     left: pos.left,
-                    animation: "landing-blip 2s ease-in-out infinite",
+                    animation: isVisible ? "landing-blip 2s ease-in-out infinite" : "none",
                     animationDelay: `${pos.delay}s`,
                   }}
                 >
-                  <div className="absolute inset-0 bg-white rounded-full animate-ping opacity-50" />
+                  <div className={`absolute inset-0 bg-white rounded-full ${isVisible ? "animate-ping" : ""} opacity-50`} />
                 </div>
               ))}
             </div>

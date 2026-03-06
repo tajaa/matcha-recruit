@@ -2,11 +2,12 @@ import { m, type Variants } from "framer-motion";
 import { MapPin, Shield, Zap, Search } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
-import { AsciiHalftone } from "../components/AsciiHalftone";
 import { JurisdictionRows } from "../components/JurisdictionRows";
+import { useInViewport } from "../hooks/useInViewport";
 import { fonts } from "../constants";
 
 export const Compliance = () => {
+  const { ref: sectionRef, isVisible } = useInViewport();
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
@@ -35,7 +36,7 @@ export const Compliance = () => {
       viewport={{ once: true, margin: "-100px" }}
       className="compliance-trigger py-64 px-6 md:px-16 lg:px-32 relative border-t border-white/5 bg-[#0A0E0C]"
     >
-      <AsciiHalftone />
+      <div ref={sectionRef} />
 
       <div className="relative z-10 max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center">
         <div className="space-y-16 pr-12">
@@ -111,7 +112,7 @@ export const Compliance = () => {
         >
           <div className="bg-[#060906] rounded-2xl border border-white/10 p-6 shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden relative group">
             <div
-              style={{ animation: "landing-scan-down 3s ease-in-out infinite" }}
+              style={{ animation: isVisible ? "landing-scan-down 3s ease-in-out infinite" : "none" }}
               className="absolute left-0 right-0 h-[1px] bg-[#4ADE80]/30 shadow-[0_0_20px_#4ADE80] z-30"
             />
 

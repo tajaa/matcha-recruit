@@ -4,6 +4,7 @@ import { m, type Variants } from "framer-motion";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { AsciiHalftone } from "../components/AsciiHalftone";
+import { useInViewport } from "../hooks/useInViewport";
 import { fonts } from "../constants";
 
 const ParticleSphere = lazy(() => import("../../../components/ParticleSphere"));
@@ -39,10 +40,15 @@ function GlitchText({ text, className, style }: { text: string; className?: stri
     return () => clearInterval(decode);
   }, [text]);
 
-  // Periodic glitch
+  // Periodic glitch — paused when off-screen
+  const { ref: glitchRef, isVisible: glitchVisible } = useInViewport();
+  const glitchVisibleRef = useRef(glitchVisible);
+  glitchVisibleRef.current = glitchVisible;
+
   useEffect(() => {
     const scheduleGlitch = () => {
       timeoutRef.current = setTimeout(() => {
+        if (!glitchVisibleRef.current) { scheduleGlitch(); return; }
         setIsGlitching(true);
         let ticks = 0;
         const maxTicks = 7 + Math.floor(Math.random() * 8);
@@ -72,6 +78,7 @@ function GlitchText({ text, className, style }: { text: string; className?: stri
 
   return (
     <span
+      ref={glitchRef}
       className={className}
       style={{
         ...style,
@@ -117,7 +124,7 @@ export const Hero = () => {
       {/* Atmosphere Layer - Minimalist Grayscale */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute inset-0 bg-[#0A0E0C]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] bg-white/[0.02] blur-[150px] rounded-full mix-blend-screen" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] rounded-full mix-blend-screen" style={{ background: "radial-gradient(circle, rgba(255,255,255,0.02) 0%, transparent 70%)" }} />
         <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none bg-[url('/textures/asfalt-light.png')]" />
       </div>
 
@@ -188,7 +195,7 @@ export const Hero = () => {
               </div>
             }
           >
-            <div className="absolute inset-0 bg-white/[0.03] blur-[100px] rounded-full mix-blend-screen pointer-events-none group-hover:bg-white/[0.05] transition-colors duration-1000" />
+            <div className="absolute inset-0 rounded-full mix-blend-screen pointer-events-none transition-colors duration-1000" style={{ background: "radial-gradient(circle, rgba(255,255,255,0.03) 0%, transparent 70%)" }} />
             <ParticleSphere
               className="w-full h-full scale-100 lg:scale-110 opacity-80"
               showCityMarkers

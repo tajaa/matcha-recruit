@@ -3,9 +3,11 @@ import { m, type Variants } from "framer-motion";
 import { BookMarked, RefreshCw, FileCode2, History } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
+import { useInViewport } from "../hooks/useInViewport";
 import { fonts } from "../constants";
 
 export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
+  const { ref: sectionRef, isVisible } = useInViewport();
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
@@ -32,6 +34,7 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
       viewport={{ once: true, margin: "-100px" }}
       className="dynamic-handbooks-trigger py-64 px-6 md:px-16 lg:px-32 relative bg-[#0A0E0C] overflow-hidden"
     >
+      <div ref={sectionRef} />
       {/* Background Depth */}
       <div className="absolute inset-0 z-0 pointer-events-none opacity-[0.03]">
         <div className="absolute top-0 left-0 w-full h-full bg-[url('/textures/asfalt-light.png')]" />
@@ -57,7 +60,7 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
                 </span>
               </div>
               <span className="text-[8px] text-zinc-500 uppercase tracking-widest flex items-center gap-2">
-                <RefreshCw size={10} className="animate-spin" /> Syncing
+                <RefreshCw size={10} className={isVisible ? "animate-spin" : ""} /> Syncing
               </span>
             </div>
 
@@ -100,7 +103,7 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
 
               {/* Scanning Laser */}
               <div
-                style={{ animation: "landing-scan-bounce 4s ease-in-out infinite" }}
+                style={{ animation: isVisible ? "landing-scan-bounce 4s ease-in-out infinite" : "none" }}
                 className="absolute left-0 w-full h-[1px] bg-white/40 shadow-[0_0_10px_rgba(255,255,255,0.5)] z-20 pointer-events-none"
               />
             </div>

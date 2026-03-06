@@ -3,9 +3,11 @@ import { m, type Variants } from "framer-motion";
 import { Scale, BookOpen, ShieldAlert } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
+import { useInViewport } from "../hooks/useInViewport";
 import { fonts, ER_INFERENCE_WIDTHS } from "../constants";
 
 export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
+  const { ref: sectionRef, isVisible } = useInViewport();
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
@@ -32,10 +34,11 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
       viewport={{ once: true, margin: "-100px" }}
       className="er-copilot-trigger py-64 px-6 md:px-16 lg:px-32 relative bg-[#0A0E0C] overflow-hidden"
     >
+      <div ref={sectionRef} />
       {/* Background Depth */}
       <div className="absolute inset-0 z-0 pointer-events-none opacity-[0.03]">
         <div className="absolute top-0 left-0 w-full h-full bg-[url('/textures/asfalt-light.png')]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-white rounded-full blur-[150px] mix-blend-screen" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] rounded-full mix-blend-screen" style={{ background: "radial-gradient(circle, white 0%, transparent 70%)" }} />
       </div>
 
       <div className="max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center relative z-10">
@@ -100,7 +103,7 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
                       className="w-[2px] bg-white/30"
                       style={{
                         height: `${h * 100}%`,
-                        animation: `landing-bar-bounce ${1.5 + i * 0.2}s ease-in-out infinite`,
+                        animation: isVisible ? `landing-bar-bounce ${1.5 + i * 0.2}s ease-in-out infinite` : "none",
                         transformOrigin: "bottom",
                       }}
                     />

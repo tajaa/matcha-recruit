@@ -1,5 +1,5 @@
 import { memo, useEffect, useState, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 
 const LAWS = [
   { law: "Minimum Wage", jurisdiction: "San Francisco Local", rate: "$18.67/hr", status: "compliant" },
@@ -84,7 +84,7 @@ export const JurisdictionRows = memo(function JurisdictionRows() {
           const key = `${item.law}-${item.jurisdiction}`;
           const sc = STATUS_COLORS[item.status];
           return (
-            <motion.div
+            <m.div
               key={key}
               initial={{ opacity: 0, y: -8 }}
               animate={{ opacity: 1, y: 0 }}
@@ -105,7 +105,7 @@ export const JurisdictionRows = memo(function JurisdictionRows() {
               <span className={`w-16 text-right text-[8px] font-mono uppercase tracking-wider ${sc.text}`}>
                 {item.status === "compliant" ? "OK" : item.status === "warning" ? "WARN" : "SYNC"}
               </span>
-            </motion.div>
+            </m.div>
           );
         })}
       </AnimatePresence>

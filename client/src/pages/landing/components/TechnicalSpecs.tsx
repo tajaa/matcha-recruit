@@ -1,4 +1,4 @@
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Info, X } from "lucide-react";
 import { useState } from "react";
 
@@ -22,7 +22,7 @@ export const TechnicalSpecs = ({ title, specs }: TechnicalSpecsProps) => {
 
       <AnimatePresence>
         {isOpen && (
-          <motion.div
+          <m.div
             initial={{ opacity: 0, x: 20, scale: 0.95 }}
             animate={{ opacity: 1, x: 0, scale: 1 }}
             exit={{ opacity: 0, x: 20, scale: 0.95 }}
@@ -43,7 +43,7 @@ export const TechnicalSpecs = ({ title, specs }: TechnicalSpecsProps) => {
                 </li>
               ))}
             </ul>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </div>

@@ -3,9 +3,11 @@ import { m, type Variants } from "framer-motion";
 import { Globe, Users, Activity, LayoutDashboard } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
+import { useInViewport } from "../hooks/useInViewport";
 import { fonts } from "../constants";
 
 export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
+  const { ref: sectionRef, isVisible } = useInViewport();
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
@@ -40,9 +42,10 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
       viewport={{ once: true, margin: "-100px" }}
       className="compliance-dashboard-trigger py-64 px-6 md:px-16 lg:px-32 relative bg-[#060807] overflow-hidden border-t border-white/5"
     >
+      <div ref={sectionRef} />
       {/* Background Depth */}
       <div className="absolute inset-0 z-0 pointer-events-none">
-        <div className="absolute top-0 right-0 w-[800px] h-[800px] bg-white/[0.01] rounded-full blur-[120px] mix-blend-screen translate-x-1/3 -translate-y-1/3" />
+        <div className="absolute top-0 right-0 w-[800px] h-[800px] rounded-full mix-blend-screen translate-x-1/3 -translate-y-1/3" style={{ background: "radial-gradient(circle, rgba(255,255,255,0.01) 0%, transparent 70%)" }} />
       </div>
 
       <div className="max-w-[1600px] mx-auto grid lg:grid-cols-2 gap-32 items-center relative z-10">
@@ -164,8 +167,8 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
                   </div>
 
                   <span className={`w-1/6 text-right font-bold ${
-                    loc.status === "OK" ? "text-white/60" : 
-                    loc.status === "WARN" ? "text-white animate-pulse" : 
+                    loc.status === "OK" ? "text-white/60" :
+                    loc.status === "WARN" ? `text-white ${isVisible ? "animate-pulse" : ""}` :
                     "text-zinc-600"
                   }`}>
                     {loc.status}
@@ -181,7 +184,7 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
 
             {/* Scanning Overlay */}
             <div
-              style={{ animation: "landing-pulse-opacity 3s ease-in-out infinite" }}
+              style={{ animation: isVisible ? "landing-pulse-opacity 3s ease-in-out infinite" : "none" }}
               className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(255,255,255,0.1)_0%,transparent_70%)] pointer-events-none"
             />
             

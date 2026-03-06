@@ -304,12 +304,21 @@ export function ParticleSphere({
       });
     }
 
+    // Visibility observer — skip GPU work when off-screen
+    const isVisible = { current: true };
+    const observer = new IntersectionObserver(
+      ([entry]) => { isVisible.current = entry.isIntersecting; },
+      { rootMargin: "200px" }
+    );
+    observer.observe(container);
+
     // Animation
     let time = 0;
     const markerNormalWorld = new THREE.Vector3();
     const toCamera = new THREE.Vector3();
     const animate = () => {
       frameRef.current = requestAnimationFrame(animate);
+      if (!isVisible.current) return;
       time += 0.01;
 
       // Slow rotation
@@ -362,6 +371,7 @@ export function ParticleSphere({
 
     // Cleanup
     return () => {
+      observer.disconnect();
       window.removeEventListener('resize', handleResize);
       cancelAnimationFrame(frameRef.current);
 
