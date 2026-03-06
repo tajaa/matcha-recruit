@@ -26,6 +26,7 @@ readonly GUMMFIT_BACKEND_DIR="${SCRIPT_DIR}/gummfit-agency/server"
 readonly GUMMFIT_FRONTEND_DIR="${SCRIPT_DIR}/gummfit-agency/client"
 readonly GUMMLOCAL_BACKEND_DIR="${SCRIPT_DIR}/gumm-local/server"
 readonly GUMMLOCAL_FRONTEND_DIR="${SCRIPT_DIR}/gumm-local/client"
+readonly AGENT_DIR="${SCRIPT_DIR}/server/agent"
 readonly LANDING_BUILD_VERSION_FILE="${SCRIPT_DIR}/.landing-build-version"
 
 # Default values
@@ -39,6 +40,7 @@ BUILD_GUMMFIT_BACKEND=false
 BUILD_GUMMFIT_FRONTEND=false
 BUILD_GUMMLOCAL_BACKEND=false
 BUILD_GUMMLOCAL_FRONTEND=false
+BUILD_AGENT=false
 LANDING_BUILD_VERSION="0"
 
 ################################################################################
@@ -104,7 +106,8 @@ OPTIONS:
     --gumm-local-backend   Also build the gumm-local backend image
     --gumm-local-frontend  Also build the gumm-local frontend image
     --gumm-local           Build both gumm-local images (backend + frontend)
-    --all                  Build all images (matcha + gummfit + gumm-local)
+    --agent                Build the matcha-agent sandbox image
+    --all                  Build all images (matcha + gummfit + gumm-local + agent)
     -h, --help             Show this help message
 
 ENVIRONMENT VARIABLES (required):
@@ -116,6 +119,7 @@ ENVIRONMENT VARIABLES (required):
     ECR_GUMMFIT_FRONTEND_REPO  ECR repository name for gummfit frontend (default: gummfit-frontend)
     ECR_GUMMLOCAL_BACKEND_REPO ECR repository name for gumm-local backend (default: gumm-local-backend)
     ECR_GUMMLOCAL_FRONTEND_REPO ECR repository name for gumm-local frontend (default: gumm-local-frontend)
+    ECR_AGENT_REPO             ECR repository name for matcha-agent (default: matcha-agent)
 
 EXAMPLES:
     # Build and push matcha to ECR (default)
@@ -141,6 +145,9 @@ EXAMPLES:
 
     # Build only gumm-local services
     $0 --gumm-local
+
+    # Build the agent sandbox image
+    $0 --agent
 EOF
 }
 
@@ -200,6 +207,12 @@ parse_args() {
                 BUILD_GUMMLOCAL_FRONTEND=true
                 shift
                 ;;
+            --agent)
+                BUILD_BACKEND=false
+                BUILD_FRONTEND=false
+                BUILD_AGENT=true
+                shift
+                ;;
             --all)
                 BUILD_BACKEND=true
                 BUILD_FRONTEND=true
@@ -207,6 +220,7 @@ parse_args() {
                 BUILD_GUMMFIT_FRONTEND=true
                 BUILD_GUMMLOCAL_BACKEND=true
                 BUILD_GUMMLOCAL_FRONTEND=true
+                BUILD_AGENT=true
                 shift
                 ;;
             --platform)
@@ -268,6 +282,7 @@ validate_env() {
     export ECR_GUMMFIT_FRONTEND_REPO="${ECR_GUMMFIT_FRONTEND_REPO:-gummfit-frontend}"
     export ECR_GUMMLOCAL_BACKEND_REPO="${ECR_GUMMLOCAL_BACKEND_REPO:-gumm-local-backend}"
     export ECR_GUMMLOCAL_FRONTEND_REPO="${ECR_GUMMLOCAL_FRONTEND_REPO:-gumm-local-frontend}"
+    export ECR_AGENT_REPO="${ECR_AGENT_REPO:-matcha-agent}"
 
     # Auto-fetch AWS Account ID if not set
     if [ -z "${AWS_ACCOUNT_ID:-}" ]; then
@@ -290,6 +305,7 @@ validate_env() {
     export GUMMFIT_FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMFIT_FRONTEND_REPO}"
     export GUMMLOCAL_BACKEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMLOCAL_BACKEND_REPO}"
     export GUMMLOCAL_FRONTEND_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_GUMMLOCAL_FRONTEND_REPO}"
+    export AGENT_ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_AGENT_REPO}"
 
     log_info "Backend ECR URI: ${BACKEND_ECR_URI}"
     log_info "Frontend ECR URI: ${FRONTEND_ECR_URI}"
@@ -304,6 +320,9 @@ validate_env() {
     fi
     if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
         log_info "gumm-local Frontend ECR URI: ${GUMMLOCAL_FRONTEND_ECR_URI}"
+    fi
+    if [ "$BUILD_AGENT" = true ]; then
+        log_info "Agent ECR URI: ${AGENT_ECR_URI}"
     fi
 
     log_success "Environment validation complete"
@@ -493,6 +512,15 @@ build_gummlocal_frontend() {
         "${GUMMLOCAL_FRONTEND_ECR_URI}"
 }
 
+# Build agent sandbox
+build_agent() {
+    build_image \
+        "Agent" \
+        "${AGENT_DIR}/Dockerfile" \
+        "${AGENT_DIR}" \
+        "${AGENT_ECR_URI}"
+}
+
 # Main execution
 main() {
     log_section "Matcha-Recruit Build & Push Script"
@@ -555,6 +583,12 @@ main() {
         services+=("gumm-local Frontend")
     fi
 
+    if [ "$BUILD_AGENT" = true ]; then
+        build_agent &
+        pids+=($!)
+        services+=("Agent")
+    fi
+
     # Wait for all builds to complete
     local failed=false
     for i in "${!pids[@]}"; do
@@ -588,6 +622,9 @@ main() {
     if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
         push_image "gumm-local Frontend" "${GUMMLOCAL_FRONTEND_ECR_URI}"
     fi
+    if [ "$BUILD_AGENT" = true ]; then
+        push_image "Agent" "${AGENT_ECR_URI}"
+    fi
 
     # Deployment trigger
     if [ "$TRIGGER_DEPLOY" = true ]; then
@@ -616,6 +653,9 @@ main() {
     if [ "$BUILD_GUMMLOCAL_FRONTEND" = true ]; then
         log_info "gumm-local Frontend: ${GUMMLOCAL_FRONTEND_ECR_URI}:latest"
     fi
+    if [ "$BUILD_AGENT" = true ]; then
+        log_info "Agent: ${AGENT_ECR_URI}:latest"
+    fi
 }
 
 ################################################################################
@@ -629,7 +669,8 @@ if [ "$BUILD_BACKEND" = false ] && \
    [ "$BUILD_GUMMFIT_BACKEND" = false ] && \
    [ "$BUILD_GUMMFIT_FRONTEND" = false ] && \
    [ "$BUILD_GUMMLOCAL_BACKEND" = false ] && \
-   [ "$BUILD_GUMMLOCAL_FRONTEND" = false ]; then
+   [ "$BUILD_GUMMLOCAL_FRONTEND" = false ] && \
+   [ "$BUILD_AGENT" = false ]; then
     log_error "No build targets selected"
     exit 1
 fi

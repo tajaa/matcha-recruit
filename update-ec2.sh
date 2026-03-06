@@ -35,9 +35,8 @@ Update EC2 deployments by pulling latest images and restarting containers.
 OPTIONS:
     --matcha         Update Matcha-Recruit (ports 8002/8082)
     --gumm-local     Update gumm-local (ports 8004/8084)
-    --agent          Start/update agent + llama (Qwen local LLM)
+    --agent          Deploy/update agent + llama (Qwen local LLM)
     --agent-upload   Upload Qwen model to EC2 (one-time, ~508MB)
-    --agent-stop     Stop the agent and llama containers
     --all            Update all apps (matcha + gumm-local, not agent)
     --status         Show status of all containers
     -h, --help       Show this help message
@@ -47,8 +46,7 @@ EXAMPLES:
     $0 --gumm-local      # Update only gumm-local
     $0 --all             # Update all apps
     $0 --agent-upload    # Upload Qwen model (first time only)
-    $0 --agent           # Start/restart agent with local Qwen
-    $0 --agent-stop      # Stop agent and llama
+    $0 --agent           # Deploy/restart agent with local Qwen
     $0 --status          # Check container status
 EOF
 }
@@ -117,8 +115,8 @@ upload_model() {
     log_success "Model uploaded to EC2:~/matcha/models/"
 }
 
-update_agent() {
-    log_info "Starting agent + llama..."
+deploy_agent() {
+    log_info "Deploying agent + llama..."
 
     # Check model exists on EC2
     ssh_cmd "test -f ~/matcha/models/Qwen3.5-0.8B-Q4_K_M.gguf" || {
@@ -127,13 +125,7 @@ update_agent() {
     }
 
     ssh_cmd "cd ~/matcha && docker-compose --profile agent pull matcha-agent && docker-compose --profile agent up -d llama matcha-agent"
-    log_success "Agent started with local Qwen model!"
-}
-
-stop_agent() {
-    log_info "Stopping agent and llama..."
-    ssh_cmd "cd ~/matcha && docker-compose --profile agent stop matcha-agent llama && docker-compose --profile agent rm -f matcha-agent llama"
-    log_success "Agent stopped."
+    log_success "Agent deployed with local Qwen model!"
 }
 
 show_status() {
@@ -154,7 +146,6 @@ UPDATE_MATCHA=false
 UPDATE_GUMM_LOCAL=false
 UPDATE_AGENT=false
 AGENT_UPLOAD=false
-AGENT_STOP=false
 SHOW_STATUS=false
 
 if [ $# -eq 0 ]; then
@@ -178,10 +169,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --agent-upload)
             AGENT_UPLOAD=true
-            shift
-            ;;
-        --agent-stop)
-            AGENT_STOP=true
             shift
             ;;
         --all)
@@ -217,15 +204,9 @@ if [ "$AGENT_UPLOAD" = true ]; then
     exit 0
 fi
 
-if [ "$AGENT_STOP" = true ]; then
-    stop_agent
-    show_status
-    exit 0
-fi
-
 if [ "$UPDATE_AGENT" = true ] && [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ]; then
     ecr_login
-    update_agent
+    deploy_agent
     show_status
     log_success "Agent deployment complete!"
     exit 0
@@ -249,7 +230,7 @@ if [ "$UPDATE_GUMM_LOCAL" = true ]; then
 fi
 
 if [ "$UPDATE_AGENT" = true ]; then
-    update_agent
+    deploy_agent
 fi
 
 cleanup

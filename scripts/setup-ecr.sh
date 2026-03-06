@@ -20,6 +20,7 @@ BACKEND_REPO="matcha-backend"
 FRONTEND_REPO="matcha-frontend"
 GUMM_LOCAL_BACKEND_REPO="gumm-local-backend"
 GUMM_LOCAL_FRONTEND_REPO="gumm-local-frontend"
+AGENT_REPO="matcha-agent"
 
 echo -e "${BLUE}[INFO]${NC} Setting up ECR repositories in region: ${AWS_REGION}"
 
@@ -58,6 +59,15 @@ aws ecr create-repository \
     --image-scanning-configuration scanOnPush=true \
     --encryption-configuration encryptionType=AES256 \
     2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Repository ${GUMM_LOCAL_FRONTEND_REPO} already exists"
+
+# Create agent repository
+echo -e "${BLUE}[INFO]${NC} Creating repository: ${AGENT_REPO}"
+aws ecr create-repository \
+    --repository-name "${AGENT_REPO}" \
+    --region "${AWS_REGION}" \
+    --image-scanning-configuration scanOnPush=true \
+    --encryption-configuration encryptionType=AES256 \
+    2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Repository ${AGENT_REPO} already exists"
 
 # Set lifecycle policy to clean up old images (keep last 10)
 LIFECYCLE_POLICY='{
@@ -105,6 +115,13 @@ aws ecr put-lifecycle-policy \
     --lifecycle-policy-text "${LIFECYCLE_POLICY}" \
     2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Failed to set lifecycle policy for ${GUMM_LOCAL_FRONTEND_REPO}"
 
+echo -e "${BLUE}[INFO]${NC} Setting lifecycle policy for ${AGENT_REPO}"
+aws ecr put-lifecycle-policy \
+    --repository-name "${AGENT_REPO}" \
+    --region "${AWS_REGION}" \
+    --lifecycle-policy-text "${LIFECYCLE_POLICY}" \
+    2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Failed to set lifecycle policy for ${AGENT_REPO}"
+
 # Get account ID
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
@@ -113,3 +130,4 @@ echo -e "${BLUE}[INFO]${NC} Backend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.ama
 echo -e "${BLUE}[INFO]${NC} Frontend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${FRONTEND_REPO}"
 echo -e "${BLUE}[INFO]${NC} gumm-local Backend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${GUMM_LOCAL_BACKEND_REPO}"
 echo -e "${BLUE}[INFO]${NC} gumm-local Frontend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${GUMM_LOCAL_FRONTEND_REPO}"
+echo -e "${BLUE}[INFO]${NC} Agent: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${AGENT_REPO}"

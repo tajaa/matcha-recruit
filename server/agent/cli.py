@@ -49,6 +49,8 @@ class AgentCLI:
 
     def _llm_label(self) -> str:
         if self.sandbox.llm is self.sandbox.local:
+            if self.config.local_model_url:
+                return f"Local ({self.config.local_model_url})"
             return Path(self.config.local_model_path).stem
         return f"Gemini ({self.config.gemini_model})"
 
@@ -234,8 +236,7 @@ User: {message}"""
             print("\nConversation cleared")
 
         elif command == "/help":
-            local_name = Path(self.config.local_model_path).stem if self.config.local_model_path else None
-            print(_make_banner(local_name))
+            print(_make_banner(self._llm_label()))
 
         else:
             print(f"\nUnknown command: {command}")

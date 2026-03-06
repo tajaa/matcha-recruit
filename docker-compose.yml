@@ -138,7 +138,7 @@ services:
 
   # Autonomous agent — uses local Qwen model via llama container
   matcha-agent:
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-backend:latest
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-agent:latest
     container_name: matcha-agent
     profiles:
       - agent
