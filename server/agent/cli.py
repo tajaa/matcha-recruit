@@ -28,6 +28,7 @@ def _make_banner(llm_label: str) -> str:
   Type a message to chat with the agent
   /briefing   — run RSS briefing now
   /email      — fetch and summarize Gmail
+  /draft      — draft a reply to an email
   /inbox      — show pending inbox files
   /output     — list recent outputs
   /feeds      — show RSS feeds
@@ -69,7 +70,7 @@ class AgentCLI:
             else:
                 asyncio.run(self._chat(user_input))
 
-    _COMMANDS = {"/quit", "/exit", "/briefing", "/email", "/inbox", "/output", "/feeds", "/clear", "/help"}
+    _COMMANDS = {"/quit", "/exit", "/briefing", "/email", "/draft", "/inbox", "/output", "/feeds", "/clear", "/help"}
 
     def _is_command(self, text: str) -> bool:
         return text.split()[0].lower() in self._COMMANDS
@@ -191,6 +192,9 @@ User: {message}"""
         elif command == "/email":
             asyncio.run(self._run_email())
 
+        elif command == "/draft":
+            asyncio.run(self._run_draft())
+
         elif command == "/inbox":
             files = self.sandbox.fs.list_dir("inbox")
             files = [f for f in files if not f.startswith(".")]
@@ -267,6 +271,86 @@ User: {message}"""
                 print("\nNo new emails or digest already generated today")
         except Exception as e:
             print(f"\n\033[31mEmail fetch failed: {e}\033[0m")
+
+    async def _run_draft(self):
+        if self.sandbox.gmail is None:
+            print(
+                "\n\033[33mGmail not configured.\033[0m\n"
+                "  1. Set AGENT_GMAIL_ENABLED=true\n"
+                "  2. Run: python -m agent.gmail_auth\n"
+            )
+            return
+
+        # Show recent emails to pick from
+        print("\n\033[2mFetching recent emails...\033[0m")
+        try:
+            messages = await self.sandbox.gmail.fetch_unread(max_results=5)
+        except Exception as e:
+            print(f"\n\033[31mFetch failed: {e}\033[0m")
+            return
+
+        if not messages:
+            print("\nNo unread emails to reply to.")
+            return
+
+        emails = []
+        for msg in messages:
+            email = await self.sandbox.gmail.get_message(msg["id"])
+            emails.append(email)
+
+        print()
+        for i, e in enumerate(emails, 1):
+            print(f"  {i}. {e['subject']}  \033[2m— {e['from']}\033[0m")
+
+        try:
+            choice = input("\n\033[1mReply to which? (number):\033[0m ").strip()
+            idx = int(choice) - 1
+            if idx < 0 or idx >= len(emails):
+                print("Invalid choice.")
+                return
+        except (ValueError, EOFError):
+            print("Cancelled.")
+            return
+
+        email = emails[idx]
+        instructions = input("\033[1mReply instructions (or Enter for auto):\033[0m ").strip()
+
+        prompt = f"""Draft a professional reply to this email. Do NOT include a subject line — just the body text.
+{f"Instructions: {instructions}" if instructions else "Write a helpful, concise reply."}
+
+Original email:
+From: {email['from']}
+Subject: {email['subject']}
+Body:
+{email['body'][:3000]}"""
+
+        print("\n\033[2mDrafting reply...\033[0m")
+        try:
+            draft_body = await self.sandbox.llm.generate(prompt)
+        except Exception as e:
+            print(f"\n\033[31mLLM error: {e}\033[0m")
+            return
+
+        print(f"\n{'='*50}")
+        print(f"To: {email['from']}")
+        print(f"Re: {email['subject']}")
+        print(f"{'='*50}")
+        print(f"\n{draft_body}\n")
+
+        confirm = input("\033[1mSave to Drafts? (y/n):\033[0m ").strip().lower()
+        if confirm != "y":
+            print("Discarded.")
+            return
+
+        try:
+            result = await self.sandbox.gmail.create_draft(
+                to=email["from"],
+                subject=f"Re: {email['subject']}",
+                body=draft_body,
+            )
+            print(f"\n\033[32mDraft saved.\033[0m Open Gmail to review and send.")
+        except Exception as e:
+            print(f"\n\033[31mFailed to save draft: {e}\033[0m")
 
     def _build_file_prompt(self, filename: str, content: str) -> str:
         context = ""

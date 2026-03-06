@@ -13,7 +13,10 @@ import json
 import sys
 from pathlib import Path
 
-SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
+]
 
 
 def main():

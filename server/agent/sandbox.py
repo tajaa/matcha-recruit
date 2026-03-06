@@ -221,9 +221,9 @@ class SandboxedLocal:
 
 
 class SandboxedGmail:
-    """Read-only Gmail client using OAuth2 tokens.
+    """Gmail client using OAuth2 tokens (read + draft, no send).
 
-    Only allows GET requests to the Gmail API. Token refresh is handled
+    Scopes: gmail.readonly + gmail.compose. Token refresh is handled
     manually via httpx POST to oauth2.googleapis.com.
     """
 
@@ -306,6 +306,58 @@ class SandboxedGmail:
             )
             resp.raise_for_status()
             return resp.json()
+
+    async def _gmail_post(self, path: str, body: dict) -> dict:
+        """Make a POST request to the Gmail API (drafts only)."""
+        url = f"{self.GMAIL_API_BASE}{path}"
+
+        parsed = urlparse(url)
+        if parsed.hostname != "gmail.googleapis.com" or not parsed.path.startswith("/gmail/v1"):
+            raise SandboxViolation(f"Gmail URL outside allowed scope: {url}")
+
+        # Only allow draft creation — block send endpoints
+        if "/send" in path:
+            raise SandboxViolation("Sending emails is not allowed")
+
+        token = await self._get_access_token()
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+                json=body,
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+    async def create_draft(self, to: str, subject: str, body: str, reply_to_id: str | None = None) -> dict:
+        """Create a draft email. Does NOT send — it sits in Drafts until you send manually."""
+        import base64
+
+        lines = [
+            f"To: {to}",
+            f"Subject: {subject}",
+            "Content-Type: text/plain; charset=utf-8",
+        ]
+        if reply_to_id:
+            lines.append(f"In-Reply-To: {reply_to_id}")
+            lines.append(f"References: {reply_to_id}")
+
+        lines.append("")
+        lines.append(body)
+
+        raw = base64.urlsafe_b64encode("\r\n".join(lines).encode()).decode()
+
+        draft_body = {"message": {"raw": raw}}
+        if reply_to_id:
+            draft_body["message"]["threadId"] = reply_to_id
+
+        data = await self._gmail_post("/users/me/drafts", draft_body)
+        logger.info(f"Draft created: {data.get('id')}")
+        return data
 
     async def fetch_unread(self, max_results: int = 25, label_ids: list[str] | None = None) -> list[dict]:
         """Fetch unread message stubs (id + threadId)."""
