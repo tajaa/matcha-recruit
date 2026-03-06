@@ -83,14 +83,6 @@ export const ComplianceDashboard = forwardRef<HTMLDivElement>((_, ref) => {
           >
             Navigate complex labor laws with a single glance.
           </motion.p>
-          
-          <motion.p 
-            variants={featureVariants}
-            className="text-zinc-400 text-base md:text-lg font-light leading-relaxed max-w-xl"
-            style={{ fontFamily: fonts.sans }}
-          >
-            View every applicable regulation across all your locations and see exactly how many employees are impacted. With daily updates and proactive alerts, your current and future compliance is always on track.
-          </motion.p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
             <motion.div variants={featureVariants} className="space-y-4 group">

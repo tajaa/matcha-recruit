@@ -148,14 +148,6 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
           >
             Your intelligent guide for employee relations. Make confident, evidence-based decisions with similarity flags and precedent reminders.
           </motion.p>
-          
-          <motion.p 
-            variants={featureVariants}
-            className="text-zinc-400 text-base md:text-lg font-light leading-relaxed max-w-xl"
-            style={{ fontFamily: fonts.sans }}
-          >
-            Matcha analyzes real case facts against your company policy, HR best practices, and legal standards to deliver actionable risk advice.
-          </motion.p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
             <motion.div variants={featureVariants} className="space-y-4 group">

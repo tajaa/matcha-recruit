@@ -145,14 +145,6 @@ export const DynamicHandbooks = forwardRef<HTMLDivElement>((_, ref) => {
           >
             Always up-to-date, always compliant.
           </motion.p>
-          
-          <motion.p 
-            variants={featureVariants}
-            className="text-zinc-400 text-base md:text-lg font-light leading-relaxed max-w-xl"
-            style={{ fontFamily: fonts.sans }}
-          >
-            Matcha builds your foundational employee handbooks and automatically alerts you the moment local laws change and an update is required.
-          </motion.p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
             <motion.div variants={featureVariants} className="space-y-4 group">

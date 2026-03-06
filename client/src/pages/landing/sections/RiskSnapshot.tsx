@@ -74,14 +74,6 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
           >
             The biggest risk is the one you don’t see coming. 
           </motion.p>
-          
-          <motion.p 
-            variants={featureVariants}
-            className="text-zinc-400 text-base md:text-lg font-light leading-relaxed max-w-xl"
-            style={{ fontFamily: fonts.sans }}
-          >
-            Matcha actively monitors your compliance landscape, acting as an early warning system to help you stay compliant day-to-day.
-          </motion.p>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
             <motion.div variants={featureVariants} className="space-y-4 group">
