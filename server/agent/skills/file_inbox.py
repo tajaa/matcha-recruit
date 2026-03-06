@@ -57,7 +57,7 @@ Document contents:
 {content}"""
 
     try:
-        summary = await sandbox.gemini.generate(prompt)
+        summary = await sandbox.llm.generate(prompt)
     except Exception as e:
         logger.error(f"Gemini failed for {filename}: {e}")
         summary = f"Gemini summarization failed: {e}\n\nRaw content length: {len(content)} chars"

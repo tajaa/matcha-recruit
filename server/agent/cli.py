@@ -1,5 +1,6 @@
 """Interactive agent CLI — chat, drag-and-drop files, run skills on demand."""
 
+import argparse
 import asyncio
 import logging
 import os
@@ -18,11 +19,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agent.cli")
 
-def _make_banner(local_model: str | None) -> str:
-    model_line = f"  \033[32mLocal model: {local_model}\033[0m\n" if local_model else ""
+def _make_banner(llm_label: str) -> str:
     return f"""
 \033[1mmatcha-agent\033[0m — drop files or type a message
-{model_line}
+  \033[32mLLM: {llm_label}\033[0m
+
   \033[2mDrag a file here to process it
   Type a message to chat with the agent
   /briefing   — run RSS briefing now
@@ -36,15 +37,21 @@ def _make_banner(local_model: str | None) -> str:
 
 
 class AgentCLI:
-    def __init__(self):
+    def __init__(self, force_gemini: bool = False):
         self.config = load_config()
         self.sandbox = Sandbox(self.config)
+        if force_gemini:
+            self.sandbox.llm = self.sandbox.gemini
         self.conversation: list[dict] = []
         self.processed_files: list[str] = []
 
+    def _llm_label(self) -> str:
+        if self.sandbox.llm is self.sandbox.local:
+            return Path(self.config.local_model_path).stem
+        return f"Gemini ({self.config.gemini_model})"
+
     def run(self):
-        local_name = Path(self.config.local_model_path).stem if self.config.local_model_path else None
-        print(_make_banner(local_name))
+        print(_make_banner(self._llm_label()))
         while True:
             try:
                 user_input = input("\n\033[1m>\033[0m ").strip()
@@ -113,7 +120,7 @@ class AgentCLI:
         prompt = self._build_file_prompt(filename, content)
 
         try:
-            summary = await self.sandbox.gemini.generate(prompt)
+            summary = await self.sandbox.llm.generate(prompt)
         except Exception as e:
             print(f"\n\033[31mGemini error: {e}\033[0m")
             return
@@ -161,15 +168,11 @@ Be concise and direct.
 
 User: {message}"""
 
-        # Prefer local model for chat, fall back to Gemini
-        llm = self.sandbox.local or self.sandbox.gemini
-        label = "Local" if self.sandbox.local else "Gemini"
-
         print()
         try:
-            response = await llm.generate(prompt)
+            response = await self.sandbox.llm.generate(prompt)
         except Exception as e:
-            print(f"\033[31m{label} error: {e}\033[0m")
+            print(f"\033[31mLLM error: {e}\033[0m")
             return
 
         self.conversation.append({"role": "agent", "content": response})
@@ -283,8 +286,12 @@ Document contents:
 
 
 def main():
+    parser = argparse.ArgumentParser(description="matcha-agent interactive CLI")
+    parser.add_argument("--gemini", action="store_true", help="Use Gemini instead of local model")
+    args = parser.parse_args()
+
     try:
-        AgentCLI().run()
+        AgentCLI(force_gemini=args.gemini).run()
     except SystemExit:
         pass
 

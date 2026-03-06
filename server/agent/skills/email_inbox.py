@@ -75,7 +75,7 @@ Emails:
 {emails_text}"""
 
     try:
-        summary = await sandbox.gemini.generate(prompt)
+        summary = await sandbox.llm.generate(prompt)
     except Exception as e:
         logger.error(f"Gemini summarization failed: {e}")
         summary = "Gemini summarization failed. Raw email subjects below.\n\n" + "\n".join(

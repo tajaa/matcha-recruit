@@ -407,6 +407,9 @@ class Sandbox:
             except SandboxViolation as e:
                 logger.warning(f"Local model unavailable: {e}")
 
+        # Default LLM: local if available, else gemini. Override with force_gemini().
+        self.llm = self.local or self.gemini
+
         # Gmail — only initialize if enabled and token exists
         if config.gmail_enabled:
             gmail = SandboxedGmail(config.workspace_root)

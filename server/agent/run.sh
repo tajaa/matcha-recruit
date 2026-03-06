@@ -19,20 +19,22 @@ mkdir -p "$SCRIPT_DIR/workspace"/{inbox,processed,output}
 # Parse args — default is interactive chat
 MODE="chat"
 INTERVAL=""
+GEMINI_FLAG=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --chat)   MODE="chat"; shift ;;
     --once)   MODE="once"; shift ;;
     --daemon) MODE="daemon"; shift ;;
+    --gemini) GEMINI_FLAG="--gemini"; shift ;;
     --interval) INTERVAL="--interval $2"; shift 2 ;;
-    *) echo "Usage: $0 [--chat|--once|--daemon] [--interval N]"; exit 1 ;;
+    *) echo "Usage: $0 [--chat|--once|--daemon] [--gemini] [--interval N]"; exit 1 ;;
   esac
 done
 
 # Interactive chat — runs directly on the host (needs terminal + file drag-drop)
 if [ "$MODE" = "chat" ]; then
   cd "$SERVER_DIR"
-  exec python3 -m agent.cli
+  exec python3 -m agent.cli $GEMINI_FLAG
 fi
 
 # Docker modes (once / daemon) — fully containerized

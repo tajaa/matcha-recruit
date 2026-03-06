@@ -74,7 +74,7 @@ Articles:
 {articles_text}"""
 
     try:
-        summary = await sandbox.gemini.generate(prompt)
+        summary = await sandbox.llm.generate(prompt)
     except Exception as e:
         logger.error(f"Gemini summarization failed: {e}")
         summary = "Gemini summarization failed. Raw articles below.\n\n" + articles_text
