@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SERVER_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Load GEMINI_API_KEY from server/.env
+GEMINI_API_KEY=$(grep '^GEMINI_API_KEY=' "$SERVER_DIR/.env" | cut -d'=' -f2)
+export GEMINI_API_KEY
+
+cd "$SERVER_DIR"
+AGENT_GMAIL_ENABLED=true exec python3 -c "
+import asyncio
+from agent.config import load_config
+from agent.sandbox import Sandbox
+
+async def run():
+    config = load_config()
+    config.gmail_enabled = True
+    sandbox = Sandbox(config)
+
+    if sandbox.gmail is None or not sandbox.gmail.is_configured:
+        print('Gmail not configured. Run: python -m agent.gmail_auth')
+        return
+
+    print('Fetching emails...')
+    messages = await sandbox.gmail.fetch_unread(max_results=5)
+    if not messages:
+        print('No unread emails.')
+        return
+
+    emails = []
+    for msg in messages:
+        emails.append(await sandbox.gmail.get_message(msg['id']))
+
+    print(f'Summarizing {len(emails)} email(s)...\n')
+
+    emails_text = '\n\n---\n\n'.join(
+        f'From: {e[\"from\"]}\nSubject: {e[\"subject\"]}\nDate: {e[\"date\"]}\n\n{e[\"body\"][:2000]}'
+        for e in emails
+    )
+
+    summary = await sandbox.llm.generate(
+        'For each email below, write exactly two sentences capturing the most salient information. '
+        'Format: bold subject line, then the two sentences. Nothing else.\n\n'
+        f'Emails:\n{emails_text}'
+    )
+    print(summary)
+
+    if sandbox.llm is sandbox.local:
+        model = config.local_model_path.rsplit('/', 1)[-1].replace('.gguf', '')
+    else:
+        model = f'Gemini ({config.gemini_model})'
+    print(f'\n\033[2m— summarized with {model}\033[0m')
+
+    if sandbox.local:
+        sandbox.local.stop()
+
+asyncio.run(run())
+"
