@@ -18,9 +18,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger("agent.cli")
 
-BANNER = """
+def _make_banner(local_model: str | None) -> str:
+    model_line = f"  \033[32mLocal model: {local_model}\033[0m\n" if local_model else ""
+    return f"""
 \033[1mmatcha-agent\033[0m — drop files or type a message
-
+{model_line}
   \033[2mDrag a file here to process it
   Type a message to chat with the agent
   /briefing   — run RSS briefing now
@@ -41,7 +43,8 @@ class AgentCLI:
         self.processed_files: list[str] = []
 
     def run(self):
-        print(BANNER)
+        local_name = Path(self.config.local_model_path).stem if self.config.local_model_path else None
+        print(_make_banner(local_name))
         while True:
             try:
                 user_input = input("\n\033[1m>\033[0m ").strip()
@@ -158,11 +161,15 @@ Be concise and direct.
 
 User: {message}"""
 
+        # Prefer local model for chat, fall back to Gemini
+        llm = self.sandbox.local or self.sandbox.gemini
+        label = "Local" if self.sandbox.local else "Gemini"
+
         print()
         try:
-            response = await self.sandbox.gemini.generate(prompt)
+            response = await llm.generate(prompt)
         except Exception as e:
-            print(f"\033[31mGemini error: {e}\033[0m")
+            print(f"\033[31m{label} error: {e}\033[0m")
             return
 
         self.conversation.append({"role": "agent", "content": response})
@@ -216,7 +223,8 @@ User: {message}"""
             print("\nConversation cleared")
 
         elif command == "/help":
-            print(BANNER)
+            local_name = Path(self.config.local_model_path).stem if self.config.local_model_path else None
+            print(_make_banner(local_name))
 
         else:
             print(f"\nUnknown command: {command}")

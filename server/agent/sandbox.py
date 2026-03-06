@@ -4,12 +4,16 @@ Wraps all I/O (network, filesystem, AI) with whitelist/jail checks.
 Any violation raises SandboxViolation.
 """
 
+import atexit
 import html
 import json
 import logging
 import os
 import re
 import shutil
+import signal
+import subprocess
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -128,6 +132,91 @@ class SandboxedGemini:
 
         result = await asyncio.to_thread(_call)
         logger.info(f"Gemini response ({len(result)} chars)")
+        return result
+
+
+class SandboxedLocal:
+    """Local LLM via llama-server (OpenAI-compatible API).
+
+    Starts llama-server as a subprocess on init, kills it on cleanup.
+    Exposes the same generate() interface as SandboxedGemini.
+    """
+
+    def __init__(self, model_path: str, port: int = 8999):
+        self._model_path = model_path
+        self._port = port
+        self._base_url = f"http://127.0.0.1:{port}"
+        self._process: subprocess.Popen | None = None
+        self._start_server()
+
+    def _start_server(self):
+        """Start llama-server in the background."""
+        llama_server = shutil.which("llama-server")
+        if not llama_server:
+            raise SandboxViolation("llama-server not found in PATH")
+
+        logger.info(f"Starting llama-server on port {self._port} with {Path(self._model_path).name}")
+        self._process = subprocess.Popen(
+            [
+                llama_server,
+                "-m", self._model_path,
+                "--port", str(self._port),
+                "--ctx-size", "4096",
+                "--n-gpu-layers", "99",
+                "--log-disable",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        atexit.register(self.stop)
+
+        # Wait for server to be ready
+        for _ in range(30):
+            try:
+                resp = httpx.get(f"{self._base_url}/health", timeout=1.0)
+                if resp.status_code == 200:
+                    logger.info("llama-server ready")
+                    return
+            except httpx.ConnectError:
+                pass
+            time.sleep(0.5)
+
+        self.stop()
+        raise SandboxViolation("llama-server failed to start within 15 seconds")
+
+    def stop(self):
+        if self._process and self._process.poll() is None:
+            logger.info("Stopping llama-server")
+            self._process.send_signal(signal.SIGTERM)
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+            self._process = None
+
+    async def generate(self, prompt: str) -> str:
+        """Generate a completion via the OpenAI-compatible /v1/chat/completions endpoint."""
+        import asyncio
+
+        logger.info(f"Local model prompt ({len(prompt)} chars)")
+
+        def _call():
+            resp = httpx.post(
+                f"{self._base_url}/v1/chat/completions",
+                json={
+                    "model": "local",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "max_tokens": 2048,
+                    "temperature": 0.7,
+                },
+                timeout=120.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["choices"][0]["message"]["content"]
+
+        result = await asyncio.to_thread(_call)
+        logger.info(f"Local model response ({len(result)} chars)")
         return result
 
 
@@ -309,6 +398,14 @@ class Sandbox:
         self.fetcher = SandboxedFetcher(all_urls)
         self.fs = SandboxedFS(config.workspace_root)
         self.gemini = SandboxedGemini(config.gemini_model)
+
+        # Local model — start llama-server if a model path is configured
+        self.local: SandboxedLocal | None = None
+        if config.local_model_path and Path(config.local_model_path).is_file():
+            try:
+                self.local = SandboxedLocal(config.local_model_path, config.local_model_port)
+            except SandboxViolation as e:
+                logger.warning(f"Local model unavailable: {e}")
 
         # Gmail — only initialize if enabled and token exists
         if config.gmail_enabled:

@@ -29,6 +29,10 @@ class AgentConfig:
     rss_max_entries_per_feed: int = 10
     rss_interests: str = "AI, startups, software engineering, HR tech"
 
+    # Local model (llama.cpp)
+    local_model_path: str = ""
+    local_model_port: int = 8999
+
     # Gmail skill settings
     gmail_enabled: bool = False
     gmail_max_emails: int = 25
@@ -71,6 +75,22 @@ def load_config(workspace_root: str | None = None, interval: int | None = None) 
     env_interests = os.getenv("AGENT_RSS_INTERESTS")
     if env_interests:
         config.rss_interests = env_interests
+
+    # Local model — auto-detect if not set via env
+    env_local_model = os.getenv("AGENT_LOCAL_MODEL")
+    if env_local_model:
+        config.local_model_path = env_local_model
+    else:
+        # Auto-detect: look for .gguf files in agent/models/
+        models_dir = Path(__file__).parent / "models"
+        if models_dir.is_dir():
+            ggufs = sorted(models_dir.glob("*.gguf"), key=lambda p: p.stat().st_size, reverse=True)
+            if ggufs:
+                config.local_model_path = str(ggufs[0])
+
+    env_local_port = os.getenv("AGENT_LOCAL_MODEL_PORT")
+    if env_local_port:
+        config.local_model_port = int(env_local_port)
 
     # Gmail config from env
     if os.getenv("AGENT_GMAIL_ENABLED", "").lower() in ("1", "true", "yes"):

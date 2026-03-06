@@ -37,6 +37,9 @@ topanga-domain-setup.md
 .coverage
 htmlcov/
 
+# Agent local models
+server/agent/models/
+
 # Agent workspace runtime files
 server/agent/workspace/output/*
 server/agent/workspace/processed/*
