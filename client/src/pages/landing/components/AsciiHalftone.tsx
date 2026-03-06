@@ -91,9 +91,8 @@ export const AsciiHalftone = () => {
           if (char === " ") continue;
 
           const alpha = 0.15 + intensity * 0.5;
-          const g = 30 + intensity * 40;
-          const rb = 20 + intensity * 30;
-          ctx!.fillStyle = `rgba(${rb}, ${g}, ${rb - 2}, ${alpha})`;
+          const v = 25 + intensity * 35;
+          ctx!.fillStyle = `rgba(${v}, ${v}, ${v}, ${alpha})`;
           ctx!.fillText(char, x + CELL / 2, y + CELL / 2);
         }
       }
