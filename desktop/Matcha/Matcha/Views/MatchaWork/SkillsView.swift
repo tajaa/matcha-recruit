@@ -97,14 +97,18 @@ struct SkillsView: View {
                         icon: "person.badge.plus.fill",
                         name: "Onboarding",
                         color: .purple,
-                        description: "Add new employees and manage their onboarding flows. Describe the new hires and the AI creates the employee records.",
+                        description: "Add new employees and manage their onboarding flows. The AI collects details, creates employee records, and triggers Google Workspace and Slack provisioning. Track per-employee status through the entire process.",
                         triggers: [
                             "Onboard three new engineers starting Monday",
                             "Add Jane Smith as a Product Manager in London",
-                            "Create employees for the new sales hires"
+                            "Create employees for the new sales hires",
+                            "Add two remote employees in California starting April 1st",
+                            "Onboard a designer for the NYC office"
                         ],
                         operations: [
-                            SkillOperation(name: "Create employees", description: "\"Create the employees\" — adds the records once details are confirmed"),
+                            SkillOperation(name: "Create employees", description: "\"Create the employees\" — adds records and triggers provisioning"),
+                            SkillOperation(name: "Check status", description: "See creation and provisioning results per employee"),
+                            SkillOperation(name: "Update details", description: "Modify employee info before creating — name, role, start date, etc."),
                         ]
                     )
 

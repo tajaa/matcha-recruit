@@ -33,7 +33,7 @@ class ThreadDetailViewModel {
             return currentState["workbook_title"] != nil
                 || (currentState["sections"]?.value as? [AnyCodable])?.isEmpty == false
         case .onboarding:
-            return currentState["employees"] != nil
+            return currentState["employees"] != nil || currentState["batch_status"] != nil
         case .presentation:
             return currentState["presentation_title"] != nil || currentState["slides"] != nil
         case .handbook:
