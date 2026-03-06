@@ -1,6 +1,6 @@
 export type MWThreadStatus = 'active' | 'finalized' | 'archived';
 export type MWMessageRole = 'user' | 'assistant' | 'system';
-export type MWTaskType = 'offer_letter' | 'review' | 'workbook' | 'onboarding' | 'presentation' | 'chat';
+export type MWTaskType = 'offer_letter' | 'review' | 'workbook' | 'onboarding' | 'presentation' | 'handbook' | 'chat';
 
 export interface MWPresentationSlide {
   title: string;
@@ -127,6 +127,42 @@ export interface MWDocumentState {
   default_start_date?: string | null;
   default_employment_type?: string | null;
   default_work_state?: string | null;
+  // Handbook fields
+  handbook_title?: string | null;
+  handbook_mode?: string | null;
+  handbook_industry?: string | null;
+  handbook_sub_industry?: string | null;
+  handbook_states?: string[] | null;
+  handbook_legal_name?: string | null;
+  handbook_dba?: string | null;
+  handbook_ceo?: string | null;
+  handbook_headcount?: number | null;
+  handbook_profile?: {
+    remote_workers?: boolean;
+    minors?: boolean;
+    tipped_employees?: boolean;
+    tip_pooling?: boolean;
+    union_employees?: boolean;
+    federal_contracts?: boolean;
+    group_health_insurance?: boolean;
+    background_checks?: boolean;
+    hourly_employees?: boolean;
+    salaried_employees?: boolean;
+    commissioned_employees?: boolean;
+  } | null;
+  handbook_custom_sections?: Array<{ title: string; content: string }> | null;
+  handbook_guided_answers?: Record<string, string> | null;
+  handbook_status?: string | null;
+  handbook_id?: string | null;
+  handbook_sections?: Array<{
+    section_key: string;
+    title: string;
+    content: string;
+    section_type?: string;
+  }> | null;
+  handbook_error?: string | null;
+  handbook_strength_score?: number | null;
+  handbook_strength_label?: string | null;
 }
 
 export interface MWThreadDetail {
