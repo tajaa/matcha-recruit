@@ -528,6 +528,222 @@ function HandbookPreview({ state }: { state: MWDocumentState }) {
   );
 }
 
+function OnboardingPreview({ state }: { state: MWDocumentState }) {
+  const employees = (state.employees || []) as NonNullable<MWDocumentState['employees']>;
+  const batchStatus = state.batch_status || 'collecting';
+  const hasDefaults = Boolean(state.default_start_date || state.default_employment_type || state.default_work_state);
+
+  const createdCount = employees.filter(e => e.status === 'created' || e.status === 'done').length;
+  const errorCount = employees.filter(e => e.status === 'error').length;
+
+  const statusColor = (status?: string | null) => {
+    switch (status) {
+      case 'created': case 'done': return 'green';
+      case 'provisioning': return 'blue';
+      case 'error': return 'red';
+      default: return 'zinc';
+    }
+  };
+
+  const badgeClasses = (color: string) => {
+    switch (color) {
+      case 'green': return 'border-green-500/30 bg-green-500/10 text-green-400 light:text-green-700 light:bg-green-100 light:border-green-300';
+      case 'blue': return 'border-blue-500/30 bg-blue-500/10 text-blue-400 light:text-blue-700 light:bg-blue-100 light:border-blue-300';
+      case 'red': return 'border-red-500/30 bg-red-500/10 text-red-400 light:text-red-700 light:bg-red-100 light:border-red-300';
+      case 'amber': return 'border-amber-500/30 bg-amber-500/10 text-amber-400 light:text-amber-700 light:bg-amber-100 light:border-amber-300';
+      default: return 'border-zinc-500/30 bg-zinc-500/10 text-zinc-400 light:text-zinc-600 light:bg-zinc-100 light:border-zinc-300';
+    }
+  };
+
+  const batchColor = batchStatus === 'complete' ? 'green' : batchStatus === 'processing' ? 'blue' : batchStatus === 'ready' ? 'amber' : 'zinc';
+
+  const getInitials = (emp: (typeof employees)[0]) => {
+    const first = emp.first_name?.trim() || '';
+    const last = emp.last_name?.trim() || '';
+    if (first && last) return (first[0] + last[0]).toUpperCase();
+    const full = (first || last || (emp as Record<string, unknown>).name as string || (emp as Record<string, unknown>).full_name as string || '?');
+    return full.slice(0, 2).toUpperCase();
+  };
+
+  const getName = (emp: (typeof employees)[0]) => {
+    const full = `${emp.first_name || ''} ${emp.last_name || ''}`.trim();
+    return full || (emp as Record<string, unknown>).name as string || (emp as Record<string, unknown>).full_name as string || 'Unnamed';
+  };
+
+  const initialsColor = (color: string) => {
+    switch (color) {
+      case 'green': return 'bg-green-500/20 text-green-400 border-green-500/30 light:bg-green-100 light:text-green-700 light:border-green-300';
+      case 'blue': return 'bg-blue-500/20 text-blue-400 border-blue-500/30 light:bg-blue-100 light:text-blue-700 light:border-blue-300';
+      case 'red': return 'bg-red-500/20 text-red-400 border-red-500/30 light:bg-red-100 light:text-red-700 light:border-red-300';
+      default: return 'bg-zinc-500/20 text-zinc-400 border-zinc-500/30 light:bg-zinc-100 light:text-zinc-600 light:border-zinc-300';
+    }
+  };
+
+  return (
+    <div className="h-full overflow-y-auto p-4">
+      <div className="max-w-2xl mx-auto space-y-4">
+        {/* Header */}
+        <div className="bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm p-6 transition-colors">
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 light:text-zinc-500">Employee Onboarding</p>
+            <span className={`text-[10px] px-2 py-0.5 border ${badgeClasses(batchColor)}`}>
+              {batchStatus}
+            </span>
+          </div>
+          {state.company_name && (
+            <p className="text-sm text-zinc-400 light:text-zinc-600 transition-colors">{state.company_name}</p>
+          )}
+          {employees.length > 0 && (
+            <p className="text-xs text-zinc-500 light:text-zinc-500 mt-3">
+              {employees.length} employee{employees.length !== 1 ? 's' : ''}
+              {createdCount > 0 && <> · {createdCount} created</>}
+              {errorCount > 0 && <> · {errorCount} error{errorCount !== 1 ? 's' : ''}</>}
+            </p>
+          )}
+        </div>
+
+        {/* Defaults */}
+        {hasDefaults && (
+          <div className="bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm p-4 space-y-2 transition-colors">
+            <p className="text-[10px] uppercase tracking-widest font-bold text-zinc-500 light:text-zinc-500 mb-2">Batch Defaults</p>
+            {state.default_start_date && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-24">Start Date</span>
+                <span className="text-xs text-zinc-300 light:text-zinc-700">{state.default_start_date}</span>
+              </div>
+            )}
+            {state.default_employment_type && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-24">Type</span>
+                <span className="text-xs text-zinc-300 light:text-zinc-700">{state.default_employment_type}</span>
+              </div>
+            )}
+            {state.default_work_state && (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-24">Work State</span>
+                <span className="text-xs text-zinc-300 light:text-zinc-700">{state.default_work_state}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Employee Cards */}
+        {employees.length > 0 ? (
+          <div className="space-y-3">
+            {employees.map((emp, idx) => {
+              const color = statusColor(emp.status);
+              const name = getName(emp);
+              const initials = getInitials(emp);
+              const provEntries = emp.provisioning_results ? Object.entries(emp.provisioning_results) : [];
+
+              return (
+                <div key={emp.employee_id || idx} className="bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm p-4 transition-colors">
+                  {/* Top row: avatar + name + status */}
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 flex items-center justify-center text-[11px] font-bold border ${initialsColor(color)}`}>
+                      {initials}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-zinc-200 light:text-zinc-800 truncate">{name}</p>
+                    </div>
+                    {emp.status && (
+                      <span className={`text-[10px] px-2 py-0.5 border flex-shrink-0 ${badgeClasses(color)}`}>
+                        {emp.status}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Detail rows */}
+                  <div className="mt-3 ml-11 space-y-1.5">
+                    {emp.work_email && (
+                      <p className="text-xs text-zinc-400 light:text-zinc-600 font-mono truncate">{emp.work_email}</p>
+                    )}
+                    {emp.personal_email && (
+                      <p className="text-xs text-zinc-500 light:text-zinc-500 truncate">{emp.personal_email}</p>
+                    )}
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {emp.employment_type && (
+                        <span className="text-[10px] px-1.5 py-0.5 border border-purple-500/30 bg-purple-500/10 text-purple-400 light:text-purple-700 light:bg-purple-100 light:border-purple-300">
+                          {emp.employment_type}
+                        </span>
+                      )}
+                      {emp.work_state && (
+                        <span className="text-[10px] px-1.5 py-0.5 border border-blue-500/30 bg-blue-500/10 text-blue-400 light:text-blue-700 light:bg-blue-100 light:border-blue-300">
+                          {emp.work_state}
+                        </span>
+                      )}
+                    </div>
+                    {emp.start_date && (
+                      <div className="flex items-center gap-1.5 text-xs text-zinc-400 light:text-zinc-600">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        {emp.start_date}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Error banner */}
+                  {emp.status === 'error' && emp.error && (
+                    <div className="mt-3 ml-11 flex items-start gap-2 bg-red-500/10 border border-red-500/20 light:bg-red-50 light:border-red-200 p-2.5">
+                      <svg className="w-3.5 h-3.5 text-red-400 light:text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                      <p className="text-xs text-red-300 light:text-red-700">{emp.error}</p>
+                    </div>
+                  )}
+
+                  {/* Provisioning results */}
+                  {provEntries.length > 0 && (
+                    <div className="mt-3 ml-11 flex flex-wrap gap-2">
+                      {provEntries.map(([service, result]) => {
+                        const isSuccess = result === 'triggered' || result === 'success';
+                        return (
+                          <span
+                            key={service}
+                            className={`text-[10px] px-1.5 py-0.5 border ${isSuccess
+                              ? 'border-green-500/30 bg-green-500/10 text-green-400 light:text-green-700 light:bg-green-100 light:border-green-300'
+                              : 'border-red-500/30 bg-red-500/10 text-red-400 light:text-red-700 light:bg-red-100 light:border-red-300'
+                            }`}
+                          >
+                            {service}: {result}
+                          </span>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : batchStatus ? (
+          <div className="border border-white/10 light:border-black/5 border-dashed p-12 text-center transition-colors">
+            <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-black/[0.12] light:border-zinc-200 flex items-center justify-center mx-auto mb-4 text-zinc-600 light:text-zinc-400 transition-colors">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <p className="text-zinc-500 light:text-zinc-500 text-sm italic font-mono transition-colors">
+              Collecting employee details...
+            </p>
+          </div>
+        ) : (
+          <div className="border border-white/10 light:border-black/5 border-dashed p-12 text-center transition-colors">
+            <div className="w-12 h-12 bg-zinc-800 border border-white/10 light:bg-black/[0.12] light:border-zinc-200 flex items-center justify-center mx-auto mb-4 text-zinc-600 light:text-zinc-400 transition-colors">
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </div>
+            <p className="text-zinc-500 light:text-zinc-500 text-sm italic font-mono transition-colors">
+              Describe the employees you'd like to onboard...
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function parseEmailList(input: string): string[] {
   const matches = input.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
   const seen = new Set<string>();
@@ -724,7 +940,7 @@ export default function MatchaWorkThread() {
         setLoading(false);
         // Open preview panel if cached thread has content
         const cst = cached.thread.current_state || {};
-        if (cached.pdfUrl || cst.workbook_title || cst.sections?.length || cst.review_title || cst.summary || cst.strengths || cst.presentation_title || cst.slides?.length || (cst.employees as unknown[] | undefined)?.length) {
+        if (cached.pdfUrl || cst.workbook_title || cst.sections?.length || cst.review_title || cst.summary || cst.strengths || cst.presentation_title || cst.slides?.length || (cst.employees as unknown[] | undefined)?.length || cst.batch_status) {
           setPreviewPanelOpen(true);
         }
       } else {
@@ -772,7 +988,7 @@ export default function MatchaWorkThread() {
         st.workbook_title || st.sections?.length ||
         st.review_title || st.summary || st.strengths ||
         st.presentation_title || st.slides?.length ||
-        (st.employees as unknown[] | undefined)?.length ||
+        (st.employees as unknown[] | undefined)?.length || st.batch_status ||
         st.handbook_title || st.handbook_sections?.length
       );
       if (threadHasContent) {
@@ -900,7 +1116,8 @@ export default function MatchaWorkThread() {
             toItemList(resp.current_state?.strengths).length > 0 ||
             toItemList(resp.current_state?.growth_areas).length > 0 ||
             (Array.isArray(resp.current_state?.review_request_statuses) && resp.current_state.review_request_statuses.length > 0);
-          const hasOnboardingState = Array.isArray(resp.current_state?.employees) && resp.current_state.employees.length > 0;
+          const hasOnboardingState = (Array.isArray(resp.current_state?.employees) && resp.current_state.employees.length > 0) ||
+            Boolean(resp.current_state?.batch_status);
           const hasPresentationState = Boolean(resp.current_state?.presentation_title) ||
             (Array.isArray(resp.current_state?.slides) && (resp.current_state.slides as unknown[]).length > 0);
           if (resp.pdf_url) {
@@ -1267,7 +1484,8 @@ export default function MatchaWorkThread() {
     reviewStatuses.length > 0
   );
   const hasOnboardingPreviewContent = Boolean(
-    thread?.current_state.employees && (thread.current_state.employees as unknown[]).length > 0
+    (thread?.current_state.employees && (thread.current_state.employees as unknown[]).length > 0) ||
+    thread?.current_state.batch_status
   );
   const hasHandbookPreviewContent = Boolean(
     thread?.current_state.handbook_title ||
@@ -1782,13 +2000,7 @@ export default function MatchaWorkThread() {
             ) : (isHandbook || hasHandbookPreviewContent) ? (
               <HandbookPreview state={thread.current_state} />
             ) : hasOnboardingPreviewContent ? (
-              <div className="h-full overflow-y-auto p-4">
-                <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm p-4 space-y-3 transition-colors">
-                  <p className="text-xs uppercase tracking-wider text-zinc-500 light:text-zinc-500">Employee Onboarding</p>
-                  <p className="text-sm text-zinc-300 light:text-zinc-900">{(thread.current_state.employees as unknown[])?.length || 0} employee(s) queued</p>
-                  <p className="text-xs text-zinc-500 light:text-zinc-500">Batch status: {thread.current_state.batch_status || 'collecting'}</p>
-                </div>
-              </div>
+              <OnboardingPreview state={thread.current_state} />
             ) : (
               <div className="h-full overflow-y-auto p-4">
                 <div className="max-w-2xl mx-auto bg-zinc-950 border border-white/10 light:bg-white/20 light:backdrop-blur-[40px] light:backdrop-saturate-[150%] light:border-white/40 light:shadow-[0_4px_16px_rgba(0,0,0,0.03),inset_0_1px_1px_rgba(255,255,255,0.5)] light:shadow-sm p-4 space-y-4 transition-colors">

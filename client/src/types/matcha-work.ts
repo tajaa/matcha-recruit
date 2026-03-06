@@ -122,6 +122,7 @@ export interface MWDocumentState {
     status?: string | null;
     error?: string | null;
     employee_id?: string | null;
+    provisioning_results?: Record<string, string> | null;
   }> | null;
   batch_status?: string | null;
   default_start_date?: string | null;
