@@ -61,7 +61,7 @@ export const JurisdictionRows = memo(function JurisdictionRows() {
       </div>
 
       <AnimatePresence mode="popLayout">
-        {visibleLaws.map((item, i) => {
+        {visibleLaws.map((item) => {
           const key = `${item.law}-${item.jurisdiction}`;
           const sc = STATUS_COLORS[item.status];
           return (
