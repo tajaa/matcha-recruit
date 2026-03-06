@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
 import { motion, type Variants } from "framer-motion";
 import { TelemetryBadge } from "../components/TelemetryBadge";
@@ -6,6 +6,83 @@ import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { fonts } from "../constants";
 
 const ParticleSphere = lazy(() => import("../../../components/ParticleSphere"));
+
+const MATRIX_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789!@#$%&';
+
+function GlitchText({ text, className, style }: { text: string; className?: string; style?: React.CSSProperties }) {
+  const [chars, setChars] = useState<string[]>(() =>
+    text.split('').map(c => (c === ' ' || c === '.') ? c : MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)])
+  );
+  const [isGlitching, setIsGlitching] = useState(false);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Decode left-to-right on mount
+  useEffect(() => {
+    const textArr = text.split('');
+    let revealProgress = 0;
+    const decode = setInterval(() => {
+      setChars(prev =>
+        prev.map((_, i) => {
+          if (textArr[i] === ' ' || textArr[i] === '.') return textArr[i];
+          if (i < revealProgress) return textArr[i];
+          return MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)];
+        })
+      );
+      revealProgress += 0.4;
+      if (revealProgress >= textArr.length) {
+        clearInterval(decode);
+        setChars(textArr);
+      }
+    }, 45);
+    return () => clearInterval(decode);
+  }, [text]);
+
+  // Periodic glitch
+  useEffect(() => {
+    const scheduleGlitch = () => {
+      timeoutRef.current = setTimeout(() => {
+        setIsGlitching(true);
+        let ticks = 0;
+        const maxTicks = 7 + Math.floor(Math.random() * 8);
+        intervalRef.current = setInterval(() => {
+          setChars(
+            text.split('').map(c => {
+              if (c === ' ' || c === '.') return c;
+              return Math.random() > 0.35 ? c : MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)];
+            })
+          );
+          ticks++;
+          if (ticks >= maxTicks) {
+            clearInterval(intervalRef.current!);
+            setChars(text.split(''));
+            setIsGlitching(false);
+            scheduleGlitch();
+          }
+        }, 55);
+      }, 2800 + Math.random() * 4000);
+    };
+    scheduleGlitch();
+    return () => {
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+  }, [text]);
+
+  return (
+    <span
+      className={className}
+      style={{
+        ...style,
+        textShadow: isGlitching ? '3px 0 #ff003c, -3px 0 #00fff9' : 'none',
+        color: isGlitching ? '#4ADE80' : undefined,
+        transition: 'color 0.05s, text-shadow 0.05s',
+      }}
+    >
+      {chars.join('')}
+    </span>
+  );
+}
 
 export const Hero = () => {
   const containerVariants: Variants = {
@@ -67,12 +144,11 @@ export const Hero = () => {
             >
               Workforce
             </span>
-            <span
+            <GlitchText
+              text="Intelligence."
               className="block text-[4rem] md:text-[6.5rem] lg:text-[8.5rem] italic font-light text-zinc-500"
               style={{ fontFamily: fonts.serif }}
-            >
-              Intelligence.
-            </span>
+            />
           </motion.h1>
 
           <motion.div variants={itemVariants} className="space-y-10 mt-10">
