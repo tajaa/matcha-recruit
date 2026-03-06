@@ -1,6 +1,6 @@
 import { forwardRef } from "react";
 import { motion, type Variants } from "framer-motion";
-import { Radar, Activity, ShieldCheck } from "lucide-react";
+import { Radar, Activity, ShieldCheck, ShieldAlert, Target, AlertTriangle } from "lucide-react";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
 import { fonts } from "../constants";
@@ -67,15 +67,16 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
             </span>
           </motion.h2>
 
-          <motion.p 
-            variants={featureVariants}
-            className="text-zinc-500 text-xl md:text-2xl font-light leading-relaxed max-w-xl"
-            style={{ fontFamily: fonts.sans }}
-          >
-            The biggest risk is the one you don’t see coming. 
-          </motion.p>
+          <motion.div variants={featureVariants} className="space-y-6">
+            <p className="text-zinc-500 text-xl md:text-2xl font-light leading-relaxed max-w-xl" style={{ fontFamily: fonts.sans }}>
+              The biggest risk is the one you don’t see coming. 
+            </p>
+            <p className="text-zinc-400 text-base md:text-lg font-light leading-relaxed max-w-xl" style={{ fontFamily: fonts.sans }}>
+              Identify and neutralize compliance gaps before they escalate. Our heuristic engine acts as an early warning system, mapping your footprint to provide a real-time threat matrix.
+            </p>
+          </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-12 pt-8 border-t border-white/5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-10 pt-8 border-t border-white/5">
             <motion.div variants={featureVariants} className="space-y-4 group">
               <div className="flex items-center gap-3">
                 <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
@@ -103,6 +104,34 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
                 Proactive alerts for pending compliance deadlines and exposure risks.
               </p>
             </motion.div>
+
+            <motion.div variants={featureVariants} className="space-y-4 group">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
+                  <ShieldAlert size={20} />
+                </div>
+                <h4 className="font-bold text-white uppercase tracking-[0.2em] text-xs font-mono">
+                  Gap Analysis
+                </h4>
+              </div>
+              <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
+                Instantly identify discrepancies between active policies and legal requirements.
+              </p>
+            </motion.div>
+
+            <motion.div variants={featureVariants} className="space-y-4 group">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-white/5 text-white group-hover:bg-white group-hover:text-black transition-colors">
+                  <Target size={20} />
+                </div>
+                <h4 className="font-bold text-white uppercase tracking-[0.2em] text-xs font-mono">
+                  Threat Routing
+                </h4>
+              </div>
+              <p className="text-zinc-500 text-sm leading-relaxed border-l border-white/10 pl-4 font-mono">
+                Automatically prioritize risks based on financial impact and probability.
+              </p>
+            </motion.div>
           </div>
         </div>
 
@@ -110,8 +139,37 @@ export const RiskSnapshot = forwardRef<HTMLDivElement>((_, ref) => {
           initial={{ opacity: 0, scale: 0.9, x: 50 }}
           whileInView={{ opacity: 1, scale: 1, x: 0 }}
           transition={{ duration: 1.2, ease: [0.16, 1, 0.3, 1] }}
-          className="relative"
+          className="relative mt-20 lg:mt-0"
         >
+          {/* Floating Alert Panels */}
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.8, duration: 0.6 }}
+            className="absolute -top-10 -left-6 lg:-left-12 bg-black/90 backdrop-blur-md border border-zinc-800 p-4 rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-30 hidden md:block w-56"
+          >
+            <div className="flex items-center gap-3 mb-3 border-b border-white/10 pb-2">
+              <AlertTriangle size={14} className="text-amber-500 animate-pulse" />
+              <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400">Threat Detected</span>
+            </div>
+            <p className="text-[10px] text-white font-mono uppercase tracking-wider mb-1">NY Pay Transparency</p>
+            <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-widest">Exposure: High</p>
+          </motion.div>
+          
+          <motion.div 
+            initial={{ opacity: 0, y: -20 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            transition={{ delay: 1.2, duration: 0.6 }}
+            className="absolute -bottom-10 -right-6 lg:-right-12 bg-black/90 backdrop-blur-md border border-zinc-800 p-4 rounded-xl shadow-[0_20px_40px_rgba(0,0,0,0.8)] z-30 hidden md:block w-56"
+          >
+            <div className="flex items-center gap-3 mb-3 border-b border-white/10 pb-2">
+              <ShieldCheck size={14} className="text-zinc-500" />
+              <span className="text-[9px] font-mono uppercase tracking-widest text-zinc-400">Status Update</span>
+            </div>
+            <p className="text-[10px] text-white font-mono uppercase tracking-wider mb-1">CA Meal Breaks</p>
+            <p className="text-[8px] text-zinc-500 font-mono uppercase tracking-widest">Mitigated</p>
+          </motion.div>
+
           {/* Radar / Snapshot Visual */}
           <div className="relative aspect-square max-w-lg mx-auto bg-[#0A0E0C] border border-white/10 flex items-center justify-center p-12 overflow-hidden shadow-[0_0_80px_rgba(255,255,255,0.02)] group rounded-full">
             
