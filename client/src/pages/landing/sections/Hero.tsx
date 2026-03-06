@@ -171,11 +171,6 @@ export const Hero = () => {
                   className="absolute inset-0 bg-zinc-200 translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
                 />
               </Link>
-              <button
-                className="px-10 py-4 border border-white/10 text-white/40 text-[10px] font-mono uppercase tracking-[0.3em] hover:text-white hover:border-white/30 transition-all duration-500 font-bold"
-              >
-                Read Whitepaper
-              </button>
             </div>
           </motion.div>
         </div>
