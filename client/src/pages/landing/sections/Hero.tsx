@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { motion, type Variants } from "framer-motion";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";
+import { AsciiHalftone } from "../components/AsciiHalftone";
 import { fonts } from "../constants";
 
 const ParticleSphere = lazy(() => import("../../../components/ParticleSphere"));
@@ -107,7 +108,7 @@ export const Hero = () => {
   };
 
   return (
-    <motion.section 
+    <motion.section
       variants={containerVariants}
       initial="hidden"
       animate="visible"
@@ -116,12 +117,13 @@ export const Hero = () => {
       {/* Atmosphere Layer - Minimalist Grayscale */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute inset-0 bg-[#0A0E0C]" />
-        {/* Subtle radial depth instead of bright green */}
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] bg-white/[0.02] blur-[150px] rounded-full mix-blend-screen" />
         <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/asfalt-light.png')]" />
       </div>
 
-      <div className="relative z-20 w-full max-w-[1400px] mx-auto grid lg:grid-cols-[1fr_0.8fr] gap-12 items-center">
+      <AsciiHalftone />
+
+      <div className="relative z-10 w-full max-w-[1600px] mx-auto grid lg:grid-cols-[1fr_0.8fr] gap-12 items-center">
         <div className="flex flex-col items-start relative z-10 py-20">
           <motion.div variants={itemVariants} className="flex items-center gap-4">
             <TelemetryBadge text="System Core // Offline Mode" active={false} />
