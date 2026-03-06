@@ -40,6 +40,10 @@ htmlcov/
 # Agent local models
 server/agent/models/
 
+# Agent OAuth credentials and tokens
+server/agent/workspace/credentials.json
+server/agent/workspace/token.json
+
 # Agent workspace runtime files
 server/agent/workspace/output/*
 server/agent/workspace/processed/*

@@ -48,28 +48,30 @@ fi
 echo "Building matcha-agent image..."
 docker build -t matcha-agent "$SCRIPT_DIR"
 
-DOCKER_CMD="docker run --rm \
-  --name matcha-agent \
-  --user $(id -u):$(id -g) \
-  --read-only \
-  --tmpfs /tmp:size=64m \
-  --cap-drop ALL \
-  --security-opt no-new-privileges:true \
-  --memory 512m \
-  --cpus 1.0 \
-  -e GEMINI_API_KEY=$GEMINI_API_KEY \
-  -e AGENT_WORKSPACE_ROOT=/workspace \
-  -v $SCRIPT_DIR/workspace:/workspace \
-  matcha-agent"
+DOCKER_ARGS=(
+  docker run --rm
+  --name matcha-agent
+  --user "$(id -u):$(id -g)"
+  --read-only
+  --tmpfs /tmp:size=64m
+  --cap-drop ALL
+  --security-opt no-new-privileges:true
+  --memory 512m
+  --cpus 1.0
+  -e "GEMINI_API_KEY=${GEMINI_API_KEY}"
+  -e AGENT_WORKSPACE_ROOT=/workspace
+  -v "$SCRIPT_DIR/workspace:/workspace"
+  matcha-agent
+)
 
 if [ "$MODE" = "once" ]; then
   echo "Running agent (one-shot)..."
-  eval "$DOCKER_CMD --once"
+  "${DOCKER_ARGS[@]}" --once
   exit 0
 fi
 
 # Daemon: run in tmux
-DAEMON_CMD="$DOCKER_CMD $INTERVAL"
+DAEMON_ARGS=("${DOCKER_ARGS[@]}" $INTERVAL)
 if tmux has-session -t "$SESSION" 2>/dev/null; then
   echo "Session '$SESSION' already running. Attaching..."
   tmux attach -t "$SESSION"
@@ -77,5 +79,5 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 echo "Starting agent daemon in tmux session '$SESSION'..."
-tmux new-session -d -s "$SESSION" "$DAEMON_CMD"
+tmux new-session -d -s "$SESSION" "${DAEMON_ARGS[*]}"
 tmux attach -t "$SESSION"

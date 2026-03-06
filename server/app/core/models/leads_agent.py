@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List
 from uuid import UUID
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class LeadStatus(str, Enum):
@@ -70,12 +70,12 @@ class EmailStatus(str, Enum):
 
 class SearchConfigCreate(BaseModel):
     """Request to create a search configuration."""
-    name: str
-    role_types: List[str] = []  # ['ceo', 'cfo', 'vp', 'director']
-    locations: List[str] = []   # ['San Francisco', 'New York']
-    industries: List[str] = []  # ['Technology', 'Finance']
-    salary_min: Optional[int] = None
-    salary_max: Optional[int] = None
+    name: str = Field(max_length=200)
+    role_types: List[str] = Field(default=[], max_length=20)
+    locations: List[str] = Field(default=[], max_length=20)
+    industries: List[str] = Field(default=[], max_length=20)
+    salary_min: Optional[int] = Field(default=None, ge=0, le=10_000_000)
+    salary_max: Optional[int] = Field(default=None, ge=0, le=10_000_000)
 
 
 class SearchConfig(SearchConfigCreate):
@@ -89,13 +89,13 @@ class SearchConfig(SearchConfigCreate):
 
 class SearchRequest(BaseModel):
     """Request to run a lead search."""
-    role_types: List[str] = []
-    locations: List[str] = []
-    industries: List[str] = []
-    salary_min: Optional[int] = None
-    salary_max: Optional[int] = None
+    role_types: List[str] = Field(default=[], max_length=20)
+    locations: List[str] = Field(default=[], max_length=20)
+    industries: List[str] = Field(default=[], max_length=20)
+    salary_min: Optional[int] = Field(default=None, ge=0, le=10_000_000)
+    salary_max: Optional[int] = Field(default=None, ge=0, le=10_000_000)
     save_config: bool = False
-    config_name: Optional[str] = None
+    config_name: Optional[str] = Field(default=None, max_length=200)
 
 
 # ===========================================

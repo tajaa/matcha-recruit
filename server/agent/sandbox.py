@@ -284,6 +284,7 @@ class SandboxedGmail:
 
         self._token_data["token"] = new_tokens["access_token"]
         self._token_path.write_text(json.dumps(self._token_data, indent=2))
+        self._token_path.chmod(0o600)
         logger.info("Gmail token refreshed and saved")
         return self._token_data["token"]
 
@@ -336,6 +337,17 @@ class SandboxedGmail:
     async def create_draft(self, to: str, subject: str, body: str, reply_to_id: str | None = None) -> dict:
         """Create a draft email. Does NOT send — it sits in Drafts until you send manually."""
         import base64
+
+        # Validate email fields against header injection
+        for field_name, value in [("to", to), ("subject", subject)]:
+            if "\r" in value or "\n" in value:
+                raise SandboxViolation(f"Email {field_name} contains newline characters (header injection attempt)")
+
+        # Basic email format validation for 'to' field
+        # Accept both bare "user@example.com" and RFC822 "Name <user@example.com>"
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', to) and \
+           not re.match(r'^.+\s*<[^@\s]+@[^@\s]+\.[^@\s]+>$', to):
+            raise SandboxViolation(f"Invalid email address format: {to}")
 
         lines = [
             f"To: {to}",

@@ -25,9 +25,18 @@ from ..models.leads_agent import (
     PipelineStats,
 )
 from ..services.leads_agent import get_leads_agent, LeadsAgentService
+from ..services.rate_limiter import get_rate_limiter, RateLimitExceeded
 
 
 router = APIRouter()
+
+
+async def _check_endpoint_rate_limit(endpoint: str):
+    """Check DB-backed rate limit for an expensive endpoint. Raises 429 if exceeded."""
+    try:
+        await get_rate_limiter().check_and_record("leads_api", endpoint)
+    except RateLimitExceeded as e:
+        raise HTTPException(status_code=429, detail=str(e))
 
 
 # ===========================================
@@ -43,9 +52,10 @@ async def run_search(
 ):
     """
     Run a job search and process results with Gemini.
-    
+
     If preview=False (default), qualified leads are saved to the database.
     """
+    await _check_endpoint_rate_limit("search")
     return await service.run_search(request, save_results=not preview)
 
 
@@ -142,6 +152,7 @@ async def find_contacts(
     service: LeadsAgentService = Depends(get_leads_agent),
 ):
     """Find contacts for a lead using Hunter.io/Apollo."""
+    await _check_endpoint_rate_limit("find_contacts")
     contacts = await service.find_contacts_for_lead(lead_id)
     return contacts
 
@@ -166,6 +177,7 @@ async def research_contact(
     service: LeadsAgentService = Depends(get_leads_agent),
 ):
     """Use AI to research the decision maker from the web."""
+    await _check_endpoint_rate_limit("research_contact")
     contact = await service.research_decision_maker(lead_id)
     if not contact:
         raise HTTPException(status_code=404, detail="Could not identify decision maker from web search")
@@ -274,6 +286,7 @@ async def send_email(
     service: LeadsAgentService = Depends(get_leads_agent),
 ):
     """Send an approved email."""
+    await _check_endpoint_rate_limit("send_email")
     email = await service.send_email(email_id)
     if not email:
         raise HTTPException(status_code=400, detail="Could not send email (not approved or invalid contact)")
