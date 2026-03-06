@@ -138,29 +138,36 @@ class SandboxedGemini:
 class SandboxedLocal:
     """Local LLM via llama-server (OpenAI-compatible API).
 
-    Starts llama-server as a subprocess on init, kills it on cleanup.
-    Exposes the same generate() interface as SandboxedGemini.
+    Two modes:
+    - Local: starts llama-server as a subprocess (for dev)
+    - Remote: connects to an external llama-server URL (for Docker/EC2)
     """
 
-    def __init__(self, model_path: str, port: int = 8999):
-        self._model_path = model_path
-        self._port = port
-        self._base_url = f"http://127.0.0.1:{port}"
+    def __init__(self, model_path: str | None = None, port: int = 8999, base_url: str | None = None):
         self._process: subprocess.Popen | None = None
-        self._start_server()
 
-    def _start_server(self):
+        if base_url:
+            # Remote mode — connect to an already-running llama-server
+            self._base_url = base_url.rstrip("/")
+            logger.info(f"Connecting to remote llama-server at {self._base_url}")
+            self._wait_for_server()
+        else:
+            # Local mode — start our own llama-server subprocess
+            self._base_url = f"http://127.0.0.1:{port}"
+            self._start_server(model_path, port)
+
+    def _start_server(self, model_path: str, port: int):
         """Start llama-server in the background."""
         llama_server = shutil.which("llama-server")
         if not llama_server:
             raise SandboxViolation("llama-server not found in PATH")
 
-        logger.info(f"Starting llama-server on port {self._port} with {Path(self._model_path).name}")
+        logger.info(f"Starting llama-server on port {port} with {Path(model_path).name}")
         self._process = subprocess.Popen(
             [
                 llama_server,
-                "-m", self._model_path,
-                "--port", str(self._port),
+                "-m", model_path,
+                "--port", str(port),
                 "--ctx-size", "4096",
                 "--n-gpu-layers", "99",
                 "--log-disable",
@@ -169,8 +176,10 @@ class SandboxedLocal:
             stderr=subprocess.DEVNULL,
         )
         atexit.register(self.stop)
+        self._wait_for_server()
 
-        # Wait for server to be ready
+    def _wait_for_server(self):
+        """Wait for llama-server to become ready."""
         for _ in range(30):
             try:
                 resp = httpx.get(f"{self._base_url}/health", timeout=1.0)
@@ -182,7 +191,7 @@ class SandboxedLocal:
             time.sleep(0.5)
 
         self.stop()
-        raise SandboxViolation("llama-server failed to start within 15 seconds")
+        raise SandboxViolation(f"llama-server not ready at {self._base_url} within 15 seconds")
 
     def stop(self):
         if self._process and self._process.poll() is None:
@@ -519,11 +528,20 @@ class Sandbox:
 
         self.fetcher = SandboxedFetcher(all_urls)
         self.fs = SandboxedFS(config.workspace_root)
-        self.gemini = SandboxedGemini(config.gemini_model)
 
-        # Local model — start llama-server if a model path is configured
+        # Gemini — optional if a local model is available
+        self.gemini: SandboxedGemini | None = None
+        if os.getenv("GEMINI_API_KEY"):
+            self.gemini = SandboxedGemini(config.gemini_model)
+
+        # Local model — connect to remote llama-server or start local subprocess
         self.local: SandboxedLocal | None = None
-        if config.local_model_path and Path(config.local_model_path).is_file():
+        if config.local_model_url:
+            try:
+                self.local = SandboxedLocal(base_url=config.local_model_url)
+            except SandboxViolation as e:
+                logger.warning(f"Remote local model unavailable: {e}")
+        elif config.local_model_path and Path(config.local_model_path).is_file():
             try:
                 self.local = SandboxedLocal(config.local_model_path, config.local_model_port)
             except SandboxViolation as e:
@@ -531,6 +549,8 @@ class Sandbox:
 
         # Default LLM: local if available, else gemini. Override with force_gemini().
         self.llm = self.local or self.gemini
+        if self.llm is None:
+            raise SandboxViolation("No LLM configured — set GEMINI_API_KEY or AGENT_LOCAL_MODEL_URL")
 
         # Gmail — only initialize if enabled and token exists
         if config.gmail_enabled:

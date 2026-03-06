@@ -35,7 +35,10 @@ Update EC2 deployments by pulling latest images and restarting containers.
 OPTIONS:
     --matcha         Update Matcha-Recruit (ports 8002/8082)
     --gumm-local     Update gumm-local (ports 8004/8084)
-    --all            Update all apps
+    --agent          Start/update agent + llama (Qwen local LLM)
+    --agent-upload   Upload Qwen model to EC2 (one-time, ~508MB)
+    --agent-stop     Stop the agent and llama containers
+    --all            Update all apps (matcha + gumm-local, not agent)
     --status         Show status of all containers
     -h, --help       Show this help message
 
@@ -43,6 +46,9 @@ EXAMPLES:
     $0 --matcha          # Update only Matcha
     $0 --gumm-local      # Update only gumm-local
     $0 --all             # Update all apps
+    $0 --agent-upload    # Upload Qwen model (first time only)
+    $0 --agent           # Start/restart agent with local Qwen
+    $0 --agent-stop      # Stop agent and llama
     $0 --status          # Check container status
 EOF
 }
@@ -98,6 +104,38 @@ update_gumm_local() {
     log_success "gumm-local updated!"
 }
 
+upload_model() {
+    local model_file="server/agent/models/Qwen3.5-0.8B-Q4_K_M.gguf"
+    if [ ! -f "$model_file" ]; then
+        log_error "Model file not found: $model_file"
+        exit 1
+    fi
+    log_info "Creating models directory on EC2..."
+    ssh_cmd "mkdir -p ~/matcha/models"
+    log_info "Uploading Qwen 0.8B model (~508MB)..."
+    scp -i "$SSH_KEY" "$model_file" "$EC2_USER@$EC2_HOST:~/matcha/models/"
+    log_success "Model uploaded to EC2:~/matcha/models/"
+}
+
+update_agent() {
+    log_info "Starting agent + llama..."
+
+    # Check model exists on EC2
+    ssh_cmd "test -f ~/matcha/models/Qwen3.5-0.8B-Q4_K_M.gguf" || {
+        log_error "Model not found on EC2. Run with --agent-upload first."
+        exit 1
+    }
+
+    ssh_cmd "cd ~/matcha && docker-compose --profile agent pull matcha-agent && docker-compose --profile agent up -d llama matcha-agent"
+    log_success "Agent started with local Qwen model!"
+}
+
+stop_agent() {
+    log_info "Stopping agent and llama..."
+    ssh_cmd "cd ~/matcha && docker-compose --profile agent stop matcha-agent llama && docker-compose --profile agent rm -f matcha-agent llama"
+    log_success "Agent stopped."
+}
+
 show_status() {
     log_info "Container status:"
     ssh_cmd "docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'"
@@ -114,6 +152,9 @@ cleanup() {
 # Parse arguments
 UPDATE_MATCHA=false
 UPDATE_GUMM_LOCAL=false
+UPDATE_AGENT=false
+AGENT_UPLOAD=false
+AGENT_STOP=false
 SHOW_STATUS=false
 
 if [ $# -eq 0 ]; then
@@ -129,6 +170,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --gumm-local)
             UPDATE_GUMM_LOCAL=true
+            shift
+            ;;
+        --agent)
+            UPDATE_AGENT=true
+            shift
+            ;;
+        --agent-upload)
+            AGENT_UPLOAD=true
+            shift
+            ;;
+        --agent-stop)
+            AGENT_STOP=true
             shift
             ;;
         --all)
@@ -158,8 +211,28 @@ if [ "$SHOW_STATUS" = true ]; then
     exit 0
 fi
 
-if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ]; then
-    log_error "No app specified. Use --matcha, --gumm-local, or --all"
+# Agent-only operations (no backup/cleanup needed)
+if [ "$AGENT_UPLOAD" = true ]; then
+    upload_model
+    exit 0
+fi
+
+if [ "$AGENT_STOP" = true ]; then
+    stop_agent
+    show_status
+    exit 0
+fi
+
+if [ "$UPDATE_AGENT" = true ] && [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ]; then
+    ecr_login
+    update_agent
+    show_status
+    log_success "Agent deployment complete!"
+    exit 0
+fi
+
+if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ] && [ "$UPDATE_AGENT" = false ]; then
+    log_error "No app specified. Use --matcha, --gumm-local, --agent, or --all"
     exit 1
 fi
 
@@ -173,6 +246,10 @@ fi
 
 if [ "$UPDATE_GUMM_LOCAL" = true ]; then
     update_gumm_local
+fi
+
+if [ "$UPDATE_AGENT" = true ]; then
+    update_agent
 fi
 
 cleanup
