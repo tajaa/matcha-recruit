@@ -36,28 +36,21 @@ export const Hero = () => {
       animate="visible"
       className="hero-trigger relative min-h-[90vh] flex flex-col justify-center px-6 md:px-16 lg:px-32 overflow-hidden"
     >
-      {/* Atmosphere Layer */}
+      {/* Atmosphere Layer - Minimalist Grayscale */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        <motion.div
-          initial={{ scale: 1.1, opacity: 0 }}
-          animate={{ scale: 1, opacity: 0.12 }}
-          transition={{ duration: 2, ease: [0.16, 1, 0.3, 1] }}
-          className="parallax-bg absolute -inset-[5%] bg-cover bg-center"
-          style={{
-            backgroundImage: `url('https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?q=80&w=3500&auto=format&fit=crop')`,
-          }}
-        />
-        <div className="absolute inset-0 bg-gradient-to-b from-[#0A0E0C]/0 via-[#0A0E0C]/80 to-[#0A0E0C]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1000px] h-[600px] bg-[#4ADE80]/5 blur-[120px] rounded-full mix-blend-screen opacity-50" />
+        <div className="absolute inset-0 bg-[#0A0E0C]" />
+        {/* Subtle radial depth instead of bright green */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] bg-white/[0.02] blur-[150px] rounded-full mix-blend-screen" />
+        <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/asfalt-light.png')]" />
       </div>
 
       <div className="relative z-20 w-full max-w-[1400px] mx-auto grid lg:grid-cols-[1fr_0.8fr] gap-12 items-center">
         <div className="flex flex-col items-start relative z-10 py-20">
           <motion.div variants={itemVariants} className="flex items-center gap-4">
-            <TelemetryBadge text="Core System v2.4 Online" active />
-            <div className="h-px w-8 bg-white/10" />
+            <TelemetryBadge text="System Core // Offline Mode" active={false} />
+            <div className="h-px w-8 bg-white/5" />
             <TechnicalSpecs 
-              title="Intelligence Engine"
+              title="Architecture"
               specs={[
                 "Sub-100ms Latent Synthesis",
                 "Neural State Machine v4.2",
@@ -69,13 +62,13 @@ export const Hero = () => {
           
           <motion.h1 variants={itemVariants} className="mt-10 leading-[0.9] tracking-[-0.04em] mix-blend-lighten max-w-2xl">
             <span
-              className="block text-[3.5rem] md:text-[5.5rem] lg:text-[6.5rem] font-bold uppercase"
-              style={{ fontFamily: fonts.sans }}
+              className="block text-[3.5rem] md:text-[5.5rem] lg:text-[7.5rem] font-bold uppercase text-white"
+              style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
             >
               Workforce
             </span>
             <span
-              className="block text-[4rem] md:text-[6.5rem] lg:text-[7.5rem] italic font-light text-[#D95A38]"
+              className="block text-[4rem] md:text-[6.5rem] lg:text-[8.5rem] italic font-light text-zinc-500"
               style={{ fontFamily: fonts.serif }}
             >
               Intelligence.
@@ -84,11 +77,11 @@ export const Hero = () => {
 
           <motion.div variants={itemVariants} className="space-y-10 mt-10">
             <p
-              className="text-[#F0EFEA]/50 text-base md:text-lg lg:text-xl font-light leading-relaxed max-w-lg"
+              className="text-zinc-500 text-base md:text-lg lg:text-xl font-light leading-relaxed max-w-lg"
               style={{ fontFamily: fonts.sans }}
             >
               The unified operating system for modern workforce architecture. 
-              <span className="text-white/80 font-medium"> Stripped of noise.</span> Optimized for 
+              <span className="text-zinc-300 font-medium"> Stripped of noise.</span> Optimized for 
               biological clarity and algorithmic precision.
             </p>
             
@@ -99,11 +92,11 @@ export const Hero = () => {
               >
                 <span className="relative z-10">Initialize Account</span>
                 <motion.div 
-                  className="absolute inset-0 bg-[#4ADE80] translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
+                  className="absolute inset-0 bg-zinc-200 translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
                 />
               </Link>
               <button
-                className="px-10 py-4 border border-white/10 text-white/60 text-[10px] font-mono uppercase tracking-[0.3em] hover:text-white hover:border-white/30 transition-all duration-500 font-bold"
+                className="px-10 py-4 border border-white/10 text-white/40 text-[10px] font-mono uppercase tracking-[0.3em] hover:text-white hover:border-white/30 transition-all duration-500 font-bold"
               >
                 Read Whitepaper
               </button>
@@ -119,12 +112,12 @@ export const Hero = () => {
         >
           <Suspense
             fallback={
-              <div className="text-[#4ADE80]/40 font-mono text-[8px] uppercase tracking-[0.4em] animate-pulse">
+              <div className="text-white/20 font-mono text-[8px] uppercase tracking-[0.4em] animate-pulse">
                 Booting Neural Sphere...
               </div>
             }
           >
-            <div className="absolute inset-0 bg-[#4ADE80]/5 blur-[100px] rounded-full mix-blend-screen pointer-events-none group-hover:bg-[#4ADE80]/10 transition-colors duration-1000" />
+            <div className="absolute inset-0 bg-white/[0.03] blur-[100px] rounded-full mix-blend-screen pointer-events-none group-hover:bg-white/[0.05] transition-colors duration-1000" />
             <ParticleSphere
               className="w-full h-full scale-100 lg:scale-110 opacity-80"
               showCityMarkers

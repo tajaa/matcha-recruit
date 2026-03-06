@@ -22,7 +22,7 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, system
         <div className="flex items-center gap-6">
           <Link to="/" className="flex items-center gap-3 group">
             <div className="w-8 h-8 rounded-full border border-[#F0EFEA]/20 flex items-center justify-center overflow-hidden bg-[#0A0E0C]">
-              <div className="w-full h-full bg-[#4ADE80] opacity-0 group-hover:opacity-30 transition-opacity duration-300" />
+              <div className="w-full h-full bg-white opacity-0 group-hover:opacity-30 transition-opacity duration-300" />
             </div>
             <span className="font-sans text-sm font-bold tracking-[0.2em] uppercase">
               Matcha
@@ -30,8 +30,8 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, system
           </Link>
           
           <div className="hidden lg:flex items-center gap-3 pl-6 border-l border-white/10">
-            <div className="w-1 h-1 bg-[#4ADE80] rounded-full animate-pulse" />
-            <span className="text-[8px] font-mono uppercase tracking-[0.3em] text-[#4ADE80]">
+            <div className="w-1 h-1 bg-white rounded-full animate-pulse" />
+            <span className="text-[8px] font-mono uppercase tracking-[0.3em] text-white/40">
               Active Module: {activeSection}
             </span>
           </div>
@@ -39,19 +39,19 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, system
         <div className="hidden md:flex gap-10 text-[10px] font-mono uppercase tracking-[0.2em] text-[#F0EFEA]/60">
           <span
             onClick={() => scrollTo(manifestoRef)}
-            className="hover:text-[#4ADE80] cursor-pointer transition-colors"
+            className="hover:text-white cursor-pointer transition-colors"
           >
             Philosophy
           </span>
           <span
             onClick={() => scrollTo(systemRef)}
-            className="hover:text-[#4ADE80] cursor-pointer transition-colors"
+            className="hover:text-white cursor-pointer transition-colors"
           >
             System
           </span>
           <span
             onClick={onPricingClick}
-            className="hover:text-[#4ADE80] cursor-pointer transition-colors"
+            className="hover:text-white cursor-pointer transition-colors"
           >
             Pricing
           </span>

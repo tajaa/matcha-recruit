@@ -1,7 +1,8 @@
 export const fonts = {
-  sans: '"Plus Jakarta Sans", "Inter", sans-serif',
-  serif: '"Cormorant Garamond", serif',
-  mono: '"JetBrains Mono", monospace',
+  sans: '"Space Grotesk", sans-serif',
+  display: '"Orbitron", sans-serif',
+  serif: '"Space Mono", monospace',
+  mono: '"Space Mono", monospace',
 };
 
 export const ER_INFERENCE_WIDTHS = [0.4, 0.8, 0.3, 0.9, 0.5, 0.7];

@@ -147,11 +147,11 @@ export function Landing() {
 
       <Hero />
       
-      <Compliance />
+      {/* <Compliance />
 
       <Interviewer ref={manifestoRef} />
 
-      <SystemProtocols ref={systemRef} />
+      <SystemProtocols ref={systemRef} /> */}
 
       <Footer />
     </div>
