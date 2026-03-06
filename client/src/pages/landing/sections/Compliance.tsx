@@ -109,42 +109,31 @@ export const Compliance = () => {
           viewport={{ once: true }}
           className="relative z-10 space-y-6"
         >
-          <div className="bg-[#0A0E0C] rounded-[3rem] border border-white/10 p-12 shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden relative group">
+          <div className="bg-[#060906] rounded-2xl border border-white/10 p-6 shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden relative group">
             <motion.div
               animate={{ top: ["-10%", "110%"] }}
-              transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-              className="absolute left-0 right-0 h-[1px] bg-[#4ADE80]/40 shadow-[0_0_30px_#4ADE80] z-30"
+              transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
+              className="absolute left-0 right-0 h-[1px] bg-[#4ADE80]/30 shadow-[0_0_20px_#4ADE80] z-30"
             />
-            
-            <div className="flex justify-between items-center mb-12 border-b border-white/10 pb-6">
-              <div className="flex items-center gap-4">
-                <div className="p-2 bg-[#D95A38]/20 rounded-lg">
-                  <MapPin className="w-5 h-5 text-[#D95A38]" />
+
+            <div className="flex justify-between items-center mb-4 border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-[#4ADE80]/10 rounded">
+                  <MapPin className="w-4 h-4 text-[#4ADE80]" />
                 </div>
                 <div>
-                  <span className="block text-[10px] font-mono uppercase tracking-widest text-white font-bold">
-                    Global Matrix
+                  <span className="block text-[9px] font-mono uppercase tracking-widest text-white font-bold">
+                    Jurisdiction Matrix
                   </span>
-                  <span className="text-[8px] font-mono text-[#F0EFEA]/40 uppercase tracking-[0.2em]">
-                    Algorithmic Enforcement Active
+                  <span className="text-[7px] font-mono text-[#F0EFEA]/30 uppercase tracking-[0.2em]">
+                    Real-time Enforcement Feed
                   </span>
                 </div>
               </div>
-              <TelemetryBadge text="Syncing Node" active />
+              <TelemetryBadge text="Live" active />
             </div>
 
             <JurisdictionRows />
-
-            <div className="mt-12 pt-8 border-t border-white/5 flex justify-between items-center">
-              <div className="flex gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-[#4ADE80] animate-pulse" />
-                <div className="w-1.5 h-1.5 rounded-full bg-[#4ADE80]/30" />
-                <div className="w-1.5 h-1.5 rounded-full bg-[#4ADE80]/10" />
-              </div>
-              <span className="text-[8px] font-mono uppercase tracking-[0.3em] text-[#F0EFEA]/30">
-                Latent Nodes: 12,402
-              </span>
-            </div>
           </div>
           
           {/* Decorative Technical Overlay */}

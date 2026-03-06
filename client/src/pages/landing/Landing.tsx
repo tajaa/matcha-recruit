@@ -13,8 +13,6 @@ import { Navbar } from "./components/Navbar";
 import { PricingContactModal } from "./components/PricingContactModal";
 import { Hero } from "./sections/Hero";
 import { Compliance } from "./sections/Compliance";
-import { Interviewer } from "./sections/Interviewer";
-import { SystemProtocols } from "./sections/SystemProtocols";
 import { Footer } from "./sections/Footer";
 
 gsap.registerPlugin(ScrollTrigger);
