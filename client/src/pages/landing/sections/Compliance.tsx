@@ -38,19 +38,24 @@ export const Compliance = () => {
         <div className="space-y-16 pr-12">
           <motion.div variants={textVariants} className="space-y-6">
             <div className="flex items-center gap-4">
-              <h2
-                className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9]"
-                style={{ fontFamily: fonts.sans }}
-              >
-                HIERARCHICAL <br />
-                <span
-                  className="italic text-[#4ADE80] font-light"
-                  style={{ fontFamily: fonts.serif }}
-                >
-                  Jurisdiction Mapping.
+              <div className="space-y-4">
+                <span className="text-[10px] font-mono uppercase tracking-[0.3em] text-[#4ADE80]">
+                  Stop finding out about law changes from your lawyer.
                 </span>
-              </h2>
-              <TechnicalSpecs 
+                <h2
+                  className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9]"
+                  style={{ fontFamily: fonts.sans }}
+                >
+                  EVERY LOCATION. <br />
+                  <span
+                    className="italic text-[#4ADE80] font-light"
+                    style={{ fontFamily: fonts.serif }}
+                  >
+                    Every Law.
+                  </span>
+                </h2>
+              </div>
+              <TechnicalSpecs
                 title="Jurisdiction Matrix"
                 specs={[
                   "Automated Wage & Hour reconciliation",
@@ -61,9 +66,8 @@ export const Compliance = () => {
               />
             </div>
             <p className="text-[#F0EFEA]/60 text-xl md:text-2xl font-light leading-relaxed max-w-2xl">
-              Eliminate the manual burden of labor law research. Matcha autonomously 
-              monitors 10,000+ legislative nodes—deploying the precise algorithmic 
-              rule for every employee endpoint natively.
+              Federal, state, and local employment law — automatically mapped to every
+              location you operate. One dashboard. Zero blind spots.
             </p>
           </motion.div>
 
