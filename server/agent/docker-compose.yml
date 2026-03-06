@@ -1,0 +1,35 @@
+services:
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: matcha-agent
+
+    # Pass only the API key — no .env mount, no DATABASE_URL
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - AGENT_WORKSPACE_ROOT=/workspace
+
+    # Mount only the workspace directory — the sole interface with the host
+    volumes:
+      - ./workspace:/workspace
+
+    # Security: read-only rootfs, tmpfs for /tmp, non-root user
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+
+    # Drop all capabilities — agent needs none
+    cap_drop:
+      - ALL
+
+    # No privileged mode, no new privileges
+    security_opt:
+      - no-new-privileges:true
+
+    # Resource limits
+    mem_limit: 512m
+    cpus: "1.0"
+
+    # No access to host network or other containers
+    network_mode: bridge

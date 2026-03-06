@@ -1,0 +1,5 @@
+feeds:
+  - url: https://news.ycombinator.com/rss
+    name: Hacker News
+  - url: https://feeds.arstechnica.com/arstechnica/technology-lab
+    name: Ars Technica

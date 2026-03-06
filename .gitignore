@@ -37,6 +37,12 @@ topanga-domain-setup.md
 .coverage
 htmlcov/
 
+# Agent workspace runtime files
+server/agent/workspace/output/*
+server/agent/workspace/processed/*
+server/agent/workspace/inbox/*
+!server/agent/workspace/**/.gitkeep
+
 # Docker
 .env.backend
 .env.build
