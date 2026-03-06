@@ -9,6 +9,7 @@ services:
     environment:
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - AGENT_WORKSPACE_ROOT=/workspace
+      - AGENT_GMAIL_ENABLED=${AGENT_GMAIL_ENABLED:-false}
 
     # Mount only the workspace directory — the sole interface with the host
     volumes:

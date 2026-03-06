@@ -29,6 +29,11 @@ class AgentConfig:
     rss_max_entries_per_feed: int = 10
     rss_interests: str = "AI, startups, software engineering, HR tech"
 
+    # Gmail skill settings
+    gmail_enabled: bool = False
+    gmail_max_emails: int = 25
+    gmail_label_ids: list[str] = field(default_factory=lambda: ["INBOX"])
+
 
 def load_config(workspace_root: str | None = None, interval: int | None = None) -> AgentConfig:
     """Load config from feeds.yaml and env vars."""
@@ -66,5 +71,15 @@ def load_config(workspace_root: str | None = None, interval: int | None = None) 
     env_interests = os.getenv("AGENT_RSS_INTERESTS")
     if env_interests:
         config.rss_interests = env_interests
+
+    # Gmail config from env
+    if os.getenv("AGENT_GMAIL_ENABLED", "").lower() in ("1", "true", "yes"):
+        config.gmail_enabled = True
+    env_gmail_max = os.getenv("AGENT_GMAIL_MAX_EMAILS")
+    if env_gmail_max:
+        config.gmail_max_emails = int(env_gmail_max)
+    env_gmail_labels = os.getenv("AGENT_GMAIL_LABELS")
+    if env_gmail_labels:
+        config.gmail_label_ids = [l.strip() for l in env_gmail_labels.split(",")]
 
     return config

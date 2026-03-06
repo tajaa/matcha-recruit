@@ -13,7 +13,7 @@ import sys
 
 from .config import load_config
 from .sandbox import Sandbox, SandboxViolation
-from .skills import rss_briefing, file_inbox
+from .skills import rss_briefing, file_inbox, email_inbox
 
 logging.basicConfig(
     level=logging.INFO,
@@ -45,7 +45,7 @@ async def run_cycle(config, sandbox):
         tasks = parse_checklist(checklist_content)
     except FileNotFoundError:
         logger.warning("HEARTBEAT.md not found, running all skills")
-        tasks = {"rss_briefing": True, "file_inbox": True}
+        tasks = {"rss_briefing": True, "file_inbox": True, "email_inbox": False}
 
     logger.info(f"Checklist: {tasks}")
 
@@ -69,6 +69,16 @@ async def run_cycle(config, sandbox):
             logger.error(f"File inbox sandbox violation: {e}")
         except Exception as e:
             logger.error(f"File inbox failed: {e}")
+
+    if tasks.get("email_inbox"):
+        try:
+            result = await email_inbox.run(config, sandbox)
+            if result:
+                logger.info(f"Email digest: {result}")
+        except SandboxViolation as e:
+            logger.error(f"Email inbox sandbox violation: {e}")
+        except Exception as e:
+            logger.error(f"Email inbox failed: {e}")
 
 
 async def heartbeat(config):

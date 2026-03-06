@@ -24,6 +24,7 @@ BANNER = """
   \033[2mDrag a file here to process it
   Type a message to chat with the agent
   /briefing   — run RSS briefing now
+  /email      — fetch and summarize Gmail
   /inbox      — show pending inbox files
   /output     — list recent outputs
   /feeds      — show RSS feeds
@@ -58,7 +59,7 @@ class AgentCLI:
             else:
                 asyncio.run(self._chat(user_input))
 
-    _COMMANDS = {"/quit", "/exit", "/briefing", "/inbox", "/output", "/feeds", "/clear", "/help"}
+    _COMMANDS = {"/quit", "/exit", "/briefing", "/email", "/inbox", "/output", "/feeds", "/clear", "/help"}
 
     def _is_command(self, text: str) -> bool:
         return text.split()[0].lower() in self._COMMANDS
@@ -177,6 +178,9 @@ User: {message}"""
         elif command == "/briefing":
             asyncio.run(self._run_briefing())
 
+        elif command == "/email":
+            asyncio.run(self._run_email())
+
         elif command == "/inbox":
             files = self.sandbox.fs.list_dir("inbox")
             files = [f for f in files if not f.startswith(".")]
@@ -230,6 +234,28 @@ User: {message}"""
                 print("\nNo briefing generated")
         except Exception as e:
             print(f"\n\033[31mBriefing failed: {e}\033[0m")
+
+    async def _run_email(self):
+        if self.sandbox.gmail is None:
+            print(
+                "\n\033[33mGmail not configured.\033[0m\n"
+                "  1. Set AGENT_GMAIL_ENABLED=true\n"
+                "  2. Run: python -m agent.gmail_auth\n"
+            )
+            return
+
+        from .skills import email_inbox
+
+        print("\n\033[2mFetching unread emails...\033[0m")
+        try:
+            result = await email_inbox.run(self.config, self.sandbox)
+            if result:
+                content = self.sandbox.fs.read(result)
+                print(f"\n{content}")
+            else:
+                print("\nNo new emails or digest already generated today")
+        except Exception as e:
+            print(f"\n\033[31mEmail fetch failed: {e}\033[0m")
 
     def _build_file_prompt(self, filename: str, content: str) -> str:
         context = ""
