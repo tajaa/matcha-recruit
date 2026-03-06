@@ -15,6 +15,7 @@ import { Hero } from "./sections/Hero";
 import { Compliance } from "./sections/Compliance";
 import { ERCopilot } from "./sections/ERCopilot";
 import { RiskSnapshot } from "./sections/RiskSnapshot";
+import { DynamicHandbooks } from "./sections/DynamicHandbooks";
 import { Footer } from "./sections/Footer";
 
 gsap.registerPlugin(ScrollTrigger);
@@ -152,6 +153,8 @@ export function Landing() {
       <ERCopilot ref={manifestoRef} />
 
       <RiskSnapshot ref={manifestoRef} />
+
+      <DynamicHandbooks ref={manifestoRef} />
 
       {/* <Interviewer ref={manifestoRef} />
 
