@@ -1155,6 +1155,33 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_er_case_notes_created_at ON er_case_notes(created_at DESC)
         """)
 
+        # ER Case Export Links
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS er_case_export_links (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                case_id UUID NOT NULL REFERENCES er_cases(id) ON DELETE CASCADE,
+                org_id UUID NOT NULL,
+                token VARCHAR(64) NOT NULL UNIQUE,
+                password_hash VARCHAR(256) NOT NULL,
+                storage_path TEXT NOT NULL,
+                filename VARCHAR(256) NOT NULL,
+                created_by UUID NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                expires_at TIMESTAMPTZ,
+                revoked_at TIMESTAMPTZ,
+                download_count INT NOT NULL DEFAULT 0,
+                last_downloaded_at TIMESTAMPTZ,
+                failed_attempts INT NOT NULL DEFAULT 0,
+                last_failed_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_export_links_token ON er_case_export_links(token)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_export_links_case_id ON er_case_export_links(case_id)
+        """)
+
         # ===========================================
         # IR (Incident Report) Tables
         # ===========================================

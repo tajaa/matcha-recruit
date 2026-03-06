@@ -697,22 +697,23 @@ async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, pa
                         logger.warning("Could not embed image %s in export: %s", fname, img_exc)
                     continue
 
-                # Text-extractable files: include extracted text
+                # PDF attachments: append original pages (preserves formatting)
+                if ext == ".pdf" and r["file_path"]:
+                    try:
+                        pdf_attachment = await storage.download_file(r["file_path"])
+                        attachment_pdfs.append(pdf_attachment)
+                        docs_html += f'<h3>{esc(fname)}</h3><p style="color:#666;font-size:10px;">(Original PDF attached at end of export)</p>'
+                    except Exception as pdf_exc:
+                        logger.warning("Could not fetch PDF attachment %s for export: %s", fname, pdf_exc)
+                    continue
+
+                # Other text-extractable files: include extracted text
                 if ext in TEXT_EXTENSIONS:
                     text_content = r.get("original_text") or ""
                     if text_content:
-                        # Truncate very long documents to keep the PDF reasonable
                         if len(text_content) > 20000:
                             text_content = text_content[:20000] + "\n\n[... truncated ...]"
                         docs_html += f'<h3>{esc(fname)}</h3><pre style="white-space:pre-wrap;font-size:10px;background:#f9f9f9;padding:12px;border:1px solid #eee;max-height:800px;overflow:hidden;">{esc(text_content)}</pre>'
-
-                    # Also append original PDF pages as-is
-                    if ext == ".pdf" and r["file_path"]:
-                        try:
-                            pdf_attachment = await storage.download_file(r["file_path"])
-                            attachment_pdfs.append(pdf_attachment)
-                        except Exception as pdf_exc:
-                            logger.warning("Could not fetch PDF attachment %s for export: %s", fname, pdf_exc)
 
 
         analyses_html = ""
@@ -855,8 +856,12 @@ async def create_share_link(
 
     pdf_bytes, filename = await _generate_case_pdf(case_id, company_id, is_admin, body.password)
 
-    storage = get_storage()
-    storage_path = await storage.upload_file(pdf_bytes, filename, prefix="er-exports", content_type="application/pdf")
+    try:
+        storage = get_storage()
+        storage_path = await storage.upload_file(pdf_bytes, filename, prefix="er-exports", content_type="application/pdf")
+    except Exception as exc:
+        logger.error("Failed to upload share link PDF for case %s: %s", case_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to store export file") from exc
 
     token = secrets.token_urlsafe(32)
     pw_hash = hash_password(body.password)
@@ -865,16 +870,20 @@ async def create_share_link(
     if body.expires_in_days is not None:
         expires_at = datetime.now(timezone.utc) + timedelta(days=body.expires_in_days)
 
-    async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            INSERT INTO er_case_export_links
-                (case_id, org_id, token, password_hash, storage_path, filename, created_by, expires_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, created_at
-            """,
-            case_id, company_id, token, pw_hash, storage_path, filename, current_user.id, expires_at,
-        )
+    try:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                INSERT INTO er_case_export_links
+                    (case_id, org_id, token, password_hash, storage_path, filename, created_by, expires_at)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                RETURNING id, created_at
+                """,
+                case_id, company_id, token, pw_hash, storage_path, filename, current_user.id, expires_at,
+            )
+    except Exception as exc:
+        logger.error("Failed to create share link record for case %s: %s", case_id, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to create share link") from exc
 
     url = f"/shared/er-export/{token}"
 
