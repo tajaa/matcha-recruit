@@ -11,57 +11,63 @@ interface NavbarProps {
 
 export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, systemRef, onPricingClick }: NavbarProps) => {
   return (
-    <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-[1600px] pointer-events-none">
+    <nav className="fixed top-0 left-0 w-full z-50 pointer-events-none transition-all duration-500">
       <div
-        className={`pointer-events-auto flex items-center justify-between px-6 py-4 rounded-[2rem] transition-all duration-500 border ${
+        className={`w-full pointer-events-auto flex items-center justify-between px-6 py-3 transition-all duration-500 border-b ${
           scrolled
-            ? "bg-[#0A0E0C]/80 backdrop-blur-md border-[#F0EFEA]/10 shadow-2xl"
+            ? "bg-[#0A0E0C]/90 backdrop-blur-xl border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.5)]"
             : "bg-transparent border-transparent"
         }`}
       >
         <div className="flex items-center gap-6">
           <Link to="/" className="flex items-center gap-3 group">
-            <div className="w-8 h-8 rounded-full border border-[#F0EFEA]/20 flex items-center justify-center overflow-hidden bg-[#0A0E0C]">
-              <div className="w-full h-full bg-white opacity-0 group-hover:opacity-30 transition-opacity duration-300" />
+            {/* Minimalist Geometric Logo */}
+            <div className="relative w-6 h-6 flex items-center justify-center">
+               <div className="absolute inset-0 border border-white/30 rotate-45 group-hover:rotate-90 group-hover:border-white transition-all duration-500" />
+               <div className="w-1 h-1 bg-white" />
             </div>
-            <span className="font-sans text-sm font-bold tracking-[0.2em] uppercase">
+            <span className="font-mono text-xs font-bold tracking-[0.3em] uppercase text-white">
               Matcha
             </span>
           </Link>
           
-          <div className="hidden lg:flex items-center gap-3 pl-6 border-l border-white/10">
-            <div className="w-1 h-1 bg-white rounded-full animate-pulse" />
-            <span className="text-[8px] font-mono uppercase tracking-[0.3em] text-white/40">
-              Active Module: {activeSection}
+          <div className="hidden lg:flex items-center gap-3 pl-6 border-l border-white/10 h-4">
+            <div className="w-1.5 h-1.5 bg-white/80 animate-pulse" />
+            <span className="text-[8px] font-mono uppercase tracking-[0.3em] text-zinc-500">
+              Active Module // <span className="text-white">{activeSection}</span>
             </span>
           </div>
         </div>
-        <div className="hidden md:flex gap-10 text-[10px] font-mono uppercase tracking-[0.2em] text-[#F0EFEA]/60">
-          <span
-            onClick={() => scrollTo(manifestoRef)}
-            className="hover:text-white cursor-pointer transition-colors"
+        
+        <div className="hidden md:flex items-center gap-8">
+          <div className="flex gap-8 text-[9px] font-mono uppercase tracking-[0.2em] text-zinc-500">
+            <button
+              onClick={() => scrollTo(manifestoRef)}
+              className="hover:text-white transition-colors uppercase tracking-[0.2em]"
+            >
+              System
+            </button>
+            <button
+              onClick={onPricingClick}
+              className="hover:text-white transition-colors uppercase tracking-[0.2em]"
+            >
+              Pricing
+            </button>
+          </div>
+          
+          <div className="w-px h-4 bg-white/10" />
+          
+          <Link
+            to="/login"
+            className="group relative px-6 py-2 bg-white/5 border border-white/10 text-[9px] font-mono uppercase tracking-[0.2em] text-white hover:border-white/30 transition-all duration-300 overflow-hidden"
           >
-            Philosophy
-          </span>
-          <span
-            onClick={() => scrollTo(systemRef)}
-            className="hover:text-white cursor-pointer transition-colors"
-          >
-            System
-          </span>
-          <span
-            onClick={onPricingClick}
-            className="hover:text-white cursor-pointer transition-colors"
-          >
-            Pricing
-          </span>
+            <span className="relative z-10 font-bold">Terminal Login</span>
+            <div className="absolute inset-0 bg-white translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
+            <span className="absolute inset-0 flex items-center justify-center text-black font-bold translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out z-20">
+              Terminal Login
+            </span>
+          </Link>
         </div>
-        <Link
-          to="/login"
-          className="px-6 py-2.5 rounded-full border border-[#F0EFEA]/20 text-[10px] font-mono uppercase tracking-[0.2em] hover:bg-[#F0EFEA] hover:text-[#0A0E0C] transition-colors"
-        >
-          Login
-        </Link>
       </div>
     </nav>
   );
