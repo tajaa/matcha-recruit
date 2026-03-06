@@ -14,7 +14,6 @@ import { Compliance } from "./sections/Compliance";
 import { ERCopilot } from "./sections/ERCopilot";
 import { RiskSnapshot } from "./sections/RiskSnapshot";
 import { DynamicHandbooks } from "./sections/DynamicHandbooks";
-import { ComplianceDashboard } from "./sections/ComplianceDashboard";
 import { Footer } from "./sections/Footer";
 
 export function Landing() {
@@ -110,8 +109,6 @@ export function Landing() {
         <RiskSnapshot ref={manifestoRef} />
 
         <DynamicHandbooks ref={manifestoRef} />
-
-        <ComplianceDashboard ref={manifestoRef} />
 
         <Footer />
       </LazyMotion>
