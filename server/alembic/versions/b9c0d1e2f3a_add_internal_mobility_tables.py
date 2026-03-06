@@ -1,7 +1,7 @@
 """add internal mobility tables
 
 Revision ID: b9c0d1e2f3a
-Revises: a7b8c9d0e1f, a8b9c0d1e2f, d4e5f6g7h8i9
+Revises: a7b8c9d0e1f, a8b9c0d1e2f, f1a2b3c4d5e, d4e5f6g7h8i9
 Create Date: 2026-02-21
 """
 
@@ -9,7 +9,7 @@ from alembic import op
 
 
 revision = "b9c0d1e2f3a"
-down_revision = ("a7b8c9d0e1f", "a8b9c0d1e2f", "d4e5f6g7h8i9")
+down_revision = ("a7b8c9d0e1f", "a8b9c0d1e2f", "f1a2b3c4d5e", "d4e5f6g7h8i9")
 branch_labels = None
 depends_on = None
 

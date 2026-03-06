@@ -1606,6 +1606,7 @@ async def invite_all_uninvited(
             FROM employees e
             WHERE e.org_id = $1
               AND e.user_id IS NULL
+              AND e.termination_date IS NULL
               AND NOT EXISTS (
                   SELECT 1 FROM employee_invitations ei
                   WHERE ei.employee_id = e.id

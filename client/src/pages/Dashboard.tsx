@@ -285,7 +285,7 @@ function CompanyProfileBanner() {
   );
 }
 
-const GETTING_STARTED_DISMISS_KEY = 'getting_started_dismissed';
+const getGettingStartedDismissKey = (userId: string) => `getting_started_dismissed_${userId}`;
 
 const CHECKLIST_ITEMS = [
   { key: 'company_profile', label: 'Complete company profile', path: '/app/matcha/company', featureGate: null },
@@ -300,8 +300,9 @@ function GettingStartedChecklist() {
   const navigate = useNavigate();
   const { user, hasFeature, onboardingNeeded } = useAuth();
   const t = useIsLightMode() ? LT : DK;
+  const dismissKey = user?.id ? getGettingStartedDismissKey(user.id) : null;
   const [dismissed, setDismissed] = useState(() =>
-    localStorage.getItem(GETTING_STARTED_DISMISS_KEY) === 'true'
+    dismissKey ? localStorage.getItem(dismissKey) === 'true' : false
   );
 
   if (user?.role !== 'client' || dismissed) return null;
@@ -325,7 +326,7 @@ function GettingStartedChecklist() {
           <p className={`text-xs ${t.textMuted} mt-0.5`}>{completedCount} of {totalCount} complete</p>
         </div>
         <button
-          onClick={() => { localStorage.setItem(GETTING_STARTED_DISMISS_KEY, 'true'); setDismissed(true); }}
+          onClick={() => { if (dismissKey) localStorage.setItem(dismissKey, 'true'); setDismissed(true); }}
           className={`${t.icon} hover:${t.textMain} transition-colors`}
           aria-label="Dismiss checklist"
         >
