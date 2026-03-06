@@ -9,6 +9,7 @@ Employee Relations Investigation management:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -629,7 +630,7 @@ async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, pa
                 raise HTTPException(status_code=404, detail="Case not found")
 
             doc_rows = await conn.fetch(
-                "SELECT filename, document_type, file_size, created_at FROM er_case_documents WHERE case_id = $1 ORDER BY created_at",
+                "SELECT filename, document_type, file_size, file_path, mime_type, original_text, created_at FROM er_case_documents WHERE case_id = $1 ORDER BY created_at",
                 case_id,
             )
 
@@ -657,13 +658,62 @@ async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, pa
         created_at = case_row["created_at"].strftime("%Y-%m-%d %H:%M") if case_row["created_at"] else "\u2014"
         closed_at = case_row["closed_at"].strftime("%Y-%m-%d %H:%M") if case_row.get("closed_at") else "\u2014"
 
+        # Classify attachments for embedding in the export
+        IMAGE_MIMES = {"image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"}
+        TEXT_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".csv", ".json"}
+        SKIP_MIMES = {"video/", "audio/"}
+
         docs_html = ""
+        attachment_pdfs: list[bytes] = []  # raw PDF bytes to append after the report
+
         if doc_rows:
+            storage = get_storage()
             rows_html = "".join(
                 f"<tr><td>{esc(r['filename'])}</td><td>{esc(r['document_type'])}</td><td>{(r['file_size'] or 0) // 1024} KB</td><td>{r['created_at'].strftime('%Y-%m-%d')}</td></tr>"
                 for r in doc_rows
             )
             docs_html = f"<h2>Documents ({len(doc_rows)})</h2><table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th></tr>{rows_html}</table>"
+
+            for r in doc_rows:
+                mime = (r["mime_type"] or "").lower()
+                fname = r["filename"] or ""
+                ext = os.path.splitext(fname)[1].lower()
+
+                # Skip video/audio
+                if any(mime.startswith(s) for s in SKIP_MIMES):
+                    continue
+
+                # Images: download and embed as base64
+                if mime in IMAGE_MIMES and r["file_path"]:
+                    try:
+                        img_bytes = await storage.download_file(r["file_path"])
+                        b64 = base64.b64encode(img_bytes).decode("ascii")
+                        docs_html += (
+                            f'<h3>{esc(fname)}</h3>'
+                            f'<img src="data:{mime};base64,{b64}" '
+                            f'style="max-width:100%;max-height:600px;margin:8px 0;" />'
+                        )
+                    except Exception as img_exc:
+                        logger.warning("Could not embed image %s in export: %s", fname, img_exc)
+                    continue
+
+                # Text-extractable files: include extracted text
+                if ext in TEXT_EXTENSIONS:
+                    text_content = r.get("original_text") or ""
+                    if text_content:
+                        # Truncate very long documents to keep the PDF reasonable
+                        if len(text_content) > 20000:
+                            text_content = text_content[:20000] + "\n\n[... truncated ...]"
+                        docs_html += f'<h3>{esc(fname)}</h3><pre style="white-space:pre-wrap;font-size:10px;background:#f9f9f9;padding:12px;border:1px solid #eee;max-height:800px;overflow:hidden;">{esc(text_content)}</pre>'
+
+                    # Also append original PDF pages as-is
+                    if ext == ".pdf" and r["file_path"]:
+                        try:
+                            pdf_attachment = await storage.download_file(r["file_path"])
+                            attachment_pdfs.append(pdf_attachment)
+                        except Exception as pdf_exc:
+                            logger.warning("Could not fetch PDF attachment %s for export: %s", fname, pdf_exc)
+
 
         analyses_html = ""
         for a in analysis_rows:
@@ -746,6 +796,16 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
         writer = PdfWriter()
         for page in reader.pages:
             writer.add_page(page)
+
+        # Append original PDF attachments after the report pages
+        for att_bytes in attachment_pdfs:
+            try:
+                att_reader = PdfReader(BytesIO(att_bytes))
+                for page in att_reader.pages:
+                    writer.add_page(page)
+            except Exception as att_exc:
+                logger.warning("Skipping unreadable PDF attachment in export: %s", att_exc)
+
         writer.encrypt(password)
 
         output = BytesIO()
