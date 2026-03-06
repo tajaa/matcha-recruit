@@ -1384,7 +1384,7 @@ async def bulk_upload_employees_csv(
                     continue
 
                 # Basic email validation
-                if not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', email):
+                if not re.match(r'^[\w\.\-\+]+@[\w\.-]+\.\w+$', email):
                     errors.append({
                         "row": row_num,
                         "email": email,
@@ -1393,7 +1393,7 @@ async def bulk_upload_employees_csv(
                     failed += 1
                     continue
 
-                if personal_email and not re.match(r'^[\w\.-]+@[\w\.-]+\.\w+$', personal_email):
+                if personal_email and not re.match(r'^[\w\.\-\+]+@[\w\.-]+\.\w+$', personal_email):
                     errors.append({
                         "row": row_num,
                         "email": email,
