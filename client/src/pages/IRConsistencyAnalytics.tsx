@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { irIncidents } from '../api/client';
 import type { IRConsistencyAnalytics as IRConsistencyAnalyticsData } from '../types';
-import { ArrowLeft, BarChart3, Shield, Clock, Scale } from 'lucide-react';
+import { ArrowLeft, BarChart3, Shield, Clock, Scale, Info } from 'lucide-react';
 import { useIsLightMode } from '../hooks/useIsLightMode';
 
 // ─── theme ────────────────────────────────────────────────────────────────────
@@ -54,6 +54,19 @@ const TYPE_LABELS: Record<string, string> = {
 };
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low'];
+
+function CardInfo({ text }: { text: string }) {
+  return (
+    <div className="relative group/info ml-auto">
+      <button className="text-zinc-600 hover:text-zinc-400 transition-colors">
+        <Info size={12} />
+      </button>
+      <div className="absolute right-0 top-5 w-56 bg-zinc-950 border border-white/10 rounded-xl p-3 text-[11px] text-zinc-400 leading-relaxed z-20 opacity-0 pointer-events-none group-hover/info:opacity-100 group-hover/info:pointer-events-auto transition-opacity shadow-xl">
+        {text}
+      </div>
+    </div>
+  );
+}
 
 function formatCategory(raw: string): string {
   if (raw === 'osha_report') return 'OSHA Report';
@@ -164,6 +177,7 @@ function IRConsistencyAnalytics() {
           <div className={`${t.cardDark} p-6 shadow-lg`}>
             <div className={`${t.labelOnDark} mb-6 flex items-center gap-2`}>
               <BarChart3 size={14} className="text-zinc-500" /> Action Distribution
+              <CardInfo text="How often each corrective action category appeared across all resolved incidents. Bars are scaled relative to the most common action. The count on the right shows how many incidents used that action." />
             </div>
             <div className="space-y-3">
               {data.action_distribution.map((action) => (
@@ -200,6 +214,7 @@ function IRConsistencyAnalytics() {
             <div className={`${t.cardDark} p-6 shadow-md`}>
               <div className={`${t.labelOnDark} mb-6 flex items-center gap-2`}>
                 <Shield size={14} className="text-zinc-500" /> By Incident Type
+                <CardInfo text="The most common corrective actions for each incident category. Shows the top 3 actions per type, helping identify whether certain incident types consistently trigger specific responses." />
               </div>
               <div className="space-y-5">
                 {data.by_incident_type.map((group) => (
@@ -239,6 +254,7 @@ function IRConsistencyAnalytics() {
             <div className={`${t.cardDark} p-6 shadow-md`}>
               <div className={`${t.labelOnDark} mb-6 flex items-center gap-2`}>
                 <Shield size={14} className="text-zinc-500" /> By Severity
+                <CardInfo text="How corrective actions vary by incident severity. Reveals whether serious incidents (critical/high) receive consistently stronger responses than lower-severity ones." />
               </div>
               <div className="space-y-5">
                 {SEVERITY_ORDER.map((sev) => {
@@ -288,6 +304,7 @@ function IRConsistencyAnalytics() {
           <div className={`${t.cardDark} p-6 shadow-lg`}>
             <div className={`${t.labelOnDark} mb-6 flex items-center gap-2`}>
               <Clock size={14} className="text-zinc-500" /> Avg Resolution by Action
+              <CardInfo text="Average days from incident occurrence to resolution, grouped by the corrective action taken. Shorter bars indicate faster resolution. Useful for understanding which actions close incidents quickly vs. those involving longer processes." />
             </div>
             <div className="space-y-3">
               {resolutionEntries.map(([category, days]) => (
