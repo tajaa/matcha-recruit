@@ -40,20 +40,11 @@ function setupStatusBadge(s: string) {
 
 const FEATURE_LABELS: Record<string, string> = {
   offer_letters: 'Offer Letters',
-  offer_letters_plus: 'Offer Letters+',
-  policies: 'Policies',
   handbooks: 'Handbooks',
   compliance: 'Compliance',
-  compliance_plus: 'Compliance+',
   employees: 'Employees',
-  vibe_checks: 'Vibe Checks',
-  enps: 'eNPS',
-  performance_reviews: 'Performance Reviews',
   er_copilot: 'ER Copilot',
   incidents: 'Incidents',
-  time_off: 'Time Off',
-  accommodations: 'Accommodations',
-  internal_mobility: 'Internal Mobility',
 };
 
 const ALL_FEATURES = Object.keys(FEATURE_LABELS);
