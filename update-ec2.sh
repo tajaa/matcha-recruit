@@ -34,17 +34,15 @@ Update EC2 deployments by pulling latest images and restarting containers.
 
 OPTIONS:
     --matcha         Update Matcha-Recruit (ports 8002/8082)
-    --gumm-local     Update gumm-local (ports 8004/8084)
     --agent          Deploy/update agent + llama (Qwen local LLM)
     --agent-upload   Upload Qwen model to EC2 (one-time, ~508MB)
-    --all            Update all apps (matcha + gumm-local, not agent)
+    --all            Update matcha + agent
     --status         Show status of all containers
     -h, --help       Show this help message
 
 EXAMPLES:
     $0 --matcha          # Update only Matcha
-    $0 --gumm-local      # Update only gumm-local
-    $0 --all             # Update all apps
+    $0 --all             # Update matcha + agent
     $0 --agent-upload    # Upload Qwen model (first time only)
     $0 --agent           # Deploy/restart agent with local Qwen
     $0 --status          # Check container status
@@ -93,15 +91,6 @@ update_matcha() {
     log_success "Matcha-Recruit updated!"
 }
 
-update_gumm_local() {
-    log_info "Updating gumm-local..."
-
-    # Recreate only gumm-local containers from shared docker-compose
-    ssh_cmd "cd ~/matcha && docker-compose pull gumm-local-backend gumm-local-frontend && docker-compose up -d --no-deps gumm-local-backend gumm-local-frontend"
-
-    log_success "gumm-local updated!"
-}
-
 upload_model() {
     local model_file="server/agent/models/Qwen3.5-0.8B-Q4_K_M.gguf"
     if [ ! -f "$model_file" ]; then
@@ -136,7 +125,6 @@ cleanup() {
 
 # Parse arguments
 UPDATE_MATCHA=false
-UPDATE_GUMM_LOCAL=false
 UPDATE_AGENT=false
 AGENT_UPLOAD=false
 SHOW_STATUS=false
@@ -152,10 +140,6 @@ while [[ $# -gt 0 ]]; do
             UPDATE_MATCHA=true
             shift
             ;;
-        --gumm-local)
-            UPDATE_GUMM_LOCAL=true
-            shift
-            ;;
         --agent)
             UPDATE_AGENT=true
             shift
@@ -166,7 +150,7 @@ while [[ $# -gt 0 ]]; do
             ;;
         --all)
             UPDATE_MATCHA=true
-            UPDATE_GUMM_LOCAL=true
+            UPDATE_AGENT=true
             shift
             ;;
         --status)
@@ -197,7 +181,7 @@ if [ "$AGENT_UPLOAD" = true ]; then
     exit 0
 fi
 
-if [ "$UPDATE_AGENT" = true ] && [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ]; then
+if [ "$UPDATE_AGENT" = true ] && [ "$UPDATE_MATCHA" = false ]; then
     ecr_login
     deploy_agent
     show_status
@@ -205,8 +189,8 @@ if [ "$UPDATE_AGENT" = true ] && [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM
     exit 0
 fi
 
-if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_GUMM_LOCAL" = false ] && [ "$UPDATE_AGENT" = false ]; then
-    log_error "No app specified. Use --matcha, --gumm-local, --agent, or --all"
+if [ "$UPDATE_MATCHA" = false ] && [ "$UPDATE_AGENT" = false ]; then
+    log_error "No app specified. Use --matcha, --agent, or --all"
     exit 1
 fi
 
@@ -216,10 +200,6 @@ pre_cleanup
 
 if [ "$UPDATE_MATCHA" = true ]; then
     update_matcha
-fi
-
-if [ "$UPDATE_GUMM_LOCAL" = true ]; then
-    update_gumm_local
 fi
 
 if [ "$UPDATE_AGENT" = true ]; then
