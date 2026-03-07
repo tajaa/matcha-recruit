@@ -14,6 +14,7 @@ import type {
 import { RootCauseAnalysisModal } from '../components/ir/RootCauseAnalysisModal';
 import { RecommendationsAnalysisModal } from '../components/ir/RecommendationsAnalysisModal';
 import { SimilarIncidentsAnalysisModal } from '../components/ir/SimilarIncidentsAnalysisModal';
+import { ConsistencyGuidancePanel } from '../components/ir/ConsistencyGuidancePanel';
 import { AnalysisTerminalModal } from '../components/ir/AnalysisTerminalModal';
 import { useIRAnalysisStream } from '../hooks/ir/useIRAnalysisStream';
 import type { AnalysisType } from '../hooks/ir/useIRAnalysisStream';
@@ -119,6 +120,7 @@ export function IRDetail() {
   const [rootCause, setRootCause] = useState<IRRootCauseAnalysis | null>(null);
   const [recommendations, setRecommendations] = useState<IRRecommendationsAnalysis | null>(null);
   const [similarIncidents, setSimilarIncidents] = useState<IRPrecedentAnalysis | null>(null);
+  const [similarVersion, setSimilarVersion] = useState(0);
   const [showTerminalModal, setShowTerminalModal] = useState(false);
 
   const stream = useIRAnalysisStream();
@@ -194,6 +196,7 @@ export function IRDetail() {
         break;
       case 'similar':
         setSimilarIncidents(stream.result as IRPrecedentAnalysis);
+        setSimilarVersion((v) => v + 1);
         break;
     }
   }, [stream.result, stream.streaming, stream.analysisType]);
@@ -539,6 +542,15 @@ export function IRDetail() {
 
         {/* Sidebar */}
         <div className="space-y-8">
+          {/* Consistency Guidance - only for investigating/action_required */}
+          {(incident.status === 'investigating' || incident.status === 'action_required') && (
+            <ConsistencyGuidancePanel
+              incidentId={id!}
+              incidentStatus={incident.status}
+              similarAnalysisVersion={similarVersion}
+            />
+          )}
+
           {/* AI Analysis */}
           <div className={`${t.card} p-6`}>
             <div className={`${t.label} mb-4`}>AI Analysis</div>

@@ -11,7 +11,7 @@ IRIncidentType = Literal["safety", "behavioral", "property", "near_miss", "other
 IRSeverity = Literal["critical", "high", "medium", "low"]
 IRStatus = Literal["reported", "investigating", "action_required", "resolved", "closed"]
 IRDocumentType = Literal["photo", "form", "statement", "other"]
-IRAnalysisType = Literal["categorization", "severity", "root_cause", "recommendations", "similar"]
+IRAnalysisType = Literal["categorization", "severity", "root_cause", "recommendations", "similar", "consistency", "company_consistency"]
 
 
 # ===========================================
@@ -252,6 +252,55 @@ class PrecedentAnalysis(BaseModel):
     generated_at: str
     from_cache: bool = False
     cache_reason: Optional[str] = None
+
+
+class ActionProbability(BaseModel):
+    """A single action category with its probability."""
+    category: str
+    probability: float
+    weighted_count: float
+
+
+class ConsistencyGuidance(BaseModel):
+    """Consistency guidance based on precedent analysis."""
+    sample_size: int
+    effective_sample_size: float
+    confidence: Literal["insufficient", "limited", "strong"]
+    unprecedented: bool
+    action_distribution: Optional[list[ActionProbability]] = None
+    dominant_action: Optional[str] = None
+    dominant_probability: Optional[float] = None
+    weighted_avg_resolution_days: Optional[float] = None
+    weighted_effectiveness_rate: Optional[float] = None
+    consistency_insight: Optional[str] = None
+    generated_at: str
+    from_cache: bool = False
+
+
+class ActionByType(BaseModel):
+    """Action distribution broken down by incident type."""
+    incident_type: str
+    total: int
+    actions: list[ActionProbability]
+
+
+class ActionBySeverity(BaseModel):
+    """Action distribution broken down by severity."""
+    severity: str
+    total: int
+    actions: list[ActionProbability]
+
+
+class ConsistencyAnalytics(BaseModel):
+    """Company-wide consistency analytics across resolved incidents."""
+    total_resolved: int
+    total_with_actions: int
+    action_distribution: list[ActionProbability]
+    by_incident_type: list[ActionByType]
+    by_severity: list[ActionBySeverity]
+    avg_resolution_by_action: dict[str, float]
+    generated_at: str
+    from_cache: bool = False
 
 
 # ===========================================

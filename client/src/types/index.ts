@@ -2082,6 +2082,50 @@ export interface IRPrecedentAnalysis {
   cache_reason?: string;
 }
 
+export interface IRActionProbability {
+  category: string;
+  probability: number;
+  weighted_count: number;
+}
+
+export interface IRConsistencyGuidance {
+  sample_size: number;
+  effective_sample_size: number;
+  confidence: 'insufficient' | 'limited' | 'strong';
+  unprecedented: boolean;
+  action_distribution: IRActionProbability[] | null;
+  dominant_action: string | null;
+  dominant_probability: number | null;
+  weighted_avg_resolution_days: number | null;
+  weighted_effectiveness_rate: number | null;
+  consistency_insight: string | null;
+  generated_at: string;
+  from_cache: boolean;
+}
+
+export interface IRActionByType {
+  incident_type: string;
+  total: number;
+  actions: IRActionProbability[];
+}
+
+export interface IRActionBySeverity {
+  severity: string;
+  total: number;
+  actions: IRActionProbability[];
+}
+
+export interface IRConsistencyAnalytics {
+  total_resolved: number;
+  total_with_actions: number;
+  action_distribution: IRActionProbability[];
+  by_incident_type: IRActionByType[];
+  by_severity: IRActionBySeverity[];
+  avg_resolution_by_action: Record<string, number>;
+  generated_at: string;
+  from_cache: boolean;
+}
+
 // Audit log
 export interface IRAuditLogEntry {
   id: string;

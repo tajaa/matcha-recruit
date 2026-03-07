@@ -37,6 +37,9 @@ from ..models.ir_incident import (
     RecommendationsAnalysis,
     PrecedentMatch,
     PrecedentAnalysis,
+    ActionProbability,
+    ConsistencyGuidance,
+    ConsistencyAnalytics,
     AnalyticsSummary,
     TrendsAnalysis,
     TrendDataPoint,
@@ -52,7 +55,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Valid analysis types
-ANALYSIS_TYPES = Literal["categorization", "severity", "root_cause", "recommendations", "similar"]
+ANALYSIS_TYPES = Literal["categorization", "severity", "root_cause", "recommendations", "similar", "consistency", "company_consistency"]
 
 
 def _sse(event: dict) -> str:
@@ -1214,6 +1217,96 @@ async def get_analytics_locations(
         )
 
 
+@router.get("/analytics/consistency", response_model=ConsistencyAnalytics)
+async def get_analytics_consistency(
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Get company-wide consistency analytics across all resolved incidents."""
+    from ..services.ir_consistency import compute_consistency_analytics
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return ConsistencyAnalytics(
+            total_resolved=0, total_with_actions=0,
+            action_distribution=[], by_incident_type=[], by_severity=[],
+            avg_resolution_by_action={}, generated_at=_utc_now_naive().isoformat(),
+        )
+
+    async with get_connection() as conn:
+        # Fetch all resolved/closed incidents
+        rows = await conn.fetch(
+            """
+            SELECT id, incident_type, severity, corrective_actions,
+                   occurred_at, resolved_at
+            FROM ir_incidents
+            WHERE company_id = $1 AND status IN ('resolved', 'closed')
+            ORDER BY resolved_at DESC
+            """,
+            company_id,
+        )
+
+        if not rows:
+            return ConsistencyAnalytics(
+                total_resolved=0, total_with_actions=0,
+                action_distribution=[], by_incident_type=[], by_severity=[],
+                avg_resolution_by_action={}, generated_at=_utc_now_naive().isoformat(),
+            )
+
+        # Use the most recently resolved incident as cache anchor for writes
+        anchor_id = str(rows[0]["id"])
+
+        # Check for cached result (<24h) anywhere in the company (not just anchor)
+        cached = await conn.fetchrow(
+            """
+            SELECT a.analysis_data, a.generated_at FROM ir_incident_analysis a
+            JOIN ir_incidents i ON i.id::text = a.incident_id
+            WHERE i.company_id = $1 AND a.analysis_type = 'company_consistency'
+            ORDER BY a.generated_at DESC LIMIT 1
+            """,
+            company_id,
+        )
+
+        if cached:
+            cache_age = _utc_now_naive() - cached["generated_at"]
+            if cache_age < timedelta(hours=24):
+                result = _safe_json_loads(cached["analysis_data"])
+                result["from_cache"] = True
+                return ConsistencyAnalytics(**result)
+
+        incidents = [dict(r) for r in rows]
+
+        settings = get_settings()
+        try:
+            result = await compute_consistency_analytics(
+                incidents,
+                api_key=settings.gemini_api_key if not settings.use_vertex else None,
+                vertex_project=settings.vertex_project if settings.use_vertex else None,
+            )
+        except Exception as e:
+            logger.warning(f"Consistency analytics computation failed: {e}")
+            return ConsistencyAnalytics(
+                total_resolved=len(incidents),
+                total_with_actions=len([i for i in incidents if i.get("corrective_actions")]),
+                action_distribution=[], by_incident_type=[], by_severity=[],
+                avg_resolution_by_action={}, generated_at=_utc_now_naive().isoformat(),
+            )
+
+        # Cache on the anchor incident
+        await conn.execute(
+            """
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+            VALUES ($1, 'company_consistency', $2)
+            ON CONFLICT (incident_id, analysis_type)
+            DO UPDATE SET analysis_data = $2, generated_at = now()
+            """,
+            anchor_id,
+            json.dumps(result, default=str),
+        )
+
+        return ConsistencyAnalytics(**result)
+
+
 # ===========================================
 # Audit Log
 # ===========================================
@@ -1791,6 +1884,11 @@ async def analyze_similar_incidents(
                 str(incident_id),
                 json.dumps(result),
             )
+            # Invalidate stale consistency guidance since precedents changed
+            await conn3.execute(
+                "DELETE FROM ir_incident_analysis WHERE incident_id = $1 AND analysis_type = 'consistency'",
+                str(incident_id),
+            )
             await log_audit(
                 conn3,
                 str(incident_id),
@@ -1807,6 +1905,112 @@ async def analyze_similar_incidents(
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.get("/{incident_id}/consistency-guidance", response_model=ConsistencyGuidance)
+async def get_consistency_guidance(
+    incident_id: UUID,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Get consistency guidance based on precedent analysis for an incident."""
+    from ..services.ir_consistency import compute_outcome_distribution
+
+    async with get_connection() as conn:
+        # Verify incident exists and belongs to company
+        await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
+
+        # Read cached similar analysis to get precedents
+        similar_row = await conn.fetchrow(
+            """
+            SELECT analysis_data FROM ir_incident_analysis
+            WHERE incident_id = $1 AND analysis_type = 'similar'
+            ORDER BY generated_at DESC LIMIT 1
+            """,
+            str(incident_id),
+        )
+
+        if not similar_row:
+            return ConsistencyGuidance(
+                sample_size=0,
+                effective_sample_size=0.0,
+                confidence="insufficient",
+                unprecedented=True,
+                generated_at=_utc_now_naive().isoformat(),
+            )
+
+        similar_data = _safe_json_loads(similar_row["analysis_data"])
+        precedents = similar_data.get("precedents", [])
+
+        if not precedents:
+            return ConsistencyGuidance(
+                sample_size=0,
+                effective_sample_size=0.0,
+                confidence="insufficient",
+                unprecedented=True,
+                generated_at=_utc_now_naive().isoformat(),
+            )
+
+        # Check for cached consistency result (<24h)
+        cached = await conn.fetchrow(
+            """
+            SELECT analysis_data, generated_at FROM ir_incident_analysis
+            WHERE incident_id = $1 AND analysis_type = 'consistency'
+            ORDER BY generated_at DESC LIMIT 1
+            """,
+            str(incident_id),
+        )
+
+        if cached:
+            cache_age = _utc_now_naive() - cached["generated_at"]
+            if cache_age < timedelta(hours=24):
+                result = _safe_json_loads(cached["analysis_data"])
+                result["from_cache"] = True
+                return ConsistencyGuidance(**result)
+
+        # Compute fresh guidance
+        settings = get_settings()
+        try:
+            result = await compute_outcome_distribution(
+                precedents,
+                api_key=settings.gemini_api_key if not settings.use_vertex else None,
+                vertex_project=settings.vertex_project if settings.use_vertex else None,
+            )
+        except Exception as e:
+            logger.warning(f"Consistency guidance computation failed: {e}")
+            return ConsistencyGuidance(
+                sample_size=len(precedents),
+                effective_sample_size=0.0,
+                confidence="insufficient",
+                unprecedented=False,
+                generated_at=_utc_now_naive().isoformat(),
+            )
+
+        # Cache result
+        await conn.execute(
+            """
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+            VALUES ($1, 'consistency', $2)
+            ON CONFLICT (incident_id, analysis_type)
+            DO UPDATE SET analysis_data = $2, generated_at = now()
+            """,
+            str(incident_id),
+            json.dumps(result),
+        )
+
+        # Log audit
+        await log_audit(
+            conn,
+            str(incident_id),
+            str(current_user.id),
+            "analysis_run",
+            "analysis",
+            None,
+            {"type": "consistency"},
+            request.client.host if request.client else None,
+        )
+
+        return ConsistencyGuidance(**result)
 
 
 @router.delete("/{incident_id}/analyze/{analysis_type}")

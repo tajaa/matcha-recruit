@@ -120,6 +120,8 @@ import type {
   IRRootCauseAnalysis,
   IRRecommendationsAnalysis,
   IRPrecedentAnalysis,
+  IRConsistencyGuidance,
+  IRConsistencyAnalytics,
   IRAuditLogResponse,
   // Policy types
   Policy,
@@ -2006,6 +2008,12 @@ export const irIncidents = {
     request<IRPrecedentAnalysis>(`/ir/incidents/${incidentId}/analyze/similar`, {
       method: 'POST',
     }),
+
+  getConsistencyGuidance: (incidentId: string): Promise<IRConsistencyGuidance> =>
+    request<IRConsistencyGuidance>(`/ir/incidents/${incidentId}/consistency-guidance`),
+
+  getConsistencyAnalytics: (): Promise<IRConsistencyAnalytics> =>
+    request<IRConsistencyAnalytics>('/ir/incidents/analytics/consistency'),
 
   clearAnalysisCache: (incidentId: string, analysisType: string): Promise<{ message: string }> =>
     request<{ message: string }>(`/ir/incidents/${incidentId}/analyze/${analysisType}`, {

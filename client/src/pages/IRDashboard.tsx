@@ -195,6 +195,12 @@ export function IRDashboard() {
           </div>
           <div className="flex gap-3">
             <button
+              onClick={() => navigate('/app/ir/dashboard/analytics')}
+              className={`px-5 py-2 ${t.btnSecondary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
+            >
+              Analytics
+            </button>
+            <button
               onClick={() => navigate('/app/ir')}
               className={`px-5 py-2 ${t.btnSecondary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
             >

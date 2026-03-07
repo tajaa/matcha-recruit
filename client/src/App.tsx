@@ -41,6 +41,7 @@ const Compliance = lazy(() => import('./pages/Compliance'));
 const GoogleWorkspaceProvisioning = lazy(() => import('./pages/GoogleWorkspaceProvisioning'));
 const SlackProvisioning = lazy(() => import('./pages/SlackProvisioning'));
 const IRDashboard = lazy(() => import('./pages/IRDashboard'));
+const IRConsistencyAnalytics = lazy(() => import('./pages/IRConsistencyAnalytics'));
 const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
 const IRDetail = lazy(() => import('./pages/IRDetail'));
@@ -774,6 +775,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
                     <IRList />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="ir/dashboard/analytics"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
+                    <IRConsistencyAnalytics />
                   </ProtectedRoute>
                 }
               />
