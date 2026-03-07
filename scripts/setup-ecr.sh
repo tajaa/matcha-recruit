@@ -21,6 +21,7 @@ FRONTEND_REPO="matcha-frontend"
 GUMM_LOCAL_BACKEND_REPO="gumm-local-backend"
 GUMM_LOCAL_FRONTEND_REPO="gumm-local-frontend"
 AGENT_REPO="matcha-agent"
+LLAMA_REPO="matcha-llama"
 
 echo -e "${BLUE}[INFO]${NC} Setting up ECR repositories in region: ${AWS_REGION}"
 
@@ -68,6 +69,15 @@ aws ecr create-repository \
     --image-scanning-configuration scanOnPush=true \
     --encryption-configuration encryptionType=AES256 \
     2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Repository ${AGENT_REPO} already exists"
+
+# Create llama repository
+echo -e "${BLUE}[INFO]${NC} Creating repository: ${LLAMA_REPO}"
+aws ecr create-repository \
+    --repository-name "${LLAMA_REPO}" \
+    --region "${AWS_REGION}" \
+    --image-scanning-configuration scanOnPush=true \
+    --encryption-configuration encryptionType=AES256 \
+    2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Repository ${LLAMA_REPO} already exists"
 
 # Set lifecycle policy to clean up old images (keep last 10)
 LIFECYCLE_POLICY='{
@@ -122,6 +132,13 @@ aws ecr put-lifecycle-policy \
     --lifecycle-policy-text "${LIFECYCLE_POLICY}" \
     2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Failed to set lifecycle policy for ${AGENT_REPO}"
 
+echo -e "${BLUE}[INFO]${NC} Setting lifecycle policy for ${LLAMA_REPO}"
+aws ecr put-lifecycle-policy \
+    --repository-name "${LLAMA_REPO}" \
+    --region "${AWS_REGION}" \
+    --lifecycle-policy-text "${LIFECYCLE_POLICY}" \
+    2>/dev/null || echo -e "${YELLOW}[WARN]${NC} Failed to set lifecycle policy for ${LLAMA_REPO}"
+
 # Get account ID
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
@@ -131,3 +148,4 @@ echo -e "${BLUE}[INFO]${NC} Frontend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.am
 echo -e "${BLUE}[INFO]${NC} gumm-local Backend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${GUMM_LOCAL_BACKEND_REPO}"
 echo -e "${BLUE}[INFO]${NC} gumm-local Frontend: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${GUMM_LOCAL_FRONTEND_REPO}"
 echo -e "${BLUE}[INFO]${NC} Agent: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${AGENT_REPO}"
+echo -e "${BLUE}[INFO]${NC} Llama: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${LLAMA_REPO}"

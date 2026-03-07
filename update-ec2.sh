@@ -124,7 +124,7 @@ deploy_agent() {
         exit 1
     }
 
-    ssh_cmd "cd ~/matcha && docker-compose --profile agent pull matcha-agent && docker-compose --profile agent up -d llama matcha-agent"
+    ssh_cmd "cd ~/matcha && docker-compose --profile agent pull matcha-agent llama && docker-compose --profile agent up -d llama matcha-agent"
     log_success "Agent deployed with local Qwen model!"
 }
 
