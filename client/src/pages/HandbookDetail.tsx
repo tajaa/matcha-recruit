@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   ChevronLeft,
@@ -216,6 +216,11 @@ function HandbookDetailPage() {
   const [sectionSearch, setSectionSearch] = useState('');
   const [highlightedSectionTabIds, setHighlightedSectionTabIds] = useState<string[]>([]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<Record<string, boolean>>({});
+  const pendingChangesRef = useRef<HTMLDivElement>(null);
+
+  const scrollToChanges = useCallback(() => {
+    pendingChangesRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
 
   const highlightStorageKey = useMemo(
     () => (id ? `handbook:highlighted-sections:${id}` : null),
@@ -518,16 +523,8 @@ function HandbookDetailPage() {
       const result = await handbooks.runFreshnessCheck(id);
       setFreshnessCheck(result);
       await loadData();
-      if (result.new_change_requests_count > 0) {
-        alert(
-          `Freshness check found ${result.impacted_sections} impacted section(s) and created ${result.new_change_requests_count} pending change request(s).`
-        );
-      } else if (result.is_outdated) {
-        alert(
-          `Freshness check found requirement changes, but no new change requests were created (likely already pending).`
-        );
-      } else {
-        alert('Handbook appears up to date with current requirement data.');
+      if (result.new_change_requests_count > 0 || result.is_outdated) {
+        setTimeout(() => scrollToChanges(), 300);
       }
     } catch (error) {
       console.error('Failed to run handbook freshness check:', error);
@@ -790,7 +787,13 @@ function HandbookDetailPage() {
                   </div>
                   <div className={`text-[10px] ${t.panelTextMuted}`}>{new Date(freshnessCheck.checked_at).toLocaleDateString()}</div>
                   <div className={`text-[10px] ${t.textFaint}`}>{freshnessCheck.impacted_sections} impacted</div>
-                  <div className={`text-[10px] ${t.textFaint}`}>{freshnessCheck.new_change_requests_count} new requests</div>
+                  {freshnessCheck.new_change_requests_count > 0 ? (
+                    <button type="button" onClick={scrollToChanges} className={`text-[10px] text-amber-300 hover:text-amber-200 underline underline-offset-2 text-left`}>
+                      {freshnessCheck.new_change_requests_count} new requests
+                    </button>
+                  ) : (
+                    <div className={`text-[10px] ${t.textFaint}`}>{freshnessCheck.new_change_requests_count} new requests</div>
+                  )}
                   {freshnessCheck.findings
                     .filter(f => f.finding_type === 'review_recommended')
                     .map((f, i) => (
@@ -1101,10 +1104,13 @@ function HandbookDetailPage() {
             )}
           </div>
 
-          <div className={`${t.editorBg} p-5`}>
+          <div ref={pendingChangesRef} className={`${t.editorBg} p-5`}>
             <div className={`flex items-center gap-2 border-b ${t.editorBorder} pb-3 mb-4`}>
               <AlertTriangle size={14} className="text-amber-400" />
               <h2 className={t.label}>Pending Legal Changes</h2>
+              {pendingChanges.length > 0 && (
+                <span className="bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded text-[10px] font-bold">{pendingChanges.length}</span>
+              )}
             </div>
             {pendingChanges.length === 0 ? (
               <p className={`text-sm ${t.textMuted}`}>No pending handbook language changes.</p>
