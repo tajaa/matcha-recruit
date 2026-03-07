@@ -1135,6 +1135,19 @@ async def create_broker(
                 current_user.id,
             )
 
+    email_sent = False
+    try:
+        email_service = get_email_service()
+        email_sent = await email_service.send_broker_welcome_email(
+            to_email=request.owner_email,
+            to_name=request.owner_name,
+            broker_name=request.broker_name.strip(),
+            broker_slug=slug,
+            password=owner_password,
+        )
+    except Exception as e:
+        logger.error("Failed to send broker welcome email to %s: %s", request.owner_email, e)
+
     return {
         "status": "created",
         "broker": {
@@ -1154,6 +1167,7 @@ async def create_broker(
             "name": request.owner_name,
             "generated_password": generated_password,
             "password": owner_password,
+            "email_sent": email_sent,
         },
         "contract_id": str(contract["id"]),
     }

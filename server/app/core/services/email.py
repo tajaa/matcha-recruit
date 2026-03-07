@@ -739,6 +739,105 @@ This invitation expires on {expires_text}.
             print(f"[Email] Error sending to {to_email}: {e}")
             return False
 
+    async def send_broker_welcome_email(
+        self,
+        to_email: str,
+        to_name: str,
+        broker_name: str,
+        broker_slug: str,
+        password: str,
+    ) -> bool:
+        """Send a welcome email to a newly created broker owner with their login credentials."""
+        if not self.is_configured():
+            print("[Email] MailerSend not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        login_url = f"{app_base_url}/login/{broker_slug}"
+        safe_name = html.escape(to_name)
+        safe_broker = html.escape(broker_name)
+        safe_email = html.escape(to_email)
+        safe_password = html.escape(password)
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .card {{ background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin: 20px 0; }}
+        .card-label {{ font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }}
+        .card-value {{ font-size: 16px; font-weight: 600; color: #111; }}
+        .card-value.mono {{ font-family: 'SF Mono', Monaco, Consolas, monospace; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; }}
+        .security-note {{ background: #fffbeb; border-left: 4px solid #f59e0b; border-radius: 4px; padding: 12px 16px; margin: 20px 0; font-size: 14px; color: #92400e; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {safe_name},</p>
+
+            <p>Your broker account <strong>{safe_broker}</strong> has been created on Matcha. Here are your login credentials:</p>
+
+            <div class="card">
+                <div style="margin-bottom: 16px;">
+                    <div class="card-label">Email</div>
+                    <div class="card-value">{safe_email}</div>
+                </div>
+                <div>
+                    <div class="card-label">Password</div>
+                    <div class="card-value mono">{safe_password}</div>
+                </div>
+            </div>
+
+            <p style="text-align: center; margin-top: 24px;">
+                <a href="{login_url}" class="btn">Log In to Your Dashboard</a>
+            </p>
+
+            <div class="security-note">
+                For security, please change your password after your first login.
+            </div>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha Recruit</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""Hi {to_name},
+
+Your broker account "{broker_name}" has been created on Matcha.
+
+Your login credentials:
+  Email: {to_email}
+  Password: {password}
+
+Log in at: {login_url}
+
+For security, please change your password after your first login.
+
+- Matcha Recruit
+"""
+
+        return await self.send_email(
+            to_email=to_email,
+            to_name=to_name,
+            subject=f"Welcome to Matcha — Your {broker_name} broker account is ready",
+            html_content=html_content,
+            text_content=text_content,
+        )
+
     async def send_employee_invitation_email(
         self,
         to_email: str,
