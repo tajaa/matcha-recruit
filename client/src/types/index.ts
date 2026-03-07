@@ -1908,6 +1908,7 @@ export interface IRIncident {
   location_name: string | null;
   location_city: string | null;
   location_state: string | null;
+  involved_employee_ids: string[];
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -1927,6 +1928,7 @@ export interface IRIncidentCreate {
   category_data?: Record<string, unknown>;
   company_id?: string;
   location_id?: string;
+  involved_employee_ids?: string[];
 }
 
 export interface IRIncidentUpdate {

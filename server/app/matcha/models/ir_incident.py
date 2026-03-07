@@ -80,6 +80,7 @@ class IRIncidentCreate(BaseModel):
     reported_by_email: Optional[str] = None
     witnesses: list[Witness] = []
     category_data: Optional[dict[str, Any]] = None
+    involved_employee_ids: list[UUID] = []
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
 
@@ -98,6 +99,7 @@ class IRIncidentUpdate(BaseModel):
     category_data: Optional[dict[str, Any]] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
+    involved_employee_ids: Optional[list[UUID]] = None
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
 
@@ -121,6 +123,7 @@ class IRIncidentResponse(BaseModel):
     category_data: dict[str, Any] = {}
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
+    involved_employee_ids: list[UUID] = []
     document_count: int = 0
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None

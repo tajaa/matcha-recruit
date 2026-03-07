@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { irIncidents } from '../api/client';
+import { getAccessToken, irIncidents } from '../api/client';
 import { complianceAPI, type BusinessLocation } from '../api/compliance';
 import type { IRIncidentType, IRSeverity, IRWitness, IRIncidentCreate } from '../types';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 // ─── theme ────────────────────────────────────────────────────────────────────
 
@@ -93,10 +95,25 @@ export function IRCreate() {
   const [businessLocations, setBusinessLocations] = useState<BusinessLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<string>('');
 
+  // Involved employees
+  const [companyEmployees, setCompanyEmployees] = useState<{id: string; first_name: string; last_name: string}[]>([]);
+  const [involvedEmployeeIds, setInvolvedEmployeeIds] = useState<string[]>([]);
+  const [employeePickerValue, setEmployeePickerValue] = useState('');
+
   useEffect(() => {
     complianceAPI.getLocations().then(setBusinessLocations).catch(() => {
       // Locations may not be available if compliance feature isn't enabled
     });
+    // Fetch employees for the involved employees picker
+    const token = getAccessToken();
+    if (token) {
+      fetch(`${API_BASE}/employees`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data) => setCompanyEmployees(data))
+        .catch(() => {});
+    }
   }, []);
 
   const updateCategory = (field: string, value: unknown) => {
@@ -131,6 +148,7 @@ export function IRCreate() {
         category_data: Object.keys(categoryData).length > 0 ? categoryData : undefined,
         company_id: companyId || undefined,
         location_id: selectedLocationId || undefined,
+        involved_employee_ids: involvedEmployeeIds.length > 0 ? involvedEmployeeIds : undefined,
       };
 
       const created = await irIncidents.createIncident(data);
@@ -466,6 +484,67 @@ export function IRCreate() {
             />
           </div>
         </div>
+
+        {/* Involved Employees */}
+        {companyEmployees.length > 0 && (
+          <div>
+            <div className={`${th.label} mb-2`}>Involved Employees</div>
+            <div className="flex gap-2 items-center">
+              <select
+                value={employeePickerValue}
+                onChange={(e) => setEmployeePickerValue(e.target.value)}
+                className={`flex-1 ${th.select}`}
+              >
+                <option value="">Select employee...</option>
+                {companyEmployees
+                  .filter((emp) => !involvedEmployeeIds.includes(emp.id))
+                  .map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.first_name} {emp.last_name}
+                    </option>
+                  ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => {
+                  if (employeePickerValue && !involvedEmployeeIds.includes(employeePickerValue)) {
+                    setInvolvedEmployeeIds([...involvedEmployeeIds, employeePickerValue]);
+                    setEmployeePickerValue('');
+                  }
+                }}
+                disabled={!employeePickerValue}
+                className={`text-[10px] ${th.btnGhost} uppercase tracking-wider font-bold disabled:opacity-30`}
+              >
+                + Add
+              </button>
+            </div>
+            {involvedEmployeeIds.length > 0 && (
+              <div className="flex flex-wrap gap-2 mt-2">
+                {involvedEmployeeIds.map((empId) => {
+                  const emp = companyEmployees.find((e) => e.id === empId);
+                  return (
+                    <span
+                      key={empId}
+                      className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold uppercase tracking-wider ${th.chipActive}`}
+                    >
+                      {emp ? `${emp.first_name} ${emp.last_name}` : empId}
+                      <button
+                        type="button"
+                        onClick={() => setInvolvedEmployeeIds(involvedEmployeeIds.filter((id) => id !== empId))}
+                        className="hover:opacity-70"
+                      >
+                        &times;
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            <div className={`text-[10px] ${th.textFaint} mt-1`}>
+              Employees directly involved in or affected by this incident
+            </div>
+          </div>
+        )}
 
         {/* Witnesses */}
         <div data-tour="ir-create-witnesses">

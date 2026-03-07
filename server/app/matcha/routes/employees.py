@@ -2897,9 +2897,9 @@ async def get_bulk_incident_counts(
             JOIN ir_incidents i ON i.company_id = e.org_id
               AND i.status NOT IN ('resolved', 'closed')
               AND (
-                i.reported_by_email IN (e.email, e.personal_email)
-                OR i.category_data::text ILIKE '%%' || e.first_name || ' ' || e.last_name || '%%'
-                OR i.witnesses::text ILIKE '%%' || e.first_name || ' ' || e.last_name || '%%'
+                e.id = ANY(i.involved_employee_ids)
+                OR i.reported_by_email IN (e.email, e.personal_email)
+                OR LOWER(i.reported_by_name) = LOWER(e.first_name || ' ' || e.last_name)
               )
             WHERE e.org_id = $1
             GROUP BY e.id
@@ -2935,12 +2935,11 @@ async def get_employee_incidents(
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
-        # 1. Fetch the employee record
+        # 1. Fetch employee record for matching
         emp = await conn.fetchrow(
             """
-            SELECT first_name, last_name, email, personal_email, org_id
-            FROM employees
-            WHERE id = $1 AND org_id = $2
+            SELECT id, first_name, last_name, email, personal_email
+            FROM employees WHERE id = $1 AND org_id = $2
             """,
             employee_id, company_id,
         )
@@ -2948,39 +2947,26 @@ async def get_employee_incidents(
             raise HTTPException(status_code=404, detail="Employee not found")
 
         full_name = f"{emp['first_name']} {emp['last_name']}"
-        work_email = emp["email"]
-        personal_email = emp["personal_email"]
+        emails = [e for e in (emp["email"], emp["personal_email"]) if e]
 
-        # Build email match list (non-null only)
-        emails = [e for e in (work_email, personal_email) if e]
-
-        # 2. Query incidents where this employee appears in any role.
-        #    Use a single query with CASE to assign role priority:
-        #    reporter (1) > involved (2) > witness (3)
-        #    Then deduplicate by keeping the highest-priority role per incident.
+        # 2. Query incidents: FK match OR reporter email/name fallback
         rows = await conn.fetch(
             """
             WITH matched AS (
                 SELECT
-                    i.id,
-                    i.incident_number,
-                    i.title,
-                    i.incident_type,
-                    i.severity,
-                    i.status,
-                    i.occurred_at,
-                    i.reported_by_name,
+                    i.id, i.incident_number, i.title, i.incident_type,
+                    i.severity, i.status, i.occurred_at, i.reported_by_name,
                     CASE
-                        WHEN i.reported_by_email = ANY($1::text[]) THEN 1
-                        WHEN i.category_data::text ILIKE '%' || $2 || '%' THEN 2
-                        WHEN i.witnesses::text ILIKE '%' || $2 || '%' THEN 3
+                        WHEN $2 = ANY(i.involved_employee_ids) THEN 1
+                        WHEN i.reported_by_email = ANY($3::text[]) THEN 2
+                        WHEN LOWER(i.reported_by_name) = LOWER($4) THEN 2
                     END AS role_priority
                 FROM ir_incidents i
-                WHERE i.company_id = $3
+                WHERE i.company_id = $1
                   AND (
-                      i.reported_by_email = ANY($1::text[])
-                      OR i.category_data::text ILIKE '%' || $2 || '%'
-                      OR i.witnesses::text ILIKE '%' || $2 || '%'
+                    $2 = ANY(i.involved_employee_ids)
+                    OR i.reported_by_email = ANY($3::text[])
+                    OR LOWER(i.reported_by_name) = LOWER($4)
                   )
             )
             SELECT DISTINCT ON (id)
@@ -2989,14 +2975,13 @@ async def get_employee_incidents(
             FROM matched
             ORDER BY id, role_priority ASC
             """,
+            company_id,
+            employee_id,
             emails if emails else ["__no_match__"],
             full_name,
-            company_id,
         )
 
-        role_map = {1: "reporter", 2: "involved", 3: "witness"}
-
-        # Sort by occurred_at DESC in Python (DISTINCT ON requires ORDER BY id first)
+        role_map = {1: "involved", 2: "reporter"}
         items = sorted(
             [
                 EmployeeIncidentItem(
@@ -3008,7 +2993,7 @@ async def get_employee_incidents(
                     status=r["status"],
                     occurred_at=r["occurred_at"],
                     reported_by_name=r["reported_by_name"],
-                    role=role_map.get(r["role_priority"], "witness"),
+                    role=role_map.get(r["role_priority"], "involved"),
                 )
                 for r in rows
             ],

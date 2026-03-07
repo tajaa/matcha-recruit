@@ -266,6 +266,7 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
         category_data=_safe_json_loads(row.get("category_data"), {}),
         root_cause=row["root_cause"],
         corrective_actions=row["corrective_actions"],
+        involved_employee_ids=row.get("involved_employee_ids") or [],
         document_count=document_count,
         company_id=row.get("company_id"),
         location_id=row.get("location_id"),
@@ -315,9 +316,10 @@ async def create_incident(
             INSERT INTO ir_incidents (
                 incident_number, title, description, incident_type, severity,
                 occurred_at, location, reported_by_name, reported_by_email,
-                witnesses, category_data, company_id, location_id, created_by
+                witnesses, category_data, involved_employee_ids,
+                company_id, location_id, created_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
             RETURNING *
             """,
             incident_number,
@@ -331,6 +333,7 @@ async def create_incident(
             incident.reported_by_email,
             json.dumps([w.model_dump() for w in incident.witnesses]),
             json.dumps(incident.category_data or {}),
+            [str(uid) for uid in incident.involved_employee_ids],
             effective_company_id,
             str(incident.location_id) if incident.location_id else None,
             str(current_user.id),
@@ -705,6 +708,11 @@ async def update_incident(
         if incident.corrective_actions is not None:
             updates.append(f"corrective_actions = ${param_idx}")
             params.append(incident.corrective_actions)
+            param_idx += 1
+
+        if incident.involved_employee_ids is not None:
+            updates.append(f"involved_employee_ids = ${param_idx}")
+            params.append([str(uid) for uid in incident.involved_employee_ids])
             param_idx += 1
 
         if not updates:

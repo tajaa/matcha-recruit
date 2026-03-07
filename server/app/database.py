@@ -1206,6 +1206,7 @@ async def init_db():
                 category_data JSONB DEFAULT '{}',
                 root_cause TEXT,
                 corrective_actions TEXT,
+                involved_employee_ids UUID[] DEFAULT '{}',
                 company_id UUID REFERENCES companies(id) ON DELETE SET NULL,
                 location_id UUID REFERENCES business_locations(id) ON DELETE SET NULL,
                 created_by UUID REFERENCES users(id),

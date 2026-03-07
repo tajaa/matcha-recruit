@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { irIncidents, erCopilot } from '../api/client';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { getAccessToken, irIncidents, erCopilot } from '../api/client';
 import type {
   IRIncident,
   IRDocument,
@@ -105,6 +105,8 @@ const ER_CATEGORY_OPTIONS: { value: ERCaseCategory; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
 export function IRDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -116,6 +118,9 @@ export function IRDetail() {
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Employee name map for resolving involved_employee_ids
+  const [employeeNameMap, setEmployeeNameMap] = useState<Record<string, { first_name: string; last_name: string }>>({});
 
   const [rootCause, setRootCause] = useState<IRRootCauseAnalysis | null>(null);
   const [recommendations, setRecommendations] = useState<IRRecommendationsAnalysis | null>(null);
@@ -160,6 +165,25 @@ export function IRDetail() {
   useEffect(() => {
     fetchIncident();
   }, [fetchIncident]);
+
+  // Fetch employee names when incident has involved employees
+  useEffect(() => {
+    if (!incident?.involved_employee_ids?.length) return;
+    const token = getAccessToken();
+    if (!token) return;
+    fetch(`${API_BASE}/employees`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((res) => (res.ok ? res.json() : []))
+      .then((employees: { id: string; first_name: string; last_name: string }[]) => {
+        const map: Record<string, { first_name: string; last_name: string }> = {};
+        for (const emp of employees) {
+          map[emp.id] = { first_name: emp.first_name, last_name: emp.last_name };
+        }
+        setEmployeeNameMap(map);
+      })
+      .catch(() => {});
+  }, [incident?.involved_employee_ids]);
 
   const updateIncident = async (data: IRIncidentUpdate) => {
     if (!id) return;
@@ -379,6 +403,26 @@ export function IRDetail() {
                 <div className={`text-sm ${t.textMain} mt-1`}>{incident.reported_by_name}</div>
               </div>
             </div>
+
+            {incident.involved_employee_ids?.length > 0 && (
+              <div className={`pt-4 border-t ${t.sectionBorder}`}>
+                <div className={t.label}>Involved Employees</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1">
+                  {incident.involved_employee_ids.map((empId) => {
+                    const emp = employeeNameMap[empId];
+                    return (
+                      <Link
+                        key={empId}
+                        to={`/app/matcha/employees/${empId}`}
+                        className={`text-sm ${t.textMain} hover:underline`}
+                      >
+                        {emp ? `${emp.first_name} ${emp.last_name}` : empId}
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             {(incident.company_name || incident.location_city) && (
               <div className={`grid grid-cols-2 gap-4 pt-4 border-t ${t.sectionBorder}`}>
