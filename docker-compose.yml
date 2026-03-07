@@ -114,6 +114,7 @@ services:
       --port 8999
       --host 0.0.0.0
       --ctx-size 4096
+      --chat-template chatml
       --log-disable
     restart: unless-stopped
     networks:

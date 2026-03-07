@@ -214,7 +214,7 @@ class SandboxedLocal:
                 f"{self._base_url}/v1/chat/completions",
                 json={
                     "model": "local",
-                    "messages": [{"role": "user", "content": prompt}],
+                    "messages": [{"role": "user", "content": f"/no_think\n{prompt}"}],
                     "max_tokens": 2048,
                     "temperature": 0.7,
                 },
@@ -222,7 +222,10 @@ class SandboxedLocal:
             )
             resp.raise_for_status()
             data = resp.json()
-            return data["choices"][0]["message"]["content"]
+            text = data["choices"][0]["message"]["content"]
+            # Strip any <think>...</think> blocks from Qwen3.5 reasoning
+            text = re.sub(r"<think>.*?</think>\s*", "", text, flags=re.DOTALL)
+            return text.strip()
 
         result = await asyncio.to_thread(_call)
         logger.info(f"Local model response ({len(result)} chars)")
