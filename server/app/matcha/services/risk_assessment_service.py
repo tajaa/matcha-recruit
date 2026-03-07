@@ -724,8 +724,22 @@ async def generate_recommendations(result: RiskAssessmentResult, settings) -> di
         return empty
 
 
-async def compute_risk_assessment(company_id: UUID) -> RiskAssessmentResult:
+DEFAULT_WEIGHTS: dict[str, float] = {
+    "compliance": 0.30,
+    "incidents": 0.25,
+    "er_cases": 0.25,
+    "workforce": 0.15,
+    "legislative": 0.05,
+}
+
+
+async def compute_risk_assessment(
+    company_id: UUID,
+    weights: Optional[dict[str, float]] = None,
+) -> RiskAssessmentResult:
     """Compute full risk assessment for a company across all 5 dimensions."""
+    w = {**DEFAULT_WEIGHTS, **(weights or {})}
+
     async with get_connection() as conn:
         compliance = await compute_compliance_dimension(company_id, conn)
         incidents = await compute_incident_dimension(company_id, conn)
@@ -733,13 +747,12 @@ async def compute_risk_assessment(company_id: UUID) -> RiskAssessmentResult:
         workforce = await compute_workforce_dimension(company_id, conn)
         legislative = await compute_legislative_dimension(company_id, conn)
 
-    # Weighted overall score
     overall = int(
-        compliance.score * 0.30
-        + incidents.score * 0.25
-        + er.score * 0.25
-        + workforce.score * 0.15
-        + legislative.score * 0.05
+        compliance.score * w["compliance"]
+        + incidents.score * w["incidents"]
+        + er.score * w["er_cases"]
+        + workforce.score * w["workforce"]
+        + legislative.score * w["legislative"]
     )
     overall = min(overall, 100)
 

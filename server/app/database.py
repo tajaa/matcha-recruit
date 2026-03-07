@@ -3657,6 +3657,29 @@ async def init_db():
             """,
             json.dumps(["offer_letters","client_management","blog","policies","handbooks","er_copilot","onboarding","employees"])
         )
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value)
+            VALUES ('risk_assessment_weights', $1::jsonb)
+            ON CONFLICT (key) DO NOTHING
+            """,
+            json.dumps({"compliance": 0.30, "incidents": 0.25, "er_cases": 0.25, "workforce": 0.15, "legislative": 0.05})
+        )
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS risk_assessment_snapshots (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                overall_score INT NOT NULL,
+                overall_band TEXT NOT NULL,
+                dimensions JSONB NOT NULL,
+                report TEXT,
+                recommendations JSONB,
+                weights JSONB NOT NULL,
+                computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                computed_by UUID REFERENCES users(id),
+                UNIQUE (company_id)
+            )
+        """)
 
         # Matcha Work tables (chat-driven offer letter generation)
         await conn.execute("""

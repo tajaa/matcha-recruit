@@ -2864,6 +2864,7 @@ export interface RiskAssessmentResult {
     legislative: DimensionResult;
   };
   computed_at: string;
+  weights: Record<string, number>;
   report?: string | null;
   recommendations?: RiskRecommendation[] | null;
 }

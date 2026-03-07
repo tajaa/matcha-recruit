@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Sparkles, HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock } from 'lucide-react';
+import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser } from '../types';
-import { riskAssessment, erCopilot } from '../api/client';
-import { useAuth } from '../context/AuthContext';
+import { riskAssessment, erCopilot, ApiRequestError } from '../api/client';
 
 type Band = 'low' | 'moderate' | 'high' | 'critical';
 
@@ -18,12 +17,12 @@ const BAND_LABEL: Record<Band, string> = {
   low: 'Low', moderate: 'Moderate', high: 'High', critical: 'Critical',
 };
 
-const DIMENSION_META: Record<string, { label: string; weight: string }> = {
-  compliance:  { label: 'Compliance',  weight: '30%' },
-  incidents:   { label: 'Incidents',   weight: '25%' },
-  er_cases:    { label: 'ER Cases',    weight: '25%' },
-  workforce:   { label: 'Workforce',   weight: '15%' },
-  legislative: { label: 'Legislative', weight: '5%'  },
+const DIMENSION_META: Record<string, { label: string }> = {
+  compliance:  { label: 'Compliance'  },
+  incidents:   { label: 'Incidents'   },
+  er_cases:    { label: 'ER Cases'    },
+  workforce:   { label: 'Workforce'   },
+  legislative: { label: 'Legislative' },
 };
 
 const DIMENSION_ORDER = ['compliance', 'incidents', 'er_cases', 'workforce', 'legislative'] as const;
@@ -153,8 +152,8 @@ function ScoreBar({ score, band }: { score: number; band: Band }) {
   );
 }
 
-function DimensionCard({ dimensionKey, dim }: { dimensionKey: string; dim: DimensionResult }) {
-  const meta = DIMENSION_META[dimensionKey] ?? { label: dimensionKey, weight: '' };
+function DimensionCard({ dimensionKey, dim, weight }: { dimensionKey: string; dim: DimensionResult; weight?: string }) {
+  const meta = DIMENSION_META[dimensionKey] ?? { label: dimensionKey };
   const c = BAND_COLOR[dim.band];
   const complianceMetrics = dimensionKey === 'compliance' ? getComplianceAlertMetrics(dim) : null;
 
@@ -164,7 +163,7 @@ function DimensionCard({ dimensionKey, dim }: { dimensionKey: string; dim: Dimen
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">{meta.label}</div>
-          <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-0.5">{meta.weight} weight</div>
+          {weight && <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-0.5">{weight} weight</div>}
         </div>
         <BandBadge band={dim.band} />
       </div>
@@ -546,12 +545,10 @@ function isEmptyResult(data: RiskAssessmentResult): boolean {
 }
 
 export default function RiskAssessment() {
-  const { user } = useAuth();
   const [data, setData] = useState<RiskAssessmentResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [analyzing, setAnalyzing] = useState(false);
+  const [notAssessed, setNotAssessed] = useState(false);
   const [metrics, setMetrics] = useState<ERCaseMetrics | null>(null);
   const [metricsDays, setMetricsDays] = useState(30);
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -567,29 +564,20 @@ export default function RiskAssessment() {
     }
   }, []);
 
-  const fetchData = useCallback(async (isRefresh = false) => {
-    if (isRefresh) setRefreshing(true);
-    else setLoading(true);
+  const fetchData = useCallback(async () => {
+    setLoading(true);
     setError(null);
+    setNotAssessed(false);
     try {
       setData(await riskAssessment.get());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load risk assessment.');
+      if (err instanceof ApiRequestError && err.status === 404) {
+        setNotAssessed(true);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load risk assessment.');
+      }
     } finally {
       setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  const runConsultation = useCallback(async () => {
-    setAnalyzing(true);
-    try {
-      const result = await riskAssessment.getRecommendations();
-      setData(prev => prev ? { ...prev, report: result.report, recommendations: result.recommendations } : result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Consultation analysis failed.');
-    } finally {
-      setAnalyzing(false);
     }
   }, []);
 
@@ -599,7 +587,7 @@ export default function RiskAssessment() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-xs text-stone-500 uppercase tracking-wider animate-pulse">Computing risk assessment…</div>
+        <div className="text-xs text-stone-500 uppercase tracking-wider animate-pulse">Loading risk assessment…</div>
       </div>
     );
   }
@@ -612,16 +600,8 @@ export default function RiskAssessment() {
       <div className="flex justify-between items-start border-b border-stone-200 pb-8">
         <div>
           <h1 className="text-4xl font-bold tracking-tighter text-zinc-900 uppercase">Risk Assessment</h1>
-          <p className="text-xs text-stone-500 mt-2 font-mono tracking-wide uppercase">Live exposure analysis across all platform data</p>
+          <p className="text-xs text-stone-500 mt-2 font-mono tracking-wide uppercase">Snapshot computed by your account manager</p>
         </div>
-        <button
-          onClick={() => fetchData(true)}
-          disabled={refreshing}
-          className="flex items-center gap-2 px-4 py-2 text-xs text-stone-500 hover:text-zinc-900 uppercase tracking-wider transition-colors border border-stone-300 bg-stone-200 rounded-xl disabled:opacity-40"
-        >
-          <RefreshCw size={12} className={refreshing ? 'animate-spin' : ''} />
-          Refresh
-        </button>
       </div>
 
       {error && (
@@ -630,14 +610,21 @@ export default function RiskAssessment() {
         </div>
       )}
 
-      {!error && data && isEmptyResult(data) && (
+      {notAssessed && (
+        <div className="bg-stone-200 rounded-2xl p-12 text-center">
+          <div className="text-xs text-stone-500 uppercase tracking-wider">Not yet assessed</div>
+          <div className="text-[10px] text-stone-400 mt-2 font-mono">Your account manager will run a risk assessment for your company. Check back soon.</div>
+        </div>
+      )}
+
+      {!error && !notAssessed && data && isEmptyResult(data) && (
         <div className="bg-stone-200 rounded-2xl p-12 text-center">
           <div className="text-xs text-stone-500 uppercase tracking-wider">No risk data yet</div>
           <div className="text-[10px] text-stone-400 mt-2 font-mono">Add locations, employees, or run a compliance check to see your risk profile.</div>
         </div>
       )}
 
-      {!error && data && !isEmptyResult(data) && (
+      {!error && !notAssessed && data && !isEmptyResult(data) && (
         <>
           {/* Overall score */}
           <div className="grid grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
@@ -666,6 +653,7 @@ export default function RiskAssessment() {
               const dim = data.dimensions[key];
               const meta = DIMENSION_META[key];
               const c = BAND_COLOR[dim.band];
+              const weightPct = data.weights[key] != null ? `${Math.round(data.weights[key] * 100)}%` : null;
               return (
                 <div key={key} className="bg-zinc-900 p-6 flex flex-col justify-between group">
                   <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
@@ -674,7 +662,7 @@ export default function RiskAssessment() {
                   </div>
                   <div className={`text-3xl font-light font-mono mt-2 ${c.text}`}>{dim.score}</div>
                   <div className="mt-3 space-y-2">
-                    <div className="text-[9px] text-zinc-600 uppercase tracking-widest">{meta.weight} weight</div>
+                    {weightPct && <div className="text-[9px] text-zinc-600 uppercase tracking-widest">{weightPct} weight</div>}
                     <BandBadge band={dim.band} />
                   </div>
                 </div>
@@ -692,7 +680,12 @@ export default function RiskAssessment() {
             <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mb-4">Dimension Breakdown</div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {DIMENSION_ORDER.map(key => (
-                <DimensionCard key={key} dimensionKey={key} dim={data.dimensions[key]} />
+                <DimensionCard
+                  key={key}
+                  dimensionKey={key}
+                  dim={data.dimensions[key]}
+                  weight={data.weights[key] != null ? `${Math.round(data.weights[key] * 100)}%` : undefined}
+                />
               ))}
             </div>
           </div>
@@ -814,43 +807,18 @@ export default function RiskAssessment() {
             )}
           </div>
 
-          {/* Admin consultation */}
-          {user?.role === 'admin' && (
+          {/* Consultation Analysis — included with snapshot when admin runs assessment */}
+          {(data.report || (data.recommendations && data.recommendations.length > 0)) && (
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Consultation Analysis</div>
-                {!data.recommendations && (
-                  <button
-                    onClick={runConsultation}
-                    disabled={analyzing}
-                    className="flex items-center gap-2 px-4 py-2 text-xs uppercase tracking-wider transition-colors bg-zinc-900 text-zinc-50 hover:bg-zinc-800 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    <Sparkles size={12} className={analyzing ? 'animate-pulse' : ''} />
-                    {analyzing ? 'Analyzing…' : 'Run Consultation'}
-                  </button>
-                )}
-              </div>
+              <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mb-4">Consultation Analysis</div>
 
-              {analyzing && (
-                <div className="bg-stone-200 rounded-2xl p-8 text-center">
-                  <div className="text-xs text-stone-500 uppercase tracking-wider animate-pulse">Generating HR consulting recommendations…</div>
-                </div>
-              )}
-
-              {!analyzing && !data.recommendations && (
-                <div className="bg-stone-200 rounded-2xl p-8 text-center">
-                  <div className="text-xs text-stone-500 uppercase tracking-wider">No analysis yet</div>
-                  <div className="text-[10px] text-stone-400 mt-2 font-mono">Run a consultation to get AI-powered HR guidance based on your risk profile.</div>
-                </div>
-              )}
-
-              {!analyzing && data.report && (
+              {data.report && (
                 <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 mb-4">
                   <div className="text-sm text-zinc-300 leading-relaxed whitespace-pre-line">{data.report}</div>
                 </div>
               )}
 
-              {!analyzing && data.recommendations && data.recommendations.length > 0 && (
+              {data.recommendations && data.recommendations.length > 0 && (
                 <div className="bg-zinc-900 border border-white/10 rounded-2xl divide-y divide-white/10 overflow-hidden">
                   {data.recommendations.map((rec, i) => (
                     <div key={i} className="px-6 py-5 flex items-start gap-4">

@@ -3784,8 +3784,6 @@ export const matchaWorkPublic = {
 export const riskAssessment = {
   get: (): Promise<RiskAssessmentResult> =>
     request('/risk-assessment'),
-  getRecommendations: (): Promise<RiskAssessmentResult> =>
-    request('/risk-assessment?include_recommendations=true'),
   listActionItems: (status?: string): Promise<RiskActionItem[]> =>
     request(`/risk-assessment/action-items${status ? `?status=${status}` : ''}`),
   createActionItem: (data: RiskActionItemCreate): Promise<RiskActionItem> =>

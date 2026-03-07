@@ -1,10 +1,12 @@
 """Risk Assessment API Route.
 
-Returns a live-computed risk score and breakdown across 5 dimensions
-for the authenticated company.
+Snapshots are computed by the master admin and stored in risk_assessment_snapshots.
+Clients read the last stored snapshot — no live computation on page load.
 """
 
+import json
 import logging
+from dataclasses import asdict
 from datetime import date, datetime
 from typing import Any, Optional
 from uuid import UUID
@@ -13,14 +15,23 @@ from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from pydantic import BaseModel
 
 from ...config import get_settings
+from ...core.dependencies import require_admin
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
-from ..services.risk_assessment_service import compute_risk_assessment, generate_recommendations
+from ..services.risk_assessment_service import (
+    compute_risk_assessment,
+    generate_recommendations,
+    DEFAULT_WEIGHTS,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+_WEIGHT_KEYS = {"compliance", "incidents", "er_cases", "workforce", "legislative"}
+
+
+# ─── Response models ──────────────────────────────────────────────────────────
 
 class DimensionResultResponse(BaseModel):
     score: int
@@ -41,51 +52,174 @@ class RiskAssessmentResponse(BaseModel):
     overall_band: str
     dimensions: dict[str, DimensionResultResponse]
     computed_at: datetime
+    weights: dict[str, float]
     report: str | None = None
     recommendations: list[RecommendationResponse] | None = None
 
 
+class WeightsResponse(BaseModel):
+    compliance: float
+    incidents: float
+    er_cases: float
+    workforce: float
+    legislative: float
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _get_weights(conn) -> dict[str, float]:
+    row = await conn.fetchval(
+        "SELECT value FROM platform_settings WHERE key = 'risk_assessment_weights'"
+    )
+    if row:
+        raw = json.loads(row) if isinstance(row, str) else row
+        if isinstance(raw, dict):
+            return {**DEFAULT_WEIGHTS, **{k: float(v) for k, v in raw.items() if k in _WEIGHT_KEYS}}
+    return dict(DEFAULT_WEIGHTS)
+
+
+def _snapshot_to_response(row) -> RiskAssessmentResponse:
+    dims_raw = row["dimensions"]
+    if isinstance(dims_raw, str):
+        dims_raw = json.loads(dims_raw)
+    weights_raw = row["weights"]
+    if isinstance(weights_raw, str):
+        weights_raw = json.loads(weights_raw)
+    recs_raw = row["recommendations"]
+    if isinstance(recs_raw, str):
+        recs_raw = json.loads(recs_raw) if recs_raw else None
+
+    recommendations = None
+    if recs_raw:
+        try:
+            recommendations = [RecommendationResponse(**r) for r in recs_raw]
+        except Exception:
+            pass
+
+    return RiskAssessmentResponse(
+        overall_score=row["overall_score"],
+        overall_band=row["overall_band"],
+        dimensions={
+            key: DimensionResultResponse(**dim)
+            for key, dim in dims_raw.items()
+        },
+        computed_at=row["computed_at"],
+        weights=weights_raw,
+        report=row["report"],
+        recommendations=recommendations,
+    )
+
+
+# ─── Client endpoint ──────────────────────────────────────────────────────────
+
 @router.get("", response_model=RiskAssessmentResponse)
 async def get_risk_assessment(
     current_user=Depends(require_admin_or_client),
-    include_recommendations: bool = Query(False),
 ):
-    """Return live-computed risk assessment for the company."""
+    """Return the last stored risk assessment snapshot for the company."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="No company associated with this account",
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No company associated with this account")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM risk_assessment_snapshots WHERE company_id = $1",
+            company_id,
         )
 
-    result = await compute_risk_assessment(company_id)
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No risk assessment has been run for this company yet")
 
-    report = None
-    recommendations = None
-    if include_recommendations and current_user.role == "admin":
-        settings = get_settings()
-        consultation = await generate_recommendations(result, settings)
-        report = consultation.get("report")
-        recs = consultation.get("recommendations", [])
-        if recs:
-            recommendations = [RecommendationResponse(**r) for r in recs]
+    return _snapshot_to_response(row)
 
-    return RiskAssessmentResponse(
-        overall_score=result.overall_score,
-        overall_band=result.overall_band,
-        dimensions={
-            key: DimensionResultResponse(
-                score=dim.score,
-                band=dim.band,
-                factors=dim.factors,
-                raw_data=dim.raw_data,
-            )
-            for key, dim in result.dimensions.items()
-        },
-        computed_at=result.computed_at,
-        report=report,
-        recommendations=recommendations,
+
+# ─── Admin endpoints ──────────────────────────────────────────────────────────
+
+@router.get("/admin/weights", response_model=WeightsResponse)
+async def get_weights(current_user=Depends(require_admin)):
+    """Return the current dimension weights used for risk scoring."""
+    async with get_connection() as conn:
+        weights = await _get_weights(conn)
+    return WeightsResponse(**weights)
+
+
+@router.put("/admin/weights", response_model=WeightsResponse)
+async def update_weights(
+    body: WeightsResponse,
+    current_user=Depends(require_admin),
+):
+    """Update dimension weights. Values should sum to 1.0."""
+    weights = body.model_dump()
+    total = sum(weights.values())
+    if not (0.99 <= total <= 1.01):
+        raise HTTPException(status_code=422, detail=f"Weights must sum to 1.0 (got {total:.3f})")
+
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value)
+            VALUES ('risk_assessment_weights', $1::jsonb)
+            ON CONFLICT (key) DO UPDATE SET value = $1::jsonb, updated_at = now()
+            """,
+            json.dumps(weights),
+        )
+    return WeightsResponse(**weights)
+
+
+@router.post("/admin/run/{company_id}", response_model=RiskAssessmentResponse)
+async def run_risk_assessment(
+    company_id: UUID = Path(...),
+    current_user=Depends(require_admin),
+):
+    """Compute and store a risk assessment snapshot for a company (admin only)."""
+    async with get_connection() as conn:
+        exists = await conn.fetchval("SELECT id FROM companies WHERE id = $1", company_id)
+        if not exists:
+            raise HTTPException(status_code=404, detail="Company not found")
+        weights = await _get_weights(conn)
+
+    result = await compute_risk_assessment(company_id, weights=weights)
+
+    settings = get_settings()
+    consultation = await generate_recommendations(result, settings)
+    report = consultation.get("report")
+    recs = consultation.get("recommendations", []) or []
+
+    dims_json = json.dumps(
+        {key: asdict(dim) for key, dim in result.dimensions.items()},
+        default=str,
     )
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO risk_assessment_snapshots
+                (company_id, overall_score, overall_band, dimensions, report,
+                 recommendations, weights, computed_at, computed_by)
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7::jsonb, $8, $9)
+            ON CONFLICT (company_id) DO UPDATE SET
+                overall_score  = EXCLUDED.overall_score,
+                overall_band   = EXCLUDED.overall_band,
+                dimensions     = EXCLUDED.dimensions,
+                report         = EXCLUDED.report,
+                recommendations = EXCLUDED.recommendations,
+                weights        = EXCLUDED.weights,
+                computed_at    = EXCLUDED.computed_at,
+                computed_by    = EXCLUDED.computed_by
+            RETURNING *
+            """,
+            company_id,
+            result.overall_score,
+            result.overall_band,
+            dims_json,
+            report,
+            json.dumps(recs, default=str),
+            json.dumps(weights),
+            result.computed_at,
+            current_user.id,
+        )
+
+    return _snapshot_to_response(row)
 
 
 # ---------------------------------------------------------------------------
