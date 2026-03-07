@@ -64,7 +64,7 @@ export function Settings({ open, onClose }: Props) {
       })
       setConfig(updated)
       setFeeds(updated.feeds.length ? updated.feeds : [{ url: '', name: '' }])
-      setStatus('saved')
+      onClose()
     } catch (e: unknown) {
       setStatus(e instanceof Error ? e.message : 'Save failed')
     }
