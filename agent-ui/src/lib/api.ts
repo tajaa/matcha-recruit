@@ -39,6 +39,19 @@ export interface ChatMessage {
   content: string
 }
 
+export interface FeedItem {
+  url: string
+  name: string
+}
+
+export interface AgentConfig {
+  feeds: FeedItem[]
+  gmail_label_ids: string[]
+  gmail_max_emails: number
+  rss_interests: string
+  rss_max_entries_per_feed: number
+}
+
 export const api = {
   health: () => request<HealthStatus>('/health'),
 
@@ -75,6 +88,14 @@ export const api = {
   briefing: () =>
     request<{ file: string | null; content: string }>('/agent/briefing', {
       method: 'POST',
+    }),
+
+  getConfig: () => request<AgentConfig>('/agent/config'),
+
+  updateConfig: (updates: Partial<AgentConfig>) =>
+    request<AgentConfig>('/agent/config', {
+      method: 'PUT',
+      body: JSON.stringify(updates),
     }),
 }
 

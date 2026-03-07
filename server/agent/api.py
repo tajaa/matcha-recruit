@@ -88,6 +88,19 @@ class CalendarCreateRequest(BaseModel):
     email_id: str
 
 
+class FeedItem(BaseModel):
+    url: str
+    name: str = ""
+
+
+class ConfigUpdate(BaseModel):
+    feeds: list[FeedItem] | None = None
+    gmail_label_ids: list[str] | None = None
+    gmail_max_emails: int | None = None
+    rss_interests: str | None = None
+    rss_max_entries_per_feed: int | None = None
+
+
 # --- Routes ---
 
 @app.get("/health")
@@ -257,6 +270,60 @@ Body:
     except Exception as e:
         logger.error(f"Calendar create error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/agent/config")
+async def get_config(request: Request):
+    _check_auth(request)
+    return {
+        "feeds": [{"url": f["url"], "name": f.get("name", "")} for f in config.rss_feeds],
+        "gmail_label_ids": config.gmail_label_ids,
+        "gmail_max_emails": config.gmail_max_emails,
+        "rss_interests": config.rss_interests,
+        "rss_max_entries_per_feed": config.rss_max_entries_per_feed,
+    }
+
+
+@app.put("/agent/config")
+async def update_config(req: ConfigUpdate, request: Request):
+    _check_auth(request)
+
+    import yaml
+
+    if req.feeds is not None:
+        feeds_list = [{"url": f.url, "name": f.name} for f in req.feeds]
+        config.rss_feeds = feeds_list
+        # Persist to feeds.yaml
+        feeds_path = Path(config.workspace_root) / "feeds.yaml"
+        with open(feeds_path, "w") as f:
+            yaml.dump({"feeds": feeds_list}, f, default_flow_style=False)
+        # Update fetcher whitelist with new feed URLs
+        all_urls = [feed["url"] for feed in feeds_list]
+        all_urls.extend(config.allowed_url_patterns)
+        if config.gmail_enabled:
+            all_urls.append("https://gmail.googleapis.com/gmail/v1/")
+            all_urls.append("https://oauth2.googleapis.com/token")
+            all_urls.append("https://www.googleapis.com/calendar/v3/")
+        sandbox.fetcher._allowed = list(all_urls)
+        logger.info(f"Updated feeds: {len(feeds_list)} feeds")
+
+    if req.gmail_label_ids is not None:
+        config.gmail_label_ids = req.gmail_label_ids
+        logger.info(f"Updated Gmail labels: {config.gmail_label_ids}")
+
+    if req.gmail_max_emails is not None:
+        config.gmail_max_emails = max(1, min(req.gmail_max_emails, 100))
+        logger.info(f"Updated Gmail max emails: {config.gmail_max_emails}")
+
+    if req.rss_interests is not None:
+        config.rss_interests = req.rss_interests
+        logger.info(f"Updated RSS interests: {config.rss_interests}")
+
+    if req.rss_max_entries_per_feed is not None:
+        config.rss_max_entries_per_feed = max(1, min(req.rss_max_entries_per_feed, 50))
+        logger.info(f"Updated max entries per feed: {config.rss_max_entries_per_feed}")
+
+    return await get_config(request)
 
 
 @app.post("/agent/briefing")
