@@ -10,7 +10,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy agent code into a proper package
-COPY __init__.py agent.py config.py sandbox.py gmail_auth.py ./agent/
+COPY __init__.py agent.py cli.py config.py sandbox.py gmail_auth.py email_check.py ./agent/
 COPY skills/ ./agent/skills/
 
 # Workspace is mounted at runtime, but create the dir structure
