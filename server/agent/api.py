@@ -454,7 +454,14 @@ async def update_config(req: ConfigUpdate, request: Request):
             all_urls.append("https://oauth2.googleapis.com/token")
             all_urls.append("https://www.googleapis.com/calendar/v3/")
         sandbox.fetcher._allowed = list(all_urls)
-        logger.info(f"Updated feeds: {len(feeds_list)} feeds")
+        logger.info(f"Updated feeds: {len(feeds_list)} feeds, whitelist: {len(all_urls)} URLs")
+        # Invalidate today's cached briefing so next run uses updated feeds
+        from datetime import datetime as dt
+        today = dt.now().strftime("%Y-%m-%d")
+        cached = Path(config.workspace_root) / "output" / f"briefing-{today}.md"
+        if cached.exists():
+            cached.unlink()
+            logger.info(f"Invalidated cached briefing for {today}")
 
     if req.gmail_label_ids is not None:
         config.gmail_label_ids = req.gmail_label_ids

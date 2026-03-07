@@ -47,6 +47,7 @@ async def run(config, sandbox) -> str | None:
 
         except Exception as e:
             logger.error(f"Failed to fetch {name} ({url}): {e}")
+            logger.error(f"Allowed URLs: {sandbox.fetcher._allowed}")
             feed_stats[name] = 0
 
     if not all_entries:
