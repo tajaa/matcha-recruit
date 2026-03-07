@@ -2,17 +2,17 @@ import { Link } from 'react-router-dom';
 
 const sections = [
   {
-    title: '1. Referral Commission',
+    title: '1. Platform Access & Usage',
     body: [
-      'As a Broker Partner, you are entitled to a ten percent (10%) recurring commission on the base subscription fees paid by any team or company you refer to Matcha, for as long as they remain an active paying customer and you remain an active Broker Partner.',
-      'Commissions are calculated on net revenue (excluding taxes and third-party fees) and are paid out according to our standard partner payment schedule.',
+      'As a Broker Partner, you are granted access to the Matcha platform to onboard and manage HR services for your client companies under the terms of your broker contract.',
+      'Broker Partners are responsible for ensuring their clients use the platform in accordance with applicable laws and regulations.',
     ],
   },
   {
     title: '2. Liability and Service Warranty',
     body: [
-      'Matcha provide its services "as is" and "as available". While we strive for high reliability and accuracy, Matcha shall not be liable for any issues, errors, or service interruptions that may occur.',
-      'Broker Partner agrees that Matcha is not responsible for any advice, guidance, or compliance outcomes provided through the platform to referred clients. The final responsibility for HR and legal compliance remains with the client.',
+      'Matcha provides its services "as is" and "as available". While we strive for high reliability and accuracy, Matcha shall not be liable for any issues, errors, or service interruptions that may occur.',
+      'Broker Partner agrees that Matcha is not responsible for any advice, guidance, or compliance outcomes provided through the platform to client companies. The final responsibility for HR and legal compliance remains with the client.',
     ],
   },
   {
@@ -25,7 +25,7 @@ const sections = [
   {
     title: '4. Termination',
     body: [
-      'Either party may terminate the partner relationship at any time upon written notice. Upon termination, the right to receive new commissions may cease depending on the specific reason for termination.',
+      'Either party may terminate the partner relationship at any time upon written notice. Upon termination, access to the platform and client management features will be revoked.',
     ],
   },
 ];

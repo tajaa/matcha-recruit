@@ -85,9 +85,9 @@ export default function BrokerReporting() {
         <div data-tour="broker-reporting-terms" className="border border-amber-600/40 bg-amber-950/20 p-6 rounded-sm">
           <h3 className="text-lg font-medium text-amber-500 mb-2">Partner Terms & Conditions</h3>
           <div className="text-sm text-zinc-300 space-y-3 mb-6">
-            <p>To access broker portfolio reporting and participate in the partner program, you must agree to our Broker Partner Terms:</p>
+            <p>To access broker portfolio reporting and manage client onboarding, you must agree to our Broker Partner Terms:</p>
             <ul className="list-disc pl-5 space-y-1">
-              <li><strong>10% Commission:</strong> Recurring commission on base subscription fees for referred teams.</li>
+              <li><strong>Platform Access:</strong> You may onboard and manage HR services for your client companies.</li>
               <li><strong>No Liability:</strong> Matcha is not liable for service issues or compliance outcomes.</li>
               <li><strong>Independent Relationship:</strong> We operate as independent contractors.</li>
             </ul>
@@ -109,7 +109,7 @@ export default function BrokerReporting() {
               className="mt-1 w-4 h-4 bg-zinc-900 border-zinc-700 text-amber-500 focus:ring-amber-500 focus:ring-offset-zinc-950 rounded-sm"
             />
             <label htmlFor="terms-checkbox" className="text-sm text-zinc-300 cursor-pointer select-none">
-              I have read and agree to the Broker Partner Terms, including the referral commission structure and liability disclaimers.
+              I have read and agree to the Broker Partner Terms, including the platform usage conditions and liability disclaimers.
             </label>
           </div>
 
