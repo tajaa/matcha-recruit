@@ -23,7 +23,7 @@ class AgentConfig:
     allowed_url_patterns: list[str] = field(default_factory=list)
 
     # Gemini
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3-flash-preview"
 
     # RSS skill settings
     rss_max_entries_per_feed: int = 10
