@@ -115,4 +115,18 @@ def load_config(workspace_root: str | None = None, interval: int | None = None) 
     if env_gmail_labels:
         config.gmail_label_ids = [l.strip() for l in env_gmail_labels.split(",")]
 
+    # Load saved UI settings (overrides env defaults)
+    settings_path = Path(workspace_root) / "settings.yaml"
+    if settings_path.exists():
+        with open(settings_path) as f:
+            settings = yaml.safe_load(f) or {}
+        if "gmail_label_ids" in settings:
+            config.gmail_label_ids = settings["gmail_label_ids"]
+        if "gmail_max_emails" in settings:
+            config.gmail_max_emails = settings["gmail_max_emails"]
+        if "rss_interests" in settings:
+            config.rss_interests = settings["rss_interests"]
+        if "rss_max_entries_per_feed" in settings:
+            config.rss_max_entries_per_feed = settings["rss_max_entries_per_feed"]
+
     return config

@@ -326,19 +326,26 @@ async def update_config(req: ConfigUpdate, request: Request):
 
     if req.gmail_label_ids is not None:
         config.gmail_label_ids = req.gmail_label_ids
-        logger.info(f"Updated Gmail labels: {config.gmail_label_ids}")
 
     if req.gmail_max_emails is not None:
         config.gmail_max_emails = max(1, min(req.gmail_max_emails, 100))
-        logger.info(f"Updated Gmail max emails: {config.gmail_max_emails}")
 
     if req.rss_interests is not None:
         config.rss_interests = req.rss_interests
-        logger.info(f"Updated RSS interests: {config.rss_interests}")
 
     if req.rss_max_entries_per_feed is not None:
         config.rss_max_entries_per_feed = max(1, min(req.rss_max_entries_per_feed, 50))
-        logger.info(f"Updated max entries per feed: {config.rss_max_entries_per_feed}")
+
+    # Persist all UI-configurable settings to disk
+    settings_path = Path(config.workspace_root) / "settings.yaml"
+    with open(settings_path, "w") as f:
+        yaml.dump({
+            "gmail_label_ids": config.gmail_label_ids,
+            "gmail_max_emails": config.gmail_max_emails,
+            "rss_interests": config.rss_interests,
+            "rss_max_entries_per_feed": config.rss_max_entries_per_feed,
+        }, f, default_flow_style=False)
+    logger.info("Settings saved to settings.yaml")
 
     return await get_config(request)
 
