@@ -255,7 +255,7 @@ def test_build_core_sections_includes_enforceable_language_and_operational_hooks
     assert "[HARASSMENT_REPORTING_HOTLINE]" in by_key["equal_opportunity"]["content"]
     assert "[WORKWEEK_START_DAY]" in by_key["hours_and_pay"]["content"]
     assert "Excused absences include approved protected leave" in by_key["attendance_and_remote"]["content"]
-    assert "employer's legal responsibility" in by_key["custom_policy_responsibility"]["content"].lower()
+    assert "custom_policy_responsibility" not in by_key
     assert "Safe-harbor statement" in by_key["acknowledgement"]["content"]
 
 

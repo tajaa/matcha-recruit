@@ -775,18 +775,6 @@ def _build_core_sections(profile: dict[str, Any], mode: str, states: list[str]) 
             ),
         },
         {
-            "section_key": "custom_policy_responsibility",
-            "title": "Employer-Custom Policy Responsibility",
-            "section_order": 85,
-            "section_type": "core",
-            "jurisdiction_scope": {"mode": mode, "states": states},
-            "content": (
-                "State and city addenda in this handbook are generated from verified jurisdiction requirements and are limited to baseline statutory controls. "
-                "Any employer-authored custom sections, culture language, operating standards, or benefit promises are drafted at employer direction and remain the employer's legal responsibility. "
-                "The employer must obtain legal review before publishing or enforcing custom handbook language."
-            ),
-        },
-        {
             "section_key": "acknowledgement",
             "title": "Employee Acknowledgement",
             "section_order": 90,

@@ -15,6 +15,7 @@ import {
   Star,
   X,
   RefreshCw,
+  Info,
 } from 'lucide-react';
 import { handbooks } from '../api/client';
 import type {
@@ -706,6 +707,18 @@ function HandbookDetailPage() {
             </button>
           )}
         </div>
+      </div>
+
+      <div className={`flex items-start gap-2.5 px-4 py-3 rounded-xl text-[11px] leading-relaxed ${
+        isLight
+          ? 'text-amber-700 border border-amber-300 bg-amber-50'
+          : 'text-amber-300/90 border border-amber-500/30 bg-amber-500/10'
+      }`}>
+        <Info size={14} className="mt-0.5 shrink-0 opacity-70" />
+        <span>
+          Custom sections, culture language, and operating standards are drafted at employer direction
+          and remain the employer's legal responsibility. Obtain legal review before publishing.
+        </span>
       </div>
 
       {/* Info panels */}

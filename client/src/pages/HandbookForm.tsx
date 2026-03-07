@@ -1,6 +1,6 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Upload, X, Plus, CheckCircle2, Sparkles } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Upload, X, Plus, CheckCircle2, Sparkles, Info } from 'lucide-react';
 import { handbooks } from '../api/client';
 import { complianceAPI } from '../api/compliance';
 import type { BusinessLocation } from '../api/compliance';
@@ -2246,6 +2246,14 @@ export function HandbookForm() {
             </div>
           )}
         </div>
+      </div>
+
+      <div className={`flex items-start gap-2.5 px-4 py-3 rounded-sm ${t.alertAmber} text-[11px] leading-relaxed`}>
+        <Info size={14} className="mt-0.5 shrink-0 opacity-70" />
+        <span>
+          Custom sections, culture language, and operating standards are drafted at employer direction
+          and remain the employer's legal responsibility. Obtain legal review before publishing.
+        </span>
       </div>
 
       {isWizard && (
