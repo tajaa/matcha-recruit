@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy agent code into a proper package
 COPY __init__.py agent.py api.py cli.py config.py sandbox.py gmail_auth.py email_check.py ./agent/
 COPY skills/ ./agent/skills/
+
+# Copy pre-built UI (built by build-and-push.sh before docker build)
 COPY static/ ./agent/static/
 
 # Workspace is mounted at runtime, but create the dir structure

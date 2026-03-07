@@ -520,8 +520,19 @@ build_gummlocal_frontend() {
         "${GUMMLOCAL_FRONTEND_ECR_URI}"
 }
 
-# Build agent sandbox
+# Build agent sandbox (includes Preact UI)
 build_agent() {
+    log_info "Building agent UI..."
+    local ui_dir="${SCRIPT_DIR}/agent-ui"
+    if [ -d "$ui_dir" ]; then
+        (cd "$ui_dir" && npm ci --silent && npm run build)
+        rm -rf "${AGENT_DIR}/static"
+        cp -r "$ui_dir/dist" "${AGENT_DIR}/static"
+        log_success "Agent UI built and copied to static/"
+    else
+        log_warn "agent-ui/ not found, skipping UI build"
+    fi
+
     build_image \
         "Agent" \
         "${AGENT_DIR}/Dockerfile" \

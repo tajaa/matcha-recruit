@@ -64,6 +64,10 @@ service-account*.json
 node_modules/
 client/node_modules/
 client/dist/
+agent-ui/dist/
+
+# Agent UI build output (copied from agent-ui/dist during Docker build)
+server/agent/static/
 
 # Xcode
 xcuserdata/

@@ -279,14 +279,18 @@ async def run_briefing(request: Request):
 
 
 # --- Static UI ---
+# In Docker: built Vite output copied to agent/static/
+# Locally: run the Vite dev server instead (port 5176)
 static_dir = Path(__file__).parent / "static"
-if static_dir.is_dir():
-    @app.get("/", response_class=HTMLResponse)
-    async def serve_ui():
-        index = static_dir / "index.html"
-        return HTMLResponse(index.read_text())
+if static_dir.is_dir() and (static_dir / "index.html").exists():
+    # Serve Vite build assets if present
+    assets_dir = static_dir / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    @app.get("/{path:path}", response_class=HTMLResponse)
+    async def serve_ui(path: str = ""):
+        return HTMLResponse((static_dir / "index.html").read_text())
 
 
 if __name__ == "__main__":
