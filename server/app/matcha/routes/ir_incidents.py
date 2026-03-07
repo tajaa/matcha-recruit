@@ -1260,7 +1260,7 @@ async def get_analytics_consistency(
         cached = await conn.fetchrow(
             """
             SELECT a.analysis_data, a.generated_at FROM ir_incident_analysis a
-            JOIN ir_incidents i ON i.id::text = a.incident_id
+            JOIN ir_incidents i ON i.id = a.incident_id
             WHERE i.company_id = $1 AND a.analysis_type = 'company_consistency'
             ORDER BY a.generated_at DESC LIMIT 1
             """,
