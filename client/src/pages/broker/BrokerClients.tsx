@@ -16,7 +16,9 @@ import {
   Pencil,
   X,
   Loader2,
+  ArrowRight,
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const APP_BASE_URL = window.location.origin;
 
@@ -514,9 +516,24 @@ function ClientSetupsTab() {
       </div>
 
       {error && (
-        <div className="border border-red-600/40 bg-red-950/20 p-3 text-sm text-red-300">
-          {error}
-        </div>
+        error.toLowerCase().includes('terms must be accepted') ? (
+          <div className="border border-amber-600/40 bg-amber-950/20 p-4 flex items-center justify-between gap-4">
+            <p className="text-sm text-amber-300">
+              Broker partner terms must be accepted before onboarding clients.
+            </p>
+            <Link
+              to="/app/broker/reporting"
+              className="flex items-center gap-1.5 px-4 py-2 text-xs uppercase tracking-wide bg-amber-500 text-black hover:bg-amber-400 transition-colors shrink-0"
+            >
+              Accept Terms
+              <ArrowRight size={14} />
+            </Link>
+          </div>
+        ) : (
+          <div className="border border-red-600/40 bg-red-950/20 p-3 text-sm text-red-300">
+            {error}
+          </div>
+        )
       )}
 
       {/* Setup list */}
