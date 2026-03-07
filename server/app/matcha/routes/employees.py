@@ -2883,6 +2883,115 @@ async def complete_offboarding_case(
 
 
 # ================================
+# Employee Incidents
+# ================================
+
+class EmployeeIncidentItem(BaseModel):
+    id: UUID
+    incident_number: str
+    title: str
+    incident_type: str
+    severity: str
+    status: str
+    occurred_at: datetime
+    reported_by_name: str
+    role: str  # "reporter", "involved", or "witness"
+
+
+@router.get("/{employee_id}/incidents", response_model=List[EmployeeIncidentItem])
+async def get_employee_incidents(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get IR incidents related to a specific employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # 1. Fetch the employee record
+        emp = await conn.fetchrow(
+            """
+            SELECT first_name, last_name, email, personal_email, org_id
+            FROM employees
+            WHERE id = $1 AND org_id = $2
+            """,
+            employee_id, company_id,
+        )
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        full_name = f"{emp['first_name']} {emp['last_name']}"
+        work_email = emp["email"]
+        personal_email = emp["personal_email"]
+
+        # Build email match list (non-null only)
+        emails = [e for e in (work_email, personal_email) if e]
+
+        # 2. Query incidents where this employee appears in any role.
+        #    Use a single query with CASE to assign role priority:
+        #    reporter (1) > involved (2) > witness (3)
+        #    Then deduplicate by keeping the highest-priority role per incident.
+        rows = await conn.fetch(
+            """
+            WITH matched AS (
+                SELECT
+                    i.id,
+                    i.incident_number,
+                    i.title,
+                    i.incident_type,
+                    i.severity,
+                    i.status,
+                    i.occurred_at,
+                    i.reported_by_name,
+                    CASE
+                        WHEN i.reported_by_email = ANY($1::text[]) THEN 1
+                        WHEN i.category_data::text ILIKE '%' || $2 || '%' THEN 2
+                        WHEN i.witnesses::text ILIKE '%' || $2 || '%' THEN 3
+                    END AS role_priority
+                FROM ir_incidents i
+                WHERE i.company_id = $3
+                  AND (
+                      i.reported_by_email = ANY($1::text[])
+                      OR i.category_data::text ILIKE '%' || $2 || '%'
+                      OR i.witnesses::text ILIKE '%' || $2 || '%'
+                  )
+            )
+            SELECT DISTINCT ON (id)
+                id, incident_number, title, incident_type, severity,
+                status, occurred_at, reported_by_name, role_priority
+            FROM matched
+            ORDER BY id, role_priority ASC
+            """,
+            emails if emails else ["__no_match__"],
+            full_name,
+            company_id,
+        )
+
+        role_map = {1: "reporter", 2: "involved", 3: "witness"}
+
+        # Sort by occurred_at DESC in Python (DISTINCT ON requires ORDER BY id first)
+        items = sorted(
+            [
+                EmployeeIncidentItem(
+                    id=r["id"],
+                    incident_number=r["incident_number"],
+                    title=r["title"],
+                    incident_type=r["incident_type"],
+                    severity=r["severity"],
+                    status=r["status"],
+                    occurred_at=r["occurred_at"],
+                    reported_by_name=r["reported_by_name"],
+                    role=role_map.get(r["role_priority"], "witness"),
+                )
+                for r in rows
+            ],
+            key=lambda x: x.occurred_at,
+            reverse=True,
+        )
+
+        return items
+
+
+# ================================
 # Admin PTO Management
 # ================================
 
