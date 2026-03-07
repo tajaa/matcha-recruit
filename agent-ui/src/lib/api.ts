@@ -67,10 +67,10 @@ export const api = {
       body: JSON.stringify({ message, history: history.slice(-20) }),
     }),
 
-  fetchEmails: (max_results = 10) =>
+  fetchEmails: () =>
     request<{ emails: Email[] }>('/agent/email/fetch', {
       method: 'POST',
-      body: JSON.stringify({ max_results }),
+      body: JSON.stringify({}),
     }),
 
   draftReply: (email_id: string, instructions: string) =>

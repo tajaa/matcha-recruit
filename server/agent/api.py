@@ -76,7 +76,7 @@ class ChatResponse(BaseModel):
 
 
 class EmailFetchRequest(BaseModel):
-    max_results: int = 10
+    max_results: int | None = None
 
 
 class EmailDraftRequest(BaseModel):
@@ -168,7 +168,7 @@ async def email_fetch(req: EmailFetchRequest, request: Request):
         raise HTTPException(status_code=400, detail="Gmail not configured")
 
     try:
-        max_emails = req.max_results or config.gmail_max_emails
+        max_emails = req.max_results if req.max_results is not None else config.gmail_max_emails
         label_ids = config.gmail_label_ids if config.gmail_label_ids else None
         messages = await sandbox.gmail.fetch_unread(max_results=max_emails, label_ids=label_ids)
         if not messages:
