@@ -24,6 +24,12 @@ export interface HealthStatus {
   gmail: boolean
   calendar: boolean
   llm: boolean
+  slack: boolean
+}
+
+export interface EmailStatus {
+  connected: boolean
+  email: string | null
 }
 
 export interface Email {
@@ -95,6 +101,14 @@ export const api = {
     request<{ file: string | null; content: string }>('/agent/briefing', {
       method: 'POST',
     }),
+
+  emailStatus: () => request<EmailStatus>('/agent/email/status'),
+
+  emailDisconnect: () =>
+    request<{ status: string }>('/agent/email/disconnect', { method: 'DELETE' }),
+
+  emailConnect: () =>
+    request<{ auth_url: string }>('/agent/email/connect', { method: 'POST' }),
 
   getLabels: () => request<{ labels: GmailLabel[] }>('/agent/email/labels'),
 

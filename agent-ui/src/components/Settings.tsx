@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks'
 import { api } from '../lib/api'
-import type { AgentConfig, FeedItem, GmailLabel } from '../lib/api'
+import type { AgentConfig, EmailStatus, FeedItem, GmailLabel } from '../lib/api'
 
 interface Props {
   open: boolean
@@ -12,11 +12,18 @@ export function Settings({ open, onClose }: Props) {
   const [feeds, setFeeds] = useState<FeedItem[]>([])
   const [selectedLabels, setSelectedLabels] = useState<string[]>(['INBOX'])
   const [availableLabels, setAvailableLabels] = useState<GmailLabel[]>([])
+  const [emailStatus, setEmailStatus] = useState<EmailStatus | null>(null)
   const [maxEmails, setMaxEmails] = useState(25)
   const [interests, setInterests] = useState('')
   const [maxEntries, setMaxEntries] = useState(10)
   const [saving, setSaving] = useState(false)
+  const [connecting, setConnecting] = useState(false)
   const [status, setStatus] = useState('')
+
+  const loadEmailData = () => {
+    api.emailStatus().then(setEmailStatus).catch(() => setEmailStatus(null))
+    api.getLabels().then((data) => setAvailableLabels(data.labels)).catch(() => {})
+  }
 
   useEffect(() => {
     if (open) {
@@ -29,11 +36,8 @@ export function Settings({ open, onClose }: Props) {
         setMaxEntries(c.rss_max_entries_per_feed)
         setStatus('')
       })
-      api.getLabels().then((data) => {
-        setAvailableLabels(data.labels)
-      }).catch(() => {
-        // Gmail not configured — leave empty
-      })
+      loadEmailData()
+      setConnecting(false)
     }
   }, [open])
 
@@ -49,6 +53,41 @@ export function Settings({ open, onClose }: Props) {
     setFeeds(updated)
   }
 
+  const handleDisconnect = async () => {
+    await api.emailDisconnect()
+    setEmailStatus({ connected: false, email: null })
+    setAvailableLabels([])
+  }
+
+  const handleConnect = async () => {
+    setConnecting(true)
+    try {
+      const data = await api.emailConnect()
+      window.open(data.auth_url, '_blank')
+      // Poll for connection every 2s for up to 2 minutes
+      let attempts = 0
+      const poll = setInterval(async () => {
+        attempts++
+        try {
+          const st = await api.emailStatus()
+          if (st.connected) {
+            clearInterval(poll)
+            setEmailStatus(st)
+            setConnecting(false)
+            loadEmailData()
+          }
+        } catch { /* ignore */ }
+        if (attempts > 60) {
+          clearInterval(poll)
+          setConnecting(false)
+        }
+      }, 2000)
+    } catch (e: unknown) {
+      setStatus(e instanceof Error ? e.message : 'Connect failed')
+      setConnecting(false)
+    }
+  }
+
   const handleSave = async () => {
     setSaving(true)
     setStatus('')
@@ -56,7 +95,6 @@ export function Settings({ open, onClose }: Props) {
       const validFeeds = feeds.filter((f) => f.url.trim())
       const newLabels = selectedLabels.length ? selectedLabels : ['INBOX']
 
-      // Build change summary
       const changes: string[] = []
       if (config) {
         const oldFeedUrls = config.feeds.map((f) => f.url).sort().join(',')
@@ -115,6 +153,84 @@ export function Settings({ open, onClose }: Props) {
         </div>
 
         <div class="settings-body">
+          <section class="settings-section">
+            <h3>gmail account</h3>
+            <div class="gmail-status">
+              {emailStatus?.connected ? (
+                <div class="gmail-connected">
+                  <span class="gmail-email">{emailStatus.email || 'connected'}</span>
+                  <button class="btn-sm cancel" onClick={handleDisconnect}>
+                    disconnect
+                  </button>
+                </div>
+              ) : (
+                <div class="gmail-disconnected">
+                  <span class="gmail-hint">no gmail account connected</span>
+                  <button
+                    class="btn-sm primary"
+                    onClick={handleConnect}
+                    disabled={connecting}
+                  >
+                    {connecting ? 'waiting for auth...' : 'connect gmail'}
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h3>email options</h3>
+            <div class="label-field">
+              <span class="label-field-title">fetch from labels</span>
+              {availableLabels.length > 0 ? (
+                <div class="label-chips">
+                  {availableLabels
+                    .sort((a, b) => {
+                      if (a.type === 'system' && b.type !== 'system') return -1
+                      if (a.type !== 'system' && b.type === 'system') return 1
+                      return a.name.localeCompare(b.name)
+                    })
+                    .map((label) => {
+                      const active = selectedLabels.includes(label.id)
+                      return (
+                        <button
+                          key={label.id}
+                          class={`label-chip ${active ? 'active' : ''}`}
+                          onClick={() => {
+                            setSelectedLabels((prev) =>
+                              active
+                                ? prev.filter((l) => l !== label.id)
+                                : [...prev, label.id]
+                            )
+                          }}
+                        >
+                          {label.name}
+                        </button>
+                      )
+                    })}
+                </div>
+              ) : (
+                <span class="label-field-hint">
+                  {emailStatus?.connected ? 'loading labels...' : 'connect gmail to see labels'}
+                </span>
+              )}
+            </div>
+            <label>
+              <span>max emails to fetch</span>
+              <input
+                type="number"
+                value={maxEmails}
+                min={1}
+                max={100}
+                onInput={(e) =>
+                  setMaxEmails(
+                    parseInt((e.target as HTMLInputElement).value) || 25
+                  )
+                }
+              />
+            </label>
+          </section>
+
           <section class="settings-section">
             <h3>rss feeds</h3>
             <div class="feed-list">
@@ -175,57 +291,6 @@ export function Settings({ open, onClose }: Props) {
                 onInput={(e) =>
                   setMaxEntries(
                     parseInt((e.target as HTMLInputElement).value) || 10
-                  )
-                }
-              />
-            </label>
-          </section>
-
-          <section class="settings-section">
-            <h3>email</h3>
-            <div class="label-field">
-              <span class="label-field-title">fetch from labels</span>
-              {availableLabels.length > 0 ? (
-                <div class="label-chips">
-                  {availableLabels
-                    .sort((a, b) => {
-                      if (a.type === 'system' && b.type !== 'system') return -1
-                      if (a.type !== 'system' && b.type === 'system') return 1
-                      return a.name.localeCompare(b.name)
-                    })
-                    .map((label) => {
-                      const active = selectedLabels.includes(label.id)
-                      return (
-                        <button
-                          key={label.id}
-                          class={`label-chip ${active ? 'active' : ''}`}
-                          onClick={() => {
-                            setSelectedLabels((prev) =>
-                              active
-                                ? prev.filter((l) => l !== label.id)
-                                : [...prev, label.id]
-                            )
-                          }}
-                        >
-                          {label.name}
-                        </button>
-                      )
-                    })}
-                </div>
-              ) : (
-                <span class="label-field-hint">gmail not connected</span>
-              )}
-            </div>
-            <label>
-              <span>max emails to fetch</span>
-              <input
-                type="number"
-                value={maxEmails}
-                min={1}
-                max={100}
-                onInput={(e) =>
-                  setMaxEmails(
-                    parseInt((e.target as HTMLInputElement).value) || 25
                   )
                 }
               />

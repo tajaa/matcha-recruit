@@ -825,6 +825,34 @@ body::after {
   font-size: 12px;
 }
 
+.gmail-status {
+  margin-bottom: 4px;
+}
+
+.gmail-connected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gmail-email {
+  font-size: 12px;
+  color: var(--matcha);
+}
+
+.gmail-disconnected {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gmail-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .label-field {
   margin-bottom: 10px;
 }

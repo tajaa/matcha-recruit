@@ -4,8 +4,10 @@ Exposes chat, email, calendar, and briefing capabilities over HTTP.
 Auth via shared secret bearer token.
 """
 
+import asyncio
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from datetime import datetime
 
@@ -17,7 +19,8 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from .config import load_config
-from .sandbox import Sandbox, SandboxViolation
+from .sandbox import Sandbox, SandboxedGmail, SandboxedCalendar, SandboxViolation
+from .slack_bot import SlackBot
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +42,12 @@ async def lifespan(app: FastAPI):
     logger.info(f"Agent API started. Workspace: {config.workspace_root}")
     logger.info(f"Gmail: {'enabled' if sandbox.gmail else 'disabled'}")
     logger.info(f"Calendar: {'enabled' if sandbox.calendar else 'disabled'}")
+
+    # Start Slack bot if configured
+    slack = SlackBot(sandbox, config)
+    if slack.is_configured:
+        slack.start()
+
     yield
     logger.info("Agent API shutting down")
 
@@ -110,6 +119,7 @@ async def health():
         "gmail": sandbox.gmail is not None if sandbox else False,
         "calendar": sandbox.calendar is not None if sandbox else False,
         "llm": sandbox.llm is not None if sandbox else False,
+        "slack": sandbox.slack_connected if sandbox else False,
     }
 
 
@@ -143,6 +153,95 @@ User: {req.message}"""
     except Exception as e:
         logger.error(f"Chat error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/agent/email/status")
+async def email_status(request: Request):
+    _check_auth(request)
+    if sandbox.gmail is None:
+        return {"connected": False, "email": None}
+    try:
+        token = await sandbox.gmail._get_access_token()
+        # Get the user's email from their profile
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                f"{sandbox.gmail.GMAIL_API_BASE}/users/me/profile",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10.0,
+            )
+            if resp.status_code == 200:
+                return {"connected": True, "email": resp.json().get("emailAddress")}
+        return {"connected": True, "email": None}
+    except Exception:
+        return {"connected": True, "email": None}
+
+
+@app.delete("/agent/email/disconnect")
+async def email_disconnect(request: Request):
+    _check_auth(request)
+    token_path = Path(config.workspace_root) / "token.json"
+    if token_path.exists():
+        token_path.unlink()
+        logger.info("Gmail token.json deleted")
+    sandbox.gmail = None
+    sandbox.calendar = None
+    return {"status": "disconnected"}
+
+
+@app.post("/agent/email/connect")
+async def email_connect(request: Request):
+    """Start Gmail OAuth flow. Returns an auth URL to open in a browser."""
+    _check_auth(request)
+
+    creds_path = Path(config.workspace_root) / "credentials.json"
+    if not creds_path.exists():
+        raise HTTPException(status_code=400, detail="credentials.json not found in workspace")
+
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError:
+        raise HTTPException(status_code=500, detail="google-auth-oauthlib not installed")
+
+    scopes = [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.compose",
+        "https://www.googleapis.com/auth/calendar.events",
+    ]
+
+    flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), scopes)
+
+    # Run the local OAuth server in a background thread
+    def _run_oauth():
+        import json
+        try:
+            creds = flow.run_local_server(port=9150, open_browser=False)
+            token_data = {
+                "token": creds.token,
+                "refresh_token": creds.refresh_token,
+                "token_uri": creds.token_uri,
+                "client_id": creds.client_id,
+                "client_secret": creds.client_secret,
+                "scopes": list(creds.scopes or []),
+            }
+            token_path = Path(config.workspace_root) / "token.json"
+            token_path.write_text(json.dumps(token_data, indent=2))
+            token_path.chmod(0o600)
+            # Reinitialize Gmail + Calendar on the sandbox
+            gmail = SandboxedGmail(config.workspace_root)
+            if gmail.is_configured:
+                sandbox.gmail = gmail
+                sandbox.calendar = SandboxedCalendar(gmail)
+                logger.info("Gmail reconnected after OAuth")
+        except Exception as e:
+            logger.error(f"OAuth flow failed: {e}")
+
+    thread = threading.Thread(target=_run_oauth, daemon=True)
+    thread.start()
+
+    # The OAuth server listens on port 9150
+    auth_url = flow.authorization_url()[0]
+    return {"auth_url": auth_url}
 
 
 @app.get("/agent/email/labels")

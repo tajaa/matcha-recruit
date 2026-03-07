@@ -7,3 +7,4 @@ pyyaml==6.0.3
 python-dotenv==1.2.1
 fastapi==0.115.12
 uvicorn==0.34.2
+slack_bolt==1.22.0

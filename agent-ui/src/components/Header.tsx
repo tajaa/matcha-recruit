@@ -10,6 +10,7 @@ export function Header({ health, onLogout }: Props) {
   const features: string[] = []
   if (health?.gmail) features.push('gmail')
   if (health?.calendar) features.push('cal')
+  if (health?.slack) features.push('slack')
 
   return (
     <header class="header">

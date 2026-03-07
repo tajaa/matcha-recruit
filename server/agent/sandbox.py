@@ -580,3 +580,6 @@ class Sandbox:
         self.calendar: SandboxedCalendar | None = None
         if self.gmail is not None:
             self.calendar = SandboxedCalendar(self.gmail)
+
+        # Slack — set externally by the slack bot module
+        self.slack_connected: bool = False
