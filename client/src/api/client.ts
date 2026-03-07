@@ -2167,8 +2167,18 @@ export interface BrokerClientInviteAcceptResponse {
 }
 
 export const brokerClientInviteApi = {
-  validate: (token: string): Promise<BrokerClientInviteDetails> =>
-    request<BrokerClientInviteDetails>(`/auth/broker-client-invite/${token}`),
+  validate: async (token: string): Promise<BrokerClientInviteDetails> => {
+    const response = await fetch(`${API_BASE}/auth/broker-client-invite/${token}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Request failed' }));
+      throw new ApiRequestError(
+        extractErrorMessage(error, 'Request failed'),
+        response.status,
+        error,
+      );
+    }
+    return response.json();
+  },
 
   accept: async (token: string, data: { password: string; name?: string; phone?: string; job_title?: string }): Promise<BrokerClientInviteAcceptResponse> => {
     const response = await fetch(`${API_BASE}/auth/broker-client-invite/${token}/accept`, {

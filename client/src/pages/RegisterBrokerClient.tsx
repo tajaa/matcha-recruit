@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { brokerClientInviteApi, type BrokerClientInviteDetails } from '../api/client';
+import { brokerClientInviteApi, ApiRequestError, type BrokerClientInviteDetails } from '../api/client';
 import { CheckCircle, XCircle, Loader2 } from 'lucide-react';
 
 export function RegisterBrokerClient() {
@@ -33,7 +33,15 @@ export function RegisterBrokerClient() {
         setInvite(data);
       })
       .catch((err) => {
-        setInviteError(err instanceof Error ? err.message : 'Invalid or expired invite link');
+        if (err instanceof ApiRequestError) {
+          if (err.status === 404) {
+            setInviteError('This invite link is invalid or has expired.');
+          } else {
+            setInviteError(err.message || 'Something went wrong validating your invite.');
+          }
+        } else {
+          setInviteError('Unable to reach the server. Please try again in a moment.');
+        }
       })
       .finally(() => {
         setValidating(false);
