@@ -6,6 +6,7 @@
 # Usage:
 #   ./agent.sh              # Interactive chat (default)
 #   ./agent.sh chat         # Interactive chat
+#   ./agent.sh start        # Start agent API server
 #   ./agent.sh stop         # Stop agent container
 #   ./agent.sh status       # Show agent container status
 #   ./agent.sh logs         # Tail agent logs
@@ -38,6 +39,12 @@ cmd_chat() {
         "cd ~/matcha && docker-compose --profile agent run --rm --entrypoint python matcha-agent -m agent.cli"
 }
 
+cmd_start() {
+    log_info "Starting agent API server..."
+    ssh_cmd "cd ~/matcha && docker-compose --profile agent up -d matcha-agent"
+    log_success "Agent API started on port 9100."
+}
+
 cmd_stop() {
     log_info "Stopping agent..."
     ssh_cmd "cd ~/matcha && docker-compose --profile agent stop matcha-agent && docker-compose --profile agent rm -f matcha-agent"
@@ -66,6 +73,7 @@ Interact with the matcha-agent running on EC2.
 
 COMMANDS:
     chat       Interactive chat with the agent (default)
+    start      Start agent API server (background)
     stop       Stop agent container
     status     Show agent container status
     logs       Tail agent logs
@@ -78,6 +86,7 @@ COMMAND="${1:-chat}"
 
 case "$COMMAND" in
     chat)    cmd_chat ;;
+    start)   cmd_start ;;
     stop)    cmd_stop ;;
     status)  cmd_status ;;
     logs)    cmd_logs ;;

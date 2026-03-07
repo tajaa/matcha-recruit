@@ -34,6 +34,9 @@ class AgentConfig:
     local_model_port: int = 8999
     local_model_url: str = ""  # Remote llama-server URL (e.g. http://llama:8999)
 
+    # API
+    api_secret: str = ""
+
     # Gmail skill settings
     gmail_enabled: bool = False
     gmail_max_emails: int = 25
@@ -96,6 +99,11 @@ def load_config(workspace_root: str | None = None, interval: int | None = None) 
     env_local_url = os.getenv("AGENT_LOCAL_MODEL_URL")
     if env_local_url:
         config.local_model_url = env_local_url
+
+    # API secret from env
+    env_api_secret = os.getenv("AGENT_API_SECRET")
+    if env_api_secret:
+        config.api_secret = env_api_secret
 
     # Gmail config from env
     if os.getenv("AGENT_GMAIL_ENABLED", "").lower() in ("1", "true", "yes"):

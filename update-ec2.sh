@@ -116,16 +116,9 @@ upload_model() {
 }
 
 deploy_agent() {
-    log_info "Deploying agent + llama..."
-
-    # Check model exists on EC2
-    ssh_cmd "test -f ~/matcha/models/Qwen3.5-0.8B-Q4_K_M.gguf" || {
-        log_error "Model not found on EC2. Run with --agent-upload first."
-        exit 1
-    }
-
-    ssh_cmd "cd ~/matcha && docker-compose --profile agent pull matcha-agent llama && docker-compose --profile agent up -d llama matcha-agent"
-    log_success "Agent deployed with local Qwen model!"
+    log_info "Deploying agent API..."
+    ssh_cmd "cd ~/matcha && docker-compose --profile agent pull matcha-agent && docker-compose --profile agent up -d matcha-agent"
+    log_success "Agent API deployed on port 9100!"
 }
 
 show_status() {

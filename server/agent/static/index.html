@@ -1,0 +1,1289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>matcha-agent</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --matcha: #7ab85d;
+  --matcha-dim: #5a8a42;
+  --matcha-glow: #7ab85d33;
+  --matcha-bright: #a0e080;
+  --bg-deep: #0a0e09;
+  --bg-surface: #111610;
+  --bg-elevated: #1a2018;
+  --bg-card: #1e261c;
+  --border: #2a3528;
+  --border-active: #3d4f38;
+  --text-primary: #d4ddd0;
+  --text-secondary: #8a9886;
+  --text-muted: #5a6858;
+  --text-bright: #eaf2e8;
+  --danger: #c45c5c;
+  --warning: #c4a85c;
+  --font: 'JetBrains Mono', monospace;
+  --radius: 6px;
+  --transition: 180ms ease;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg-deep);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scanline overlay */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* ─── LOGIN SCREEN ─── */
+#login-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-deep);
+  z-index: 1000;
+  flex-direction: column;
+  gap: 32px;
+}
+
+#login-screen.hidden { display: none; }
+
+.login-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.login-logo .glyph {
+  width: 48px;
+  height: 48px;
+  border: 2px solid var(--matcha);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  color: var(--matcha);
+  box-shadow: 0 0 24px var(--matcha-glow);
+  animation: pulse-glow 3s ease-in-out infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 24px var(--matcha-glow); }
+  50% { box-shadow: 0 0 40px var(--matcha-glow), 0 0 80px #7ab85d11; }
+}
+
+.login-logo h1 {
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text-bright);
+  letter-spacing: 2px;
+  text-transform: lowercase;
+}
+
+.login-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 320px;
+}
+
+.login-box input {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 12px 16px;
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.login-box input:focus {
+  border-color: var(--matcha-dim);
+}
+
+.login-box input::placeholder { color: var(--text-muted); }
+
+.login-box button {
+  background: var(--matcha-dim);
+  color: var(--bg-deep);
+  border: none;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  transition: background var(--transition);
+}
+
+.login-box button:hover { background: var(--matcha); }
+
+.login-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+
+.login-error {
+  color: var(--danger);
+  font-size: 11px;
+  text-align: center;
+  min-height: 16px;
+}
+
+/* ─── MAIN LAYOUT ─── */
+#app {
+  display: none;
+  height: 100vh;
+  flex-direction: column;
+}
+
+#app.active { display: flex; }
+
+/* ─── HEADER ─── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  height: 52px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-logo {
+  width: 28px;
+  height: 28px;
+  border: 1.5px solid var(--matcha);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--matcha);
+}
+
+.header-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-bright);
+  letter-spacing: 1px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  transition: background 0.5s;
+}
+
+.status-dot.online { background: var(--matcha); box-shadow: 0 0 8px var(--matcha-glow); }
+.status-dot.offline { background: var(--danger); }
+
+.status-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.btn-logout {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-logout:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* ─── TOOLBAR ─── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+  overflow-x: auto;
+}
+
+.toolbar::-webkit-scrollbar { display: none; }
+
+.tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 7px 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all var(--transition);
+  letter-spacing: 0.3px;
+}
+
+.tool-btn:hover {
+  border-color: var(--matcha-dim);
+  color: var(--matcha-bright);
+  background: var(--bg-card);
+}
+
+.tool-btn:active {
+  transform: scale(0.97);
+}
+
+.tool-btn.loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.tool-btn .icon {
+  font-size: 13px;
+  width: 16px;
+  text-align: center;
+}
+
+.toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  flex-shrink: 0;
+}
+
+/* ─── CHAT AREA ─── */
+.chat-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  scroll-behavior: smooth;
+}
+
+.chat-area::-webkit-scrollbar { width: 6px; }
+.chat-area::-webkit-scrollbar-track { background: transparent; }
+.chat-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.chat-area::-webkit-scrollbar-thumb:hover { background: var(--border-active); }
+
+/* Messages */
+.msg {
+  max-width: 720px;
+  padding: 10px 16px;
+  border-radius: var(--radius);
+  animation: msg-in 0.25s ease-out;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.msg.user {
+  align-self: flex-end;
+  background: var(--matcha-dim);
+  color: #0a0e09;
+  font-weight: 400;
+  border-bottom-right-radius: 2px;
+}
+
+.msg.agent {
+  align-self: flex-start;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-bottom-left-radius: 2px;
+}
+
+.msg.system {
+  align-self: center;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 6px 12px;
+  max-width: 480px;
+  text-align: center;
+}
+
+/* Agent message markdown */
+.msg.agent h1 { font-size: 16px; font-weight: 600; color: var(--text-bright); margin: 8px 0 4px; }
+.msg.agent h2 { font-size: 14px; font-weight: 600; color: var(--text-bright); margin: 8px 0 4px; }
+.msg.agent h3 { font-size: 13px; font-weight: 600; color: var(--matcha-bright); margin: 6px 0 2px; }
+.msg.agent strong { color: var(--text-bright); font-weight: 600; }
+.msg.agent em { font-style: italic; color: var(--text-secondary); }
+.msg.agent code {
+  background: var(--bg-deep);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+  color: var(--matcha-bright);
+}
+.msg.agent pre {
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin: 8px 0;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.msg.agent pre code {
+  background: none;
+  padding: 0;
+  color: var(--text-primary);
+}
+.msg.agent ul, .msg.agent ol {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+.msg.agent li { margin: 2px 0; }
+.msg.agent p { margin: 4px 0; }
+.msg.agent hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
+}
+.msg.agent a {
+  color: var(--matcha-bright);
+  text-decoration: none;
+}
+.msg.agent a:hover { text-decoration: underline; }
+.msg.agent blockquote {
+  border-left: 3px solid var(--matcha-dim);
+  padding-left: 12px;
+  color: var(--text-secondary);
+  margin: 6px 0;
+}
+
+/* ─── EMAIL CARDS ─── */
+.email-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 4px 0;
+  max-width: 580px;
+  animation: msg-in 0.25s ease-out;
+}
+
+.email-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.email-card-subject {
+  font-weight: 600;
+  color: var(--text-bright);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.email-card-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.email-card-preview {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  max-height: 60px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.email-card-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.email-action-btn {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 5px 12px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.email-action-btn:hover {
+  border-color: var(--matcha-dim);
+  color: var(--matcha-bright);
+}
+
+.email-action-btn.loading {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ─── LOADING INDICATOR ─── */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px;
+  align-self: flex-start;
+}
+
+.typing-indicator span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--matcha-dim);
+  animation: blink 1.4s ease-in-out infinite;
+}
+
+.typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+.typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes blink {
+  0%, 80%, 100% { opacity: 0.2; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+/* ─── INPUT AREA ─── */
+.input-area {
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+  flex-shrink: 0;
+}
+
+.input-row {
+  display: flex;
+  gap: 10px;
+  max-width: 800px;
+}
+
+.input-row textarea {
+  flex: 1;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 13px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  outline: none;
+  resize: none;
+  min-height: 40px;
+  max-height: 160px;
+  line-height: 1.5;
+  transition: border-color var(--transition);
+}
+
+.input-row textarea:focus {
+  border-color: var(--matcha-dim);
+}
+
+.input-row textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.send-btn {
+  background: var(--matcha-dim);
+  border: none;
+  color: var(--bg-deep);
+  font-family: var(--font);
+  font-size: 14px;
+  width: 42px;
+  height: 42px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition);
+  flex-shrink: 0;
+  align-self: flex-end;
+}
+
+.send-btn:hover { background: var(--matcha); }
+.send-btn:disabled { opacity: 0.3; cursor: default; }
+
+/* ─── WELCOME ─── */
+.welcome {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  gap: 16px;
+  padding: 40px 20px;
+  text-align: center;
+}
+
+.welcome-icon {
+  width: 56px;
+  height: 56px;
+  border: 2px solid var(--border);
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  color: var(--matcha-dim);
+}
+
+.welcome h2 {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-bright);
+  letter-spacing: 1px;
+}
+
+.welcome p {
+  color: var(--text-muted);
+  font-size: 12px;
+  max-width: 380px;
+  line-height: 1.7;
+}
+
+.welcome-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.welcome-shortcut {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.welcome-shortcut:hover {
+  border-color: var(--matcha-dim);
+  color: var(--matcha-bright);
+}
+
+/* ─── RESPONSIVE ─── */
+@media (max-width: 600px) {
+  .header { padding: 0 12px; }
+  .toolbar { padding: 8px 12px; }
+  .chat-area { padding: 12px; }
+  .input-area { padding: 12px; }
+  .msg { max-width: 95%; }
+  .email-card { max-width: 95%; }
+  .header-title { display: none; }
+  .btn-logout span { display: none; }
+  .status-label { display: none; }
+  .tool-btn span { display: none; }
+  .tool-btn { padding: 7px 10px; }
+  .tool-btn .icon { font-size: 15px; }
+}
+
+/* ─── DRAFT DIALOG ─── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fade-in 0.15s ease;
+}
+
+.overlay.hidden { display: none; }
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.dialog {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 24px;
+  width: 90%;
+  max-width: 460px;
+  animation: dialog-in 0.2s ease-out;
+}
+
+@keyframes dialog-in {
+  from { opacity: 0; transform: scale(0.96) translateY(8px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.dialog h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-bright);
+  margin-bottom: 4px;
+}
+
+.dialog .dialog-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 16px;
+}
+
+.dialog textarea {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 12px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  outline: none;
+  resize: vertical;
+  min-height: 72px;
+  line-height: 1.5;
+  margin-bottom: 16px;
+}
+
+.dialog textarea:focus { border-color: var(--matcha-dim); }
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.dialog-btn {
+  font-family: var(--font);
+  font-size: 12px;
+  padding: 8px 18px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  border: 1px solid var(--border);
+  transition: all var(--transition);
+}
+
+.dialog-btn.cancel {
+  background: none;
+  color: var(--text-secondary);
+}
+
+.dialog-btn.cancel:hover {
+  border-color: var(--text-muted);
+  color: var(--text-primary);
+}
+
+.dialog-btn.primary {
+  background: var(--matcha-dim);
+  color: var(--bg-deep);
+  border-color: var(--matcha-dim);
+  font-weight: 600;
+}
+
+.dialog-btn.primary:hover { background: var(--matcha); border-color: var(--matcha); }
+.dialog-btn.primary:disabled { opacity: 0.4; cursor: default; }
+</style>
+</head>
+<body>
+
+<!-- LOGIN -->
+<div id="login-screen">
+  <div class="login-logo">
+    <div class="glyph">&#x2618;</div>
+    <h1>matcha-agent</h1>
+  </div>
+  <div class="login-box">
+    <input type="password" id="login-token" placeholder="api secret" autocomplete="off" />
+    <button id="login-btn">connect</button>
+    <div class="login-error" id="login-error"></div>
+    <div class="login-hint">leave blank if no secret is configured</div>
+  </div>
+</div>
+
+<!-- MAIN APP -->
+<div id="app">
+  <div class="header">
+    <div class="header-left">
+      <div class="header-logo">&#x2618;</div>
+      <div class="header-title">matcha-agent</div>
+    </div>
+    <div class="header-right">
+      <div style="display:flex;align-items:center;gap:6px;">
+        <div class="status-dot" id="status-dot"></div>
+        <span class="status-label" id="status-label">checking...</span>
+      </div>
+      <button class="btn-logout" id="btn-logout"><span>logout</span></button>
+    </div>
+  </div>
+
+  <div class="toolbar">
+    <button class="tool-btn" id="btn-emails" title="Fetch emails">
+      <span class="icon">&#9993;</span><span>emails</span>
+    </button>
+    <button class="tool-btn" id="btn-briefing" title="RSS briefing">
+      <span class="icon">&#9783;</span><span>briefing</span>
+    </button>
+    <div class="toolbar-sep"></div>
+    <button class="tool-btn" id="btn-clear" title="Clear chat">
+      <span class="icon">&#10005;</span><span>clear</span>
+    </button>
+  </div>
+
+  <div class="chat-area" id="chat-area">
+    <div class="welcome" id="welcome">
+      <div class="welcome-icon">&#x2618;</div>
+      <h2>matcha-agent</h2>
+      <p>Sandboxed assistant with Gmail, Calendar, and RSS. Type a message or use the toolbar above.</p>
+      <div class="welcome-shortcuts">
+        <button class="welcome-shortcut" data-msg="Summarize my unread emails">check emails</button>
+        <button class="welcome-shortcut" data-msg="Give me today's news briefing">briefing</button>
+        <button class="welcome-shortcut" data-msg="What can you help me with?">what can you do?</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-row">
+      <textarea id="msg-input" placeholder="type a message..." rows="1"></textarea>
+      <button class="send-btn" id="send-btn" title="Send">&#8593;</button>
+    </div>
+  </div>
+</div>
+
+<!-- DRAFT DIALOG -->
+<div class="overlay hidden" id="draft-overlay">
+  <div class="dialog">
+    <h3>Draft Reply</h3>
+    <div class="dialog-sub" id="draft-to"></div>
+    <textarea id="draft-instructions" placeholder="Reply instructions (e.g. 'say thanks and confirm the meeting')..."></textarea>
+    <div class="dialog-actions">
+      <button class="dialog-btn cancel" id="draft-cancel">cancel</button>
+      <button class="dialog-btn primary" id="draft-send">draft &amp; save</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const $$ = (sel) => document.querySelectorAll(sel);
+
+// ── State ──
+let token = sessionStorage.getItem('agent_token') || '';
+let history = [];
+let isLoading = false;
+
+// ── API ──
+async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  const res = await fetch(path, { ...opts, headers: { ...headers, ...opts.headers } });
+  if (res.status === 401) {
+    sessionStorage.removeItem('agent_token');
+    location.reload();
+    throw new Error('Unauthorized');
+  }
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail || 'Request failed');
+  }
+  return res.json();
+}
+
+// ── Auth ──
+async function tryConnect(secret) {
+  token = secret;
+  try {
+    const data = await api('/health');
+    sessionStorage.setItem('agent_token', token);
+    return data;
+  } catch (e) {
+    token = '';
+    throw e;
+  }
+}
+
+$('#login-btn').onclick = async () => {
+  const secret = $('#login-token').value;
+  $('#login-error').textContent = '';
+  try {
+    await tryConnect(secret);
+    showApp();
+  } catch (e) {
+    $('#login-error').textContent = e.message || 'Connection failed';
+  }
+};
+
+$('#login-token').onkeydown = (e) => {
+  if (e.key === 'Enter') $('#login-btn').click();
+};
+
+function showApp() {
+  $('#login-screen').classList.add('hidden');
+  $('#app').classList.add('active');
+  checkHealth();
+  $('#msg-input').focus();
+}
+
+$('#btn-logout').onclick = () => {
+  sessionStorage.removeItem('agent_token');
+  token = '';
+  location.reload();
+};
+
+// Auto-login if token exists
+if (token) {
+  tryConnect(token).then(() => showApp()).catch(() => {
+    sessionStorage.removeItem('agent_token');
+    token = '';
+  });
+}
+
+// ── Health check ──
+async function checkHealth() {
+  try {
+    const data = await api('/health');
+    $('#status-dot').className = 'status-dot online';
+    const features = [];
+    if (data.gmail) features.push('gmail');
+    if (data.calendar) features.push('cal');
+    $('#status-label').textContent = features.length ? `online · ${features.join(', ')}` : 'online';
+  } catch {
+    $('#status-dot').className = 'status-dot offline';
+    $('#status-label').textContent = 'offline';
+  }
+}
+
+setInterval(checkHealth, 30000);
+
+// ── Chat ──
+function addMessage(role, content) {
+  const welcome = $('#welcome');
+  if (welcome) welcome.remove();
+
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+
+  if (role === 'agent') {
+    div.innerHTML = renderMarkdown(content);
+  } else {
+    div.textContent = content;
+  }
+
+  $('#chat-area').appendChild(div);
+  scrollToBottom();
+}
+
+function addSystem(text) {
+  const welcome = $('#welcome');
+  if (welcome) welcome.remove();
+
+  const div = document.createElement('div');
+  div.className = 'msg system';
+  div.textContent = text;
+  $('#chat-area').appendChild(div);
+  scrollToBottom();
+}
+
+function showTyping() {
+  const div = document.createElement('div');
+  div.className = 'typing-indicator';
+  div.id = 'typing';
+  div.innerHTML = '<span></span><span></span><span></span>';
+  $('#chat-area').appendChild(div);
+  scrollToBottom();
+}
+
+function hideTyping() {
+  const el = $('#typing');
+  if (el) el.remove();
+}
+
+function scrollToBottom() {
+  const area = $('#chat-area');
+  requestAnimationFrame(() => {
+    area.scrollTop = area.scrollHeight;
+  });
+}
+
+async function sendMessage(text) {
+  if (!text.trim() || isLoading) return;
+
+  addMessage('user', text);
+  history.push({ role: 'user', content: text });
+
+  isLoading = true;
+  $('#send-btn').disabled = true;
+  showTyping();
+
+  try {
+    const data = await api('/agent/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message: text, history: history.slice(-20) }),
+    });
+    hideTyping();
+    addMessage('agent', data.response);
+    history.push({ role: 'agent', content: data.response });
+  } catch (e) {
+    hideTyping();
+    addSystem(`Error: ${e.message}`);
+  }
+
+  isLoading = false;
+  $('#send-btn').disabled = false;
+  $('#msg-input').focus();
+}
+
+$('#send-btn').onclick = () => {
+  const input = $('#msg-input');
+  sendMessage(input.value);
+  input.value = '';
+  input.style.height = 'auto';
+};
+
+$('#msg-input').onkeydown = (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    $('#send-btn').click();
+  }
+};
+
+// Auto-resize textarea
+$('#msg-input').oninput = function () {
+  this.style.height = 'auto';
+  this.style.height = Math.min(this.scrollHeight, 160) + 'px';
+};
+
+// Welcome shortcuts
+$$('.welcome-shortcut').forEach((btn) => {
+  btn.onclick = () => {
+    const msg = btn.dataset.msg;
+    if (msg === 'Summarize my unread emails') {
+      fetchEmails();
+    } else if (msg === "Give me today's news briefing") {
+      runBriefing();
+    } else {
+      sendMessage(msg);
+    }
+  };
+});
+
+// ── Emails ──
+async function fetchEmails() {
+  const btn = $('#btn-emails');
+  btn.classList.add('loading');
+  addSystem('Fetching unread emails...');
+  showTyping();
+
+  try {
+    const data = await api('/agent/email/fetch', {
+      method: 'POST',
+      body: JSON.stringify({ max_results: 10 }),
+    });
+    hideTyping();
+
+    if (!data.emails || data.emails.length === 0) {
+      addSystem('No unread emails found.');
+    } else {
+      addSystem(`${data.emails.length} unread email${data.emails.length > 1 ? 's' : ''}:`);
+      data.emails.forEach((email) => addEmailCard(email));
+    }
+  } catch (e) {
+    hideTyping();
+    addSystem(`Email fetch failed: ${e.message}`);
+  }
+
+  btn.classList.remove('loading');
+}
+
+function addEmailCard(email) {
+  const welcome = $('#welcome');
+  if (welcome) welcome.remove();
+
+  const card = document.createElement('div');
+  card.className = 'email-card';
+
+  const preview = (email.body || '').slice(0, 150).replace(/\n/g, ' ');
+
+  card.innerHTML = `
+    <div class="email-card-header">
+      <div class="email-card-subject">${esc(email.subject)}</div>
+    </div>
+    <div class="email-card-meta">${esc(email.from)} &middot; ${esc(email.date || '')}</div>
+    <div class="email-card-preview">${esc(preview)}...</div>
+    <div class="email-card-actions">
+      <button class="email-action-btn" data-action="draft" data-id="${esc(email.id)}" data-from="${esc(email.from)}" data-subject="${esc(email.subject)}">
+        &#9997; draft reply
+      </button>
+      <button class="email-action-btn" data-action="schedule" data-id="${esc(email.id)}">
+        &#128197; schedule
+      </button>
+    </div>
+  `;
+
+  card.querySelector('[data-action="draft"]').onclick = (e) => {
+    const el = e.currentTarget;
+    openDraftDialog(el.dataset.id, el.dataset.from, el.dataset.subject);
+  };
+
+  card.querySelector('[data-action="schedule"]').onclick = (e) => {
+    createEvent(e.currentTarget.dataset.id, e.currentTarget);
+  };
+
+  $('#chat-area').appendChild(card);
+  scrollToBottom();
+}
+
+$('#btn-emails').onclick = fetchEmails;
+
+// ── Draft dialog ──
+let draftEmailId = null;
+
+function openDraftDialog(emailId, from, subject) {
+  draftEmailId = emailId;
+  $('#draft-to').textContent = `Re: ${subject} → ${from}`;
+  $('#draft-instructions').value = '';
+  $('#draft-overlay').classList.remove('hidden');
+  $('#draft-instructions').focus();
+}
+
+$('#draft-cancel').onclick = () => {
+  $('#draft-overlay').classList.add('hidden');
+  draftEmailId = null;
+};
+
+$('#draft-overlay').onclick = (e) => {
+  if (e.target === $('#draft-overlay')) {
+    $('#draft-cancel').click();
+  }
+};
+
+$('#draft-send').onclick = async () => {
+  if (!draftEmailId) return;
+  const instructions = $('#draft-instructions').value;
+  const btn = $('#draft-send');
+  btn.disabled = true;
+  btn.textContent = 'drafting...';
+
+  try {
+    const data = await api('/agent/email/draft', {
+      method: 'POST',
+      body: JSON.stringify({ email_id: draftEmailId, instructions }),
+    });
+    $('#draft-overlay').classList.add('hidden');
+    addSystem(`Draft saved → ${data.to}`);
+    addMessage('agent', `**Draft to ${data.to}**\n\nSubject: ${data.subject}\n\n---\n\n${data.body}\n\n---\n_Saved to Gmail Drafts. Open Gmail to review and send._`);
+  } catch (e) {
+    addSystem(`Draft failed: ${e.message}`);
+    $('#draft-overlay').classList.add('hidden');
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'draft & save';
+  draftEmailId = null;
+};
+
+// ── Calendar ──
+async function createEvent(emailId, btnEl) {
+  if (btnEl) btnEl.classList.add('loading');
+  addSystem('Extracting event details...');
+  showTyping();
+
+  try {
+    const data = await api('/agent/calendar/create', {
+      method: 'POST',
+      body: JSON.stringify({ email_id: emailId }),
+    });
+    hideTyping();
+
+    const ev = data.event;
+    let text = `**Event Created**\n\n- **${ev.summary}**\n- Start: ${ev.start}\n- End: ${ev.end}`;
+    if (ev.location) text += `\n- Location: ${ev.location}`;
+    if (ev.attendees && ev.attendees.length) text += `\n- Attendees: ${ev.attendees.join(', ')}`;
+    if (data.link) text += `\n\n[Open in Calendar](${data.link})`;
+
+    addMessage('agent', text);
+  } catch (e) {
+    hideTyping();
+    addSystem(`Calendar error: ${e.message}`);
+  }
+
+  if (btnEl) btnEl.classList.remove('loading');
+}
+
+// ── Briefing ──
+async function runBriefing() {
+  const btn = $('#btn-briefing');
+  btn.classList.add('loading');
+  addSystem('Generating RSS briefing...');
+  showTyping();
+
+  try {
+    const data = await api('/agent/briefing', { method: 'POST' });
+    hideTyping();
+    if (data.content) {
+      addMessage('agent', data.content);
+    } else {
+      addSystem('No briefing generated.');
+    }
+  } catch (e) {
+    hideTyping();
+    addSystem(`Briefing failed: ${e.message}`);
+  }
+
+  btn.classList.remove('loading');
+}
+
+$('#btn-briefing').onclick = runBriefing;
+
+// ── Clear ──
+$('#btn-clear').onclick = () => {
+  history = [];
+  $('#chat-area').innerHTML = '';
+
+  // Restore welcome
+  const w = document.createElement('div');
+  w.className = 'welcome';
+  w.id = 'welcome';
+  w.innerHTML = `
+    <div class="welcome-icon">&#x2618;</div>
+    <h2>matcha-agent</h2>
+    <p>Sandboxed assistant with Gmail, Calendar, and RSS. Type a message or use the toolbar above.</p>
+    <div class="welcome-shortcuts">
+      <button class="welcome-shortcut" data-msg="Summarize my unread emails">check emails</button>
+      <button class="welcome-shortcut" data-msg="Give me today's news briefing">briefing</button>
+      <button class="welcome-shortcut" data-msg="What can you help me with?">what can you do?</button>
+    </div>
+  `;
+  $('#chat-area').appendChild(w);
+  w.querySelectorAll('.welcome-shortcut').forEach((btn) => {
+    btn.onclick = () => {
+      const msg = btn.dataset.msg;
+      if (msg === 'Summarize my unread emails') fetchEmails();
+      else if (msg === "Give me today's news briefing") runBriefing();
+      else sendMessage(msg);
+    };
+  });
+};
+
+// ── Markdown renderer ──
+function renderMarkdown(text) {
+  // Code blocks
+  text = text.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) => {
+    return `<pre><code>${esc(code.trim())}</code></pre>`;
+  });
+  // Inline code
+  text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+  // Headers
+  text = text.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  text = text.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  text = text.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+  // Bold
+  text = text.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  // Italic
+  text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  // Links
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  // Blockquote
+  text = text.replace(/^> (.+)$/gm, '<blockquote>$1</blockquote>');
+  // HR
+  text = text.replace(/^---$/gm, '<hr>');
+  // Unordered lists
+  text = text.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+  text = text.replace(/((?:<li>.*<\/li>\n?)+)/g, '<ul>$1</ul>');
+  // Ordered lists
+  text = text.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+  // Checkbox lists
+  text = text.replace(/^- \[x\] (.+)$/gm, '<li>&#9745; $1</li>');
+  text = text.replace(/^- \[ \] (.+)$/gm, '<li>&#9744; $1</li>');
+  // Paragraphs
+  text = text.replace(/\n{2,}/g, '</p><p>');
+  text = text.replace(/\n/g, '<br>');
+  text = `<p>${text}</p>`;
+  // Cleanup empty paragraphs
+  text = text.replace(/<p>\s*<\/p>/g, '');
+  text = text.replace(/<p>(<h[123]>)/g, '$1');
+  text = text.replace(/(<\/h[123]>)<\/p>/g, '$1');
+  text = text.replace(/<p>(<pre>)/g, '$1');
+  text = text.replace(/(<\/pre>)<\/p>/g, '$1');
+  text = text.replace(/<p>(<ul>)/g, '$1');
+  text = text.replace(/(<\/ul>)<\/p>/g, '$1');
+  text = text.replace(/<p>(<hr>)<\/p>/g, '$1');
+  text = text.replace(/<p>(<blockquote>)/g, '$1');
+  text = text.replace(/(<\/blockquote>)<\/p>/g, '$1');
+  return text;
+}
+
+function esc(s) {
+  const el = document.createElement('span');
+  el.textContent = s;
+  return el.innerHTML;
+}
+</script>
+</body>
+</html>

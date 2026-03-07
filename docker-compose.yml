@@ -135,15 +135,18 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Autonomous agent — uses Gemini API
+  # Autonomous agent — Gemini API + standalone UI on port 9100
   matcha-agent:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-agent:latest
     container_name: matcha-agent
     profiles:
       - agent
+    ports:
+      - "127.0.0.1:9100:9100"
     environment:
       - AGENT_WORKSPACE_ROOT=/workspace
       - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - AGENT_API_SECRET=${AGENT_API_SECRET:-}
       - AGENT_GMAIL_ENABLED=${AGENT_GMAIL_ENABLED:-false}
     volumes:
       - agent_workspace:/workspace
@@ -157,8 +160,13 @@ services:
     restart: unless-stopped
     networks:
       - agent-network
-    entrypoint: ["python", "-m", "agent.agent"]
-    command: ["--once"]
+      - matcha-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     deploy:
       resources:
         limits:
