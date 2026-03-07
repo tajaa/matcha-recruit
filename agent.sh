@@ -42,7 +42,7 @@ cmd_chat() {
 
     # Run agent CLI interactively with TTY
     ssh -t -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new "$EC2_USER@$EC2_HOST" \
-        "cd ~/matcha && docker-compose --profile agent run --rm -e AGENT_LOCAL_MODEL_URL=http://llama:8999 matcha-agent python -m agent.cli"
+        "cd ~/matcha && docker-compose --profile agent run --rm --entrypoint python -e AGENT_LOCAL_MODEL_URL=http://llama:8999 matcha-agent -m agent.cli"
 }
 
 cmd_stop() {
