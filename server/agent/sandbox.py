@@ -300,7 +300,7 @@ class SandboxedGmail:
         logger.info("Gmail token refreshed and saved")
         return self._token_data["token"]
 
-    async def _gmail_get(self, path: str, params: dict | None = None) -> dict:
+    async def _gmail_get(self, path: str, params: dict | list[tuple[str, str]] | None = None) -> dict:
         """Make a GET request to the Gmail API."""
         url = f"{self.GMAIL_API_BASE}{path}"
 
@@ -385,12 +385,14 @@ class SandboxedGmail:
 
     async def fetch_unread(self, max_results: int = 25, label_ids: list[str] | None = None) -> list[dict]:
         """Fetch unread message stubs (id + threadId)."""
-        params = {
-            "maxResults": max_results,
-            "q": "is:unread",
-        }
+        # Gmail API requires labelIds as repeated query params, not comma-joined
+        params: list[tuple[str, str]] = [
+            ("maxResults", str(max_results)),
+            ("q", "is:unread"),
+        ]
         if label_ids:
-            params["labelIds"] = ",".join(label_ids)
+            for label in label_ids:
+                params.append(("labelIds", label))
 
         data = await self._gmail_get("/users/me/messages", params=params)
         return data.get("messages", [])

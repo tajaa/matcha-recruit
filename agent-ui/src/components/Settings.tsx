@@ -159,14 +159,14 @@ export function Settings({ open, onClose }: Props) {
           <section class="settings-section">
             <h3>email</h3>
             <label>
-              <span>gmail labels</span>
+              <span>gmail labels (comma-separated)</span>
               <input
                 type="text"
                 value={labels}
                 onInput={(e) =>
                   setLabels((e.target as HTMLInputElement).value)
                 }
-                placeholder="INBOX, IMPORTANT, CATEGORY_UPDATES"
+                placeholder="INBOX"
               />
             </label>
             <label>
