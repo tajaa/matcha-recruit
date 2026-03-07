@@ -6,7 +6,7 @@
 # Usage:
 #   ./agent.sh              # Interactive chat (default)
 #   ./agent.sh chat         # Interactive chat
-#   ./agent.sh stop         # Stop agent + llama containers
+#   ./agent.sh stop         # Stop agent container
 #   ./agent.sh status       # Show agent container status
 #   ./agent.sh logs         # Tail agent logs
 ################################################################################
@@ -33,36 +33,29 @@ ssh_cmd() {
 cmd_chat() {
     log_info "Connecting to agent on EC2..."
 
-    # Ensure llama is running
-    ssh_cmd "cd ~/matcha && docker-compose --profile agent up -d llama" 2>/dev/null
-
-    # Wait briefly for llama health check
-    log_info "Waiting for llama-server..."
-    ssh_cmd "cd ~/matcha && timeout 30 bash -c 'until docker-compose --profile agent ps llama | grep -q healthy; do sleep 1; done'" 2>/dev/null || true
-
     # Run agent CLI interactively with TTY
     ssh -t -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new "$EC2_USER@$EC2_HOST" \
-        "cd ~/matcha && docker-compose --profile agent run --rm --entrypoint python -e AGENT_LOCAL_MODEL_URL=http://llama:8999 matcha-agent -m agent.cli"
+        "cd ~/matcha && docker-compose --profile agent run --rm --entrypoint python matcha-agent -m agent.cli"
 }
 
 cmd_stop() {
-    log_info "Stopping agent and llama..."
-    ssh_cmd "cd ~/matcha && docker-compose --profile agent stop matcha-agent llama && docker-compose --profile agent rm -f matcha-agent llama"
+    log_info "Stopping agent..."
+    ssh_cmd "cd ~/matcha && docker-compose --profile agent stop matcha-agent && docker-compose --profile agent rm -f matcha-agent"
     log_success "Agent stopped."
 }
 
 cmd_status() {
     log_info "Agent containers:"
-    ssh_cmd "docker ps --filter name=matcha-agent --filter name=matcha-llama --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo 'No agent containers running'"
+    ssh_cmd "docker ps --filter name=matcha-agent --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}' 2>/dev/null || echo 'No agent containers running'"
     echo ""
     log_info "Memory:"
-    ssh_cmd "docker stats --no-stream --filter name=matcha-agent --filter name=matcha-llama --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' 2>/dev/null || true"
+    ssh_cmd "docker stats --no-stream --filter name=matcha-agent --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' 2>/dev/null || true"
 }
 
 cmd_logs() {
     log_info "Tailing agent logs (Ctrl+C to stop)..."
     ssh -t -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new "$EC2_USER@$EC2_HOST" \
-        "cd ~/matcha && docker-compose --profile agent logs -f --tail 50 matcha-agent llama"
+        "cd ~/matcha && docker-compose --profile agent logs -f --tail 50 matcha-agent"
 }
 
 usage() {
@@ -73,9 +66,9 @@ Interact with the matcha-agent running on EC2.
 
 COMMANDS:
     chat       Interactive chat with the agent (default)
-    stop       Stop agent and llama containers
+    stop       Stop agent container
     status     Show agent container status
-    logs       Tail agent and llama logs
+    logs       Tail agent logs
     -h,--help  Show this help message
 EOF
 }

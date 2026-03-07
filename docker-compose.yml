@@ -135,7 +135,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # Autonomous agent — uses local Qwen model via llama container
+  # Autonomous agent — uses Gemini API
   matcha-agent:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-agent:latest
     container_name: matcha-agent
@@ -143,13 +143,10 @@ services:
       - agent
     environment:
       - AGENT_WORKSPACE_ROOT=/workspace
-      - AGENT_LOCAL_MODEL_URL=http://llama:8999
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
       - AGENT_GMAIL_ENABLED=${AGENT_GMAIL_ENABLED:-false}
     volumes:
       - agent_workspace:/workspace
-    depends_on:
-      llama:
-        condition: service_healthy
     read_only: true
     tmpfs:
       - /tmp:size=64m
@@ -333,7 +330,6 @@ networks:
     driver: bridge
   agent-network:
     driver: bridge
-    internal: true
 
 volumes:
   uploads:
