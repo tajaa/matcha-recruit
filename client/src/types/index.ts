@@ -2490,6 +2490,19 @@ export interface IRAuditLogResponse {
   total: number;
 }
 
+// Employee incident item (for employee detail sidebar)
+export interface EmployeeIncidentItem {
+  id: string;
+  incident_number: number;
+  title: string;
+  incident_type: 'safety' | 'behavioral' | 'property' | 'near_miss' | 'other';
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  status: 'reported' | 'investigating' | 'action_required' | 'resolved' | 'closed';
+  occurred_at: string;
+  reported_by_name: string;
+  role: string;
+}
+
 // Blog types
 export type BlogStatus = 'draft' | 'published' | 'archived';
 

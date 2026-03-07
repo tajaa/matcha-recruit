@@ -123,6 +123,7 @@ import type {
   IRConsistencyGuidance,
   IRConsistencyAnalytics,
   IRAuditLogResponse,
+  EmployeeIncidentItem,
   // Policy types
   Policy,
   PolicyCreate,
@@ -3931,4 +3932,9 @@ export const adminPlatformSettings = {
       method: 'PUT',
       body: JSON.stringify({ weights }),
     }),
+};
+
+export const employees = {
+  getIncidents: (employeeId: string): Promise<EmployeeIncidentItem[]> =>
+    request<EmployeeIncidentItem[]>(`/employees/${employeeId}/incidents`),
 };

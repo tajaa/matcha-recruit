@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getAccessToken, provisioning } from '../api/client';
-import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioningStatus, ProvisioningRunStatus } from '../types';
+import { getAccessToken, provisioning, employees as employeesApi } from '../api/client';
+import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioningStatus, ProvisioningRunStatus, EmployeeIncidentItem } from '../types';
+import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, Mail, Phone, MapPin, Calendar, Users, CheckCircle, Clock, FileText,
   Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw,
@@ -108,6 +109,7 @@ function provisioningStatusBadge(status?: string | null): string {
 export default function EmployeeDetail() {
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
+  const { hasFeature } = useAuth();
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [tasks, setTasks] = useState<OnboardingTask[]>([]);
   const [templates, setTemplates] = useState<OnboardingTemplate[]>([]);
@@ -128,6 +130,7 @@ export default function EmployeeDetail() {
   const [allEmployees, setAllEmployees] = useState<EmployeeListItem[]>([]);
   const [directReports, setDirectReports] = useState<EmployeeListItem[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
+  const [incidents, setIncidents] = useState<EmployeeIncidentItem[]>([]);
 
   const startEditing = () => {
     if (!employee) return;
@@ -321,6 +324,12 @@ export default function EmployeeDetail() {
     fetchAllEmployees();
     fetchDirectReports();
     fetchDepartments();
+  }, [employeeId]);
+
+  // Fetch incidents related to this employee
+  useEffect(() => {
+    if (!employeeId || !hasFeature('incidents')) return;
+    employeesApi.getIncidents(employeeId).then(setIncidents).catch(() => setIncidents([]));
   }, [employeeId]);
 
   const handleAssignAll = async () => {
@@ -787,6 +796,64 @@ export default function EmployeeDetail() {
               </div>
             )}
           </div>
+
+          {/* Incident Reports */}
+          {hasFeature('incidents') && (
+          <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} className="text-zinc-500" />
+              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Incident Reports</h2>
+              {incidents.length > 0 && (
+                <span className="ml-auto px-1.5 py-0.5 text-[10px] font-bold tabular-nums bg-zinc-800 text-zinc-300 border border-white/10 rounded">
+                  {incidents.length}
+                </span>
+              )}
+            </div>
+            {incidents.length === 0 ? (
+              <p className="text-xs text-zinc-600 font-mono uppercase">No incidents on record</p>
+            ) : (
+              <div className="space-y-2">
+                {incidents.map((inc) => {
+                  const sevDot: Record<string, string> = { critical: 'bg-zinc-100', high: 'bg-zinc-400', medium: 'bg-zinc-500', low: 'bg-zinc-600' };
+                  const statusColor: Record<string, string> = { reported: 'text-zinc-100', investigating: 'text-zinc-400', action_required: 'text-zinc-300', resolved: 'text-zinc-500', closed: 'text-zinc-600' };
+                  const typeLabel: Record<string, string> = { safety: 'Safety', behavioral: 'Behavioral', property: 'Property', near_miss: 'Near Miss', other: 'Other' };
+                  const roleLabel: Record<string, string> = { reporter: 'Reporter', involved: 'Involved', witness: 'Witness' };
+                  return (
+                    <div
+                      key={inc.id}
+                      onClick={() => navigate(`/app/ir/incidents/${inc.id}`)}
+                      className="p-3 rounded bg-zinc-950/50 border border-white/5 hover:border-white/15 cursor-pointer transition-colors group"
+                    >
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sevDot[inc.severity] || 'bg-zinc-600'}`} />
+                        <span className="text-[10px] text-zinc-500 font-mono">
+                          #IR-{String(inc.incident_number).padStart(4, '0')}
+                        </span>
+                        <span className={`ml-auto text-[10px] uppercase tracking-wider font-bold ${statusColor[inc.status] || 'text-zinc-500'}`}>
+                          {inc.status.replace('_', ' ')}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-300 group-hover:text-white truncate transition-colors font-medium">
+                        {inc.title}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                        <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-400 border border-white/5 rounded">
+                          {typeLabel[inc.incident_type] || inc.incident_type}
+                        </span>
+                        <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-400 border border-white/5 rounded">
+                          {roleLabel[inc.role] || inc.role}
+                        </span>
+                        <span className="ml-auto text-[10px] text-zinc-600 font-mono">
+                          {new Date(inc.occurred_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          )}
 
           <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
             <div className="flex items-center justify-between gap-2">
