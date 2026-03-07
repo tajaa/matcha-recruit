@@ -303,11 +303,20 @@ def test_build_state_sections_injects_state_requirements_when_available():
     assert "[HR_CONTACT_EMAIL]" in content
 
 
-def test_build_state_sections_includes_repository_fallback_when_missing():
+def test_build_state_sections_includes_generic_prose_when_no_requirements():
     sections = _build_state_sections(["NY"], {"tip_pooling": False}, {"NY": []})
     assert len(sections) == 1
     content = sections[0]["content"]
-    assert "No verified statutory entries were found in the compliance repository" in content
+    # When no requirements exist, the addendum should still contain polished
+    # prose covering each mandatory topic — not raw fallback warnings.
+    assert "applicable minimum wage" in content
+    assert "paid sick leave" in content
+    assert "meal and rest break" in content.lower()
+    assert "final pay" in content.lower()
+    # Must NOT contain internal review warnings
+    assert "No verified statutory entries" not in content
+    assert "Run a compliance refresh" not in content
+    assert "Do not publish this addendum without legal sign-off" not in content
 
 
 def test_build_state_sections_mentions_selected_city_scope():
