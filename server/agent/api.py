@@ -145,6 +145,21 @@ User: {req.message}"""
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/agent/email/labels")
+async def email_labels(request: Request):
+    _check_auth(request)
+
+    if sandbox.gmail is None:
+        raise HTTPException(status_code=400, detail="Gmail not configured")
+
+    try:
+        labels = await sandbox.gmail.list_labels()
+        return {"labels": labels}
+    except Exception as e:
+        logger.error(f"Email labels error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/agent/email/fetch")
 async def email_fetch(req: EmailFetchRequest, request: Request):
     _check_auth(request)

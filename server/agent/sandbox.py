@@ -383,6 +383,18 @@ class SandboxedGmail:
         logger.info(f"Draft created: {data.get('id')}")
         return data
 
+    async def list_labels(self) -> list[dict]:
+        """List all Gmail labels (system + custom)."""
+        data = await self._gmail_get("/users/me/labels")
+        labels = []
+        for label in data.get("labels", []):
+            labels.append({
+                "id": label["id"],
+                "name": label.get("name", label["id"]),
+                "type": label.get("type", "user"),
+            })
+        return labels
+
     async def fetch_unread(self, max_results: int = 25, label_ids: list[str] | None = None) -> list[dict]:
         """Fetch unread message stubs (id + threadId)."""
         # Gmail API requires labelIds as repeated query params, not comma-joined

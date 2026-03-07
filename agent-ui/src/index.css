@@ -825,6 +825,55 @@ body::after {
   font-size: 12px;
 }
 
+.label-field {
+  margin-bottom: 10px;
+}
+
+.label-field-title {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+}
+
+.label-field-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.label-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.label-chip {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 11px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: all var(--ease);
+  white-space: nowrap;
+}
+
+.label-chip:hover {
+  border-color: var(--matcha-dim);
+  color: var(--text);
+}
+
+.label-chip.active {
+  background: var(--matcha-dim);
+  border-color: var(--matcha-dim);
+  color: var(--bg-deep);
+  font-weight: 600;
+}
+
 /* ── Responsive ── */
 @media (max-width: 600px) {
   .header { padding: 0 12px; }

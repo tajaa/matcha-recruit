@@ -39,6 +39,12 @@ export interface ChatMessage {
   content: string
 }
 
+export interface GmailLabel {
+  id: string
+  name: string
+  type: string
+}
+
 export interface FeedItem {
   url: string
   name: string
@@ -89,6 +95,8 @@ export const api = {
     request<{ file: string | null; content: string }>('/agent/briefing', {
       method: 'POST',
     }),
+
+  getLabels: () => request<{ labels: GmailLabel[] }>('/agent/email/labels'),
 
   getConfig: () => request<AgentConfig>('/agent/config'),
 

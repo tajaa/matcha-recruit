@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'preact/hooks'
 import { api } from '../lib/api'
-import type { AgentConfig, FeedItem } from '../lib/api'
+import type { AgentConfig, FeedItem, GmailLabel } from '../lib/api'
 
 interface Props {
   open: boolean
@@ -10,7 +10,8 @@ interface Props {
 export function Settings({ open, onClose }: Props) {
   const [config, setConfig] = useState<AgentConfig | null>(null)
   const [feeds, setFeeds] = useState<FeedItem[]>([])
-  const [labels, setLabels] = useState('')
+  const [selectedLabels, setSelectedLabels] = useState<string[]>(['INBOX'])
+  const [availableLabels, setAvailableLabels] = useState<GmailLabel[]>([])
   const [maxEmails, setMaxEmails] = useState(25)
   const [interests, setInterests] = useState('')
   const [maxEntries, setMaxEntries] = useState(10)
@@ -22,11 +23,16 @@ export function Settings({ open, onClose }: Props) {
       api.getConfig().then((c) => {
         setConfig(c)
         setFeeds(c.feeds.length ? c.feeds : [{ url: '', name: '' }])
-        setLabels(c.gmail_label_ids.join(', '))
+        setSelectedLabels(c.gmail_label_ids.length ? c.gmail_label_ids : ['INBOX'])
         setMaxEmails(c.gmail_max_emails)
         setInterests(c.rss_interests)
         setMaxEntries(c.rss_max_entries_per_feed)
         setStatus('')
+      })
+      api.getLabels().then((data) => {
+        setAvailableLabels(data.labels)
+      }).catch(() => {
+        // Gmail not configured — leave empty
       })
     }
   }, [open])
@@ -48,14 +54,10 @@ export function Settings({ open, onClose }: Props) {
     setStatus('')
     try {
       const validFeeds = feeds.filter((f) => f.url.trim())
-      const labelList = labels
-        .split(',')
-        .map((l) => l.trim())
-        .filter(Boolean)
 
       const updated = await api.updateConfig({
         feeds: validFeeds,
-        gmail_label_ids: labelList.length ? labelList : ['INBOX'],
+        gmail_label_ids: selectedLabels.length ? selectedLabels : ['INBOX'],
         gmail_max_emails: maxEmails,
         rss_interests: interests,
         rss_max_entries_per_feed: maxEntries,
@@ -158,17 +160,39 @@ export function Settings({ open, onClose }: Props) {
 
           <section class="settings-section">
             <h3>email</h3>
-            <label>
-              <span>gmail labels (comma-separated)</span>
-              <input
-                type="text"
-                value={labels}
-                onInput={(e) =>
-                  setLabels((e.target as HTMLInputElement).value)
-                }
-                placeholder="INBOX"
-              />
-            </label>
+            <div class="label-field">
+              <span class="label-field-title">fetch from labels</span>
+              {availableLabels.length > 0 ? (
+                <div class="label-chips">
+                  {availableLabels
+                    .sort((a, b) => {
+                      if (a.type === 'system' && b.type !== 'system') return -1
+                      if (a.type !== 'system' && b.type === 'system') return 1
+                      return a.name.localeCompare(b.name)
+                    })
+                    .map((label) => {
+                      const active = selectedLabels.includes(label.id)
+                      return (
+                        <button
+                          key={label.id}
+                          class={`label-chip ${active ? 'active' : ''}`}
+                          onClick={() => {
+                            setSelectedLabels((prev) =>
+                              active
+                                ? prev.filter((l) => l !== label.id)
+                                : [...prev, label.id]
+                            )
+                          }}
+                        >
+                          {label.name}
+                        </button>
+                      )
+                    })}
+                </div>
+              ) : (
+                <span class="label-field-hint">gmail not connected</span>
+              )}
+            </div>
             <label>
               <span>max emails to fetch</span>
               <input
