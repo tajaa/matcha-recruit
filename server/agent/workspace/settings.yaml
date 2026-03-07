@@ -1,5 +1,5 @@
 gmail_label_ids:
 - INBOX
-gmail_max_emails: 2
+gmail_max_emails: 3
 rss_interests: AI, startups, software engineering, HR tech
 rss_max_entries_per_feed: 10
