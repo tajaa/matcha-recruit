@@ -653,7 +653,7 @@ export default function RiskAssessment() {
               const dim = data.dimensions[key];
               const meta = DIMENSION_META[key];
               const c = BAND_COLOR[dim.band];
-              const weightPct = data.weights[key] != null ? `${Math.round(data.weights[key] * 100)}%` : null;
+              const weightPct = data.weights?.[key] != null ? `${Math.round(data.weights?.[key] * 100)}%` : null;
               return (
                 <div key={key} className="bg-zinc-900 p-6 flex flex-col justify-between group">
                   <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-1.5">
@@ -684,7 +684,7 @@ export default function RiskAssessment() {
                   key={key}
                   dimensionKey={key}
                   dim={data.dimensions[key]}
-                  weight={data.weights[key] != null ? `${Math.round(data.weights[key] * 100)}%` : undefined}
+                  weight={data.weights?.[key] != null ? `${Math.round(data.weights?.[key] * 100)}%` : undefined}
                 />
               ))}
             </div>
