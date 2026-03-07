@@ -62,6 +62,7 @@ export function App() {
         messages={chat.messages}
         loading={chat.loading}
         onDraft={chat.draftReply}
+        onSend={chat.sendEmail}
         onSchedule={chat.createEvent}
         onQuickAction={handleQuickAction}
       />

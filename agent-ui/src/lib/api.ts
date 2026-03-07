@@ -88,6 +88,15 @@ export const api = {
       }
     ),
 
+  sendEmail: (to: string, subject: string, body: string, reply_to_id?: string) =>
+    request<{ message_id: string; to: string; subject: string }>(
+      '/agent/email/send',
+      {
+        method: 'POST',
+        body: JSON.stringify({ to, subject, body, reply_to_id }),
+      }
+    ),
+
   createEvent: (email_id: string) =>
     request<{ event: Record<string, unknown>; link: string }>(
       '/agent/calendar/create',

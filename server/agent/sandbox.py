@@ -246,6 +246,7 @@ class SandboxedGmail:
         self._workspace = Path(workspace_root)
         self._token_path = self._workspace / "token.json"
         self._token_data: dict | None = None
+        self._send_timestamps: list[float] = []
         if self._token_path.exists():
             self._token_data = json.loads(self._token_path.read_text())
 
@@ -320,17 +321,17 @@ class SandboxedGmail:
             resp.raise_for_status()
             return resp.json()
 
-    async def _gmail_post(self, path: str, body: dict) -> dict:
-        """Make a POST request to the Gmail API (drafts only)."""
+    async def _gmail_post(self, path: str, body: dict, allow_send: bool = False) -> dict:
+        """Make a POST request to the Gmail API."""
         url = f"{self.GMAIL_API_BASE}{path}"
 
         parsed = urlparse(url)
         if parsed.hostname != "gmail.googleapis.com" or not parsed.path.startswith("/gmail/v1"):
             raise SandboxViolation(f"Gmail URL outside allowed scope: {url}")
 
-        # Only allow draft creation — block send endpoints
-        if "/send" in path:
-            raise SandboxViolation("Sending emails is not allowed")
+        # Block send unless explicitly allowed (rate-limited send_email method)
+        if "/send" in path and not allow_send:
+            raise SandboxViolation("Use send_email() for rate-limited sending")
 
         token = await self._get_access_token()
         async with httpx.AsyncClient() as client:
@@ -381,6 +382,58 @@ class SandboxedGmail:
 
         data = await self._gmail_post("/users/me/drafts", draft_body)
         logger.info(f"Draft created: {data.get('id')}")
+        return data
+
+    # --- Rate-limited send ---
+
+    def _check_send_rate(self):
+        """Enforce 5/min and 50/hour send limits."""
+        now = time.time()
+        # Prune timestamps older than 1 hour
+        self._send_timestamps = [t for t in self._send_timestamps if now - t < 3600]
+
+        last_minute = [t for t in self._send_timestamps if now - t < 60]
+        if len(last_minute) >= 5:
+            raise SandboxViolation("Send rate limit: max 5 emails per minute")
+        if len(self._send_timestamps) >= 50:
+            raise SandboxViolation("Send rate limit: max 50 emails per hour")
+
+    async def send_email(self, to: str, subject: str, body: str, reply_to_id: str | None = None) -> dict:
+        """Send an email via Gmail. Rate-limited to 5/min and 50/hour."""
+        import base64
+
+        self._check_send_rate()
+
+        # Validate fields (same as create_draft)
+        for field_name, value in [("to", to), ("subject", subject)]:
+            if "\r" in value or "\n" in value:
+                raise SandboxViolation(f"Email {field_name} contains newline characters (header injection attempt)")
+
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', to) and \
+           not re.match(r'^.+\s*<[^@\s]+@[^@\s]+\.[^@\s]+>$', to):
+            raise SandboxViolation(f"Invalid email address format: {to}")
+
+        lines = [
+            f"To: {to}",
+            f"Subject: {subject}",
+            "Content-Type: text/plain; charset=utf-8",
+        ]
+        if reply_to_id:
+            lines.append(f"In-Reply-To: {reply_to_id}")
+            lines.append(f"References: {reply_to_id}")
+
+        lines.append("")
+        lines.append(body)
+
+        raw = base64.urlsafe_b64encode("\r\n".join(lines).encode()).decode()
+
+        send_body: dict = {"raw": raw}
+        if reply_to_id:
+            send_body["threadId"] = reply_to_id
+
+        data = await self._gmail_post("/users/me/messages/send", send_body, allow_send=True)
+        self._send_timestamps.append(time.time())
+        logger.info(f"Email sent to {to}: {data.get('id')}")
         return data
 
     async def list_labels(self) -> list[dict]:

@@ -434,6 +434,21 @@ body::after {
   gap: 8px;
 }
 
+.email-draft-form input[type="text"] {
+  width: 100%;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color var(--ease);
+}
+
+.email-draft-form input[type="text"]:focus { border-color: var(--matcha-dim); }
+
 .email-draft-form textarea {
   width: 100%;
   background: var(--bg-elevated);

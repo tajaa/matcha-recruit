@@ -7,6 +7,7 @@ interface Props {
   messages: MessageItem[]
   loading: boolean
   onDraft: (emailId: string, instructions: string) => void
+  onSend: (to: string, subject: string, body: string, replyToId?: string) => void
   onSchedule: (emailId: string) => void
   onQuickAction: (action: string) => void
 }
@@ -15,6 +16,7 @@ export function ChatArea({
   messages,
   loading,
   onDraft,
+  onSend,
   onSchedule,
   onQuickAction,
 }: Props) {
@@ -95,6 +97,7 @@ export function ChatArea({
                     key={email.id}
                     email={email}
                     onDraft={onDraft}
+                    onSend={onSend}
                     onSchedule={onSchedule}
                   />
                 ))}

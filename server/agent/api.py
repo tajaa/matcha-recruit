@@ -93,6 +93,13 @@ class EmailDraftRequest(BaseModel):
     instructions: str = ""
 
 
+class EmailSendRequest(BaseModel):
+    to: str
+    subject: str
+    body: str
+    reply_to_id: str | None = None
+
+
 class CalendarCreateRequest(BaseModel):
     email_id: str
 
@@ -323,6 +330,32 @@ Body:
         raise HTTPException(status_code=403, detail=str(e))
     except Exception as e:
         logger.error(f"Email draft error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/agent/email/send")
+async def email_send(req: EmailSendRequest, request: Request):
+    _check_auth(request)
+
+    if sandbox.gmail is None:
+        raise HTTPException(status_code=400, detail="Gmail not configured")
+
+    try:
+        result = await sandbox.gmail.send_email(
+            to=req.to,
+            subject=req.subject,
+            body=req.body,
+            reply_to_id=req.reply_to_id,
+        )
+        return {
+            "message_id": result.get("id"),
+            "to": req.to,
+            "subject": req.subject,
+        }
+    except SandboxViolation as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except Exception as e:
+        logger.error(f"Email send error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

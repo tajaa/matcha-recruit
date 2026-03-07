@@ -81,6 +81,26 @@ export function useChat() {
     [addMessage, addSystem]
   )
 
+  const sendEmail = useCallback(
+    async (to: string, subject: string, body: string, replyToId?: string) => {
+      setLoading(true)
+      addSystem(`Sending email to ${to}...`)
+      try {
+        const data = await api.sendEmail(to, subject, body, replyToId)
+        addMessage({
+          type: 'agent',
+          content: `**Email sent**\n\nTo: ${data.to}\nSubject: ${data.subject}`,
+        })
+      } catch (e: unknown) {
+        addSystem(
+          `Send failed: ${e instanceof Error ? e.message : 'Unknown error'}`
+        )
+      }
+      setLoading(false)
+    },
+    [addMessage, addSystem]
+  )
+
   const createEvent = useCallback(
     async (emailId: string) => {
       setLoading(true)
@@ -127,6 +147,7 @@ export function useChat() {
     sendMessage,
     fetchEmails,
     draftReply,
+    sendEmail,
     createEvent,
     runBriefing,
     clear,
