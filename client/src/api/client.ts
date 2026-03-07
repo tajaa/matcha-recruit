@@ -2147,6 +2147,47 @@ export const businessInviteApi = {
     request<{ valid: boolean; expires_at: string; note: string | null }>(`/auth/business-invite/${token}`),
 };
 
+export interface BrokerClientInviteDetails {
+  valid: boolean;
+  broker_name: string;
+  company_name: string;
+  contact_email: string;
+  invite_expires_at: string;
+}
+
+export interface BrokerClientInviteAcceptResponse {
+  access_token: string;
+  refresh_token: string;
+  expires_in: number;
+  user: { id: string; email: string; role: string; is_active: boolean; created_at: string | null; last_login: string | null };
+  company_status: string;
+  company_name: string;
+  broker_name: string;
+  message: string;
+}
+
+export const brokerClientInviteApi = {
+  validate: (token: string): Promise<BrokerClientInviteDetails> =>
+    request<BrokerClientInviteDetails>(`/auth/broker-client-invite/${token}`),
+
+  accept: async (token: string, data: { password: string; name?: string; phone?: string; job_title?: string }): Promise<BrokerClientInviteAcceptResponse> => {
+    const response = await fetch(`${API_BASE}/auth/broker-client-invite/${token}/accept`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Registration failed' }));
+      throw new Error(extractErrorMessage(error, 'Registration failed'));
+    }
+
+    const result: BrokerClientInviteAcceptResponse = await response.json();
+    setTokens(result.access_token, result.refresh_token);
+    return result;
+  },
+};
+
 // Company Features (Admin)
 export const adminCompanyFeatures = {
   list: (): Promise<CompanyWithFeatures[]> =>

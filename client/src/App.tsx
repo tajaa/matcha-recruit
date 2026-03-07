@@ -105,6 +105,7 @@ const PortalUnavailable = lazy(() => import('./pages/portal/PortalUnavailable'))
 const CandidateRankings = lazy(() => import('./pages/CandidateRankings'));
 const Projects = lazy(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
 const ProjectDetail = lazy(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
+const RegisterBrokerClient = lazy(() => import('./pages/RegisterBrokerClient'));
 const BrokerClients = lazy(() => import('./pages/broker/BrokerClients'));
 const BrokerReporting = lazy(() => import('./pages/broker/BrokerReporting'));
 const BrokerPartnerTerms = lazy(() => import('./pages/broker/BrokerPartnerTerms'));
@@ -187,6 +188,7 @@ function App() {
               <Route path="/login/:brokerSlug" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/register/invite/:token" element={<RegisterInvite />} />
+              <Route path="/register/broker-client/:token" element={<RegisterBrokerClient />} />
               <Route path="/onboarding/resume" element={<ResumeOnboarding />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="/terms" element={<TermsOfService />} />
