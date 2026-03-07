@@ -4,7 +4,7 @@ import type { AgentConfig, FeedItem, GmailLabel } from '../lib/api'
 
 interface Props {
   open: boolean
-  onClose: () => void
+  onClose: (summary?: string[]) => void
 }
 
 export function Settings({ open, onClose }: Props) {
@@ -54,17 +54,40 @@ export function Settings({ open, onClose }: Props) {
     setStatus('')
     try {
       const validFeeds = feeds.filter((f) => f.url.trim())
+      const newLabels = selectedLabels.length ? selectedLabels : ['INBOX']
+
+      // Build change summary
+      const changes: string[] = []
+      if (config) {
+        const oldFeedUrls = config.feeds.map((f) => f.url).sort().join(',')
+        const newFeedUrls = validFeeds.map((f) => f.url).sort().join(',')
+        if (oldFeedUrls !== newFeedUrls)
+          changes.push(`feeds → ${validFeeds.length} feed${validFeeds.length !== 1 ? 's' : ''}`)
+
+        const oldLabels = config.gmail_label_ids.sort().join(',')
+        if (oldLabels !== [...newLabels].sort().join(','))
+          changes.push(`labels → ${newLabels.join(', ')}`)
+
+        if (config.gmail_max_emails !== maxEmails)
+          changes.push(`max emails → ${maxEmails}`)
+
+        if (config.rss_interests !== interests)
+          changes.push(`interests → ${interests || '(none)'}`)
+
+        if (config.rss_max_entries_per_feed !== maxEntries)
+          changes.push(`max entries → ${maxEntries}`)
+      }
 
       const updated = await api.updateConfig({
         feeds: validFeeds,
-        gmail_label_ids: selectedLabels.length ? selectedLabels : ['INBOX'],
+        gmail_label_ids: newLabels,
         gmail_max_emails: maxEmails,
         rss_interests: interests,
         rss_max_entries_per_feed: maxEntries,
       })
       setConfig(updated)
       setFeeds(updated.feeds.length ? updated.feeds : [{ url: '', name: '' }])
-      onClose()
+      onClose(changes.length ? changes : ['no changes'])
     } catch (e: unknown) {
       setStatus(e instanceof Error ? e.message : 'Save failed')
     }
@@ -73,7 +96,7 @@ export function Settings({ open, onClose }: Props) {
 
   if (!config) {
     return (
-      <div class="settings-overlay" onClick={onClose}>
+      <div class="settings-overlay" onClick={() => onClose()}>
         <div class="settings-panel" onClick={(e) => e.stopPropagation()}>
           <div class="settings-loading">loading...</div>
         </div>
@@ -82,11 +105,11 @@ export function Settings({ open, onClose }: Props) {
   }
 
   return (
-    <div class="settings-overlay" onClick={onClose}>
+    <div class="settings-overlay" onClick={() => onClose()}>
       <div class="settings-panel" onClick={(e) => e.stopPropagation()}>
         <div class="settings-header">
           <h2>settings</h2>
-          <button class="settings-close" onClick={onClose}>
+          <button class="settings-close" onClick={() => onClose()}>
             &#10005;
           </button>
         </div>

@@ -13,6 +13,7 @@ export function App() {
   const [authed, setAuthed] = useState(false)
   const [checking, setChecking] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [toast, setToast] = useState<string[] | null>(null)
   const health = useHealth(authed)
   const chat = useChat()
 
@@ -65,7 +66,24 @@ export function App() {
         onQuickAction={handleQuickAction}
       />
       <MessageInput loading={chat.loading} onSend={chat.sendMessage} />
-      <Settings open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <Settings
+        open={settingsOpen}
+        onClose={(changes) => {
+          setSettingsOpen(false)
+          if (changes) {
+            setToast(changes)
+            setTimeout(() => setToast(null), 4000)
+          }
+        }}
+      />
+      {toast && (
+        <div class="toast" onClick={() => setToast(null)}>
+          <div class="toast-title">settings saved</div>
+          {toast.map((line, i) => (
+            <div class="toast-line" key={i}>{line}</div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
