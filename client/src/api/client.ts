@@ -3937,4 +3937,6 @@ export const adminPlatformSettings = {
 export const employees = {
   getIncidents: (employeeId: string): Promise<EmployeeIncidentItem[]> =>
     request<EmployeeIncidentItem[]>(`/employees/${employeeId}/incidents`),
+  getIncidentCounts: (): Promise<Record<string, number>> =>
+    request<Record<string, number>>('/employees/incident-counts'),
 };

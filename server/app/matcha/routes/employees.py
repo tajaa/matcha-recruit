@@ -2882,6 +2882,34 @@ async def complete_offboarding_case(
         return _to_offboarding_case_response(case_row, list(task_rows))
 
 
+@router.get("/incident-counts")
+async def get_bulk_incident_counts(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get open IR incident counts per employee (avoids N+1)."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT e.id AS employee_id, COUNT(DISTINCT i.id)::int AS open_count
+            FROM employees e
+            JOIN ir_incidents i ON i.company_id = e.org_id
+              AND i.status NOT IN ('resolved', 'closed')
+              AND (
+                i.reported_by_email IN (e.email, e.personal_email)
+                OR i.category_data::text ILIKE '%%' || e.first_name || ' ' || e.last_name || '%%'
+                OR i.witnesses::text ILIKE '%%' || e.first_name || ' ' || e.last_name || '%%'
+              )
+            WHERE e.org_id = $1
+            GROUP BY e.id
+            """,
+            company_id,
+        )
+
+        return {str(r["employee_id"]): r["open_count"] for r in rows}
+
+
 # ================================
 # Employee Incidents
 # ================================

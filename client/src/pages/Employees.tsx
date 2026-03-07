@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAccessToken, provisioning, onboardingDraft } from '../api/client';
+import { getAccessToken, provisioning, onboardingDraft, employees as employeesApi } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 import { complianceAPI } from '../api/compliance';
 import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download, Search, MapPin } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
@@ -305,7 +306,7 @@ type EmployeeEmptyState = {
   icon: 'add' | 'invited' | 'terminated';
 };
 
-function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getStatusBadge, handleSendInvite, invitingId }: {
+function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getStatusBadge, handleSendInvite, invitingId, incidentCount }: {
   employee: Employee;
   t: typeof LT | typeof DK;
   isLight: boolean;
@@ -314,6 +315,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
   getStatusBadge: (emp: Employee) => React.ReactNode;
   handleSendInvite: (id: string) => void;
   invitingId: string | null;
+  incidentCount: number;
 }) {
   return (
     <div
@@ -355,6 +357,17 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider truncate`}>
             {employee.employment_type?.replace('_', ' ') || '—'}
           </p>
+        </div>
+        <div className="lg:text-right lg:w-16">
+          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>IR</p>
+          {incidentCount > 0 ? (
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded ${isLight ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-amber-950/40 text-amber-400 border border-amber-500/30'}`}>
+              <AlertTriangle size={10} />
+              {incidentCount}
+            </span>
+          ) : (
+            <span className={`text-[10px] ${t.textFaint}`}>—</span>
+          )}
         </div>
         <div data-tour="emp-onboarding-col" className="lg:w-36 flex flex-col lg:items-end lg:justify-end">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Onboarding</p>
@@ -453,6 +466,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const [invitingId, setInvitingId] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [onboardingProgress, setOnboardingProgress] = useState<Record<string, OnboardingProgress>>({});
+  const { hasFeature } = useAuth();
+  const [incidentCounts, setIncidentCounts] = useState<Record<string, number>>({});
   const [agentEmployee, setAgentEmployee] = useState<{
     id: string; name: string; workEmail: string; personalEmail: string;
   } | null>(null);
@@ -632,6 +647,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   useEffect(() => {
     fetchEmployees();
     fetchOnboardingProgress();
+    if (hasFeature('incidents')) {
+      employeesApi.getIncidentCounts().then(setIncidentCounts).catch(() => setIncidentCounts({}));
+    }
   }, [filter, searchQuery, filterDepartment, filterEmploymentType, filterLocation]);
 
   // Debounced search
@@ -1528,6 +1546,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                 <div className="w-28 text-right">Department</div>
                 <div className="w-32 text-right">Location</div>
                 <div className="w-24 text-right">Type</div>
+                <div className="w-16 text-right">IR</div>
                 <div className="w-36 text-right">Onboarding</div>
                 <div className="w-32 text-right">Status</div>
                 <div className="w-32"></div>
@@ -1567,7 +1586,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         </summary>
                         <div className={`divide-y ${isLight ? 'divide-stone-200' : 'divide-white/5'}`}>
                           {emps.map((employee) => (
-                            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} getStatusBadge={getStatusBadge} handleSendInvite={handleSendInvite} invitingId={invitingId} />
+                            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} getStatusBadge={getStatusBadge} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
                           ))}
                         </div>
                       </details>
@@ -1579,7 +1598,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           ) : (
           <div className={`divide-y ${isLight ? 'divide-stone-200' : 'divide-white/5'}`}>
           {employees.map((employee) => (
-            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} getStatusBadge={getStatusBadge} handleSendInvite={handleSendInvite} invitingId={invitingId} />
+            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} getStatusBadge={getStatusBadge} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
           ))}
           </div>
           )}
