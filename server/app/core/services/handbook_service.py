@@ -1646,6 +1646,14 @@ def _apply_operational_hooks_to_sections(
     return hydrated
 
 
+def _apply_hooks_to_content(content: str, hook_values: dict[str, str]) -> str:
+    """Replace operational hook placeholders in a single content string."""
+    for token, replacement in hook_values.items():
+        if token in content:
+            content = content.replace(token, replacement)
+    return content
+
+
 def _parse_bool_like(value: Any) -> Optional[bool]:
     if isinstance(value, bool):
         return value
@@ -2915,13 +2923,29 @@ class HandbookService:
                         handbook["active_version"],
                     )
                     if version_id:
+                        # Safety net: resolve any lingering operational hook
+                        # placeholders (e.g. from change requests created before
+                        # the freshness-check hook-resolution fix).
+                        resolved_content = change["proposed_content"]
+                        _all_hook_tokens = list(LEGAL_OPERATIONAL_HOOKS.values()) + [ATTENDANCE_NOTICE_WINDOW_HOOK]
+                        if resolved_content and any(
+                            token in resolved_content
+                            for token in _all_hook_tokens
+                        ):
+                            profile = await HandbookService.get_or_default_profile(company_id)
+                            profile_data = profile.model_dump(
+                                exclude={"company_id", "updated_by", "updated_at"},
+                            )
+                            norm_profile = _normalize_profile(CompanyHandbookProfileInput(**profile_data))
+                            hv = _build_operational_hook_values(norm_profile, {})
+                            resolved_content = _apply_hooks_to_content(resolved_content, hv)
                         await conn.execute(
                             """
                             UPDATE handbook_sections
                             SET content = $1, updated_at = NOW()
                             WHERE handbook_version_id = $2 AND section_key = $3
                             """,
-                            change["proposed_content"],
+                            resolved_content,
                             version_id,
                             change["section_key"],
                         )
@@ -3162,6 +3186,7 @@ class HandbookService:
                         exclude={"company_id", "updated_by", "updated_at"},
                     )
                     normalized_profile = _normalize_profile(CompanyHandbookProfileInput(**profile_data))
+                    hook_values = _build_operational_hook_values(normalized_profile, {})
                     profile_fingerprint = sha256(
                         json.dumps(normalized_profile, sort_keys=True, default=str).encode()
                     ).hexdigest()
@@ -3225,6 +3250,7 @@ class HandbookService:
                             requirements=requirements,
                             selected_cities=selected_cities_by_state.get(state),
                         )
+                        proposed_content = _apply_hooks_to_content(proposed_content, hook_values)
                         old_content = sections_by_key.get(section_key) or ""
                         if _normalize_section_content(old_content) == _normalize_section_content(proposed_content):
                             continue
@@ -3322,7 +3348,7 @@ class HandbookService:
                         old_core = sections_by_key.get(core_key)
                         if old_core is None:
                             continue
-                        proposed_core = core_sec["content"]
+                        proposed_core = _apply_hooks_to_content(core_sec["content"], hook_values)
                         if _normalize_section_content(old_core) == _normalize_section_content(proposed_core):
                             continue
 
