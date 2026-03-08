@@ -3217,7 +3217,7 @@ async def run_compliance_check_stream(
                         still_missing,
                         threshold_days=max(location.auto_check_interval_days or 7, 90),
                     )
-            elif not used_repository:
+            elif not used_repository and allow_live_research:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
                 if missing_categories:
@@ -3758,10 +3758,16 @@ async def get_locations(company_id: UUID) -> list[dict]:
                  ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
                LEFT JOIN LATERAL (
                    SELECT COUNT(*) AS cnt FROM employees e
-                   WHERE e.org_id = bl.company_id
-                     AND LOWER(e.work_city) = LOWER(bl.city)
-                     AND UPPER(e.work_state) = UPPER(bl.state)
-                     AND e.termination_date IS NULL
+                   WHERE e.termination_date IS NULL
+                     AND (
+                       e.work_location_id = bl.id
+                       OR (
+                         e.work_location_id IS NULL
+                         AND LOWER(e.work_city) = LOWER(bl.city)
+                         AND UPPER(e.work_state) = UPPER(bl.state)
+                         AND e.org_id = bl.company_id
+                       )
+                     )
                ) ec ON true
                LEFT JOIN LATERAL (
                    SELECT COUNT(*) AS cnt FROM compliance_requirements cr
@@ -5477,7 +5483,7 @@ async def run_compliance_check_background(
                         not in target_set
                     ]
                     requirements = preserved + requirements
-            elif not used_repository:
+            elif not used_repository and allow_live_research:
                 missing_categories = _missing_required_categories(requirements)
                 used_repository = True
                 if missing_categories:
@@ -5771,3 +5777,113 @@ async def run_compliance_check_background(
         print(f"[Compliance] Error notifying admins about compliance changes: {e}")
 
     return {"new": new_count, "updated": updated_count, "alerts": alert_count}
+
+
+async def research_jurisdiction_repo_only(
+    jurisdiction_id: UUID,
+) -> AsyncGenerator[Dict[str, Any], None]:
+    """Populate jurisdiction_requirements for the given jurisdiction via Gemini.
+
+    Unlike run_compliance_check_stream(), this function writes ONLY to
+    jurisdiction_requirements (the shared repo). It does NOT touch
+    compliance_requirements, compliance_check_logs, or compliance_alerts for
+    any tenant. Intended for the admin research queue.
+    """
+    from ...database import get_connection
+    from .gemini_compliance import get_gemini_compliance_service
+
+    async with get_connection() as conn:
+        j = await conn.fetchrow(
+            "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
+            jurisdiction_id,
+        )
+        if not j:
+            yield {"type": "error", "message": "Jurisdiction not found"}
+            return
+
+        city = j["city"]
+        state = j["state"]
+        county = j.get("county")
+        location_name = f"{city}, {state}"
+
+        has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
+
+        yield {"type": "started", "location": location_name}
+
+        service = get_gemini_compliance_service()
+
+        existing_rows = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+        current_requirements = [_jurisdiction_row_to_dict(jr) for jr in existing_rows]
+        missing_categories = _missing_required_categories(current_requirements)
+
+        if not missing_categories:
+            yield {
+                "type": "complete",
+                "message": f"Repository already has full coverage for {location_name}.",
+                "new": 0,
+                "updated": 0,
+                "alerts": 0,
+            }
+            return
+
+        yield {
+            "type": "repository_refresh",
+            "jurisdiction_id": str(jurisdiction_id),
+            "missing_categories": missing_categories,
+            "message": (
+                f"Researching {len(missing_categories)} missing categories for "
+                f"{location_name} ({', '.join(missing_categories)})."
+            ),
+        }
+
+        refresh_queue: asyncio.Queue = asyncio.Queue()
+
+        def _on_retry(attempt: int, error: str) -> None:
+            refresh_queue.put_nowait(
+                {
+                    "type": "retrying",
+                    "message": f"Retrying research (attempt {attempt + 1})...",
+                }
+            )
+
+        try:
+            refresh_task = asyncio.create_task(
+                _refresh_repository_missing_categories(
+                    conn,
+                    service,
+                    jurisdiction_id=jurisdiction_id,
+                    city=city,
+                    state=state,
+                    county=county,
+                    has_local_ordinance=has_local_ordinance,
+                    current_requirements=current_requirements,
+                    missing_categories=missing_categories,
+                    on_retry=_on_retry,
+                )
+            )
+            async for evt in _heartbeat_while(refresh_task, queue=refresh_queue):
+                yield evt
+            updated_requirements = refresh_task.result() or []
+        except Exception as e:
+            yield {"type": "error", "message": f"Research failed: {e}"}
+            return
+
+        missing_after = _missing_required_categories(updated_requirements)
+        if missing_after:
+            yield {
+                "type": "repository_only",
+                "jurisdiction_id": str(jurisdiction_id),
+                "missing_categories": missing_after,
+                "message": (
+                    f"Repository still missing {', '.join(missing_after)} after research."
+                ),
+            }
+
+        yield {
+            "type": "complete",
+            "location": location_name,
+            "message": f"Research complete for {location_name}.",
+            "new": len(updated_requirements),
+            "updated": 0,
+            "alerts": 0,
+        }

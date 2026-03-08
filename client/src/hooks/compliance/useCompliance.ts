@@ -46,7 +46,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
   });
 
   const { data: alerts, isLoading: loadingAlerts } = useQuery({
-    queryKey: ['compliance-alerts', selectedLocationId, companyId],
+    queryKey: ['compliance-alerts', companyId],
     queryFn: () => complianceAPI.getAlerts(undefined, companyId || undefined),
     enabled: !!selectedLocationId,
     staleTime: ONE_HOUR,
@@ -129,7 +129,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
   const markAlertReadMutation = useMutation({
     mutationFn: (id: string) => complianceAPI.markAlertRead(id, companyId || undefined),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', selectedLocationId, companyId] });
+      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
     },
@@ -139,7 +139,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
   const dismissAlertMutation = useMutation({
     mutationFn: (id: string) => complianceAPI.dismissAlert(id, companyId || undefined),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', selectedLocationId, companyId] });
+      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
     },

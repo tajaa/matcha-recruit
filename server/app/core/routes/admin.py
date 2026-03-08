@@ -27,6 +27,7 @@ from ..services.compliance_service import (
     _jurisdiction_row_to_dict,
     run_compliance_check_background,
     run_compliance_check_stream,
+    research_jurisdiction_repo_only,
 )
 from ..services.rate_limiter import get_rate_limiter
 from ..services.auth import hash_password
@@ -5549,30 +5550,23 @@ async def get_research_queue():
 
 @router.post("/research-queue/{jurisdiction_id}/research", dependencies=[Depends(require_admin)])
 async def research_jurisdiction(jurisdiction_id: UUID):
-    """Trigger Gemini research for a jurisdiction. Returns SSE stream."""
+    """Trigger Gemini research for a jurisdiction. Returns SSE stream.
+
+    Writes only to jurisdiction_requirements (the shared repo).
+    Does NOT mutate any tenant's compliance_requirements, compliance_check_logs,
+    or compliance_alerts.
+    """
     async with get_connection() as conn:
         j = await conn.fetchrow(
-            "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
+            "SELECT id FROM jurisdictions WHERE id = $1",
             jurisdiction_id,
         )
         if not j:
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
 
-        loc = await conn.fetchrow(
-            "SELECT id, company_id FROM business_locations WHERE jurisdiction_id = $1 LIMIT 1",
-            jurisdiction_id,
-        )
-        if not loc:
-            raise HTTPException(
-                status_code=400,
-                detail="No locations linked to this jurisdiction yet",
-            )
-
     async def event_stream():
         try:
-            async for event in run_compliance_check_stream(
-                loc["id"], loc["company_id"], allow_live_research=True,
-            ):
+            async for event in research_jurisdiction_repo_only(jurisdiction_id):
                 if event.get("type") == "heartbeat":
                     yield ": heartbeat\n\n"
                 else:
