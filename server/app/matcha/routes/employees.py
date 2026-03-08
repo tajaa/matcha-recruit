@@ -2811,8 +2811,7 @@ async def acknowledge_pre_termination_check(
             SET acknowledged = true,
                 acknowledged_by = $2,
                 acknowledged_at = NOW(),
-                acknowledgment_notes = $3,
-                updated_at = NOW()
+                acknowledgment_notes = $3
             WHERE id = $1
             RETURNING *
             """,
@@ -2855,7 +2854,7 @@ async def update_pre_termination_outcome(
         updated = await conn.fetchrow(
             """
             UPDATE pre_termination_checks
-            SET outcome = $2, updated_at = NOW()
+            SET outcome = $2
             WHERE id = $1
             RETURNING *
             """,
@@ -2903,48 +2902,47 @@ async def create_offboarding_case(
             if employee["start_date"] and request.last_day < employee["start_date"]:
                 raise HTTPException(status_code=400, detail="last_day cannot be before employee start_date")
 
-            # --- Pre-termination risk check for involuntary separations ---
+            # --- Pre-termination risk check ---
+            # Runs for ALL separations (audit trail). Only gates involuntary.
             pre_term_check_id = None
+            pre_term_result = None
 
-            if not request.is_voluntary:
-                pre_term_result = None
+            if request.pre_termination_check_id:
+                # Reuse an existing check — verify it belongs to this employee/company
+                existing_check = await conn.fetchrow(
+                    """
+                    SELECT *
+                    FROM pre_termination_checks
+                    WHERE id = $1 AND employee_id = $2 AND company_id = $3
+                    """,
+                    request.pre_termination_check_id,
+                    employee_id,
+                    company_id,
+                )
+                if not existing_check:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Pre-termination check not found for this employee",
+                    )
+                pre_term_result = dict(existing_check)
+                pre_term_result["dimensions"] = _normalize_json(pre_term_result.get("dimensions"), {})
+                pre_term_result["recommended_actions"] = _normalize_json(
+                    pre_term_result.get("recommended_actions"), []
+                )
+                pre_term_check_id = existing_check["id"]
+            else:
+                # Auto-run the pre-termination check
+                pre_term_result = await run_pre_termination_check(
+                    employee_id=employee_id,
+                    company_id=company_id,
+                    initiated_by=current_user.id,
+                    separation_reason=request.reason,
+                    is_voluntary=request.is_voluntary,
+                )
+                pre_term_check_id = pre_term_result.get("id")
 
-                if request.pre_termination_check_id:
-                    # Reuse an existing check — verify it belongs to this employee/company
-                    existing_check = await conn.fetchrow(
-                        """
-                        SELECT *
-                        FROM pre_termination_checks
-                        WHERE id = $1 AND employee_id = $2 AND company_id = $3
-                        """,
-                        request.pre_termination_check_id,
-                        employee_id,
-                        company_id,
-                    )
-                    if not existing_check:
-                        raise HTTPException(
-                            status_code=404,
-                            detail="Pre-termination check not found for this employee",
-                        )
-                    pre_term_result = dict(existing_check)
-                    # Normalize JSONB fields
-                    pre_term_result["dimensions"] = _normalize_json(pre_term_result.get("dimensions"), {})
-                    pre_term_result["recommended_actions"] = _normalize_json(
-                        pre_term_result.get("recommended_actions"), []
-                    )
-                    pre_term_check_id = existing_check["id"]
-                else:
-                    # Auto-run the pre-termination check
-                    pre_term_result = await run_pre_termination_check(
-                        employee_id=employee_id,
-                        company_id=company_id,
-                        initiated_by=current_user.id,
-                        separation_reason=request.reason,
-                        is_voluntary=False,
-                    )
-                    pre_term_check_id = pre_term_result.get("id")
-
-                # Gate on high/critical risk
+            # Gate on high/critical risk — involuntary only
+            if not request.is_voluntary and pre_term_result:
                 overall_band = pre_term_result.get("overall_band", "low")
                 if overall_band in ("high", "critical") and not request.risk_acknowledged:
                     raise HTTPException(
@@ -2956,16 +2954,27 @@ async def create_offboarding_case(
                         },
                     )
 
-                # If acknowledged, update the check record
+                # If acknowledged, require notes and enforce separate acknowledger for critical
                 if overall_band in ("high", "critical") and request.risk_acknowledged:
+                    if not request.acknowledgment_notes:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="Acknowledgment notes are required for high/critical risk separations",
+                        )
+                    if overall_band == "critical":
+                        initiated_by = pre_term_result.get("initiated_by")
+                        if initiated_by and str(initiated_by) == str(current_user.id):
+                            raise HTTPException(
+                                status_code=403,
+                                detail="Critical risk separations require sign-off from a different user than the initiator",
+                            )
                     await conn.execute(
                         """
                         UPDATE pre_termination_checks
                         SET acknowledged = true,
                             acknowledged_by = $2,
                             acknowledged_at = NOW(),
-                            acknowledgment_notes = $3,
-                            updated_at = NOW()
+                            acknowledgment_notes = $3
                         WHERE id = $1
                         """,
                         pre_term_check_id,

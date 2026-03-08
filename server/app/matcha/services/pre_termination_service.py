@@ -111,7 +111,7 @@ async def scan_er_cases(
               )
             ORDER BY created_at DESC
             """,
-            company_id, containment, twelve_months_ago,
+            company_id, containment, ninety_days_ago,
         )
 
         if not rows:
@@ -338,14 +338,18 @@ async def scan_leave_status(
                 "hours": float(row["hours"]) if row["hours"] else None,
             }
 
-            if row["status"] == "pending":
+            # Only flag sick/medical leave as potentially protected (per PRD MVP note)
+            protected_types = ("sick", "medical", "fmla", "ada")
+            is_protected = row["request_type"] in protected_types
+
+            if row["status"] == "pending" and is_protected:
                 pending_requests.append(leave_info)
             elif row["status"] == "approved":
                 start = row["start_date"]
                 end = row["end_date"]
                 if start and end:
-                    # Active leave: dates overlap today
-                    if start <= today <= end:
+                    # Active leave: dates overlap today (only protected types)
+                    if is_protected and start <= today <= end:
                         active_leaves.append(leave_info)
                     # Recently returned from sick leave
                     elif (
@@ -355,7 +359,7 @@ async def scan_leave_status(
                     ):
                         recent_sick_returns.append(leave_info)
 
-        # Red: active leave or pending request
+        # Red: active protected leave or pending protected request
         if active_leaves:
             leave = active_leaves[0]
             return _red(
@@ -369,8 +373,8 @@ async def scan_leave_status(
 
         if pending_requests:
             return _red(
-                f"Employee has {len(pending_requests)} pending leave request(s) — "
-                f"termination while request pending creates retaliation inference",
+                f"Employee has {len(pending_requests)} pending {pending_requests[0]['request_type']} "
+                f"leave request(s) — termination while request pending creates retaliation inference",
                 active_leaves=active_leaves,
                 pending_requests=pending_requests,
                 recent_sick_returns=recent_sick_returns,
@@ -459,7 +463,8 @@ async def scan_protected_activity(
                 "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             }
 
-            if role == "complainant":
+            category_lower = (row["category"] or "").lower()
+            if role == "complainant" and category_lower in protected_categories:
                 complainant_signals.append(signal)
             elif role == "witness":
                 witness_signals.append(signal)
@@ -1133,12 +1138,14 @@ async def scan_consistency(
 
         comparable_count = len(scored_cases)
 
-        if effective_n < 2:
+        if comparable_count < 3 or effective_n < 3:
             return _yellow(
                 f"Insufficient comparable data for consistency analysis "
-                f"({comparable_count} similar case(s), effective N = {effective_n})",
+                f"({comparable_count} similar case(s), effective N = {effective_n}, "
+                f"minimum 3 required)",
                 comparable_cases=comparable_count,
                 effective_n=effective_n,
+                minimum_required=3,
                 similar_cases=scored_cases[:5],
             )
 
@@ -1515,36 +1522,25 @@ async def run_pre_termination_check(
         Full risk report as a dict, ready for JSON serialization.
     """
     async with get_connection() as conn:
-        # Run all 8 dimension scans in parallel
-        results = await asyncio.gather(
-            scan_er_cases(employee_id, company_id, conn),
-            scan_ir_involvement(employee_id, company_id, conn),
-            scan_leave_status(employee_id, conn),
-            scan_protected_activity(employee_id, company_id, conn),
-            scan_documentation(employee_id, company_id, conn),
-            scan_tenure_timing(employee_id, company_id, conn),
-            scan_consistency(employee_id, company_id, separation_reason, conn),
-            scan_manager_profile(employee_id, company_id, conn),
-            return_exceptions=True,
-        )
-
-        dimension_names = [
-            "er_cases",
-            "ir_involvement",
-            "leave_status",
-            "protected_activity",
-            "documentation",
-            "tenure_timing",
-            "consistency",
-            "manager_profile",
+        # Run dimension scans sequentially — asyncpg connections
+        # do not support concurrent operations on the same connection.
+        scan_specs = [
+            ("er_cases", scan_er_cases(employee_id, company_id, conn)),
+            ("ir_involvement", scan_ir_involvement(employee_id, company_id, conn)),
+            ("leave_status", scan_leave_status(employee_id, conn)),
+            ("protected_activity", scan_protected_activity(employee_id, company_id, conn)),
+            ("documentation", scan_documentation(employee_id, company_id, conn)),
+            ("tenure_timing", scan_tenure_timing(employee_id, company_id, conn)),
+            ("consistency", scan_consistency(employee_id, company_id, separation_reason, conn)),
+            ("manager_profile", scan_manager_profile(employee_id, company_id, conn)),
         ]
 
         dimensions: dict[str, PreTermDimensionResult] = {}
-        for name, result in zip(dimension_names, results):
-            if isinstance(result, Exception):
-                dimensions[name] = _safe_dimension(name, result)
-            else:
-                dimensions[name] = result
+        for name, coro in scan_specs:
+            try:
+                dimensions[name] = await coro
+            except Exception as exc:
+                dimensions[name] = _safe_dimension(name, exc)
 
         # Calculate overall score: sum of dimension scores, normalized 0-100
         total_score = sum(d.score for d in dimensions.values())
