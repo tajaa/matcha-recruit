@@ -301,6 +301,21 @@ _CITY_ALIAS_FALLBACKS = {
 }
 
 
+async def _resolve_county_from_zip(conn, zipcode: str, state: str) -> Optional[str]:
+    """Look up county from zip code. Returns None if zip not in reference."""
+    if not zipcode:
+        return None
+    try:
+        row = await conn.fetchrow(
+            "SELECT county FROM zip_county_reference WHERE zipcode = $1 AND state = $2",
+            zipcode.strip()[:5],
+            state.upper(),
+        )
+        return row["county"] if row else None
+    except asyncpg.UndefinedTableError:
+        return None
+
+
 async def _resolve_reference_city(
     conn,
     city: str,
@@ -2624,6 +2639,10 @@ async def ensure_location_for_employee(
         resolved_city = ""
         is_known_jurisdiction = True
 
+    # Fall back to zip→county lookup if city-based resolution didn't find a county
+    if not ref_county and work_zip:
+        ref_county = await _resolve_county_from_zip(conn, work_zip, norm_state)
+
     # Determine source and coverage
     source = "employee_derived"
     coverage_status = "covered" if is_known_jurisdiction else "pending_review"
@@ -2670,7 +2689,8 @@ async def ensure_location_for_employee(
         if j_reqs:
             req_dicts = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
             await _fill_missing_categories_from_parents(conn, jurisdiction_id, req_dicts, 7)
-        elif has_local_ordinance is False:
+        elif not has_local_ordinance:
+            # has_local_ordinance is False or None — try county/state fallback
             county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, 7)
             if county_reqs:
                 req_dicts = county_reqs
@@ -2682,7 +2702,7 @@ async def ensure_location_for_employee(
                 await _fill_missing_categories_from_parents(conn, jurisdiction_id, req_dicts, 7)
 
         if req_dicts:
-            if has_local_ordinance is False and display_city:
+            if not has_local_ordinance and display_city:
                 req_dicts = _filter_city_level_requirements(req_dicts, norm_state)
             _normalize_requirement_categories(req_dicts)
             req_dicts = await _filter_with_preemption(conn, req_dicts, norm_state)
@@ -2737,9 +2757,19 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             data.zipcode or "",
         )
 
+        # Resolve county from zip if not provided
+        resolved_county = data.county
+        if not resolved_county and data.zipcode:
+            resolved_county = await _resolve_county_from_zip(conn, data.zipcode, data.state)
+            if resolved_county:
+                await conn.execute(
+                    "UPDATE business_locations SET county = $1 WHERE id = $2",
+                    resolved_county, location_id,
+                )
+
         # Map to jurisdiction
         jurisdiction_id = await _get_or_create_jurisdiction(
-            conn, data.city, data.state, data.county
+            conn, data.city, data.state, resolved_county
         )
         await conn.execute(
             "UPDATE business_locations SET jurisdiction_id = $1 WHERE id = $2",
@@ -2756,7 +2786,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
         has_repository_rows = len(j_reqs) > 0
         has_complete_repository_coverage = False
 
-        # Try county data for cities without local ordinance
+        # Try county data for cities without local ordinance (or unknown)
         req_dicts = None
         if has_repository_rows:
             req_dicts = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
@@ -2764,7 +2794,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
                 conn, jurisdiction_id, req_dicts, 7
             )
         else:
-            if has_local_ordinance is False:
+            if not has_local_ordinance:
                 county_reqs = await _try_load_county_requirements(
                     conn, jurisdiction_id, 7
                 )
@@ -2787,7 +2817,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             # Normalize and filter (with preemption awareness) before cloning.
             # This keeps create-location behavior consistent with the main
             # compliance check pipeline.
-            if has_local_ordinance is False:
+            if not has_local_ordinance:
                 req_dicts = _filter_city_level_requirements(req_dicts, data.state)
             _normalize_requirement_categories(req_dicts)
             req_dicts = await _filter_with_preemption(conn, req_dicts, data.state)
