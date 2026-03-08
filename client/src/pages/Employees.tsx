@@ -393,7 +393,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handl
         </div>
         <div className="ml-3 min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className={`text-sm font-bold ${isLight ? 'text-zinc-900' : 'text-zinc-50'} truncate`}>
+            <p className={`text-sm font-bold ${t.textMain} truncate`}>
               {employee.first_name || employee.last_name 
                 ? `${employee.first_name} ${employee.last_name}`.trim() 
                 : (employee.work_email || employee.email || 'Unknown')}
@@ -461,7 +461,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handl
             <span className={`text-[10px] ${t.textFaint} uppercase tracking-wider`}>Not started</span>
           )}
         </div>
-        <div className="col-span-2 sm:col-auto xl:w-48 flex xl:justify-end mt-2 sm:mt-0">
+        <div className="col-span-2 sm:col-auto xl:w-48 flex xl:justify-end mt-2 sm:mt-0 xl:pr-4">
           <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider xl:hidden mb-0.5`}>Status</p>
           <StatusActionBadge employee={employee} isLight={isLight} handleSendInvite={handleSendInvite} invitingId={invitingId} />
         </div>
