@@ -22,7 +22,8 @@ from ...database import get_connection
 from ...core.dependencies import get_current_user
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
-from ...core.services.email import EmailService, get_email_service
+from ...core.services.compliance_service import ensure_location_for_employee
+from ...core.services.email import get_email_service
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -35,6 +36,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 pto_admin_router = APIRouter()
 leave_admin_router = APIRouter()
+
+INVITATION_SEND_FAILED_DETAIL = "Invitation email could not be sent. Check email delivery settings and try again."
 
 
 def _json_object(value) -> dict:
@@ -63,6 +66,12 @@ def _coerce_bool(value, default: bool = True) -> bool:
         if normalized in {"0", "false", "no", "off"}:
             return False
     return default
+
+
+def _exception_message(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+    return str(exc)
 
 
 async def _column_exists(conn, table_name: str, column_name: str) -> bool:
@@ -129,6 +138,37 @@ async def _employee_org_fields_available(conn) -> bool:
     )
     existing = {row["column_name"] for row in columns}
     return {"job_title", "department"}.issubset(existing)
+
+
+async def _sync_employee_location_for_compliance(
+    conn,
+    *,
+    company_id: UUID,
+    employee_id: UUID,
+    work_state: Optional[str],
+    work_city: Optional[str],
+    background_tasks: Optional[BackgroundTasks] = None,
+) -> Optional[UUID]:
+    normalized_state = work_state.strip().upper() if work_state else None
+    normalized_city = work_city.strip() if work_city else None
+    if not normalized_state:
+        return None
+
+    try:
+        return await ensure_location_for_employee(
+            conn,
+            company_id,
+            normalized_city,
+            normalized_state,
+            background_tasks=background_tasks,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to sync compliance location for employee %s in company %s",
+            employee_id,
+            company_id,
+        )
+        return None
 
 
 def _employee_compensation_values(
@@ -372,15 +412,35 @@ async def _send_invitation_with_conn(
     company = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", org_id)
     company_name = company["name"] if company else "Your Company"
 
+    await _sync_employee_location_for_compliance(
+        conn,
+        company_id=org_id,
+        employee_id=employee_id,
+        work_state=employee.get("work_state"),
+        work_city=employee.get("work_city"),
+    )
+
     # Send invitation email
-    email_service = EmailService()
-    await email_service.send_employee_invitation_email(
+    email_service = get_email_service()
+    sent = await email_service.send_employee_invitation_email(
         to_email=employee["email"],
         to_name=f"{employee['first_name']} {employee['last_name']}",
         company_name=company_name,
         token=token,
         expires_at=expires_at,
     )
+    if not sent:
+        logger.warning(
+            "Employee invitation email failed for employee %s in company %s; cancelling invitation %s",
+            employee_id,
+            org_id,
+            invitation["id"],
+        )
+        await conn.execute(
+            "UPDATE employee_invitations SET status = 'cancelled' WHERE id = $1",
+            invitation["id"],
+        )
+        raise HTTPException(status_code=503, detail=INVITATION_SEND_FAILED_DETAIL)
 
     return {
         "invitation_id": invitation["id"],
@@ -843,6 +903,15 @@ async def create_employee(
             *insert_vals,
         )
 
+        await _sync_employee_location_for_compliance(
+            conn,
+            company_id=company_id,
+            employee_id=row["id"],
+            work_state=row["work_state"],
+            work_city=row["work_city"] if compensation_fields_available else None,
+            background_tasks=background_tasks,
+        )
+
         # Auto-assign active onboarding task templates to the new employee
         try:
             template_rows = await conn.fetch(
@@ -1039,6 +1108,7 @@ async def get_employee(
 async def update_employee(
     employee_id: UUID,
     request: EmployeeUpdateRequest,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update employee details."""
@@ -1171,6 +1241,16 @@ async def update_employee(
         values.extend([employee_id, company_id])
 
         row = await conn.fetchrow(query, *values)
+
+        if request.work_state is not None or (compensation_fields_available and request.work_city is not None):
+            await _sync_employee_location_for_compliance(
+                conn,
+                company_id=company_id,
+                employee_id=row["id"],
+                work_state=row["work_state"],
+                work_city=row["work_city"] if compensation_fields_available else None,
+                background_tasks=background_tasks,
+            )
 
         # Get manager name
         manager_name = None
@@ -1661,6 +1741,15 @@ async def bulk_upload_employees_csv(
                 employee_ids.append(employee['id'])
                 created += 1
 
+                await _sync_employee_location_for_compliance(
+                    conn,
+                    company_id=company_id,
+                    employee_id=employee["id"],
+                    work_state=work_state,
+                    work_city=work_city,
+                    background_tasks=background_tasks,
+                )
+
                 # Schedule Google Workspace / Slack provisioning
                 run_google = google_workspace_auto_provision
                 run_slack = slack_auto_provision
@@ -1691,7 +1780,7 @@ async def bulk_upload_employees_csv(
                         errors.append({
                             "row": row_num,
                             "email": email,
-                            "error": f"Employee created but invitation failed: {str(e)}"
+                            "error": f"Employee created but invitation failed: {_exception_message(e)}"
                         })
 
             except Exception as e:
@@ -1753,7 +1842,7 @@ async def send_bulk_invitations(
                     failed += 1
                     errors.append({
                         "employee_id": str(employee_id),
-                        "error": str(e)
+                        "error": _exception_message(e)
                     })
 
             # Delay between batches to avoid overwhelming email service
@@ -1820,7 +1909,7 @@ async def invite_all_uninvited(
                     failed += 1
                     errors.append({
                         "employee_id": str(employee_id),
-                        "error": str(e)
+                        "error": _exception_message(e)
                     })
 
             if i + BATCH_SIZE < len(employee_ids):
