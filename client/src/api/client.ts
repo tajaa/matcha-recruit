@@ -170,6 +170,7 @@ import type {
   RiskActionItemCreate,
   RiskActionItemUpdate,
   AssignableUser,
+  RiskHistoryEntry,
   } from '../types';
 import type {
   Lead,
@@ -3890,6 +3891,10 @@ export const riskAssessment = {
     request(`/risk-assessment/action-items/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
   getAssignableUsers: (): Promise<AssignableUser[]> =>
     request('/risk-assessment/assignable-users'),
+  getHistory: (months?: number): Promise<RiskHistoryEntry[]> =>
+    request(`/risk-assessment/history${months ? `?months=${months}` : ''}`),
+  adminRun: (companyId: string): Promise<RiskAssessmentResult> =>
+    request(`/risk-assessment/admin/run/${companyId}`, { method: 'POST' }),
 };
 
 // Combined API object for convenient imports

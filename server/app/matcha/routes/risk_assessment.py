@@ -7,7 +7,7 @@ Clients read the last stored snapshot — no live computation on page load.
 import json
 import logging
 from dataclasses import asdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from uuid import UUID
 
@@ -133,6 +133,55 @@ async def get_risk_assessment(
     return _snapshot_to_response(row)
 
 
+# ─── History endpoint ─────────────────────────────────────────────────────────
+
+@router.get("/history")
+async def get_risk_history(
+    current_user=Depends(require_admin_or_client),
+    months: int = Query(12, ge=1, le=36),
+):
+    """Return risk assessment history for the company as a time series."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT overall_score, overall_band, dimensions, computed_at, source
+            FROM risk_assessment_history
+            WHERE company_id = $1 AND computed_at >= $2
+            ORDER BY computed_at ASC
+            """,
+            company_id,
+            cutoff,
+        )
+
+    result = []
+    for row in rows:
+        dims_raw = row["dimensions"]
+        if isinstance(dims_raw, str):
+            dims_raw = json.loads(dims_raw)
+        # Extract just the scores from each dimension
+        dim_scores = {}
+        for key, dim in dims_raw.items():
+            if isinstance(dim, dict):
+                dim_scores[key] = dim.get("score", 0)
+            else:
+                dim_scores[key] = 0
+        result.append({
+            "overall_score": row["overall_score"],
+            "overall_band": row["overall_band"],
+            "dimensions": dim_scores,
+            "computed_at": row["computed_at"].isoformat(),
+            "source": row["source"],
+        })
+
+    return result
+
+
 # ─── Admin endpoints ──────────────────────────────────────────────────────────
 
 @router.get("/admin/weights", response_model=WeightsResponse)
@@ -217,6 +266,21 @@ async def run_risk_assessment(
             json.dumps(weights),
             result.computed_at,
             current_user.id,
+        )
+
+        # Also record in history
+        await conn.execute(
+            """
+            INSERT INTO risk_assessment_history
+                (company_id, overall_score, overall_band, dimensions, weights, computed_at, source)
+            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, 'manual')
+            """,
+            company_id,
+            result.overall_score,
+            result.overall_band,
+            dims_json,
+            json.dumps(weights),
+            result.computed_at,
         )
 
     return _snapshot_to_response(row)

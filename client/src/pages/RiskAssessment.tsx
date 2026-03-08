@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList } from 'recharts';
-import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser } from '../types';
-import { riskAssessment, erCopilot, ApiRequestError } from '../api/client';
+import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock, Play } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList, AreaChart, Area, LineChart, Line, ReferenceArea } from 'recharts';
+import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser, RiskHistoryEntry } from '../types';
+import { riskAssessment, erCopilot, companies as companiesApi, ApiRequestError } from '../api/client';
+import { useAuth } from '../context/AuthContext';
 
 type Band = 'low' | 'moderate' | 'high' | 'critical';
 
@@ -538,6 +539,204 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
   );
 }
 
+const TREND_DIMENSION_COLORS: Record<string, string> = {
+  compliance: '#f59e0b',
+  incidents: '#ef4444',
+  er_cases: '#3b82f6',
+  workforce: '#a855f7',
+  legislative: '#06b6d4',
+};
+
+function formatShortDate(dateStr: string): string {
+  const d = new Date(dateStr);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function TrendTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ dataKey: string; value: number; color: string }>; label?: string }) {
+  if (!active || !payload || payload.length === 0) return null;
+  return (
+    <div className="bg-zinc-900 border border-white/10 px-4 py-3 shadow-xl text-xs">
+      <div className="text-zinc-500 font-mono text-[9px] uppercase tracking-widest mb-2">{label}</div>
+      {payload.map((entry) => (
+        <div key={entry.dataKey} className="flex items-center justify-between gap-6">
+          <span className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
+            <span className="text-zinc-400 capitalize">{entry.dataKey.replace('_', ' ')}</span>
+          </span>
+          <span className="font-mono text-zinc-200">{entry.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RiskTrendChart() {
+  const [history, setHistory] = useState<RiskHistoryEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [months, setMonths] = useState(12);
+  const [visibleDimensions, setVisibleDimensions] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    riskAssessment.getHistory(months)
+      .then((data) => {
+        if (!cancelled) setHistory(data);
+      })
+      .catch(() => {
+        if (!cancelled) setHistory([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [months]);
+
+  const toggleDimension = (dim: string) => {
+    setVisibleDimensions(prev => {
+      const next = new Set(prev);
+      if (next.has(dim)) next.delete(dim);
+      else next.add(dim);
+      return next;
+    });
+  };
+
+  const chartData = history
+    .slice()
+    .sort((a, b) => new Date(a.computed_at).getTime() - new Date(b.computed_at).getTime())
+    .map(entry => ({
+      date: formatShortDate(entry.computed_at),
+      overall_score: entry.overall_score,
+      ...entry.dimensions,
+    }));
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold">Risk Trend</div>
+        <div className="flex gap-0 border border-stone-300 rounded-lg overflow-hidden">
+          {([3, 6, 12] as const).map(m => (
+            <button
+              key={m}
+              onClick={() => setMonths(m)}
+              className={`px-3 py-1.5 text-[10px] uppercase tracking-widest font-mono transition-colors ${
+                months === m
+                  ? 'bg-zinc-900 text-zinc-50'
+                  : 'bg-stone-200 text-stone-500 hover:text-zinc-900'
+              }`}
+            >
+              {m}m
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading && (
+        <div className="bg-stone-200 rounded-2xl p-8 text-center">
+          <div className="text-xs text-stone-500 uppercase tracking-wider animate-pulse">Loading trend data…</div>
+        </div>
+      )}
+
+      {!loading && chartData.length === 0 && (
+        <div className="bg-stone-200 rounded-2xl p-8 text-center">
+          <div className="text-xs text-stone-500 uppercase tracking-wider">No history yet</div>
+          <div className="text-[10px] text-stone-400 mt-2 font-mono">Risk assessments will be recorded automatically</div>
+        </div>
+      )}
+
+      {!loading && chartData.length > 0 && (
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
+          {/* Dimension toggles */}
+          <div className="flex flex-wrap gap-2 mb-5">
+            {DIMENSION_ORDER.map(dim => {
+              const active = visibleDimensions.has(dim);
+              const color = TREND_DIMENSION_COLORS[dim];
+              return (
+                <button
+                  key={dim}
+                  onClick={() => toggleDimension(dim)}
+                  className={`px-2.5 py-1 text-[9px] uppercase tracking-widest font-bold rounded-lg border transition-colors ${
+                    active
+                      ? 'border-white/20 text-zinc-200'
+                      : 'border-white/5 text-zinc-600 hover:text-zinc-400 hover:border-white/10'
+                  }`}
+                  style={active ? { backgroundColor: `${color}20`, borderColor: `${color}40` } : undefined}
+                >
+                  <span className="inline-block w-1.5 h-1.5 rounded-full mr-1.5" style={{ backgroundColor: active ? color : '#52525b' }} />
+                  {DIMENSION_META[dim]?.label ?? dim}
+                </button>
+              );
+            })}
+          </div>
+
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={chartData} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+              {/* Risk zone reference bands */}
+              <ReferenceArea y1={0} y2={25} fill="#10b981" fillOpacity={0.04} />
+              <ReferenceArea y1={25} y2={50} fill="#f59e0b" fillOpacity={0.04} />
+              <ReferenceArea y1={50} y2={75} fill="#f97316" fillOpacity={0.04} />
+              <ReferenceArea y1={75} y2={100} fill="#ef4444" fillOpacity={0.04} />
+
+              <XAxis
+                dataKey="date"
+                tick={{ fontSize: 10, fill: '#71717a' }}
+                axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
+                tickLine={false}
+              />
+              <YAxis
+                domain={[0, 100]}
+                tick={{ fontSize: 10, fill: '#71717a' }}
+                axisLine={{ stroke: 'rgba(255,255,255,0.05)' }}
+                tickLine={false}
+                width={32}
+              />
+              <Tooltip content={<TrendTooltip />} />
+
+              {/* Overall score — always visible */}
+              <Area
+                type="monotone"
+                dataKey="overall_score"
+                stroke="#e4e4e7"
+                strokeWidth={2}
+                fill="url(#overallGradient)"
+                dot={{ r: 3, fill: '#e4e4e7', stroke: '#18181b', strokeWidth: 2 }}
+                activeDot={{ r: 5, fill: '#e4e4e7', stroke: '#18181b', strokeWidth: 2 }}
+                name="Overall"
+              />
+
+              {/* Dimension lines — toggleable */}
+              {DIMENSION_ORDER.map(dim => {
+                if (!visibleDimensions.has(dim)) return null;
+                const color = TREND_DIMENSION_COLORS[dim];
+                return (
+                  <Line
+                    key={dim}
+                    type="monotone"
+                    dataKey={dim}
+                    stroke={color}
+                    strokeWidth={1.5}
+                    strokeDasharray="4 2"
+                    dot={{ r: 2, fill: color, stroke: '#18181b', strokeWidth: 1 }}
+                    activeDot={{ r: 4, fill: color, stroke: '#18181b', strokeWidth: 2 }}
+                    name={DIMENSION_META[dim]?.label ?? dim}
+                  />
+                );
+              })}
+
+              <defs>
+                <linearGradient id="overallGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#e4e4e7" stopOpacity={0.15} />
+                  <stop offset="100%" stopColor="#e4e4e7" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function isEmptyResult(data: RiskAssessmentResult): boolean {
   if (data.overall_score !== 0) return false;
   if (hasEmployeeComplianceAlerts(data.dimensions.compliance)) return false;
@@ -545,10 +744,15 @@ function isEmptyResult(data: RiskAssessmentResult): boolean {
 }
 
 export default function RiskAssessment() {
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [data, setData] = useState<RiskAssessmentResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notAssessed, setNotAssessed] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [adminCompanies, setAdminCompanies] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('');
   const [metrics, setMetrics] = useState<ERCaseMetrics | null>(null);
   const [metricsDays, setMetricsDays] = useState(30);
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -581,6 +785,30 @@ export default function RiskAssessment() {
     }
   }, []);
 
+  // Load companies list for admin company selector
+  useEffect(() => {
+    if (!isAdmin) return;
+    companiesApi.list().then((list) => {
+      setAdminCompanies(list.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })));
+      if (list.length > 0 && !selectedCompanyId) setSelectedCompanyId(list[0].id);
+    }).catch(() => {});
+  }, [isAdmin]);
+
+  const handleAdminRun = useCallback(async () => {
+    if (!selectedCompanyId) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const result = await riskAssessment.adminRun(selectedCompanyId);
+      setData(result);
+      setNotAssessed(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to run assessment.');
+    } finally {
+      setRunning(false);
+    }
+  }, [selectedCompanyId]);
+
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { fetchMetrics(metricsDays); }, [fetchMetrics, metricsDays]);
 
@@ -600,8 +828,33 @@ export default function RiskAssessment() {
       <div className="flex justify-between items-start border-b border-stone-200 pb-8">
         <div>
           <h1 className="text-4xl font-bold tracking-tighter text-zinc-900 uppercase">Risk Assessment</h1>
-          <p className="text-xs text-stone-500 mt-2 font-mono tracking-wide uppercase">Snapshot computed by your account manager</p>
+          <p className="text-xs text-stone-500 mt-2 font-mono tracking-wide uppercase">
+            {isAdmin ? 'Admin risk assessment console' : 'Snapshot computed by your account manager'}
+          </p>
         </div>
+        {isAdmin && (
+          <div className="flex items-center gap-3">
+            {adminCompanies.length > 1 && (
+              <select
+                value={selectedCompanyId}
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                className="px-3 py-2 text-xs bg-stone-200 border border-stone-300 rounded-lg text-zinc-900 font-mono"
+              >
+                {adminCompanies.map(c => (
+                  <option key={c.id} value={c.id}>{c.name || c.id.slice(0, 8)}</option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={handleAdminRun}
+              disabled={running || !selectedCompanyId}
+              className="flex items-center gap-2 px-4 py-2 text-xs font-bold uppercase tracking-widest bg-zinc-900 text-zinc-50 rounded-xl hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              <Play className="w-3 h-3" />
+              {running ? 'Running…' : 'Run Assessment'}
+            </button>
+          </div>
+        )}
       </div>
 
       {error && (
@@ -613,7 +866,11 @@ export default function RiskAssessment() {
       {notAssessed && (
         <div className="bg-stone-200 rounded-2xl p-12 text-center">
           <div className="text-xs text-stone-500 uppercase tracking-wider">Not yet assessed</div>
-          <div className="text-[10px] text-stone-400 mt-2 font-mono">Your account manager will run a risk assessment for your company. Check back soon.</div>
+          <div className="text-[10px] text-stone-400 mt-2 font-mono">
+            {isAdmin
+              ? 'Click "Run Assessment" above to compute the first risk snapshot.'
+              : 'Your account manager will run a risk assessment for your company. Check back soon.'}
+          </div>
         </div>
       )}
 
@@ -674,6 +931,9 @@ export default function RiskAssessment() {
           <div className="text-[10px] text-stone-400 font-mono uppercase tracking-wider -mt-8">
             Computed {new Date(data.computed_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
           </div>
+
+          {/* Risk Trend Chart */}
+          <RiskTrendChart />
 
           {/* Dimension detail cards */}
           <div>

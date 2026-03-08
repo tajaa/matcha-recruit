@@ -4381,6 +4381,23 @@ async def list_schedulers():
                     "overdue_tasks": stats["overdue_tasks"],
                     "due_soon_tasks": stats["due_soon_tasks"],
                 }
+            elif row["task_key"] == "risk_assessment":
+                ra_stats = await conn.fetchrow("""
+                    SELECT
+                        (SELECT COUNT(DISTINCT company_id) FROM risk_assessment_history) AS total_assessed,
+                        (SELECT COUNT(*) FROM risk_assessment_history WHERE computed_at > NOW() - INTERVAL '7 days') AS assessments_7d,
+                        (SELECT COUNT(*) FROM companies WHERE next_risk_assessment IS NOT NULL AND next_risk_assessment <= NOW()) AS due_now
+                """)
+                last_run = await conn.fetchrow(
+                    "SELECT computed_at, source FROM risk_assessment_history ORDER BY computed_at DESC LIMIT 1"
+                )
+                item["stats"] = {
+                    "total_assessed": ra_stats["total_assessed"],
+                    "assessments_7d": ra_stats["assessments_7d"],
+                    "due_now": ra_stats["due_now"],
+                    "last_run": last_run["computed_at"].isoformat() if last_run else None,
+                    "last_source": last_run["source"] if last_run else None,
+                }
 
             result.append(item)
 
@@ -4460,6 +4477,10 @@ async def trigger_scheduler(task_key: str):
     elif task_key == "onboarding_reminders":
         run_onboarding_reminders.delay()
         return {"status": "triggered", "task_key": task_key, "message": "Onboarding reminders enqueued"}
+    elif task_key == "risk_assessment":
+        from ...workers.tasks.risk_assessment import enqueue_scheduled_risk_assessments
+        enqueue_scheduled_risk_assessments.delay()
+        return {"status": "triggered", "task_key": task_key, "message": "Risk assessment enqueued"}
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task key: {task_key}")
 

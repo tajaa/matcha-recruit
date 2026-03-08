@@ -2920,3 +2920,11 @@ export interface AssignableUser {
   name: string;
   email: string;
 }
+
+export interface RiskHistoryEntry {
+  overall_score: number;
+  overall_band: string;
+  dimensions: Record<string, number>;
+  computed_at: string;
+  source: 'scheduled' | 'manual';
+}

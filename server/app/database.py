@@ -296,6 +296,12 @@ async def init_db():
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'logo_url') THEN
                     ALTER TABLE companies ADD COLUMN logo_url TEXT;
                 END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'next_risk_assessment') THEN
+                    ALTER TABLE companies ADD COLUMN next_risk_assessment TIMESTAMPTZ;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'risk_assessment_interval_days') THEN
+                    ALTER TABLE companies ADD COLUMN risk_assessment_interval_days INTEGER DEFAULT 7;
+                END IF;
             END $$;
         """)
 
@@ -2976,6 +2982,14 @@ async def init_db():
             ON CONFLICT (task_key) DO NOTHING
         """)
 
+        # Add scheduler setting for risk assessments
+        await conn.execute("""
+            INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
+            VALUES ('risk_assessment', 'Risk Assessment',
+                    'Automated weekly risk assessment scoring for all companies.', false, 3)
+            ON CONFLICT (task_key) DO NOTHING
+        """)
+
         # ===========================================
         # Compliance Poster Tables
         # ===========================================
@@ -3684,6 +3698,22 @@ async def init_db():
                 computed_by UUID REFERENCES users(id),
                 UNIQUE (company_id)
             )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS risk_assessment_history (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                overall_score INT NOT NULL,
+                overall_band TEXT NOT NULL,
+                dimensions JSONB NOT NULL,
+                weights JSONB NOT NULL,
+                computed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                source VARCHAR(20) NOT NULL DEFAULT 'scheduled'
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_risk_history_company_date
+            ON risk_assessment_history(company_id, computed_at DESC)
         """)
 
         # Matcha Work tables (chat-driven offer letter generation)
