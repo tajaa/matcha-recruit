@@ -394,12 +394,21 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handl
         <div className="ml-3 min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className={`text-sm font-bold ${isLight ? 'text-zinc-900' : 'text-zinc-50'} truncate`}>
-              {employee.first_name} {employee.last_name}
+              {employee.first_name || employee.last_name 
+                ? `${employee.first_name} ${employee.last_name}`.trim() 
+                : (employee.work_email || employee.email || 'Unknown')}
             </p>
           </div>
-          <p className={`text-[11px] ${t.textMuted} truncate mt-0.5`}>
-            {employee.job_title || (employee.work_email || employee.email)}
-          </p>
+          {(employee.first_name || employee.last_name) && (
+            <p className={`text-[11px] ${t.textMuted} truncate mt-0.5`}>
+              {employee.job_title || (employee.work_email || employee.email)}
+            </p>
+          )}
+          {!(employee.first_name || employee.last_name) && employee.job_title && (
+            <p className={`text-[11px] ${t.textMuted} truncate mt-0.5`}>
+              {employee.job_title}
+            </p>
+          )}
         </div>
         <div className="xl:hidden">
           <ChevronRight size={16} className={t.textFaint} />
@@ -1565,7 +1574,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           </>
         </div>
       ) : (
-        <div data-tour="emp-list" className={`${t.cardDark} overflow-hidden shadow-lg`}>
+        <div data-tour="emp-list" className={`${t.cardDark} overflow-x-auto shadow-lg`}>
+          <div className="min-w-[1024px]">
            {/* Table Header */}
            {!groupByLocation && (
              <div className={`hidden xl:flex items-center gap-6 py-4 px-6 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
@@ -1628,6 +1638,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />          ))}
           </div>
           )}
+          </div>
         </div>
       )}
       {/* Add Employee Modal */}
