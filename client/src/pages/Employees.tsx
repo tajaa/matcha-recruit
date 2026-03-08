@@ -1578,7 +1578,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           <div className="min-w-[1024px]">
            {/* Table Header */}
            {!groupByLocation && (
-             <div className={`hidden xl:flex items-center gap-6 py-4 px-6 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
+             <div className={`hidden xl:flex items-center gap-6 py-4 px-6 text-[10px] ${DK.textMuted} font-bold uppercase tracking-wider border-b border-white/5`}>
                 <div className="flex-1 min-w-[240px]">Name / Role</div>
                 <div className="w-24 text-left">Department</div>
                 <div className="w-28 text-left">Location</div>
@@ -1615,15 +1615,15 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       : city ? `${state} — ${city}` : state;
                     return (
                       <details key={key} open className="group/loc">
-                        <summary className={`flex items-center gap-3 px-6 py-3 cursor-pointer ${isLight ? 'bg-stone-200/80' : 'bg-zinc-800/80'} ${t.textDim} text-xs font-bold uppercase tracking-wider`}>
+                        <summary className={`flex items-center gap-3 px-6 py-3 cursor-pointer bg-zinc-800/80 ${DK.textDim} text-xs font-bold uppercase tracking-wider`}>
                           <ChevronDown size={14} className="transition-transform group-open/loc:rotate-0 -rotate-90" />
                           <MapPin size={12} />
                           {label}
-                          <span className={`${t.textFaint} font-mono ml-1`}>({emps.length})</span>
+                          <span className={`${DK.textFaint} font-mono ml-1`}>({emps.length})</span>
                         </summary>
-                        <div className={`divide-y ${isLight ? 'divide-stone-200' : 'divide-white/5'}`}>
+                        <div className="divide-y divide-white/5">
                           {emps.map((employee) => (
-                            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
+                            <EmployeeRow key={employee.id} employee={employee} t={DK} isLight={false} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
                           ))}
                         </div>
                       </details>
@@ -1633,9 +1633,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
               );
             })()
           ) : (
-          <div className={`divide-y ${isLight ? 'divide-stone-200' : 'divide-white/5'}`}>
+          <div className="divide-y divide-white/5">
           {employees.map((employee) => (
-            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />          ))}
+            <EmployeeRow key={employee.id} employee={employee} t={DK} isLight={false} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />          ))}
           </div>
           )}
           </div>
