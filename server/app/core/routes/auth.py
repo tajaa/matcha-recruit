@@ -3,7 +3,7 @@ import json
 import logging
 import re
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
 
@@ -1384,7 +1384,7 @@ async def validate_broker_client_invite(token: str):
         if row["status"] != "invited":
             raise HTTPException(status_code=400, detail=f"Invite is no longer valid (status: {row['status']})")
 
-        if not row["invite_expires_at"] or row["invite_expires_at"] < datetime.utcnow():
+        if not row["invite_expires_at"] or row["invite_expires_at"] < datetime.now(timezone.utc):
             await conn.execute(
                 """
                 UPDATE broker_client_setups
@@ -1451,7 +1451,7 @@ async def accept_broker_client_invite(token: str, request: BrokerClientInviteAcc
             if invite["status"] != "invited":
                 raise HTTPException(status_code=400, detail=f"Invite is no longer valid (status: {invite['status']})")
 
-            if not invite["invite_expires_at"] or invite["invite_expires_at"] < datetime.utcnow():
+            if not invite["invite_expires_at"] or invite["invite_expires_at"] < datetime.now(timezone.utc):
                 await conn.execute(
                     """
                     UPDATE broker_client_setups

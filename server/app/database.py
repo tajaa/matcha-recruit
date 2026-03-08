@@ -1677,6 +1677,10 @@ async def init_db():
             ADD COLUMN IF NOT EXISTS published_at TIMESTAMP
         """)
         await conn.execute("""
+            ALTER TABLE handbooks
+            ADD COLUMN IF NOT EXISTS guided_answers JSONB DEFAULT '{}'
+        """)
+        await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_handbooks_company_id ON handbooks(company_id)
         """)
         await conn.execute("""

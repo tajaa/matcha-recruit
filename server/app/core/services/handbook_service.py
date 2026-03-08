@@ -1665,6 +1665,35 @@ def _apply_operational_hooks_to_sections(
     return hydrated
 
 
+def _extract_hooks_from_existing_content(
+    template_content: str,
+    existing_content: str,
+    hook_tokens: list[str],
+) -> dict[str, str]:
+    extracted = {}
+    for token in hook_tokens:
+        idx = template_content.find(token)
+        if idx < 0:
+            continue
+        ctx_before = template_content[max(0, idx - 60):idx]
+        ctx_after = template_content[idx + len(token):idx + len(token) + 60]
+        before_snippet = ctx_before[-25:] if len(ctx_before) >= 25 else ctx_before
+        after_snippet = ctx_after[:25] if len(ctx_after) >= 25 else ctx_after
+        if not before_snippet or not after_snippet:
+            continue
+        before_pos = existing_content.find(before_snippet)
+        if before_pos < 0:
+            continue
+        value_start = before_pos + len(before_snippet)
+        after_pos = existing_content.find(after_snippet, value_start)
+        if after_pos <= value_start:
+            continue
+        value = existing_content[value_start:after_pos].strip()
+        if value and value != token:
+            extracted[token] = value
+    return extracted
+
+
 def _apply_hooks_to_content(content: str, hook_values: dict[str, str]) -> str:
     """Replace operational hook placeholders in a single content string."""
     for token, replacement in hook_values.items():
@@ -2455,9 +2484,9 @@ class HandbookService:
                         """
                         INSERT INTO handbooks (
                             company_id, title, status, mode, source_type, active_version,
-                            file_url, file_name, created_by, created_at, updated_at
+                            file_url, file_name, created_by, guided_answers, created_at, updated_at
                         )
-                        VALUES ($1, $2, 'draft', $3, $4, 1, $5, $6, $7, NOW(), NOW())
+                        VALUES ($1, $2, 'draft', $3, $4, 1, $5, $6, $7, $8, NOW(), NOW())
                         RETURNING id
                         """,
                         company_id,
@@ -2467,6 +2496,7 @@ class HandbookService:
                         data.file_url,
                         data.file_name,
                         created_by,
+                        json.dumps(guided_answers),
                     )
 
                     for scope in normalized_scopes:
@@ -2915,7 +2945,7 @@ class HandbookService:
         async with get_connection() as conn:
             async with conn.transaction():
                 handbook = await conn.fetchrow(
-                    "SELECT id, active_version FROM handbooks WHERE id = $1 AND company_id = $2",
+                    "SELECT id, active_version, guided_answers FROM handbooks WHERE id = $1 AND company_id = $2",
                     handbook_id,
                     company_id,
                 )
@@ -2956,7 +2986,10 @@ class HandbookService:
                                 exclude={"company_id", "updated_by", "updated_at"},
                             )
                             norm_profile = _normalize_profile(CompanyHandbookProfileInput(**profile_data))
-                            hv = _build_operational_hook_values(norm_profile, {})
+                            stored_ga = handbook.get("guided_answers") or {}
+                            if isinstance(stored_ga, str):
+                                stored_ga = json.loads(stored_ga) if stored_ga else {}
+                            hv = _build_operational_hook_values(norm_profile, stored_ga)
                             resolved_content = _apply_hooks_to_content(resolved_content, hv)
                         await conn.execute(
                             """
@@ -3174,7 +3207,7 @@ class HandbookService:
                     )
 
                     handbook_row = await conn.fetchrow(
-                        "SELECT id, active_version, mode FROM handbooks WHERE id = $1 AND company_id = $2",
+                        "SELECT id, active_version, mode, guided_answers FROM handbooks WHERE id = $1 AND company_id = $2",
                         handbook_id,
                         company_id,
                     )
@@ -3205,7 +3238,12 @@ class HandbookService:
                         exclude={"company_id", "updated_by", "updated_at"},
                     )
                     normalized_profile = _normalize_profile(CompanyHandbookProfileInput(**profile_data))
-                    hook_values = _build_operational_hook_values(normalized_profile, {})
+                    stored_answers = handbook_row.get("guided_answers") or {}
+                    if isinstance(stored_answers, str):
+                        stored_answers = json.loads(stored_answers) if stored_answers else {}
+                    hook_values = _build_operational_hook_values(normalized_profile, stored_answers)
+                    all_hook_tokens = list(LEGAL_OPERATIONAL_HOOKS.values()) + [ATTENDANCE_NOTICE_WINDOW_HOOK]
+                    _using_generic_fallbacks = not stored_answers
                     profile_fingerprint = sha256(
                         json.dumps(normalized_profile, sort_keys=True, default=str).encode()
                     ).hexdigest()
@@ -3269,8 +3307,19 @@ class HandbookService:
                             requirements=requirements,
                             selected_cities=selected_cities_by_state.get(state),
                         )
-                        proposed_content = _apply_hooks_to_content(proposed_content, hook_values)
                         old_content = sections_by_key.get(section_key) or ""
+                        if _using_generic_fallbacks and old_content:
+                            extracted = _extract_hooks_from_existing_content(
+                                proposed_content, old_content, all_hook_tokens,
+                            )
+                            if extracted:
+                                proposed_content = _apply_hooks_to_content(
+                                    proposed_content, {**hook_values, **extracted},
+                                )
+                            else:
+                                proposed_content = _apply_hooks_to_content(proposed_content, hook_values)
+                        else:
+                            proposed_content = _apply_hooks_to_content(proposed_content, hook_values)
                         if _normalize_section_content(old_content) == _normalize_section_content(proposed_content):
                             continue
 
@@ -3367,7 +3416,18 @@ class HandbookService:
                         old_core = sections_by_key.get(core_key)
                         if old_core is None:
                             continue
-                        proposed_core = _apply_hooks_to_content(core_sec["content"], hook_values)
+                        if _using_generic_fallbacks and old_core:
+                            extracted = _extract_hooks_from_existing_content(
+                                core_sec["content"], old_core, all_hook_tokens,
+                            )
+                            if extracted:
+                                proposed_core = _apply_hooks_to_content(
+                                    core_sec["content"], {**hook_values, **extracted},
+                                )
+                            else:
+                                proposed_core = _apply_hooks_to_content(core_sec["content"], hook_values)
+                        else:
+                            proposed_core = _apply_hooks_to_content(core_sec["content"], hook_values)
                         if _normalize_section_content(old_core) == _normalize_section_content(proposed_core):
                             continue
 
