@@ -1,6 +1,6 @@
 """Pydantic models for IR (Incident Report) module."""
 
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, Literal, Any
 from uuid import UUID
 from pydantic import BaseModel, Field
@@ -11,7 +11,7 @@ IRIncidentType = Literal["safety", "behavioral", "property", "near_miss", "other
 IRSeverity = Literal["critical", "high", "medium", "low"]
 IRStatus = Literal["reported", "investigating", "action_required", "resolved", "closed"]
 IRDocumentType = Literal["photo", "form", "statement", "other"]
-IRAnalysisType = Literal["categorization", "severity", "root_cause", "recommendations", "similar", "consistency", "company_consistency"]
+IRAnalysisType = Literal["categorization", "severity", "root_cause", "recommendations", "similar"]
 
 
 # ===========================================
@@ -80,7 +80,6 @@ class IRIncidentCreate(BaseModel):
     reported_by_email: Optional[str] = None
     witnesses: list[Witness] = []
     category_data: Optional[dict[str, Any]] = None
-    involved_employee_ids: list[UUID] = []
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
 
@@ -99,7 +98,6 @@ class IRIncidentUpdate(BaseModel):
     category_data: Optional[dict[str, Any]] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
-    involved_employee_ids: Optional[list[UUID]] = None
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
 
@@ -123,7 +121,6 @@ class IRIncidentResponse(BaseModel):
     category_data: dict[str, Any] = {}
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
-    involved_employee_ids: list[UUID] = []
     document_count: int = 0
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
@@ -257,55 +254,6 @@ class PrecedentAnalysis(BaseModel):
     cache_reason: Optional[str] = None
 
 
-class ActionProbability(BaseModel):
-    """A single action category with its probability."""
-    category: str
-    probability: float
-    weighted_count: float
-
-
-class ConsistencyGuidance(BaseModel):
-    """Consistency guidance based on precedent analysis."""
-    sample_size: int
-    effective_sample_size: float
-    confidence: Literal["insufficient", "limited", "strong"]
-    unprecedented: bool
-    action_distribution: Optional[list[ActionProbability]] = None
-    dominant_action: Optional[str] = None
-    dominant_probability: Optional[float] = None
-    weighted_avg_resolution_days: Optional[float] = None
-    weighted_effectiveness_rate: Optional[float] = None
-    consistency_insight: Optional[str] = None
-    generated_at: str
-    from_cache: bool = False
-
-
-class ActionByType(BaseModel):
-    """Action distribution broken down by incident type."""
-    incident_type: str
-    total: int
-    actions: list[ActionProbability]
-
-
-class ActionBySeverity(BaseModel):
-    """Action distribution broken down by severity."""
-    severity: str
-    total: int
-    actions: list[ActionProbability]
-
-
-class ConsistencyAnalytics(BaseModel):
-    """Company-wide consistency analytics across resolved incidents."""
-    total_resolved: int
-    total_with_actions: int
-    action_distribution: list[ActionProbability]
-    by_incident_type: list[ActionByType]
-    by_severity: list[ActionBySeverity]
-    avg_resolution_by_action: dict[str, float]
-    generated_at: str
-    from_cache: bool = False
-
-
 # ===========================================
 # Analytics Models
 # ===========================================
@@ -370,3 +318,53 @@ class IRAuditLogResponse(BaseModel):
     """Response for listing audit log entries."""
     entries: list[IRAuditLogEntry]
     total: int
+
+
+# ===========================================
+# OSHA Models
+# ===========================================
+
+class OshaRecordabilityUpdate(BaseModel):
+    """Request model for updating OSHA recordability on an incident."""
+    osha_recordable: bool
+    osha_classification: Optional[str] = None  # death, days_away, restricted_duty, medical_treatment, loss_of_consciousness, significant_injury
+    osha_case_number: Optional[str] = None
+    days_away_from_work: Optional[int] = 0
+    days_restricted_duty: Optional[int] = 0
+    date_of_death: Optional[date] = None
+
+
+class Osha300LogEntry(BaseModel):
+    """A single entry in the OSHA 300 log."""
+    case_number: str
+    employee_name: str
+    job_title: Optional[str]
+    date_of_injury: str
+    location: Optional[str]
+    description: Optional[str]
+    classification: Optional[str]
+    days_away: int
+    days_restricted: int
+    injury_type: Optional[str]
+    incident_id: str
+
+
+class Osha300ASummary(BaseModel):
+    """OSHA 300A annual summary."""
+    year: int
+    establishment_name: Optional[str]
+    total_cases: int
+    total_deaths: int
+    total_days_away_cases: int
+    total_restricted_cases: int
+    total_other_recordable: int
+    total_days_away: int
+    total_days_restricted: int
+    total_injuries: int
+    total_skin_disorders: int
+    total_respiratory: int
+    total_poisonings: int
+    total_hearing_loss: int
+    total_other_illnesses: int
+    average_employees: Optional[int]
+    total_hours_worked: Optional[int]

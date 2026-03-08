@@ -11,7 +11,7 @@ import re
 import secrets
 from datetime import datetime, date, timedelta
 from decimal import Decimal
-from typing import Any, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body, BackgroundTasks
@@ -23,7 +23,6 @@ from ...core.dependencies import get_current_user
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
 from ...core.services.email import EmailService, get_email_service
-from ...core.services.compliance_service import ensure_location_for_employee
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -100,6 +99,24 @@ async def _employee_compensation_fields_available(conn) -> bool:
     }.issubset(existing)
 
 
+async def _employee_status_fields_available(conn) -> bool:
+    columns = await conn.fetch(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'employees'
+          AND column_name = ANY($1::text[])
+        """,
+        ["employment_status", "status_changed_at", "status_reason"],
+    )
+    existing = {row["column_name"] for row in columns}
+    return {
+        "employment_status",
+        "status_changed_at",
+        "status_reason",
+    }.issubset(existing)
+
+
 async def _employee_org_fields_available(conn) -> bool:
     columns = await conn.fetch(
         """
@@ -144,7 +161,6 @@ class EmployeeCreateRequest(BaseModel):
     pay_classification: Optional[str] = None
     pay_rate: Optional[Decimal] = None
     work_city: Optional[str] = None
-    work_zip: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
 
@@ -196,6 +212,14 @@ class EmployeeUpdateRequest(BaseModel):
         return self
 
 
+VALID_EMPLOYMENT_STATUSES = {"active", "on_leave", "suspended", "on_notice", "furloughed", "terminated", "offboarded"}
+
+
+class EmployeeStatusUpdateRequest(BaseModel):
+    employment_status: str  # active, on_leave, suspended, on_notice, furloughed, terminated, offboarded
+    reason: Optional[str] = None
+
+
 class EmployeeListResponse(BaseModel):
     id: UUID
     email: str
@@ -216,6 +240,9 @@ class EmployeeListResponse(BaseModel):
     work_city: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
+    employment_status: Optional[str] = None
+    status_changed_at: Optional[datetime] = None
+    status_reason: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -547,6 +574,7 @@ async def get_bulk_onboarding_progress(
 @router.get("", response_model=List[EmployeeListResponse])
 async def list_employees(
     status: Optional[str] = None,  # active, terminated, invited
+    employment_status: Optional[str] = Query(None, description="Filter by employment_status column"),
     search: Optional[str] = Query(None, min_length=1, max_length=200),
     department: Optional[str] = Query(None),
     employment_type: Optional[str] = Query(None),
@@ -561,6 +589,7 @@ async def list_employees(
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
         org_fields_available = await _employee_org_fields_available(conn)
+        status_fields_available = await _employee_status_fields_available(conn)
         compensation_select = (
             "e.pay_classification, e.pay_rate, e.work_city,"
             if compensation_fields_available
@@ -571,6 +600,11 @@ async def list_employees(
             if org_fields_available
             else "NULL::VARCHAR AS job_title, NULL::VARCHAR AS department,"
         )
+        status_select = (
+            "e.employment_status, e.status_changed_at, e.status_reason,"
+            if status_fields_available
+            else "NULL::VARCHAR AS employment_status, NULL::TIMESTAMP AS status_changed_at, NULL::TEXT AS status_reason,"
+        )
 
         # Build query based on status filter
         base_query = f"""
@@ -580,6 +614,7 @@ async def list_employees(
                 e.manager_id, e.user_id, e.created_at,
                 {compensation_select}
                 {org_select}
+                {status_select}
                 m.first_name || ' ' || m.last_name as manager_name,
                 (
                     SELECT status FROM employee_invitations
@@ -600,6 +635,11 @@ async def list_employees(
             base_query += " AND e.termination_date IS NOT NULL"
         elif status == "invited":
             base_query += " AND e.user_id IS NULL"
+
+        if employment_status and status_fields_available:
+            base_query += f" AND e.employment_status = ${param_num}"
+            params.append(employment_status)
+            param_num += 1
 
         if search:
             search_pattern = f"%{search}%"
@@ -666,6 +706,9 @@ async def list_employees(
                     work_city=_work_city,
                     job_title=row["job_title"],
                     department=row["department"],
+                    employment_status=row["employment_status"],
+                    status_changed_at=row["status_changed_at"],
+                    status_reason=row["status_reason"],
                     created_at=row["created_at"],
                 )
             )
@@ -769,12 +812,11 @@ async def create_employee(
         ]
 
         if compensation_fields_available:
-            insert_cols.extend(["pay_classification", "pay_rate", "work_city", "work_zip"])
+            insert_cols.extend(["pay_classification", "pay_rate", "work_city"])
             insert_vals.extend([
                 request.pay_classification,
                 request.pay_rate,
                 request.work_city.strip() if request.work_city else None,
-                request.work_zip.strip() if request.work_zip else None,
             ])
         elif request.pay_classification or request.pay_rate is not None or request.work_city:
             logger.warning(
@@ -800,23 +842,6 @@ async def create_employee(
             """,
             *insert_vals,
         )
-
-        # Auto-derive compliance location from employee address
-        if row["work_state"]:
-            location_id = await ensure_location_for_employee(
-                conn,
-                company_id,
-                row.get("work_city") if compensation_fields_available else None,
-                row["work_state"],
-                background_tasks,
-                work_zip=row.get("work_zip") if compensation_fields_available else None,
-            )
-            if location_id and location_id != row.get("work_location_id"):
-                await conn.execute(
-                    "UPDATE employees SET work_location_id = $1 WHERE id = $2",
-                    location_id,
-                    row["id"],
-                )
 
         # Auto-assign active onboarding task templates to the new employee
         try:
@@ -999,6 +1024,9 @@ async def get_employee(
             work_city=work_city,
             job_title=row.get("job_title"),
             department=row.get("department"),
+            employment_status=row.get("employment_status"),
+            status_changed_at=row.get("status_changed_at"),
+            status_reason=row.get("status_reason"),
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -1011,7 +1039,6 @@ async def get_employee(
 async def update_employee(
     employee_id: UUID,
     request: EmployeeUpdateRequest,
-    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update employee details."""
@@ -1020,17 +1047,13 @@ async def update_employee(
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
         org_fields_available = await _employee_org_fields_available(conn)
-        # Check employee exists and capture current location-related fields
-        existing_row = await conn.fetchrow(
-            "SELECT id, work_state, work_city, work_location_id FROM employees WHERE id = $1 AND org_id = $2",
+        # Check employee exists
+        existing = await conn.fetchval(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
             employee_id, company_id
         )
-        if not existing_row:
+        if not existing:
             raise HTTPException(status_code=404, detail="Employee not found")
-
-        old_work_state = existing_row["work_state"]
-        old_work_city = existing_row.get("work_city")
-        old_work_location_id = existing_row.get("work_location_id")
 
         # Build update query dynamically
         updates = []
@@ -1149,48 +1172,96 @@ async def update_employee(
 
         row = await conn.fetchrow(query, *values)
 
-        # Sync compliance location if work_state or work_city changed
-        new_work_state = row["work_state"]
-        new_work_city = row.get("work_city")
-        location_changed = (
-            new_work_state != old_work_state
-            or new_work_city != old_work_city
-        )
-        if location_changed and new_work_state:
-            new_location_id = await ensure_location_for_employee(
-                conn,
-                company_id,
-                new_work_city,
-                new_work_state,
-                background_tasks,
-                work_zip=row.get("work_zip"),
+        # Get manager name
+        manager_name = None
+        if row["manager_id"]:
+            manager = await conn.fetchrow(
+                "SELECT first_name, last_name FROM employees WHERE id = $1",
+                row["manager_id"]
             )
-            if new_location_id and new_location_id != row.get("work_location_id"):
-                await conn.execute(
-                    "UPDATE employees SET work_location_id = $1 WHERE id = $2",
-                    new_location_id,
-                    row["id"],
-                )
+            if manager:
+                manager_name = f"{manager['first_name']} {manager['last_name']}"
 
-            # Deactivate old auto-derived location if no active employees remain
-            if old_work_location_id and old_work_location_id != new_location_id:
-                remaining = await conn.fetchval(
-                    """
-                    SELECT COUNT(*) FROM employees
-                    WHERE work_location_id = $1
-                      AND termination_date IS NULL
-                      AND id != $2
-                    """,
-                    old_work_location_id,
-                    employee_id,
-                )
-                if remaining == 0:
-                    # Only auto-deactivate employee_derived locations; manual ones stay active
-                    await conn.execute(
-                        """UPDATE business_locations SET is_active = false, updated_at = NOW()
-                           WHERE id = $1 AND source = 'employee_derived'""",
-                        old_work_location_id,
-                    )
+        # Get invitation status
+        invitation_status = await conn.fetchval(
+            "SELECT status FROM employee_invitations WHERE employee_id = $1 ORDER BY created_at DESC LIMIT 1",
+            employee_id
+        )
+
+        pay_classification, pay_rate, work_city = _employee_compensation_values(
+            row, compensation_fields_available
+        )
+
+        return EmployeeDetailResponse(
+            id=row["id"],
+            email=row["email"],
+            work_email=row["email"],
+            personal_email=row["personal_email"],
+            first_name=row["first_name"],
+            last_name=row["last_name"],
+            work_state=row["work_state"],
+            employment_type=row["employment_type"],
+            start_date=str(row["start_date"]) if row["start_date"] else None,
+            termination_date=str(row["termination_date"]) if row["termination_date"] else None,
+            manager_id=row["manager_id"],
+            manager_name=manager_name,
+            user_id=row["user_id"],
+            invitation_status=invitation_status,
+            pay_classification=pay_classification,
+            pay_rate=pay_rate,
+            work_city=work_city,
+            job_title=row.get("job_title"),
+            department=row.get("department"),
+            employment_status=row.get("employment_status"),
+            status_changed_at=row.get("status_changed_at"),
+            status_reason=row.get("status_reason"),
+            phone=row["phone"],
+            address=row["address"],
+            emergency_contact=row["emergency_contact"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+
+@router.put("/{employee_id}/status")
+async def update_employee_status(
+    employee_id: UUID,
+    request: EmployeeStatusUpdateRequest,
+    user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Update the employment status of an employee."""
+    if request.employment_status not in VALID_EMPLOYMENT_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid employment_status. Must be one of: {sorted(VALID_EMPLOYMENT_STATUSES)}",
+        )
+
+    async with get_connection() as conn:
+        status_fields_available = await _employee_status_fields_available(conn)
+        if not status_fields_available:
+            raise HTTPException(
+                status_code=500,
+                detail="Employment status columns not yet available. Run the migration first.",
+            )
+
+        row = await conn.fetchrow(
+            """
+            UPDATE employees
+            SET employment_status = $1, status_changed_at = NOW(), status_reason = $2, updated_at = NOW()
+            WHERE id = $3 AND org_id = $4
+            RETURNING *
+            """,
+            request.employment_status,
+            request.reason,
+            employee_id,
+            company_id,
+        )
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        compensation_fields_available = await _employee_compensation_fields_available(conn)
 
         # Get manager name
         manager_name = None
@@ -1232,6 +1303,9 @@ async def update_employee(
             work_city=work_city,
             job_title=row.get("job_title"),
             department=row.get("department"),
+            employment_status=row.get("employment_status"),
+            status_changed_at=row.get("status_changed_at"),
+            status_reason=row.get("status_reason"),
             phone=row["phone"],
             address=row["address"],
             emergency_contact=row["emergency_contact"],
@@ -1586,24 +1660,6 @@ async def bulk_upload_employees_csv(
 
                 employee_ids.append(employee['id'])
                 created += 1
-
-                # Auto-derive compliance location from employee address
-                if work_state:
-                    work_zip_val = row.get("work_zip", "").strip() or None
-                    loc_id = await ensure_location_for_employee(
-                        conn,
-                        company_id,
-                        work_city,
-                        work_state,
-                        background_tasks,
-                        work_zip=work_zip_val or None,
-                    )
-                    if loc_id:
-                        await conn.execute(
-                            "UPDATE employees SET work_location_id = $1 WHERE id = $2",
-                            loc_id,
-                            employee['id'],
-                        )
 
                 # Schedule Google Workspace / Slack provisioning
                 run_google = google_workspace_auto_provision
@@ -1992,9 +2048,6 @@ class OffboardingCaseCreateRequest(BaseModel):
     reason: Optional[str] = None
     is_voluntary: bool = True
     assign_default_tasks: bool = True
-    pre_termination_check_id: Optional[UUID] = None
-    risk_acknowledged: bool = False
-    acknowledgment_notes: Optional[str] = None
 
 
 class OffboardingCaseCompleteRequest(BaseModel):
@@ -2041,96 +2094,6 @@ class OffboardingCaseResponse(BaseModel):
 
     class Config:
         from_attributes = True
-
-
-# ================================
-# Pre-Termination Check Models
-# ================================
-
-
-class PreTermCheckRequest(BaseModel):
-    separation_reason: Optional[str] = None
-    is_voluntary: bool = False
-
-
-class PreTermDimensionResponse(BaseModel):
-    status: str  # green/yellow/red
-    score: int
-    summary: str
-    details: dict[str, Any] = {}
-
-
-class PreTermCheckResponse(BaseModel):
-    id: UUID
-    employee_id: UUID
-    company_id: UUID
-    initiated_by: UUID
-    overall_score: int
-    overall_band: str
-    dimensions: dict[str, Any]
-    ai_narrative: Optional[str] = None
-    recommended_actions: list[str] = []
-    requires_acknowledgment: bool = False
-    acknowledged: bool = False
-    acknowledged_by: Optional[UUID] = None
-    acknowledged_at: Optional[datetime] = None
-    acknowledgment_notes: Optional[str] = None
-    outcome: Optional[str] = None
-    offboarding_case_id: Optional[UUID] = None
-    separation_reason: Optional[str] = None
-    is_voluntary: bool = False
-    computed_at: datetime
-    created_at: datetime
-
-
-class PreTermAcknowledgeRequest(BaseModel):
-    notes: str
-
-
-class PreTermOutcomeRequest(BaseModel):
-    outcome: str  # proceeded/modified/abandoned
-
-
-VALID_PRE_TERM_OUTCOMES = {"proceeded", "modified", "abandoned"}
-
-
-def _normalize_json(value, default=None):
-    """Parse JSONB string from asyncpg if needed."""
-    if value is None:
-        return default
-    if isinstance(value, (dict, list)):
-        return value
-    if isinstance(value, str):
-        try:
-            return json.loads(value)
-        except (json.JSONDecodeError, ValueError):
-            return default
-    return default
-
-
-def _to_pre_term_check_response(row) -> PreTermCheckResponse:
-    return PreTermCheckResponse(
-        id=row["id"],
-        employee_id=row["employee_id"],
-        company_id=row["company_id"],
-        initiated_by=row["initiated_by"],
-        overall_score=row["overall_score"],
-        overall_band=row["overall_band"],
-        dimensions=_normalize_json(row["dimensions"], {}),
-        ai_narrative=row.get("ai_narrative"),
-        recommended_actions=_normalize_json(row.get("recommended_actions"), []),
-        requires_acknowledgment=row["requires_acknowledgment"],
-        acknowledged=row["acknowledged"],
-        acknowledged_by=row.get("acknowledged_by"),
-        acknowledged_at=row.get("acknowledged_at"),
-        acknowledgment_notes=row.get("acknowledgment_notes"),
-        outcome=row.get("outcome"),
-        offboarding_case_id=row.get("offboarding_case_id"),
-        separation_reason=row.get("separation_reason"),
-        is_voluntary=row.get("is_voluntary", False),
-        computed_at=row["computed_at"],
-        created_at=row["created_at"],
-    )
 
 
 def _to_offboarding_task_response(row) -> OffboardingTaskResponse:
@@ -2709,249 +2672,6 @@ async def delete_employee_onboarding_task(
 
 
 # ================================
-# Pre-Termination Risk Checks
-# ================================
-
-
-@router.get("/pre-termination-checks/analytics")
-async def get_pre_termination_analytics(
-    period: Optional[str] = Query("12m", description="Time period: 30d, 90d, 12m"),
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Return aggregate analytics for pre-termination risk checks across the company."""
-    company_id = await get_client_company_id(current_user)
-
-    period_days = {"30d": 30, "90d": 90, "12m": 365}
-    days = period_days.get(period, 365)
-    period_start = datetime.utcnow() - timedelta(days=days)
-
-    async with get_connection() as conn:
-        summary = await conn.fetchrow(
-            """
-            SELECT
-                COUNT(*) AS total_checks,
-                COUNT(*) FILTER (WHERE overall_band = 'low') AS band_low,
-                COUNT(*) FILTER (WHERE overall_band = 'moderate') AS band_moderate,
-                COUNT(*) FILTER (WHERE overall_band = 'high') AS band_high,
-                COUNT(*) FILTER (WHERE overall_band = 'critical') AS band_critical,
-                COUNT(*) FILTER (WHERE outcome = 'proceeded') AS outcome_proceeded,
-                COUNT(*) FILTER (WHERE outcome = 'modified') AS outcome_modified,
-                COUNT(*) FILTER (WHERE outcome = 'abandoned') AS outcome_abandoned,
-                COUNT(*) FILTER (WHERE outcome = 'pending') AS outcome_pending,
-                COALESCE(AVG(overall_score), 0)::int AS avg_score,
-                COUNT(*) FILTER (WHERE overall_band IN ('high', 'critical') AND outcome = 'proceeded') AS high_risk_proceeded,
-                COUNT(*) FILTER (WHERE overall_band IN ('high', 'critical')) AS high_risk_total
-            FROM pre_termination_checks
-            WHERE company_id = $1 AND computed_at > $2
-            """,
-            company_id,
-            period_start,
-        )
-
-        high_risk_total = int(summary["high_risk_total"] or 0)
-        high_risk_proceeded = int(summary["high_risk_proceeded"] or 0)
-        override_rate = round(high_risk_proceeded / high_risk_total, 2) if high_risk_total > 0 else 0.0
-
-        try:
-            red_flag_rows = await conn.fetch(
-                """
-                SELECT key AS dimension, COUNT(*) AS count
-                FROM pre_termination_checks,
-                     jsonb_each(dimensions) AS d(key, value)
-                WHERE company_id = $1
-                  AND computed_at > $2
-                  AND value->>'status' = 'red'
-                GROUP BY key
-                ORDER BY count DESC
-                LIMIT 5
-                """,
-                company_id,
-                period_start,
-            )
-            most_common_red_flags = [
-                {"dimension": row["dimension"], "count": int(row["count"])}
-                for row in red_flag_rows
-            ]
-        except Exception:
-            most_common_red_flags = []
-
-    return {
-        "total_checks": int(summary["total_checks"] or 0),
-        "by_band": {
-            "low": int(summary["band_low"] or 0),
-            "moderate": int(summary["band_moderate"] or 0),
-            "high": int(summary["band_high"] or 0),
-            "critical": int(summary["band_critical"] or 0),
-        },
-        "by_outcome": {
-            "proceeded": int(summary["outcome_proceeded"] or 0),
-            "modified": int(summary["outcome_modified"] or 0),
-            "abandoned": int(summary["outcome_abandoned"] or 0),
-            "pending": int(summary["outcome_pending"] or 0),
-        },
-        "override_rate": override_rate,
-        "avg_score": int(summary["avg_score"] or 0),
-        "most_common_red_flags": most_common_red_flags,
-        "period": period,
-    }
-
-
-@router.post("/{employee_id}/pre-termination-check", response_model=PreTermCheckResponse)
-async def create_pre_termination_check(
-    employee_id: UUID,
-    request: PreTermCheckRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Run a pre-termination risk check for an employee without creating an offboarding case."""
-    from ..services.pre_termination_service import run_pre_termination_check
-
-    company_id = await get_client_company_id(current_user)
-
-    async with get_connection() as conn:
-        emp = await conn.fetchrow(
-            "SELECT id FROM employees WHERE id = $1 AND org_id = $2 AND termination_date IS NULL",
-            employee_id,
-            company_id,
-        )
-        if not emp:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-    result = await run_pre_termination_check(
-        employee_id=employee_id,
-        company_id=company_id,
-        initiated_by=current_user.id,
-        separation_reason=request.separation_reason,
-        is_voluntary=request.is_voluntary,
-    )
-    return PreTermCheckResponse(**result)
-
-
-@router.get("/{employee_id}/pre-termination-checks", response_model=list[PreTermCheckResponse])
-async def list_pre_termination_checks(
-    employee_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """List all prior pre-termination checks for an employee."""
-    company_id = await get_client_company_id(current_user)
-
-    async with get_connection() as conn:
-        emp = await conn.fetchrow(
-            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
-            employee_id,
-            company_id,
-        )
-        if not emp:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-        rows = await conn.fetch(
-            """
-            SELECT *
-            FROM pre_termination_checks
-            WHERE employee_id = $1 AND company_id = $2
-            ORDER BY computed_at DESC
-            """,
-            employee_id,
-            company_id,
-        )
-
-    return [_to_pre_term_check_response(row) for row in rows]
-
-
-@router.post("/pre-termination-checks/{check_id}/acknowledge", response_model=PreTermCheckResponse)
-async def acknowledge_pre_termination_check(
-    check_id: UUID,
-    request: PreTermAcknowledgeRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Acknowledge a high/critical pre-termination risk check to allow offboarding to proceed."""
-    company_id = await get_client_company_id(current_user)
-
-    async with get_connection() as conn:
-        check_row = await conn.fetchrow(
-            """
-            SELECT *
-            FROM pre_termination_checks
-            WHERE id = $1 AND company_id = $2
-            """,
-            check_id,
-            company_id,
-        )
-        if not check_row:
-            raise HTTPException(status_code=404, detail="Pre-termination check not found")
-
-        if not check_row["requires_acknowledgment"]:
-            raise HTTPException(
-                status_code=400,
-                detail="This check does not require acknowledgment",
-            )
-
-        if check_row["acknowledged"]:
-            raise HTTPException(
-                status_code=400,
-                detail="This check has already been acknowledged",
-            )
-
-        updated = await conn.fetchrow(
-            """
-            UPDATE pre_termination_checks
-            SET acknowledged = true,
-                acknowledged_by = $2,
-                acknowledged_at = NOW(),
-                acknowledgment_notes = $3
-            WHERE id = $1
-            RETURNING *
-            """,
-            check_id,
-            current_user.id,
-            request.notes,
-        )
-
-    return _to_pre_term_check_response(updated)
-
-
-@router.patch("/pre-termination-checks/{check_id}/outcome", response_model=PreTermCheckResponse)
-async def update_pre_termination_outcome(
-    check_id: UUID,
-    request: PreTermOutcomeRequest,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Update the outcome of a pre-termination check after a decision is made."""
-    company_id = await get_client_company_id(current_user)
-
-    if request.outcome not in VALID_PRE_TERM_OUTCOMES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid outcome. Must be one of: {sorted(VALID_PRE_TERM_OUTCOMES)}",
-        )
-
-    async with get_connection() as conn:
-        check_row = await conn.fetchrow(
-            """
-            SELECT id
-            FROM pre_termination_checks
-            WHERE id = $1 AND company_id = $2
-            """,
-            check_id,
-            company_id,
-        )
-        if not check_row:
-            raise HTTPException(status_code=404, detail="Pre-termination check not found")
-
-        updated = await conn.fetchrow(
-            """
-            UPDATE pre_termination_checks
-            SET outcome = $2
-            WHERE id = $1
-            RETURNING *
-            """,
-            check_id,
-            request.outcome,
-        )
-
-    return _to_pre_term_check_response(updated)
-
-
-# ================================
 # Employee Offboarding
 # ================================
 
@@ -2961,13 +2681,7 @@ async def create_offboarding_case(
     request: OffboardingCaseCreateRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Create or return the active offboarding case for an employee.
-
-    For involuntary separations, a pre-termination risk check is required.
-    If risk is high/critical and not acknowledged, returns HTTP 409 with the risk report.
-    """
-    from ..services.pre_termination_service import run_pre_termination_check
-
+    """Create or return the active offboarding case for an employee."""
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
@@ -2988,87 +2702,6 @@ async def create_offboarding_case(
             if employee["start_date"] and request.last_day < employee["start_date"]:
                 raise HTTPException(status_code=400, detail="last_day cannot be before employee start_date")
 
-            # --- Pre-termination risk check ---
-            # Runs for ALL separations (audit trail). Only gates involuntary.
-            pre_term_check_id = None
-            pre_term_result = None
-
-            if request.pre_termination_check_id:
-                # Reuse an existing check — verify it belongs to this employee/company
-                existing_check = await conn.fetchrow(
-                    """
-                    SELECT *
-                    FROM pre_termination_checks
-                    WHERE id = $1 AND employee_id = $2 AND company_id = $3
-                    """,
-                    request.pre_termination_check_id,
-                    employee_id,
-                    company_id,
-                )
-                if not existing_check:
-                    raise HTTPException(
-                        status_code=404,
-                        detail="Pre-termination check not found for this employee",
-                    )
-                pre_term_result = dict(existing_check)
-                pre_term_result["dimensions"] = _normalize_json(pre_term_result.get("dimensions"), {})
-                pre_term_result["recommended_actions"] = _normalize_json(
-                    pre_term_result.get("recommended_actions"), []
-                )
-                pre_term_check_id = existing_check["id"]
-            else:
-                # Auto-run the pre-termination check
-                pre_term_result = await run_pre_termination_check(
-                    employee_id=employee_id,
-                    company_id=company_id,
-                    initiated_by=current_user.id,
-                    separation_reason=request.reason,
-                    is_voluntary=request.is_voluntary,
-                )
-                pre_term_check_id = pre_term_result.get("id")
-
-            # Gate on high/critical risk — involuntary only
-            if not request.is_voluntary and pre_term_result:
-                overall_band = pre_term_result.get("overall_band", "low")
-                if overall_band in ("high", "critical") and not request.risk_acknowledged:
-                    raise HTTPException(
-                        status_code=409,
-                        detail={
-                            "message": "Pre-termination risk check required",
-                            "risk_report": pre_term_result,
-                            "requires_acknowledgment": True,
-                        },
-                    )
-
-                # If acknowledged, require notes and enforce separate acknowledger for critical
-                if overall_band in ("high", "critical") and request.risk_acknowledged:
-                    if not request.acknowledgment_notes:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="Acknowledgment notes are required for high/critical risk separations",
-                        )
-                    if overall_band == "critical":
-                        initiated_by = pre_term_result.get("initiated_by")
-                        if initiated_by and str(initiated_by) == str(current_user.id):
-                            raise HTTPException(
-                                status_code=403,
-                                detail="Critical risk separations require sign-off from a different user than the initiator",
-                            )
-                    await conn.execute(
-                        """
-                        UPDATE pre_termination_checks
-                        SET acknowledged = true,
-                            acknowledged_by = $2,
-                            acknowledged_at = NOW(),
-                            acknowledgment_notes = $3
-                        WHERE id = $1
-                        """,
-                        pre_term_check_id,
-                        current_user.id,
-                        request.acknowledgment_notes,
-                    )
-
-            # --- Check for existing in-progress case ---
             existing_case = await conn.fetchrow(
                 """
                 SELECT *
@@ -3084,40 +2717,20 @@ async def create_offboarding_case(
             if existing_case:
                 case_row = existing_case
             else:
-                # Build the INSERT, optionally including pre_termination_check_id
-                has_check_col = await _column_exists(conn, "offboarding_cases", "pre_termination_check_id")
-
-                if has_check_col and pre_term_check_id:
-                    case_row = await conn.fetchrow(
-                        """
-                        INSERT INTO offboarding_cases
-                        (org_id, employee_id, status, reason, is_voluntary, last_day, created_by, pre_termination_check_id)
-                        VALUES ($1, $2, 'in_progress', $3, $4, $5, $6, $7)
-                        RETURNING *
-                        """,
-                        company_id,
-                        employee_id,
-                        request.reason,
-                        request.is_voluntary,
-                        request.last_day,
-                        current_user.id,
-                        pre_term_check_id,
-                    )
-                else:
-                    case_row = await conn.fetchrow(
-                        """
-                        INSERT INTO offboarding_cases
-                        (org_id, employee_id, status, reason, is_voluntary, last_day, created_by)
-                        VALUES ($1, $2, 'in_progress', $3, $4, $5, $6)
-                        RETURNING *
-                        """,
-                        company_id,
-                        employee_id,
-                        request.reason,
-                        request.is_voluntary,
-                        request.last_day,
-                        current_user.id,
-                    )
+                case_row = await conn.fetchrow(
+                    """
+                    INSERT INTO offboarding_cases
+                    (org_id, employee_id, status, reason, is_voluntary, last_day, created_by)
+                    VALUES ($1, $2, 'in_progress', $3, $4, $5, $6)
+                    RETURNING *
+                    """,
+                    company_id,
+                    employee_id,
+                    request.reason,
+                    request.is_voluntary,
+                    request.last_day,
+                    current_user.id,
+                )
 
                 await conn.execute(
                     """
@@ -3128,6 +2741,18 @@ async def create_offboarding_case(
                     employee_id,
                     request.last_day,
                 )
+
+                # Update employment status to on_notice if status columns exist
+                if await _employee_status_fields_available(conn):
+                    await conn.execute(
+                        """
+                        UPDATE employees
+                        SET employment_status = 'on_notice', status_changed_at = NOW(),
+                            status_reason = 'Offboarding initiated'
+                        WHERE id = $1
+                        """,
+                        employee_id,
+                    )
 
                 if request.assign_default_tasks:
                     for template in OFFBOARDING_DEFAULT_TASKS:
@@ -3146,20 +2771,6 @@ async def create_offboarding_case(
                             template["assignee_type"],
                             due_date,
                         )
-
-                # Link the pre-termination check to the offboarding case
-                if pre_term_check_id:
-                    await conn.execute(
-                        """
-                        UPDATE pre_termination_checks
-                        SET offboarding_case_id = $2,
-                            outcome = 'proceeded',
-                            updated_at = NOW()
-                        WHERE id = $1
-                        """,
-                        pre_term_check_id,
-                        case_row["id"],
-                    )
 
             task_rows = await conn.fetch(
                 """
@@ -3375,6 +2986,18 @@ async def complete_offboarding_case(
                 case_id,
             )
 
+            # Update employment status to offboarded if status columns exist
+            if await _employee_status_fields_available(conn):
+                await conn.execute(
+                    """
+                    UPDATE employees
+                    SET employment_status = 'offboarded', status_changed_at = NOW(),
+                        status_reason = 'Offboarding completed'
+                    WHERE id = $1
+                    """,
+                    employee_id,
+                )
+
             if case_row["last_day"] <= date.today():
                 try:
                     identities = await conn.fetch(
@@ -3423,128 +3046,6 @@ async def complete_offboarding_case(
             )
 
         return _to_offboarding_case_response(case_row, list(task_rows))
-
-
-@router.get("/incident-counts")
-async def get_bulk_incident_counts(
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Get open IR incident counts per employee (avoids N+1)."""
-    company_id = await get_client_company_id(current_user)
-
-    async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT e.id AS employee_id, COUNT(DISTINCT i.id)::int AS open_count
-            FROM employees e
-            JOIN ir_incidents i ON i.company_id = e.org_id
-              AND i.status NOT IN ('resolved', 'closed')
-              AND (
-                e.id = ANY(i.involved_employee_ids)
-                OR i.reported_by_email IN (e.email, e.personal_email)
-                OR LOWER(i.reported_by_name) = LOWER(e.first_name || ' ' || e.last_name)
-              )
-            WHERE e.org_id = $1
-            GROUP BY e.id
-            """,
-            company_id,
-        )
-
-        return {str(r["employee_id"]): r["open_count"] for r in rows}
-
-
-# ================================
-# Employee Incidents
-# ================================
-
-class EmployeeIncidentItem(BaseModel):
-    id: UUID
-    incident_number: str
-    title: str
-    incident_type: str
-    severity: str
-    status: str
-    occurred_at: datetime
-    reported_by_name: str
-    role: str  # "reporter", "involved", or "witness"
-
-
-@router.get("/{employee_id}/incidents", response_model=List[EmployeeIncidentItem])
-async def get_employee_incidents(
-    employee_id: UUID,
-    current_user: CurrentUser = Depends(require_admin_or_client),
-):
-    """Get IR incidents related to a specific employee."""
-    company_id = await get_client_company_id(current_user)
-
-    async with get_connection() as conn:
-        # 1. Fetch employee record for matching
-        emp = await conn.fetchrow(
-            """
-            SELECT id, first_name, last_name, email, personal_email
-            FROM employees WHERE id = $1 AND org_id = $2
-            """,
-            employee_id, company_id,
-        )
-        if not emp:
-            raise HTTPException(status_code=404, detail="Employee not found")
-
-        full_name = f"{emp['first_name']} {emp['last_name']}"
-        emails = [e for e in (emp["email"], emp["personal_email"]) if e]
-
-        # 2. Query incidents: FK match OR reporter email/name fallback
-        rows = await conn.fetch(
-            """
-            WITH matched AS (
-                SELECT
-                    i.id, i.incident_number, i.title, i.incident_type,
-                    i.severity, i.status, i.occurred_at, i.reported_by_name,
-                    CASE
-                        WHEN $2 = ANY(i.involved_employee_ids) THEN 1
-                        WHEN i.reported_by_email = ANY($3::text[]) THEN 2
-                        WHEN LOWER(i.reported_by_name) = LOWER($4) THEN 2
-                    END AS role_priority
-                FROM ir_incidents i
-                WHERE i.company_id = $1
-                  AND (
-                    $2 = ANY(i.involved_employee_ids)
-                    OR i.reported_by_email = ANY($3::text[])
-                    OR LOWER(i.reported_by_name) = LOWER($4)
-                  )
-            )
-            SELECT DISTINCT ON (id)
-                id, incident_number, title, incident_type, severity,
-                status, occurred_at, reported_by_name, role_priority
-            FROM matched
-            ORDER BY id, role_priority ASC
-            """,
-            company_id,
-            employee_id,
-            emails if emails else ["__no_match__"],
-            full_name,
-        )
-
-        role_map = {1: "involved", 2: "reporter"}
-        items = sorted(
-            [
-                EmployeeIncidentItem(
-                    id=r["id"],
-                    incident_number=r["incident_number"],
-                    title=r["title"],
-                    incident_type=r["incident_type"],
-                    severity=r["severity"],
-                    status=r["status"],
-                    occurred_at=r["occurred_at"],
-                    reported_by_name=r["reported_by_name"],
-                    role=role_map.get(r["role_priority"], "involved"),
-                )
-                for r in rows
-            ],
-            key=lambda x: x.occurred_at,
-            reverse=True,
-        )
-
-        return items
 
 
 # ================================

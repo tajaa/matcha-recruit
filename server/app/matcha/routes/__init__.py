@@ -26,6 +26,10 @@ from .billing import router as matcha_work_billing_router, admin_router as match
 from .risk_assessment import router as risk_assessment_router
 from .pre_termination import router as pre_termination_router
 from .inbound_email import router as anonymous_report_router
+from .training import router as training_router
+from .i9 import router as i9_router
+from .cobra import router as cobra_router
+from .separation import router as separation_router
 from ..dependencies import require_feature
 
 # Create main Matcha router
@@ -106,6 +110,30 @@ matcha_router.include_router(
     tags=["pre-termination"],
     dependencies=[Depends(require_feature("employees"))],
 )
+matcha_router.include_router(
+    training_router,
+    prefix="/training",
+    tags=["training"],
+    dependencies=[Depends(require_feature("training"))],
+)
+matcha_router.include_router(
+    i9_router,
+    prefix="/i9",
+    tags=["i9"],
+    dependencies=[Depends(require_feature("i9"))],
+)
+matcha_router.include_router(
+    cobra_router,
+    prefix="/cobra",
+    tags=["cobra"],
+    dependencies=[Depends(require_feature("cobra"))],
+)
+matcha_router.include_router(
+    separation_router,
+    prefix="/separation-agreements",
+    tags=["separation"],
+    dependencies=[Depends(require_feature("separation_agreements"))],
+)
 # Public anonymous incident reporting — no auth, no feature gate (token-validated internally)
 matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting"])
 
@@ -138,4 +166,8 @@ __all__ = [
     "matcha_work_public_router",
     "matcha_work_billing_router",
     "pre_termination_router",
+    "training_router",
+    "i9_router",
+    "cobra_router",
+    "separation_router",
 ]

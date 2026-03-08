@@ -2180,6 +2180,37 @@ async def init_db():
                 END IF;
             END$$;
         """)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF to_regclass('employees') IS NOT NULL THEN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'employees'
+                          AND column_name = 'employment_status'
+                    ) THEN
+                        ALTER TABLE employees ADD COLUMN employment_status VARCHAR(30) DEFAULT 'active';
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'employees'
+                          AND column_name = 'status_changed_at'
+                    ) THEN
+                        ALTER TABLE employees ADD COLUMN status_changed_at TIMESTAMP;
+                    END IF;
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'employees'
+                          AND column_name = 'status_reason'
+                    ) THEN
+                        ALTER TABLE employees ADD COLUMN status_reason TEXT;
+                    END IF;
+                END IF;
+            END$$;
+        """)
 
         # ===========================================
         # Compliance Tracking Tables
@@ -2555,6 +2586,11 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_jurisdiction_requirements_rate_type
             ON jurisdiction_requirements(rate_type)
+        """)
+        # Add requires_written_policy column for handbook injection filtering
+        await conn.execute("""
+            ALTER TABLE jurisdiction_requirements
+            ADD COLUMN IF NOT EXISTS requires_written_policy BOOLEAN
         """)
 
         # Jurisdiction legislation — upcoming/pending legislation per jurisdiction
@@ -4316,6 +4352,190 @@ async def init_db():
                 0
             FROM companies c
             ON CONFLICT (company_id) DO NOTHING
+        """)
+
+        # Training compliance tables
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS training_requirements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                training_type VARCHAR(50) NOT NULL,
+                jurisdiction VARCHAR(50),
+                frequency_months INTEGER,
+                applies_to VARCHAR(50) DEFAULT 'all',
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_training_requirements_company
+            ON training_requirements(company_id)
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS training_records (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                requirement_id UUID REFERENCES training_requirements(id) ON DELETE SET NULL,
+                title VARCHAR(255) NOT NULL,
+                training_type VARCHAR(50) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'assigned',
+                assigned_date DATE NOT NULL DEFAULT CURRENT_DATE,
+                due_date DATE,
+                completed_date DATE,
+                expiration_date DATE,
+                provider VARCHAR(255),
+                certificate_number VARCHAR(100),
+                score DECIMAL(5,2),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_training_records_company
+            ON training_records(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_training_records_employee
+            ON training_records(employee_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_training_records_status
+            ON training_records(status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_training_records_due_date
+            ON training_records(due_date)
+        """)
+
+        # -- I-9 Employment Eligibility Records --
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS i9_records (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                status VARCHAR(30) NOT NULL DEFAULT 'pending_section1',
+                section1_completed_date DATE,
+                section2_completed_date DATE,
+                section2_completed_by UUID REFERENCES users(id),
+                document_title VARCHAR(100),
+                list_used VARCHAR(10),
+                document_number VARCHAR(100),
+                issuing_authority VARCHAR(100),
+                expiration_date DATE,
+                reverification_date DATE,
+                reverification_document VARCHAR(100),
+                reverification_expiration DATE,
+                reverification_by UUID REFERENCES users(id),
+                everify_case_number VARCHAR(50),
+                everify_status VARCHAR(30),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(employee_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_i9_records_company ON i9_records(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_i9_records_expiration ON i9_records(expiration_date)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_i9_records_status ON i9_records(status)
+        """)
+
+        # COBRA qualifying events
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS cobra_qualifying_events (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                event_type VARCHAR(50) NOT NULL,
+                event_date DATE NOT NULL,
+                employer_notice_deadline DATE NOT NULL,
+                administrator_notice_deadline DATE NOT NULL,
+                election_deadline DATE NOT NULL,
+                continuation_months INTEGER NOT NULL DEFAULT 18,
+                continuation_end_date DATE NOT NULL,
+                employer_notice_sent BOOLEAN DEFAULT false,
+                employer_notice_sent_date DATE,
+                administrator_notified BOOLEAN DEFAULT false,
+                administrator_notified_date DATE,
+                election_received BOOLEAN,
+                election_received_date DATE,
+                status VARCHAR(30) NOT NULL DEFAULT 'pending_notice',
+                beneficiary_count INTEGER DEFAULT 1,
+                notes TEXT,
+                offboarding_case_id UUID,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cobra_events_company
+            ON cobra_qualifying_events(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cobra_events_employee
+            ON cobra_qualifying_events(employee_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cobra_events_deadline
+            ON cobra_qualifying_events(employer_notice_deadline)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_cobra_events_status
+            ON cobra_qualifying_events(status)
+        """)
+
+        # Separation agreements (ADEA period tracking)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS separation_agreements (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                offboarding_case_id UUID,
+                pre_term_check_id UUID,
+                status VARCHAR(30) NOT NULL DEFAULT 'draft',
+                severance_amount DECIMAL(12,2),
+                severance_weeks INTEGER,
+                severance_description TEXT,
+                additional_terms JSONB,
+                employee_age_at_separation INTEGER,
+                is_adea_applicable BOOLEAN DEFAULT false,
+                is_group_layoff BOOLEAN DEFAULT false,
+                presented_date DATE,
+                consideration_period_days INTEGER,
+                consideration_deadline DATE,
+                signed_date DATE,
+                revocation_period_days INTEGER DEFAULT 7,
+                revocation_deadline DATE,
+                effective_date DATE,
+                revoked_date DATE,
+                decisional_unit TEXT,
+                group_disclosure JSONB,
+                created_by UUID REFERENCES users(id),
+                notes TEXT,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_separation_agreements_company
+            ON separation_agreements(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_separation_agreements_employee
+            ON separation_agreements(employee_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_separation_agreements_status
+            ON separation_agreements(status)
         """)
 
         print("[DB] Tables initialized")

@@ -7,6 +7,8 @@ Incident Report management for HR departments:
 - Analytics dashboard
 """
 
+import csv
+import io
 import json
 import logging
 import secrets
@@ -37,9 +39,6 @@ from ..models.ir_incident import (
     RecommendationsAnalysis,
     PrecedentMatch,
     PrecedentAnalysis,
-    ActionProbability,
-    ConsistencyGuidance,
-    ConsistencyAnalytics,
     AnalyticsSummary,
     TrendsAnalysis,
     TrendDataPoint,
@@ -48,6 +47,9 @@ from ..models.ir_incident import (
     IRAuditLogEntry,
     IRAuditLogResponse,
     Witness,
+    OshaRecordabilityUpdate,
+    Osha300LogEntry,
+    Osha300ASummary,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Valid analysis types
-ANALYSIS_TYPES = Literal["categorization", "severity", "root_cause", "recommendations", "similar", "consistency", "company_consistency"]
+ANALYSIS_TYPES = Literal["categorization", "severity", "root_cause", "recommendations", "similar"]
 
 
 def _sse(event: dict) -> str:
@@ -266,7 +268,6 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
         category_data=_safe_json_loads(row.get("category_data"), {}),
         root_cause=row["root_cause"],
         corrective_actions=row["corrective_actions"],
-        involved_employee_ids=row.get("involved_employee_ids") or [],
         document_count=document_count,
         company_id=row.get("company_id"),
         location_id=row.get("location_id"),
@@ -316,10 +317,9 @@ async def create_incident(
             INSERT INTO ir_incidents (
                 incident_number, title, description, incident_type, severity,
                 occurred_at, location, reported_by_name, reported_by_email,
-                witnesses, category_data, involved_employee_ids,
-                company_id, location_id, created_by
+                witnesses, category_data, company_id, location_id, created_by
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING *
             """,
             incident_number,
@@ -333,7 +333,6 @@ async def create_incident(
             incident.reported_by_email,
             json.dumps([w.model_dump() for w in incident.witnesses]),
             json.dumps(incident.category_data or {}),
-            [str(uid) for uid in incident.involved_employee_ids],
             effective_company_id,
             str(incident.location_id) if incident.location_id else None,
             str(current_user.id),
@@ -551,6 +550,342 @@ async def disable_anonymous_reporting(
     return {"token": None, "enabled": False}
 
 
+# ===========================================
+# OSHA 300/301 Log Endpoints
+# ===========================================
+
+VALID_OSHA_CLASSIFICATIONS = {
+    "death", "days_away", "restricted_duty",
+    "medical_treatment", "loss_of_consciousness", "significant_injury",
+}
+
+
+@router.get("/osha/300-log", response_model=list[Osha300LogEntry])
+async def get_osha_300_log(
+    year: int = Query(..., description="Calendar year for the 300 log"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Generate OSHA 300 log for a given year."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                i.id,
+                i.osha_case_number,
+                i.title,
+                i.description,
+                i.location,
+                i.occurred_at,
+                i.osha_classification,
+                COALESCE(i.days_away_from_work, 0) AS days_away_from_work,
+                COALESCE(i.days_restricted_duty, 0) AS days_restricted_duty,
+                i.category_data,
+                i.reported_by_name,
+                e.first_name AS emp_first_name,
+                e.last_name AS emp_last_name,
+                e.job_title AS emp_job_title
+            FROM ir_incidents i
+            LEFT JOIN employees e
+                ON e.work_email = i.reported_by_email
+                AND e.company_id::text = i.company_id
+            WHERE i.company_id = $1
+              AND i.osha_recordable = true
+              AND EXTRACT(YEAR FROM i.occurred_at) = $2
+            ORDER BY i.occurred_at
+            """,
+            company_id,
+            year,
+        )
+
+    entries = []
+    for row in rows:
+        emp_name = row["reported_by_name"]
+        if row["emp_first_name"]:
+            emp_name = f"{row['emp_first_name']} {row['emp_last_name'] or ''}".strip()
+
+        category_data = _safe_json_loads(row.get("category_data"), {})
+        injury_type = category_data.get("injury_type")
+
+        entries.append(Osha300LogEntry(
+            case_number=row["osha_case_number"] or str(row["id"])[:8],
+            employee_name=emp_name,
+            job_title=row["emp_job_title"],
+            date_of_injury=row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else "",
+            location=row["location"],
+            description=row["description"],
+            classification=row["osha_classification"],
+            days_away=row["days_away_from_work"],
+            days_restricted=row["days_restricted_duty"],
+            injury_type=injury_type,
+            incident_id=str(row["id"]),
+        ))
+    return entries
+
+
+@router.get("/osha/300-log/csv")
+async def get_osha_300_log_csv(
+    year: int = Query(..., description="Calendar year for the 300 log CSV"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Export OSHA 300 log as CSV for a given year."""
+    entries = await get_osha_300_log(year=year, current_user=current_user)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Case Number", "Employee Name", "Job Title", "Date of Injury/Illness",
+        "Where Event Occurred", "Description", "Classification",
+        "Days Away From Work", "Days on Restricted Duty", "Injury/Illness Type",
+        "Incident ID",
+    ])
+    for entry in entries:
+        writer.writerow([
+            entry.case_number,
+            entry.employee_name,
+            entry.job_title or "",
+            entry.date_of_injury,
+            entry.location or "",
+            entry.description or "",
+            entry.classification or "",
+            entry.days_away,
+            entry.days_restricted,
+            entry.injury_type or "",
+            entry.incident_id,
+        ])
+
+    output.seek(0)
+    filename = f"osha_300_log_{year}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/osha/301/{incident_id}")
+async def get_osha_301_form(
+    incident_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    """Generate OSHA 301 form data for a specific recordable incident."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT
+                i.*,
+                c.name AS company_name,
+                c.address AS company_address,
+                bl.name AS location_name,
+                bl.city AS location_city,
+                bl.state AS location_state,
+                e.first_name AS emp_first_name,
+                e.last_name AS emp_last_name,
+                e.job_title AS emp_job_title,
+                e.personal_email AS emp_email,
+                e.start_date AS emp_start_date
+            FROM ir_incidents i
+            LEFT JOIN companies c ON c.id::text = i.company_id
+            LEFT JOIN business_locations bl ON bl.id::text = i.location_id
+            LEFT JOIN employees e
+                ON e.work_email = i.reported_by_email
+                AND e.company_id::text = i.company_id
+            WHERE i.id = $1
+              AND i.company_id = $2
+              AND i.osha_recordable = true
+            """,
+            str(incident_id),
+            company_id,
+        )
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Recordable incident not found")
+
+    category_data = _safe_json_loads(row.get("category_data"), {})
+    form_301_data = _safe_json_loads(row.get("osha_form_301_data"), {})
+
+    emp_name = row["reported_by_name"]
+    if row["emp_first_name"]:
+        emp_name = f"{row['emp_first_name']} {row['emp_last_name'] or ''}".strip()
+
+    return {
+        "incident_id": str(row["id"]),
+        "case_number": row["osha_case_number"] or str(row["id"])[:8],
+        "employee_name": emp_name,
+        "employee_email": row.get("emp_email"),
+        "employee_job_title": row.get("emp_job_title"),
+        "employee_start_date": row["emp_start_date"].isoformat() if row.get("emp_start_date") else None,
+        "employer_name": row.get("company_name"),
+        "employer_address": row.get("company_address"),
+        "establishment_name": row.get("location_name"),
+        "establishment_city": row.get("location_city"),
+        "establishment_state": row.get("location_state"),
+        "date_of_injury": row["occurred_at"].strftime("%Y-%m-%d") if row["occurred_at"] else None,
+        "time_of_event": row["occurred_at"].strftime("%H:%M") if row["occurred_at"] else None,
+        "location_of_event": row.get("location"),
+        "description_of_injury": row.get("description"),
+        "object_or_substance": category_data.get("equipment_involved"),
+        "injury_type": category_data.get("injury_type"),
+        "body_parts_affected": category_data.get("body_parts", []),
+        "treatment": category_data.get("treatment"),
+        "osha_classification": row.get("osha_classification"),
+        "days_away_from_work": row.get("days_away_from_work") or 0,
+        "days_restricted_duty": row.get("days_restricted_duty") or 0,
+        "date_of_death": row["date_of_death"].isoformat() if row.get("date_of_death") else None,
+        "additional_data": form_301_data,
+    }
+
+
+@router.get("/osha/300a", response_model=Osha300ASummary)
+async def get_osha_300a_summary(
+    year: int = Query(..., description="Calendar year for the 300A summary"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Generate OSHA 300A annual summary for a given year."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with user")
+
+    async with get_connection() as conn:
+        # Check for a cached summary first
+        cached = await conn.fetchrow(
+            """
+            SELECT * FROM osha_annual_summaries
+            WHERE company_id = $1 AND year = $2
+            """,
+            company_id,
+            year,
+        )
+        if cached:
+            return Osha300ASummary(
+                year=cached["year"],
+                establishment_name=cached["establishment_name"],
+                total_cases=cached["total_cases"],
+                total_deaths=cached["total_deaths"],
+                total_days_away_cases=cached["total_days_away_cases"],
+                total_restricted_cases=cached["total_restricted_cases"],
+                total_other_recordable=cached["total_other_recordable"],
+                total_days_away=cached["total_days_away"],
+                total_days_restricted=cached["total_days_restricted"],
+                total_injuries=cached["total_injuries"],
+                total_skin_disorders=cached["total_skin_disorders"],
+                total_respiratory=cached["total_respiratory"],
+                total_poisonings=cached["total_poisonings"],
+                total_hearing_loss=cached["total_hearing_loss"],
+                total_other_illnesses=cached["total_other_illnesses"],
+                average_employees=cached["average_employees"],
+                total_hours_worked=cached["total_hours_worked"],
+            )
+
+        # Aggregate from recordable incidents
+        agg = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) AS total_cases,
+                COUNT(*) FILTER (WHERE osha_classification = 'death') AS total_deaths,
+                COUNT(*) FILTER (WHERE osha_classification = 'days_away') AS total_days_away_cases,
+                COUNT(*) FILTER (WHERE osha_classification = 'restricted_duty') AS total_restricted_cases,
+                COUNT(*) FILTER (WHERE osha_classification NOT IN ('death', 'days_away', 'restricted_duty')) AS total_other_recordable,
+                COALESCE(SUM(days_away_from_work), 0) AS total_days_away,
+                COALESCE(SUM(days_restricted_duty), 0) AS total_days_restricted
+            FROM ir_incidents
+            WHERE company_id = $1
+              AND osha_recordable = true
+              AND EXTRACT(YEAR FROM occurred_at) = $2
+            """,
+            company_id,
+            year,
+        )
+
+        # Count by illness type from category_data
+        illness_rows = await conn.fetch(
+            """
+            SELECT category_data
+            FROM ir_incidents
+            WHERE company_id = $1
+              AND osha_recordable = true
+              AND EXTRACT(YEAR FROM occurred_at) = $2
+            """,
+            company_id,
+            year,
+        )
+
+        injuries = 0
+        skin_disorders = 0
+        respiratory = 0
+        poisonings = 0
+        hearing_loss = 0
+        other_illnesses = 0
+
+        illness_type_map = {
+            "injury": "injuries",
+            "cut": "injuries",
+            "burn": "injuries",
+            "strain": "injuries",
+            "fracture": "injuries",
+            "bruise": "injuries",
+            "sprain": "injuries",
+            "skin_disorder": "skin_disorders",
+            "dermatitis": "skin_disorders",
+            "respiratory": "respiratory",
+            "asthma": "respiratory",
+            "poisoning": "poisonings",
+            "hearing_loss": "hearing_loss",
+        }
+
+        for ir_row in illness_rows:
+            cd = _safe_json_loads(ir_row.get("category_data"), {})
+            it = (cd.get("injury_type") or "").lower().strip()
+            mapped = illness_type_map.get(it)
+            if mapped == "injuries":
+                injuries += 1
+            elif mapped == "skin_disorders":
+                skin_disorders += 1
+            elif mapped == "respiratory":
+                respiratory += 1
+            elif mapped == "poisonings":
+                poisonings += 1
+            elif mapped == "hearing_loss":
+                hearing_loss += 1
+            elif it:
+                other_illnesses += 1
+            else:
+                injuries += 1  # default to injury if no type specified
+
+        # Get company name as establishment name
+        establishment_name = await conn.fetchval(
+            "SELECT name FROM companies WHERE id = $1",
+            company_id,
+        )
+
+    return Osha300ASummary(
+        year=year,
+        establishment_name=establishment_name,
+        total_cases=agg["total_cases"],
+        total_deaths=agg["total_deaths"],
+        total_days_away_cases=agg["total_days_away_cases"],
+        total_restricted_cases=agg["total_restricted_cases"],
+        total_other_recordable=agg["total_other_recordable"],
+        total_days_away=agg["total_days_away"],
+        total_days_restricted=agg["total_days_restricted"],
+        total_injuries=injuries,
+        total_skin_disorders=skin_disorders,
+        total_respiratory=respiratory,
+        total_poisonings=poisonings,
+        total_hearing_loss=hearing_loss,
+        total_other_illnesses=other_illnesses,
+        average_employees=None,
+        total_hours_worked=None,
+    )
+
+
 @router.get("/{incident_id}", response_model=IRIncidentResponse)
 async def get_incident(
     incident_id: UUID,
@@ -708,11 +1043,6 @@ async def update_incident(
         if incident.corrective_actions is not None:
             updates.append(f"corrective_actions = ${param_idx}")
             params.append(incident.corrective_actions)
-            param_idx += 1
-
-        if incident.involved_employee_ids is not None:
-            updates.append(f"involved_employee_ids = ${param_idx}")
-            params.append([str(uid) for uid in incident.involved_employee_ids])
             param_idx += 1
 
         if not updates:
@@ -1223,96 +1553,6 @@ async def get_analytics_locations(
             hotspots=hotspots,
             total_locations=len(location_map),
         )
-
-
-@router.get("/analytics/consistency", response_model=ConsistencyAnalytics)
-async def get_analytics_consistency(
-    request: Request,
-    current_user=Depends(require_admin_or_client),
-):
-    """Get company-wide consistency analytics across all resolved incidents."""
-    from ..services.ir_consistency import compute_consistency_analytics
-
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        return ConsistencyAnalytics(
-            total_resolved=0, total_with_actions=0,
-            action_distribution=[], by_incident_type=[], by_severity=[],
-            avg_resolution_by_action={}, generated_at=_utc_now_naive().isoformat(),
-        )
-
-    async with get_connection() as conn:
-        # Fetch all resolved/closed incidents
-        rows = await conn.fetch(
-            """
-            SELECT id, incident_type, severity, corrective_actions,
-                   occurred_at, resolved_at
-            FROM ir_incidents
-            WHERE company_id = $1 AND status IN ('resolved', 'closed')
-            ORDER BY resolved_at DESC
-            """,
-            company_id,
-        )
-
-        if not rows:
-            return ConsistencyAnalytics(
-                total_resolved=0, total_with_actions=0,
-                action_distribution=[], by_incident_type=[], by_severity=[],
-                avg_resolution_by_action={}, generated_at=_utc_now_naive().isoformat(),
-            )
-
-        # Use the most recently resolved incident as cache anchor for writes
-        anchor_id = str(rows[0]["id"])
-
-        # Check for cached result (<24h) anywhere in the company (not just anchor)
-        cached = await conn.fetchrow(
-            """
-            SELECT a.analysis_data, a.generated_at FROM ir_incident_analysis a
-            JOIN ir_incidents i ON i.id = a.incident_id
-            WHERE i.company_id = $1 AND a.analysis_type = 'company_consistency'
-            ORDER BY a.generated_at DESC LIMIT 1
-            """,
-            company_id,
-        )
-
-        if cached:
-            cache_age = _utc_now_naive() - cached["generated_at"]
-            if cache_age < timedelta(hours=24):
-                result = _safe_json_loads(cached["analysis_data"])
-                result["from_cache"] = True
-                return ConsistencyAnalytics(**result)
-
-        incidents = [dict(r) for r in rows]
-
-        settings = get_settings()
-        try:
-            result = await compute_consistency_analytics(
-                incidents,
-                api_key=settings.gemini_api_key if not settings.use_vertex else None,
-                vertex_project=settings.vertex_project if settings.use_vertex else None,
-            )
-        except Exception as e:
-            logger.warning(f"Consistency analytics computation failed: {e}")
-            return ConsistencyAnalytics(
-                total_resolved=len(incidents),
-                total_with_actions=len([i for i in incidents if i.get("corrective_actions")]),
-                action_distribution=[], by_incident_type=[], by_severity=[],
-                avg_resolution_by_action={}, generated_at=_utc_now_naive().isoformat(),
-            )
-
-        # Cache on the anchor incident
-        await conn.execute(
-            """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
-            VALUES ($1, 'company_consistency', $2)
-            ON CONFLICT (incident_id, analysis_type)
-            DO UPDATE SET analysis_data = $2, generated_at = now()
-            """,
-            anchor_id,
-            json.dumps(result, default=str),
-        )
-
-        return ConsistencyAnalytics(**result)
 
 
 # ===========================================
@@ -1892,11 +2132,6 @@ async def analyze_similar_incidents(
                 str(incident_id),
                 json.dumps(result),
             )
-            # Invalidate stale consistency guidance since precedents changed
-            await conn3.execute(
-                "DELETE FROM ir_incident_analysis WHERE incident_id = $1 AND analysis_type = 'consistency'",
-                str(incident_id),
-            )
             await log_audit(
                 conn3,
                 str(incident_id),
@@ -1913,112 +2148,6 @@ async def analyze_similar_incidents(
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-@router.get("/{incident_id}/consistency-guidance", response_model=ConsistencyGuidance)
-async def get_consistency_guidance(
-    incident_id: UUID,
-    request: Request,
-    current_user=Depends(require_admin_or_client),
-):
-    """Get consistency guidance based on precedent analysis for an incident."""
-    from ..services.ir_consistency import compute_outcome_distribution
-
-    async with get_connection() as conn:
-        # Verify incident exists and belongs to company
-        await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
-
-        # Read cached similar analysis to get precedents
-        similar_row = await conn.fetchrow(
-            """
-            SELECT analysis_data FROM ir_incident_analysis
-            WHERE incident_id = $1 AND analysis_type = 'similar'
-            ORDER BY generated_at DESC LIMIT 1
-            """,
-            str(incident_id),
-        )
-
-        if not similar_row:
-            return ConsistencyGuidance(
-                sample_size=0,
-                effective_sample_size=0.0,
-                confidence="insufficient",
-                unprecedented=True,
-                generated_at=_utc_now_naive().isoformat(),
-            )
-
-        similar_data = _safe_json_loads(similar_row["analysis_data"])
-        precedents = similar_data.get("precedents", [])
-
-        if not precedents:
-            return ConsistencyGuidance(
-                sample_size=0,
-                effective_sample_size=0.0,
-                confidence="insufficient",
-                unprecedented=True,
-                generated_at=_utc_now_naive().isoformat(),
-            )
-
-        # Check for cached consistency result (<24h)
-        cached = await conn.fetchrow(
-            """
-            SELECT analysis_data, generated_at FROM ir_incident_analysis
-            WHERE incident_id = $1 AND analysis_type = 'consistency'
-            ORDER BY generated_at DESC LIMIT 1
-            """,
-            str(incident_id),
-        )
-
-        if cached:
-            cache_age = _utc_now_naive() - cached["generated_at"]
-            if cache_age < timedelta(hours=24):
-                result = _safe_json_loads(cached["analysis_data"])
-                result["from_cache"] = True
-                return ConsistencyGuidance(**result)
-
-        # Compute fresh guidance
-        settings = get_settings()
-        try:
-            result = await compute_outcome_distribution(
-                precedents,
-                api_key=settings.gemini_api_key if not settings.use_vertex else None,
-                vertex_project=settings.vertex_project if settings.use_vertex else None,
-            )
-        except Exception as e:
-            logger.warning(f"Consistency guidance computation failed: {e}")
-            return ConsistencyGuidance(
-                sample_size=len(precedents),
-                effective_sample_size=0.0,
-                confidence="insufficient",
-                unprecedented=False,
-                generated_at=_utc_now_naive().isoformat(),
-            )
-
-        # Cache result
-        await conn.execute(
-            """
-            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
-            VALUES ($1, 'consistency', $2)
-            ON CONFLICT (incident_id, analysis_type)
-            DO UPDATE SET analysis_data = $2, generated_at = now()
-            """,
-            str(incident_id),
-            json.dumps(result),
-        )
-
-        # Log audit
-        await log_audit(
-            conn,
-            str(incident_id),
-            str(current_user.id),
-            "analysis_run",
-            "analysis",
-            None,
-            {"type": "consistency"},
-            request.client.host if request.client else None,
-        )
-
-        return ConsistencyGuidance(**result)
 
 
 @router.delete("/{incident_id}/analyze/{analysis_type}")
@@ -2056,3 +2185,278 @@ async def clear_analysis_cache(
         )
 
         return {"message": f"Analysis cache cleared for {analysis_type}"}
+
+
+# ===========================================
+# OSHA Per-Incident Endpoints
+# ===========================================
+
+@router.put("/{incident_id}/osha")
+async def update_osha_recordability(
+    incident_id: UUID,
+    body: OshaRecordabilityUpdate,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Set OSHA recordability fields for an incident."""
+    if body.osha_recordable and body.osha_classification:
+        if body.osha_classification not in VALID_OSHA_CLASSIFICATIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid classification. Must be one of: {', '.join(sorted(VALID_OSHA_CLASSIFICATIONS))}",
+            )
+
+    async with get_connection() as conn:
+        row = await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
+
+        await conn.execute(
+            """
+            UPDATE ir_incidents
+            SET osha_recordable = $2,
+                osha_classification = $3,
+                osha_case_number = $4,
+                days_away_from_work = $5,
+                days_restricted_duty = $6,
+                date_of_death = $7,
+                updated_at = NOW()
+            WHERE id = $1
+            """,
+            str(incident_id),
+            body.osha_recordable,
+            body.osha_classification if body.osha_recordable else None,
+            body.osha_case_number,
+            body.days_away_from_work or 0,
+            body.days_restricted_duty or 0,
+            body.date_of_death,
+        )
+
+        await log_audit(
+            conn,
+            str(incident_id),
+            str(current_user.id),
+            "osha_recordability_updated",
+            "incident",
+            str(incident_id),
+            {
+                "osha_recordable": body.osha_recordable,
+                "osha_classification": body.osha_classification,
+                "days_away_from_work": body.days_away_from_work,
+                "days_restricted_duty": body.days_restricted_duty,
+            },
+            request.client.host if request.client else None,
+        )
+
+    return {
+        "message": "OSHA recordability updated",
+        "osha_recordable": body.osha_recordable,
+        "osha_classification": body.osha_classification,
+    }
+
+
+OSHA_DETERMINATION_PROMPT = """You are an occupational safety expert. Analyze this workplace incident and determine if it is OSHA recordable.
+
+INCIDENT DETAILS:
+Title: {title}
+Description: {description}
+Type: {incident_type}
+Severity: {severity}
+Location: {location}
+Date: {occurred_at}
+Category Data: {category_data}
+
+OSHA RECORDABILITY CRITERIA:
+An incident is OSHA recordable if it results in any of the following:
+1. Death
+2. Days away from work
+3. Restricted work or transfer to another job
+4. Medical treatment beyond first aid
+5. Loss of consciousness
+6. A significant injury or illness diagnosed by a physician or licensed healthcare professional
+
+FIRST AID (NOT recordable) includes:
+- Non-prescription medications at nonprescription strength
+- Tetanus immunizations
+- Cleaning, flushing, or soaking wounds on the surface of the skin
+- Wound closures (butterfly bandages, Steri-Strips)
+- Hot or cold therapy
+- Non-rigid means of support (elastic bandages, wraps)
+- Temporary immobilization devices used to transport accident victims
+
+Analyze the incident against these criteria and determine:
+1. Is this OSHA recordable?
+2. If yes, what is the classification? (death, days_away, restricted_duty, medical_treatment, loss_of_consciousness, significant_injury)
+3. Provide detailed reasoning
+
+Return ONLY a JSON object:
+{{
+    "recordable": true,
+    "classification": "medical_treatment",
+    "reasoning": "The incident involved..."
+}}"""
+
+
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
+
+
+def _is_model_unavailable_error(error: Exception) -> bool:
+    message = str(error).lower()
+    if "model" not in message:
+        return False
+    return (
+        "not found" in message
+        or "does not have access" in message
+        or "unsupported model" in message
+        or "404" in message
+    )
+
+
+def _parse_json_response(text: str) -> dict:
+    """Parse JSON from LLM response, handling markdown code blocks."""
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+    elif text.startswith("```"):
+        text = text[3:]
+    if text.endswith("```"):
+        text = text[:-3]
+    return json.loads(text.strip())
+
+
+def _fallback_osha_determination(category_data: dict) -> dict:
+    """Rule-based fallback when Gemini is unavailable."""
+    lost_days = category_data.get("lost_days") or 0
+    treatment = (category_data.get("treatment") or "").lower()
+    injury_type = (category_data.get("injury_type") or "").lower()
+
+    if lost_days > 0:
+        return {
+            "recordable": True,
+            "classification": "days_away",
+            "reasoning": f"Fallback determination: {lost_days} lost work day(s) reported. Incidents resulting in days away from work are OSHA recordable.",
+        }
+
+    if treatment in ("hospitalization", "er", "emergency_room"):
+        return {
+            "recordable": True,
+            "classification": "medical_treatment",
+            "reasoning": f"Fallback determination: treatment was '{treatment}', which indicates medical treatment beyond first aid. This is OSHA recordable.",
+        }
+
+    if treatment in ("medical", "physician"):
+        return {
+            "recordable": True,
+            "classification": "medical_treatment",
+            "reasoning": f"Fallback determination: treatment was '{treatment}', indicating professional medical care beyond first aid.",
+        }
+
+    if "fracture" in injury_type or "amputation" in injury_type:
+        return {
+            "recordable": True,
+            "classification": "significant_injury",
+            "reasoning": f"Fallback determination: injury type '{injury_type}' is a significant injury that is OSHA recordable.",
+        }
+
+    if treatment in ("first_aid", "none", "") and lost_days == 0:
+        return {
+            "recordable": False,
+            "classification": None,
+            "reasoning": "Fallback determination: no lost days, treatment was first aid or none. This does not meet OSHA recordability criteria.",
+        }
+
+    return {
+        "recordable": False,
+        "classification": None,
+        "reasoning": "Fallback determination: insufficient information to determine recordability. Manual review recommended.",
+    }
+
+
+@router.post("/{incident_id}/osha/determine")
+async def determine_osha_recordability(
+    incident_id: UUID,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """AI-assisted OSHA recordability determination using Gemini."""
+    async with get_connection() as conn:
+        row = await _get_incident_with_company_check(conn, incident_id, current_user)
+        row = dict(row)
+
+    category_data = _safe_json_loads(row.get("category_data"), {})
+
+    # Try Gemini-based determination
+    settings = get_settings()
+    try:
+        from google import genai
+
+        if settings.use_vertex:
+            client = genai.Client(
+                vertexai=True,
+                project=settings.vertex_project,
+                location=settings.vertex_location,
+            )
+        elif settings.gemini_api_key:
+            client = genai.Client(api_key=settings.gemini_api_key)
+        else:
+            logger.info("[OSHA] No Gemini credentials — using rule-based fallback")
+            return _fallback_osha_determination(category_data)
+
+        prompt = OSHA_DETERMINATION_PROMPT.format(
+            title=row.get("title", ""),
+            description=row.get("description", "No description"),
+            incident_type=row.get("incident_type", ""),
+            severity=row.get("severity", ""),
+            location=row.get("location", "Not specified"),
+            occurred_at=str(row.get("occurred_at", "")),
+            category_data=json.dumps(category_data),
+        )
+
+        models_to_try = [settings.analysis_model] + [
+            m for m in FALLBACK_MODELS if m != settings.analysis_model
+        ]
+
+        last_error = None
+        for model in models_to_try:
+            try:
+                response = await asyncio.wait_for(
+                    client.aio.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                    ),
+                    timeout=45,
+                )
+                result = _parse_json_response(response.text)
+
+                # Validate the response
+                recordable = result.get("recordable")
+                if not isinstance(recordable, bool):
+                    raise ValueError("Invalid response: 'recordable' must be a boolean")
+
+                classification = result.get("classification")
+                if recordable and classification and classification not in VALID_OSHA_CLASSIFICATIONS:
+                    classification = None
+
+                return {
+                    "recordable": recordable,
+                    "classification": classification,
+                    "reasoning": result.get("reasoning", ""),
+                }
+            except asyncio.TimeoutError:
+                last_error = "Gemini request timed out"
+                logger.warning("[OSHA] Model %s timed out", model)
+            except Exception as e:
+                last_error = str(e)
+                if _is_model_unavailable_error(e):
+                    logger.warning("[OSHA] Model %s unavailable: %s", model, e)
+                    continue
+                logger.warning("[OSHA] Gemini error with model %s: %s", model, e)
+                break
+
+        logger.warning("[OSHA] All Gemini models failed (%s) — using fallback", last_error)
+        return _fallback_osha_determination(category_data)
+
+    except ImportError:
+        logger.warning("[OSHA] google-genai not installed — using rule-based fallback")
+        return _fallback_osha_determination(category_data)
+    except Exception as e:
+        logger.warning("[OSHA] Gemini setup failed (%s) — using rule-based fallback", e)
+        return _fallback_osha_determination(category_data)

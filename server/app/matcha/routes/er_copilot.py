@@ -14,7 +14,7 @@ import json
 import logging
 import os
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from typing import Any, Optional
 from uuid import UUID
@@ -754,42 +754,37 @@ async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, pa
             )
             docs_html = f"<h2>Documents ({len(doc_rows)})</h2><table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th></tr>{rows_html}</table>"
 
-            # Fetch all S3 files concurrently
-            async def _fetch(path: str) -> bytes | None:
-                try:
-                    return await storage.download_file(path)
-                except Exception as exc:
-                    logger.warning("Could not fetch attachment %s: %s", path, exc)
-                    return None
-
-            fetch_rows = [r for r in doc_rows if r["file_path"] and not any((r["mime_type"] or "").lower().startswith(s) for s in SKIP_MIMES)]
-            fetched = await asyncio.gather(*[_fetch(r["file_path"]) for r in fetch_rows])
-            fetch_map = {r["file_path"]: data for r, data in zip(fetch_rows, fetched)}
-
             for r in doc_rows:
                 mime = (r["mime_type"] or "").lower()
                 fname = r["filename"] or ""
                 ext = os.path.splitext(fname)[1].lower()
 
+                # Skip video/audio
                 if any(mime.startswith(s) for s in SKIP_MIMES):
                     continue
 
-                file_data = fetch_map.get(r["file_path"]) if r["file_path"] else None
-
-                # Images: embed as base64
-                if mime in IMAGE_MIMES and file_data:
-                    b64 = base64.b64encode(file_data).decode("ascii")
-                    docs_html += (
-                        f'<h3>{esc(fname)}</h3>'
-                        f'<img src="data:{mime};base64,{b64}" '
-                        f'style="max-width:100%;max-height:600px;margin:8px 0;" />'
-                    )
+                # Images: download and embed as base64
+                if mime in IMAGE_MIMES and r["file_path"]:
+                    try:
+                        img_bytes = await storage.download_file(r["file_path"])
+                        b64 = base64.b64encode(img_bytes).decode("ascii")
+                        docs_html += (
+                            f'<h3>{esc(fname)}</h3>'
+                            f'<img src="data:{mime};base64,{b64}" '
+                            f'style="max-width:100%;max-height:600px;margin:8px 0;" />'
+                        )
+                    except Exception as img_exc:
+                        logger.warning("Could not embed image %s in export: %s", fname, img_exc)
                     continue
 
-                # PDF attachments: append original pages
-                if ext == ".pdf" and file_data:
-                    attachment_pdfs.append(file_data)
-                    docs_html += f'<h3>{esc(fname)}</h3><p style="color:#666;font-size:10px;">(Original PDF attached at end of export)</p>'
+                # PDF attachments: append original pages (preserves formatting)
+                if ext == ".pdf" and r["file_path"]:
+                    try:
+                        pdf_attachment = await storage.download_file(r["file_path"])
+                        attachment_pdfs.append(pdf_attachment)
+                        docs_html += f'<h3>{esc(fname)}</h3><p style="color:#666;font-size:10px;">(Original PDF attached at end of export)</p>'
+                    except Exception as pdf_exc:
+                        logger.warning("Could not fetch PDF attachment %s for export: %s", fname, pdf_exc)
                     continue
 
                 # Other text-extractable files: include extracted text
@@ -3433,3 +3428,133 @@ async def get_audit_log(
         ]
 
         return AuditLogResponse(entries=entries, total=total or 0)
+
+
+# ===========================================
+# Retaliation Risk
+# ===========================================
+
+@router.get("/{case_id}/retaliation-risk")
+async def get_retaliation_risk(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    company_id: UUID = Depends(get_client_company_id),
+):
+    """Check for retaliation risk: adverse actions against involved employees after case creation."""
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+
+        # Get the case details
+        case_row = await conn.fetchrow(
+            "SELECT id, created_at, involved_employees FROM er_cases WHERE id = $1",
+            case_id,
+        )
+        if not case_row:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        case_created = case_row["created_at"]
+        if case_created and case_created.tzinfo is None:
+            case_created = case_created.replace(tzinfo=timezone.utc)
+
+        # Parse involved employees
+        involved = case_row["involved_employees"]
+        if isinstance(involved, str):
+            try:
+                involved = json.loads(involved)
+            except (json.JSONDecodeError, TypeError):
+                involved = []
+        if not isinstance(involved, list):
+            involved = []
+
+        events: list[dict[str, Any]] = []
+        at_risk = False
+
+        for entry in involved:
+            if not isinstance(entry, dict):
+                continue
+            emp_id_str = entry.get("employee_id")
+            if not emp_id_str:
+                continue
+
+            try:
+                emp_id = UUID(str(emp_id_str))
+            except (ValueError, TypeError):
+                continue
+
+            # Get employee name
+            emp_row = await conn.fetchrow(
+                "SELECT first_name, last_name FROM employees WHERE id = $1",
+                emp_id,
+            )
+            emp_name = "Unknown"
+            if emp_row:
+                first = emp_row["first_name"] or ""
+                last = emp_row["last_name"] or ""
+                emp_name = f"{first} {last}".strip() or "Unknown"
+
+            # Check progressive_discipline after case creation
+            try:
+                disc_rows = await conn.fetch(
+                    """
+                    SELECT id, discipline_type, issued_date
+                    FROM progressive_discipline
+                    WHERE employee_id = $1 AND company_id = $2
+                      AND issued_date >= $3
+                    ORDER BY issued_date ASC
+                    """,
+                    emp_id, company_id, case_created,
+                )
+                for row in disc_rows:
+                    issued = row["issued_date"]
+                    if issued:
+                        if isinstance(issued, date) and not isinstance(issued, datetime):
+                            issued_dt = datetime.combine(issued, datetime.min.time(), tzinfo=timezone.utc)
+                        elif issued.tzinfo is None:
+                            issued_dt = issued.replace(tzinfo=timezone.utc)
+                        else:
+                            issued_dt = issued
+                        days_since = (issued_dt - case_created).days
+                        events.append({
+                            "employee_id": str(emp_id),
+                            "employee_name": emp_name,
+                            "event_type": f"discipline:{row['discipline_type']}",
+                            "event_date": issued.isoformat() if hasattr(issued, 'isoformat') else str(issued),
+                            "days_since_case": days_since,
+                        })
+                        at_risk = True
+            except Exception:
+                logger.warning("progressive_discipline query failed for retaliation risk check")
+
+            # Check involuntary offboarding after case creation
+            try:
+                offb_rows = await conn.fetch(
+                    """
+                    SELECT id, started_at
+                    FROM offboarding_cases
+                    WHERE employee_id = $1 AND is_voluntary = false
+                      AND started_at >= $2
+                    ORDER BY started_at ASC
+                    """,
+                    emp_id, case_created,
+                )
+                for row in offb_rows:
+                    started = row["started_at"]
+                    if started:
+                        if started.tzinfo is None:
+                            started = started.replace(tzinfo=timezone.utc)
+                        days_since = (started - case_created).days
+                        events.append({
+                            "employee_id": str(emp_id),
+                            "employee_name": emp_name,
+                            "event_type": "involuntary_termination",
+                            "event_date": started.isoformat(),
+                            "days_since_case": days_since,
+                        })
+                        at_risk = True
+            except Exception:
+                logger.warning("offboarding_cases query failed for retaliation risk check")
+
+        # Sort events by days_since_case ascending
+        events.sort(key=lambda x: x["days_since_case"])
+
+        return {"at_risk": at_risk, "events": events}

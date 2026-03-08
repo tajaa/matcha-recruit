@@ -1,6 +1,6 @@
 """Pre-Termination Risk Check Service.
 
-Scans 8 risk dimensions for an employee before separation to identify
+Scans 9 risk dimensions for an employee before separation to identify
 legal, compliance, and reputational risks. Each dimension produces a
 green/yellow/red flag contributing to an overall 0-100 risk score.
 
@@ -13,6 +13,7 @@ Dimensions:
 6. Tenure & Timing
 7. Consistency Check
 8. Manager Risk Profile
+9. Retaliation Risk Detection
 """
 
 import asyncio
@@ -1321,6 +1322,267 @@ async def scan_manager_profile(
 
 
 # ---------------------------------------------------------------------------
+# Dimension 9: Retaliation Risk Detection
+# ---------------------------------------------------------------------------
+
+async def scan_retaliation_risk(
+    employee_id: UUID, company_id: UUID, conn,
+) -> PreTermDimensionResult:
+    """Detect retaliation risk: adverse actions occurring shortly after protected activity."""
+    try:
+        now = _NOW_UTC()
+        twelve_months_ago = now - timedelta(days=365)
+
+        # Get employee's email for reporter matching
+        emp_row = await conn.fetchrow(
+            "SELECT work_email, email FROM employees WHERE id = $1",
+            employee_id,
+        )
+        employee_email = None
+        if emp_row:
+            employee_email = emp_row["work_email"] or emp_row.get("email")
+
+        # ---------------------------------------------------------------
+        # Collect protected activity events (last 12 months)
+        # ---------------------------------------------------------------
+        protected_events: list[dict[str, Any]] = []
+
+        # IR incidents where employee is the reporter
+        if employee_email:
+            ir_rows = await conn.fetch(
+                """
+                SELECT id, incident_number, title, occurred_at
+                FROM ir_incidents
+                WHERE company_id = $1
+                  AND reported_by_email = $2
+                  AND occurred_at >= $3
+                ORDER BY occurred_at DESC
+                """,
+                company_id, employee_email, twelve_months_ago,
+            )
+            for row in ir_rows:
+                evt_date = row["occurred_at"]
+                if evt_date:
+                    if evt_date.tzinfo is None:
+                        evt_date = evt_date.replace(tzinfo=timezone.utc)
+                    protected_events.append({
+                        "type": "ir_report",
+                        "date": evt_date,
+                        "label": f"IR report \"{row['title']}\" ({row['incident_number']})",
+                    })
+
+        # ER cases where employee is complainant
+        containment = json.dumps([{"employee_id": str(employee_id)}])
+        er_rows = await conn.fetch(
+            """
+            SELECT id, case_number, title, category, created_at,
+                   involved_employees
+            FROM er_cases
+            WHERE company_id = $1
+              AND involved_employees @> $2::jsonb
+              AND created_at >= $3
+            ORDER BY created_at DESC
+            """,
+            company_id, containment, twelve_months_ago,
+        )
+        for row in er_rows:
+            involved = row["involved_employees"]
+            if isinstance(involved, str):
+                try:
+                    involved = json.loads(involved)
+                except (json.JSONDecodeError, TypeError):
+                    involved = []
+            if not isinstance(involved, list):
+                involved = []
+
+            role = "involved"
+            for entry in involved:
+                if isinstance(entry, dict) and str(entry.get("employee_id")) == str(employee_id):
+                    role = entry.get("role", "involved")
+                    break
+
+            if role == "complainant":
+                evt_date = row["created_at"]
+                if evt_date:
+                    if evt_date.tzinfo is None:
+                        evt_date = evt_date.replace(tzinfo=timezone.utc)
+                    protected_events.append({
+                        "type": "er_complaint",
+                        "date": evt_date,
+                        "label": f"ER complaint \"{row['title']}\" ({row['case_number']})",
+                    })
+
+        # Agency charges
+        try:
+            agency_rows = await conn.fetch(
+                """
+                SELECT id, charge_type, agency_name, filing_date
+                FROM agency_charges
+                WHERE employee_id = $1 AND company_id = $2
+                  AND filing_date > $3
+                ORDER BY filing_date DESC
+                """,
+                employee_id, company_id, twelve_months_ago,
+            )
+            for row in agency_rows:
+                evt_date = row["filing_date"]
+                if evt_date:
+                    if isinstance(evt_date, date) and not isinstance(evt_date, datetime):
+                        evt_date = datetime.combine(evt_date, datetime.min.time(), tzinfo=timezone.utc)
+                    elif evt_date.tzinfo is None:
+                        evt_date = evt_date.replace(tzinfo=timezone.utc)
+                    protected_events.append({
+                        "type": "agency_charge",
+                        "date": evt_date,
+                        "label": f"{row['agency_name']} {row['charge_type']} charge",
+                    })
+        except Exception:
+            logger.warning("agency_charges table not available — skipping agency charge scan for retaliation")
+
+        # ---------------------------------------------------------------
+        # Collect adverse action events (last 12 months)
+        # ---------------------------------------------------------------
+        adverse_events: list[dict[str, Any]] = []
+
+        # Progressive discipline
+        try:
+            disc_rows = await conn.fetch(
+                """
+                SELECT id, discipline_type, issued_date
+                FROM progressive_discipline
+                WHERE employee_id = $1 AND company_id = $2
+                  AND issued_date >= $3
+                ORDER BY issued_date DESC
+                """,
+                employee_id, company_id, twelve_months_ago,
+            )
+            for row in disc_rows:
+                evt_date = row["issued_date"]
+                if evt_date:
+                    if isinstance(evt_date, date) and not isinstance(evt_date, datetime):
+                        evt_date = datetime.combine(evt_date, datetime.min.time(), tzinfo=timezone.utc)
+                    elif evt_date.tzinfo is None:
+                        evt_date = evt_date.replace(tzinfo=timezone.utc)
+                    adverse_events.append({
+                        "type": "discipline",
+                        "date": evt_date,
+                        "label": f"Discipline: {row['discipline_type']}",
+                    })
+        except Exception:
+            logger.warning("progressive_discipline table not available — skipping discipline scan for retaliation")
+
+        # Involuntary offboarding cases
+        try:
+            offb_rows = await conn.fetch(
+                """
+                SELECT id, started_at
+                FROM offboarding_cases
+                WHERE employee_id = $1 AND is_voluntary = false
+                  AND started_at >= $2
+                ORDER BY started_at DESC
+                """,
+                employee_id, twelve_months_ago,
+            )
+            for row in offb_rows:
+                evt_date = row["started_at"]
+                if evt_date:
+                    if evt_date.tzinfo is None:
+                        evt_date = evt_date.replace(tzinfo=timezone.utc)
+                    adverse_events.append({
+                        "type": "involuntary_offboarding",
+                        "date": evt_date,
+                        "label": "Involuntary termination initiated",
+                    })
+        except Exception:
+            logger.warning("offboarding_cases query failed — skipping offboarding scan for retaliation")
+
+        # ---------------------------------------------------------------
+        # Temporal proximity analysis
+        # ---------------------------------------------------------------
+        if not protected_events or not adverse_events:
+            return _green(
+                "No temporal overlap between protected activity and adverse actions",
+                protected_events_count=len(protected_events),
+                adverse_events_count=len(adverse_events),
+                timeline=[],
+            )
+
+        timeline: list[dict[str, Any]] = []
+        closest_days: int | None = None
+        closest_entry: dict[str, Any] | None = None
+
+        for pe in protected_events:
+            pe_date = pe["date"]
+            for ae in adverse_events:
+                ae_date = ae["date"]
+                # Only consider adverse actions AFTER the protected event
+                delta = ae_date - pe_date
+                days_between = delta.days
+                if days_between < 0:
+                    continue
+
+                entry = {
+                    "protected_event_type": pe["type"],
+                    "protected_event_date": pe_date.isoformat(),
+                    "protected_event_label": pe["label"],
+                    "adverse_event_type": ae["type"],
+                    "adverse_event_date": ae_date.isoformat(),
+                    "adverse_event_label": ae["label"],
+                    "days_between": days_between,
+                }
+                timeline.append(entry)
+
+                if closest_days is None or days_between < closest_days:
+                    closest_days = days_between
+                    closest_entry = entry
+
+        if not timeline:
+            return _green(
+                "No adverse actions occurred after protected activity events",
+                protected_events_count=len(protected_events),
+                adverse_events_count=len(adverse_events),
+                timeline=[],
+            )
+
+        # Sort timeline by days_between ascending
+        timeline.sort(key=lambda x: x["days_between"])
+
+        # Red: any adverse action within 90 days of protected activity
+        if closest_days is not None and closest_days <= 90:
+            return _red(
+                f"{closest_entry['adverse_event_label']} {closest_days} days after "
+                f"{closest_entry['protected_event_type']} — high retaliation inference",
+                timeline=timeline[:10],
+                closest_days=closest_days,
+                protected_events_count=len(protected_events),
+                adverse_events_count=len(adverse_events),
+            )
+
+        # Yellow: any adverse action within 91-180 days
+        if closest_days is not None and closest_days <= 180:
+            return _yellow(
+                f"{closest_entry['adverse_event_label']} {closest_days} days after "
+                f"{closest_entry['protected_event_type']} — moderate retaliation inference",
+                timeline=timeline[:10],
+                closest_days=closest_days,
+                protected_events_count=len(protected_events),
+                adverse_events_count=len(adverse_events),
+            )
+
+        # Green: no temporal overlap within 180 days
+        return _green(
+            "No adverse actions within 180 days of protected activity",
+            timeline=timeline[:10],
+            closest_days=closest_days,
+            protected_events_count=len(protected_events),
+            adverse_events_count=len(adverse_events),
+        )
+
+    except Exception as exc:
+        return _safe_dimension("retaliation_risk", exc)
+
+
+# ---------------------------------------------------------------------------
 # Recommended Actions Generator
 # ---------------------------------------------------------------------------
 
@@ -1376,6 +1638,19 @@ def _generate_recommended_actions(
         actions.append(
             "Manager has elevated ER/termination rates — consider independent review "
             "by HR director or outside counsel"
+        )
+
+    retaliation = dimensions.get("retaliation_risk")
+    if retaliation and retaliation.status == "red":
+        actions.append(
+            "Adverse action occurred within 90 days of protected activity — "
+            "strong temporal proximity creates prima facie retaliation inference. "
+            "Consult employment counsel before proceeding"
+        )
+    elif retaliation and retaliation.status == "yellow":
+        actions.append(
+            "Adverse action occurred within 180 days of protected activity — "
+            "document legitimate non-retaliatory business reasons thoroughly"
         )
 
     if overall_band in ("high", "critical"):
@@ -1509,7 +1784,7 @@ async def run_pre_termination_check(
     separation_reason: Optional[str] = None,
     is_voluntary: bool = False,
 ) -> dict[str, Any]:
-    """Run the full 8-dimension pre-termination risk scan.
+    """Run the full 9-dimension pre-termination risk scan.
 
     Args:
         employee_id: Employee being considered for separation.
@@ -1533,6 +1808,7 @@ async def run_pre_termination_check(
             ("tenure_timing", scan_tenure_timing(employee_id, company_id, conn)),
             ("consistency", scan_consistency(employee_id, company_id, separation_reason, conn)),
             ("manager_profile", scan_manager_profile(employee_id, company_id, conn)),
+            ("retaliation_risk", scan_retaliation_risk(employee_id, company_id, conn)),
         ]
 
         dimensions: dict[str, PreTermDimensionResult] = {}
@@ -1544,7 +1820,7 @@ async def run_pre_termination_check(
 
         # Calculate overall score: sum of dimension scores, normalized 0-100
         total_score = sum(d.score for d in dimensions.values())
-        max_possible = 240  # 8 dimensions * 30 points max each
+        max_possible = 270  # 9 dimensions * 30 points max each
         overall_score = int(total_score / max_possible * 100)
         overall_band = _band(overall_score)
 
