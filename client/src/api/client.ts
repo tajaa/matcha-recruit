@@ -2592,7 +2592,7 @@ export const adminResearchQueue = {
     request<ResearchQueueItem[]>('/admin/research-queue'),
 
   research: (jurisdictionId: string): string =>
-    `${BASE_URL}/admin/research-queue/${jurisdictionId}/research`,
+    `${import.meta.env.VITE_API_URL || '/api'}/admin/research-queue/${jurisdictionId}/research`,
 };
 
 // Jurisdiction Data Overview (repository dashboard)

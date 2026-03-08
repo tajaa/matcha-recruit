@@ -604,6 +604,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       pay_classification: '',
       pay_rate: '',
       work_city: '',
+      work_zip: '',
       job_title: '',
       department: '',
     });

@@ -47,7 +47,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
 
   const { data: alerts, isLoading: loadingAlerts } = useQuery({
     queryKey: ['compliance-alerts', selectedLocationId, companyId],
-    queryFn: () => complianceAPI.getAlerts(selectedLocationId || undefined, companyId || undefined),
+    queryFn: () => complianceAPI.getAlerts(undefined, companyId || undefined),
     enabled: !!selectedLocationId,
     staleTime: ONE_HOUR,
     gcTime: ONE_HOUR,
