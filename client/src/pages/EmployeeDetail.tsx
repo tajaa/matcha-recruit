@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { getAccessToken, provisioning, employees as employeesApi } from '../api/client';
 import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioningStatus, ProvisioningRunStatus, EmployeeIncidentItem } from '../types';
 import { useAuth } from '../context/AuthContext';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 import {
   ArrowLeft, Mail, Phone, MapPin, Calendar, Users, CheckCircle, Clock, FileText,
   Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw,
@@ -10,6 +11,38 @@ import {
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+const LT = {
+  pageBg: 'bg-stone-300',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  textDim: 'text-stone-600',
+  border: 'border-stone-200',
+  card: 'bg-stone-100 border border-stone-200 rounded-2xl',
+  innerEl: 'bg-stone-200/60 rounded-xl border border-stone-200',
+  inputCls: 'bg-white border border-stone-300 text-zinc-900 text-sm rounded-xl focus:outline-none focus:border-stone-400 placeholder:text-stone-400 transition-colors',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  btnSecondary: 'border border-stone-300 text-stone-500 hover:text-zinc-900 hover:border-stone-400',
+  modalBg: 'bg-stone-100 border border-stone-200 shadow-2xl rounded-2xl',
+  divide: 'divide-stone-200',
+} as const;
+
+const DK = {
+  pageBg: 'bg-zinc-950',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  innerEl: 'bg-zinc-900/40 rounded-xl border border-white/10',
+  inputCls: 'bg-zinc-800 border border-white/10 text-zinc-100 text-sm rounded-xl focus:outline-none focus:border-white/20 placeholder:text-zinc-600 transition-colors',
+  btnPrimary: 'bg-zinc-100 text-zinc-900 hover:bg-white',
+  btnSecondary: 'border border-white/10 text-zinc-500 hover:text-zinc-100 hover:border-white/20',
+  modalBg: 'bg-zinc-900 border border-white/10 shadow-2xl rounded-2xl',
+  divide: 'divide-white/10',
+} as const;
 
 interface Employee {
   id: string;
@@ -93,20 +126,22 @@ const CATEGORIES = [
   { value: 'return_to_work', label: 'Return to Work', icon: RotateCcw, color: 'text-emerald-400', bgColor: 'bg-emerald-500/10' },
 ];
 
-function provisioningStatusBadge(status?: string | null): string {
+function provisioningStatusBadge(status: string | null | undefined, isLight: boolean): string {
   if (status === 'connected' || status === 'completed' || status === 'active') {
-    return 'bg-emerald-900/30 text-emerald-300 border border-emerald-600/30';
+    return isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-300' : 'bg-emerald-900/30 text-emerald-300 border border-emerald-600/30';
   }
   if (status === 'failed' || status === 'error') {
-    return 'bg-red-900/30 text-red-300 border border-red-600/30';
+    return isLight ? 'bg-red-50 text-red-700 border border-red-300' : 'bg-red-900/30 text-red-300 border border-red-600/30';
   }
   if (status === 'needs_action' || status === 'running' || status === 'pending' || status === 'disconnected') {
-    return 'bg-amber-900/30 text-amber-300 border border-amber-600/30';
+    return isLight ? 'bg-amber-50 text-amber-700 border border-amber-300' : 'bg-amber-900/30 text-amber-300 border border-amber-600/30';
   }
-  return 'bg-zinc-800 text-zinc-300 border border-zinc-700';
+  return isLight ? 'bg-stone-200 text-stone-600 border border-stone-300' : 'bg-zinc-800 text-zinc-300 border border-zinc-700';
 }
 
 export default function EmployeeDetail() {
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
   const { hasFeature } = useAuth();
@@ -497,38 +532,41 @@ export default function EmployeeDetail() {
 
   const displayWorkEmail = employee.work_email || employee.email;
 
+  const wrapperClass = `-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`;
+
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className={wrapperClass}>
+    <div className={`max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500`}>
       {/* Header */}
-      <div className="flex items-center gap-4 border-b border-white/10 pb-8">
+      <div className={`flex items-center gap-4 border-b ${t.border} pb-8`}>
         <button
           onClick={() => navigate('/app/matcha/employees')}
-          className="p-2 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-colors"
+          className={`p-2 ${t.textMuted} hover:${t.textMain} hover:${isLight ? 'bg-stone-200' : 'bg-zinc-800'} rounded transition-colors`}
         >
           <ArrowLeft size={20} />
         </button>
         <div className="flex-1">
-          <h1 className="text-4xl font-bold tracking-tighter text-white">
+          <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
             {employee.first_name} {employee.last_name}
           </h1>
           <div className="flex items-center gap-3 mt-1">
-            {employee.job_title && <span className="text-sm text-zinc-400">{employee.job_title}</span>}
-            {employee.job_title && employee.department && <span className="text-zinc-600">·</span>}
-            {employee.department && <span className="text-sm text-zinc-400">{employee.department}</span>}
-            {!employee.job_title && !employee.department && <span className="text-xs text-zinc-500 font-mono">{displayWorkEmail}</span>}
+            {employee.job_title && <span className={`text-sm ${t.textDim}`}>{employee.job_title}</span>}
+            {employee.job_title && employee.department && <span className={t.textFaint}>·</span>}
+            {employee.department && <span className={`text-sm ${t.textDim}`}>{employee.department}</span>}
+            {!employee.job_title && !employee.department && <span className={`text-xs ${t.textMuted} font-mono`}>{displayWorkEmail}</span>}
           </div>
         </div>
         <div className="flex items-center gap-2">
           {employee.termination_date ? (
-            <span className="px-3 py-1 bg-zinc-800 text-zinc-400 text-xs uppercase tracking-wider rounded">
+            <span className={`px-3 py-1 ${isLight ? 'bg-stone-200 text-stone-600 border border-stone-300' : 'bg-zinc-800 text-zinc-400 border border-zinc-700'} text-[10px] font-bold uppercase tracking-wider rounded`}>
               Terminated
             </span>
           ) : employee.user_id ? (
-            <span className="px-3 py-1 bg-emerald-900/30 text-emerald-400 text-xs uppercase tracking-wider rounded border border-emerald-500/20">
+            <span className={`px-3 py-1 ${isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-300' : 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/20'} text-[10px] font-bold uppercase tracking-wider rounded`}>
               Active
             </span>
           ) : (
-            <span className="px-3 py-1 bg-amber-900/30 text-amber-400 text-xs uppercase tracking-wider rounded border border-amber-500/20">
+            <span className={`px-3 py-1 ${isLight ? 'bg-amber-50 text-amber-700 border border-amber-300' : 'bg-amber-900/30 text-amber-400 border border-amber-500/20'} text-[10px] font-bold uppercase tracking-wider rounded`}>
               {employee.invitation_status === 'pending' ? 'Invited' : 'Not Invited'}
             </span>
           )}
@@ -537,22 +575,22 @@ export default function EmployeeDetail() {
 
       {/* Error */}
       {error && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded p-4 flex items-center justify-between">
+        <div className={`${isLight ? 'bg-red-50 border-red-300' : 'bg-red-500/10 border-red-500/20'} border rounded p-4 flex items-center justify-between`}>
           <div className="flex items-center gap-3">
-            <AlertTriangle className="text-red-400" size={16} />
-            <p className="text-sm text-red-400 font-mono">{error}</p>
+            <AlertTriangle className={isLight ? 'text-red-700' : 'text-red-400'} size={16} />
+            <p className={`text-sm ${isLight ? 'text-red-700' : 'text-red-400'} font-mono`}>{error}</p>
           </div>
-          <button onClick={() => setError(null)} className="text-xs text-red-400 hover:text-red-300 uppercase tracking-wider font-bold">
+          <button onClick={() => setError(null)} className={`text-xs ${isLight ? 'text-red-700' : 'text-red-400'} hover:opacity-80 uppercase tracking-wider font-bold`}>
             Dismiss
           </button>
         </div>
       )}
       {statusMessage && (
-        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded p-4 flex items-center justify-between">
-          <p className="text-sm text-emerald-300 font-mono">{statusMessage}</p>
+        <div className={`${isLight ? 'bg-emerald-50 border-emerald-300' : 'bg-emerald-500/10 border-emerald-500/20'} border rounded p-4 flex items-center justify-between`}>
+          <p className={`text-sm ${isLight ? 'text-emerald-700' : 'text-emerald-300'} font-mono`}>{statusMessage}</p>
           <button
             onClick={() => setStatusMessage(null)}
-            className="text-xs text-emerald-300 hover:text-emerald-200 uppercase tracking-wider font-bold"
+            className={`text-xs ${isLight ? 'text-emerald-700' : 'text-emerald-300'} hover:opacity-80 uppercase tracking-wider font-bold`}
           >
             Dismiss
           </button>
@@ -562,11 +600,11 @@ export default function EmployeeDetail() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         {/* Employee Info */}
         <div className="lg:col-span-1 space-y-6">
-          <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
+          <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
             <div className="flex items-center justify-between">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Contact Info</h2>
+              <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Contact Info</h2>
               {!editing && (
-                <button onClick={startEditing} className="p-1.5 text-zinc-500 hover:text-white hover:bg-zinc-800 rounded transition-colors" title="Edit">
+                <button onClick={startEditing} className={`p-1.5 ${t.textMuted} hover:${t.textMain} hover:${isLight ? 'bg-stone-200' : 'bg-zinc-800'} rounded transition-colors`} title="Edit">
                   <Pencil size={14} />
                 </button>
               )}
@@ -575,77 +613,77 @@ export default function EmployeeDetail() {
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">First Name</label>
-                    <input value={editFields.first_name} onChange={(e) => setEditFields({ ...editFields, first_name: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" />
+                    <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>First Name</label>
+                    <input value={editFields.first_name} onChange={(e) => setEditFields({ ...editFields, first_name: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} />
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Last Name</label>
-                    <input value={editFields.last_name} onChange={(e) => setEditFields({ ...editFields, last_name: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" />
+                    <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Last Name</label>
+                    <input value={editFields.last_name} onChange={(e) => setEditFields({ ...editFields, last_name: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} />
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Work Email</label>
-                  <input type="email" value={editFields.work_email} onChange={(e) => setEditFields({ ...editFields, work_email: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" />
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Work Email</label>
+                  <input type="email" value={editFields.work_email} onChange={(e) => setEditFields({ ...editFields, work_email: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} />
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Personal Email</label>
-                  <input type="email" value={editFields.personal_email} onChange={(e) => setEditFields({ ...editFields, personal_email: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="Optional" />
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Personal Email</label>
+                  <input type="email" value={editFields.personal_email} onChange={(e) => setEditFields({ ...editFields, personal_email: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} placeholder="Optional" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Phone</label>
-                  <input value={editFields.phone} onChange={(e) => setEditFields({ ...editFields, phone: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="Optional" />
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Phone</label>
+                  <input value={editFields.phone} onChange={(e) => setEditFields({ ...editFields, phone: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} placeholder="Optional" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Address</label>
-                  <input value={editFields.address} onChange={(e) => setEditFields({ ...editFields, address: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="Optional" />
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Address</label>
+                  <input value={editFields.address} onChange={(e) => setEditFields({ ...editFields, address: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} placeholder="Optional" />
                 </div>
               </div>
             ) : (
               <div className="space-y-3">
                 <div className="flex items-center gap-3">
-                  <Mail size={16} className="text-zinc-500" />
-                  <span className="text-sm text-white">{displayWorkEmail}</span>
+                  <Mail size={16} className={t.textFaint} />
+                  <span className={`text-sm ${t.textMain}`}>{displayWorkEmail}</span>
                 </div>
                 {employee.personal_email && (
                   <div className="flex items-center gap-3">
-                    <Mail size={16} className="text-zinc-600" />
-                    <span className="text-sm text-zinc-300">Personal: {employee.personal_email}</span>
+                    <Mail size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textDim}`}>Personal: {employee.personal_email}</span>
                   </div>
                 )}
                 {employee.phone && (
                   <div className="flex items-center gap-3">
-                    <Phone size={16} className="text-zinc-500" />
-                    <span className="text-sm text-white">{employee.phone}</span>
+                    <Phone size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textMain}`}>{employee.phone}</span>
                   </div>
                 )}
                 {employee.address && (
                   <div className="flex items-center gap-3">
-                    <MapPin size={16} className="text-zinc-500" />
-                    <span className="text-sm text-white">{employee.address}</span>
+                    <MapPin size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textMain}`}>{employee.address}</span>
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Employment</h2>
+          <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
+            <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Employment</h2>
             {editing && editFields ? (
               <div className="space-y-3">
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Job Title</label>
-                  <input value={editFields.job_title} onChange={(e) => setEditFields({ ...editFields, job_title: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. Software Engineer" />
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Job Title</label>
+                  <input value={editFields.job_title} onChange={(e) => setEditFields({ ...editFields, job_title: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} placeholder="e.g. Software Engineer" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Department</label>
-                  <input value={editFields.department} onChange={(e) => setEditFields({ ...editFields, department: e.target.value })} list="dept-options" className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. Engineering" />
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Department</label>
+                  <input value={editFields.department} onChange={(e) => setEditFields({ ...editFields, department: e.target.value })} list="dept-options" className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} placeholder="e.g. Engineering" />
                   <datalist id="dept-options">
                     {departments.map((d) => <option key={d} value={d} />)}
                   </datalist>
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Employment Type</label>
-                  <select value={editFields.employment_type} onChange={(e) => setEditFields({ ...editFields, employment_type: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30">
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Employment Type</label>
+                  <select value={editFields.employment_type} onChange={(e) => setEditFields({ ...editFields, employment_type: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`}>
                     <option value="">Select...</option>
                     <option value="full_time">Full Time</option>
                     <option value="part_time">Part Time</option>
@@ -654,25 +692,25 @@ export default function EmployeeDetail() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Start Date</label>
-                  <input type="date" value={editFields.start_date} onChange={(e) => setEditFields({ ...editFields, start_date: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" />
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Start Date</label>
+                  <input type="date" value={editFields.start_date} onChange={(e) => setEditFields({ ...editFields, start_date: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} />
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Work State</label>
-                    <input value={editFields.work_state} onChange={(e) => setEditFields({ ...editFields, work_state: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. CA" />
+                    <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Work State</label>
+                    <input value={editFields.work_state} onChange={(e) => setEditFields({ ...editFields, work_state: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} placeholder="e.g. CA" />
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Work City</label>
-                    <input value={editFields.work_city} onChange={(e) => setEditFields({ ...editFields, work_city: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder="e.g. San Francisco" />
+                    <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Work City</label>
+                    <input value={editFields.work_city} onChange={(e) => setEditFields({ ...editFields, work_city: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} placeholder="e.g. San Francisco" />
                   </div>
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Manager</label>
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Manager</label>
                   <select
                     value={editFields.manager_id}
                     onChange={(e) => setEditFields({ ...editFields, manager_id: e.target.value })}
-                    className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30"
+                    className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`}
                   >
                     <option value="">No Manager</option>
                     {allEmployees
@@ -683,8 +721,8 @@ export default function EmployeeDetail() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-[10px] text-zinc-500 uppercase tracking-wider">Pay Classification</label>
-                  <select value={editFields.pay_classification} onChange={(e) => setEditFields({ ...editFields, pay_classification: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30">
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Pay Classification</label>
+                  <select value={editFields.pay_classification} onChange={(e) => setEditFields({ ...editFields, pay_classification: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`}>
                     <option value="">Select...</option>
                     <option value="exempt">Exempt (Salary)</option>
                     <option value="hourly">Hourly</option>
@@ -692,18 +730,18 @@ export default function EmployeeDetail() {
                 </div>
                 {editFields.pay_classification && (
                   <div>
-                    <label className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                    <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>
                       {editFields.pay_classification === 'hourly' ? 'Hourly Rate ($)' : 'Annual Salary ($)'}
                     </label>
-                    <input type="number" step="0.01" min="0" value={editFields.pay_rate} onChange={(e) => setEditFields({ ...editFields, pay_rate: e.target.value })} className="w-full mt-1 px-3 py-1.5 bg-zinc-950 border border-white/10 text-sm text-white rounded focus:outline-none focus:border-white/30" placeholder={editFields.pay_classification === 'hourly' ? '18.50' : '65000'} />
+                    <input type="number" step="0.01" min="0" value={editFields.pay_rate} onChange={(e) => setEditFields({ ...editFields, pay_rate: e.target.value })} className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`} placeholder={editFields.pay_classification === 'hourly' ? '18.50' : '65000'} />
                   </div>
                 )}
                 <div className="flex items-center gap-2 pt-2">
-                  <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-4 py-1.5 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50 transition-colors">
+                  <button onClick={handleSave} disabled={saving} className={`flex items-center gap-1.5 px-4 py-1.5 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50 transition-colors`}>
                     <Save size={12} />
                     {saving ? 'Saving...' : 'Save Changes'}
                   </button>
-                  <button onClick={cancelEditing} disabled={saving} className="px-4 py-1.5 text-zinc-400 hover:text-white text-[10px] font-bold uppercase tracking-wider transition-colors">
+                  <button onClick={cancelEditing} disabled={saving} className={`px-4 py-1.5 ${t.textMuted} hover:${t.textMain} text-[10px] font-bold uppercase tracking-wider transition-colors`}>
                     Cancel
                   </button>
                 </div>
@@ -712,47 +750,47 @@ export default function EmployeeDetail() {
               <div className="space-y-3">
                 {employee.job_title && (
                   <div className="flex items-center gap-3">
-                    <Briefcase size={16} className="text-zinc-500" />
-                    <span className="text-sm text-zinc-400">
-                      Title: <span className="text-white">{employee.job_title}</span>
+                    <Briefcase size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textDim}`}>
+                      Title: <span className={t.textMain}>{employee.job_title}</span>
                     </span>
                   </div>
                 )}
                 {employee.department && (
                   <div className="flex items-center gap-3">
-                    <Users size={16} className="text-zinc-500" />
-                    <span className="text-sm text-zinc-400">
-                      Department: <span className="text-white">{employee.department}</span>
+                    <Users size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textDim}`}>
+                      Department: <span className={t.textMain}>{employee.department}</span>
                     </span>
                   </div>
                 )}
                 {employee.start_date && (
                   <div className="flex items-center gap-3">
-                    <Calendar size={16} className="text-zinc-500" />
-                    <span className="text-sm text-zinc-400">
-                      Started: <span className="text-white">{employee.start_date}</span>
+                    <Calendar size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textDim}`}>
+                      Started: <span className={t.textMain}>{employee.start_date}</span>
                     </span>
                   </div>
                 )}
                 {employee.employment_type && (
                   <div className="flex items-center gap-3">
-                    <Briefcase size={16} className="text-zinc-500" />
-                    <span className="text-sm text-zinc-400">
-                      Type: <span className="text-white">{employee.employment_type.replace('_', ' ')}</span>
+                    <Briefcase size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textDim}`}>
+                      Type: <span className={t.textMain}>{employee.employment_type.replace('_', ' ')}</span>
                     </span>
                   </div>
                 )}
                 <div className="flex items-center gap-3">
-                  <MapPin size={16} className="text-zinc-500" />
-                  <span className="text-sm text-zinc-400">
-                    Location: <span className="text-white">{employee.work_city && employee.work_state ? `${employee.work_city}, ${employee.work_state}` : employee.work_state || employee.work_city || '—'}</span>
+                  <MapPin size={16} className={t.textFaint} />
+                  <span className={`text-sm ${t.textDim}`}>
+                    Location: <span className={t.textMain}>{employee.work_city && employee.work_state ? `${employee.work_city}, ${employee.work_state}` : employee.work_state || employee.work_city || '—'}</span>
                   </span>
                 </div>
                 {employee.pay_classification && (
                   <div className="flex items-center gap-3">
-                    <DollarSign size={16} className="text-zinc-500" />
-                    <span className="text-sm text-zinc-400">
-                      Pay: <span className="text-white">
+                    <DollarSign size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textDim}`}>
+                      Pay: <span className={t.textMain}>
                         {employee.pay_classification === 'hourly' ? `$${employee.pay_rate?.toFixed(2) || '—'}/hr` : `$${employee.pay_rate?.toLocaleString() || '—'}/yr`}
                         {' '}({employee.pay_classification})
                       </span>
@@ -761,9 +799,9 @@ export default function EmployeeDetail() {
                 )}
                 {employee.manager_name && (
                   <div className="flex items-center gap-3">
-                    <Users size={16} className="text-zinc-500" />
-                    <span className="text-sm text-zinc-400">
-                      Manager: <span className="text-white cursor-pointer hover:underline" onClick={() => employee.manager_id && navigate(`/app/matcha/employees/${employee.manager_id}`)}>{employee.manager_name}</span>
+                    <Users size={16} className={t.textFaint} />
+                    <span className={`text-sm ${t.textDim}`}>
+                      Manager: <span className={`${t.textMain} cursor-pointer hover:underline`} onClick={() => employee.manager_id && navigate(`/app/matcha/employees/${employee.manager_id}`)}>{employee.manager_name}</span>
                     </span>
                   </div>
                 )}
@@ -772,25 +810,25 @@ export default function EmployeeDetail() {
           </div>
 
           {/* Direct Reports */}
-          <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Direct Reports</h2>
+          <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
+            <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Direct Reports</h2>
             {directReports.length === 0 ? (
-              <p className="text-xs text-zinc-600 font-mono uppercase">No direct reports</p>
+              <p className={`text-xs ${t.textFaint} font-mono uppercase`}>No direct reports</p>
             ) : (
               <div className="space-y-2">
                 {directReports.map((dr) => (
                   <div
                     key={dr.id}
                     onClick={() => navigate(`/app/matcha/employees/${dr.id}`)}
-                    className="flex items-center gap-3 p-2 rounded hover:bg-white/5 cursor-pointer transition-colors"
+                    className={`flex items-center gap-3 p-2 rounded ${isLight ? 'hover:bg-stone-200' : 'hover:bg-white/5'} cursor-pointer transition-colors`}
                   >
-                    <div className="h-7 w-7 rounded-lg bg-zinc-800 border border-white/5 flex items-center justify-center text-[10px] font-bold text-zinc-400">
+                    <div className={`h-7 w-7 rounded-lg ${isLight ? 'bg-stone-200 text-stone-600' : 'bg-zinc-800 text-zinc-400'} border ${t.border} flex items-center justify-center text-[10px] font-bold`}>
                       {dr.first_name[0]}{dr.last_name[0]}
                     </div>
                     <div className="min-w-0 flex-1">
-                      <p className="text-sm text-white truncate">{dr.first_name} {dr.last_name}</p>
+                      <p className={`text-sm ${t.textMain} truncate`}>{dr.first_name} {dr.last_name}</p>
                     </div>
-                    <ChevronRight size={14} className="text-zinc-600" />
+                    <ChevronRight size={14} className={t.textFaint} />
                   </div>
                 ))}
               </div>
@@ -799,51 +837,51 @@ export default function EmployeeDetail() {
 
           {/* Incident Reports */}
           {hasFeature('incidents') && (
-          <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
+          <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
             <div className="flex items-center gap-2">
-              <AlertTriangle size={14} className="text-zinc-500" />
-              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Incident Reports</h2>
+              <AlertTriangle size={14} className={t.textMuted} />
+              <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Incident Reports</h2>
               {incidents.length > 0 && (
-                <span className="ml-auto px-1.5 py-0.5 text-[10px] font-bold tabular-nums bg-zinc-800 text-zinc-300 border border-white/10 rounded">
+                <span className={`ml-auto px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${isLight ? 'bg-stone-200 text-stone-600' : 'bg-zinc-800 text-zinc-300'} border ${t.border} rounded`}>
                   {incidents.length}
                 </span>
               )}
             </div>
             {incidents.length === 0 ? (
-              <p className="text-xs text-zinc-600 font-mono uppercase">No incidents on record</p>
+              <p className={`text-xs ${t.textFaint} font-mono uppercase`}>No incidents on record</p>
             ) : (
               <div className="space-y-2">
                 {incidents.map((inc) => {
-                  const sevDot: Record<string, string> = { critical: 'bg-zinc-100', high: 'bg-zinc-400', medium: 'bg-zinc-500', low: 'bg-zinc-600' };
-                  const statusColor: Record<string, string> = { reported: 'text-zinc-100', investigating: 'text-zinc-400', action_required: 'text-zinc-300', resolved: 'text-zinc-500', closed: 'text-zinc-600' };
+                  const sevDot: Record<string, string> = { critical: isLight ? 'bg-red-500' : 'bg-zinc-100', high: isLight ? 'bg-red-400' : 'bg-zinc-400', medium: isLight ? 'bg-amber-500' : 'bg-zinc-500', low: isLight ? 'bg-stone-400' : 'bg-zinc-600' };
+                  const statusColor: Record<string, string> = { reported: t.textMain, investigating: t.textDim, action_required: t.textMain, resolved: t.textMuted, closed: t.textFaint };
                   const typeLabel: Record<string, string> = { safety: 'Safety', behavioral: 'Behavioral', property: 'Property', near_miss: 'Near Miss', other: 'Other' };
                   const roleLabel: Record<string, string> = { reporter: 'Reporter', involved: 'Involved', witness: 'Witness' };
                   return (
                     <div
                       key={inc.id}
                       onClick={() => navigate(`/app/ir/incidents/${inc.id}`)}
-                      className="p-3 rounded bg-zinc-950/50 border border-white/5 hover:border-white/15 cursor-pointer transition-colors group"
+                      className={`p-3 rounded ${isLight ? 'bg-white' : 'bg-zinc-950/50'} border ${t.border} hover:border-zinc-400/50 cursor-pointer transition-colors group`}
                     >
                       <div className="flex items-center gap-2 mb-1.5">
                         <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${sevDot[inc.severity] || 'bg-zinc-600'}`} />
-                        <span className="text-[10px] text-zinc-500 font-mono">
+                        <span className={`text-[10px] ${t.textFaint} font-mono`}>
                           #IR-{String(inc.incident_number).padStart(4, '0')}
                         </span>
-                        <span className={`ml-auto text-[10px] uppercase tracking-wider font-bold ${statusColor[inc.status] || 'text-zinc-500'}`}>
+                        <span className={`ml-auto text-[10px] uppercase tracking-wider font-bold ${statusColor[inc.status] || t.textMuted}`}>
                           {inc.status.replace('_', ' ')}
                         </span>
                       </div>
-                      <p className="text-xs text-zinc-300 group-hover:text-white truncate transition-colors font-medium">
+                      <p className={`text-xs ${t.textDim} group-hover:${t.textMain} truncate transition-colors font-medium`}>
                         {inc.title}
                       </p>
                       <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-                        <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-400 border border-white/5 rounded">
+                        <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${isLight ? 'bg-stone-100 text-stone-500' : 'bg-zinc-800 text-zinc-400'} border ${t.border} rounded`}>
                           {typeLabel[inc.incident_type] || inc.incident_type}
                         </span>
-                        <span className="px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-zinc-800 text-zinc-400 border border-white/5 rounded">
+                        <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider ${isLight ? 'bg-stone-100 text-stone-500' : 'bg-zinc-800 text-zinc-400'} border ${t.border} rounded`}>
                           {roleLabel[inc.role] || inc.role}
                         </span>
-                        <span className="ml-auto text-[10px] text-zinc-600 font-mono">
+                        <span className={`ml-auto text-[10px] ${t.textFaint} font-mono`}>
                           {new Date(inc.occurred_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                         </span>
                       </div>
@@ -855,12 +893,12 @@ export default function EmployeeDetail() {
           </div>
           )}
 
-          <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
+          <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
             <div className="flex items-center justify-between gap-2">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Google Workspace</h2>
+              <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Google Workspace</h2>
               <button
                 onClick={() => navigate('/app/matcha/google-workspace')}
-                className="text-[10px] uppercase tracking-wider text-zinc-400 hover:text-white"
+                className={`text-[10px] uppercase tracking-wider ${t.textMuted} hover:${t.textMain}`}
               >
                 Settings
               </button>
@@ -868,30 +906,30 @@ export default function EmployeeDetail() {
 
             <div className="space-y-3">
               <div className="flex items-center justify-between gap-2">
-                <span className="text-xs text-zinc-500 uppercase tracking-wider">Connection</span>
-                <span className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(googleConnection?.status)}`}>
+                <span className={`text-xs ${t.textMuted} uppercase tracking-wider`}>Connection</span>
+                <span className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(googleConnection?.status, isLight)}`}>
                   {googleConnection?.status || 'disconnected'}
                 </span>
               </div>
 
               {provisioningLoading && (
-                <p className="text-xs text-zinc-500 font-mono uppercase tracking-wider">Loading provisioning status...</p>
+                <p className={`text-xs ${t.textMuted} font-mono uppercase tracking-wider`}>Loading provisioning status...</p>
               )}
 
               {googleConnection?.last_error && (
-                <p className="text-xs text-red-300">Last error: {googleConnection.last_error}</p>
+                <p className={`text-xs ${isLight ? 'text-red-700' : 'text-red-300'}`}>Last error: {googleConnection.last_error}</p>
               )}
 
               {provisioningStatus?.external_identity ? (
-                <div className="space-y-1 border border-white/10 bg-zinc-950/50 p-3">
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider">External Identity</p>
-                  <p className="text-xs text-white">{provisioningStatus.external_identity.external_email || 'No external email returned'}</p>
-                  <p className="text-[10px] text-zinc-500">
-                    Status: <span className="text-zinc-300 uppercase">{provisioningStatus.external_identity.status}</span>
+                <div className={`space-y-1 border ${t.border} ${isLight ? 'bg-white' : 'bg-zinc-950/50'} p-3 rounded-xl`}>
+                  <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>External Identity</p>
+                  <p className={`text-xs ${t.textMain}`}>{provisioningStatus.external_identity.external_email || 'No external email returned'}</p>
+                  <p className={`text-[10px] ${t.textMuted}`}>
+                    Status: <span className={`${t.textDim} uppercase`}>{provisioningStatus.external_identity.status}</span>
                   </p>
                 </div>
               ) : (
-                <p className="text-xs text-zinc-500">No Google account provisioned yet.</p>
+                <p className={`text-xs ${t.textMuted}`}>No Google account provisioned yet.</p>
               )}
 
               <div className="flex flex-wrap gap-2">
@@ -904,7 +942,7 @@ export default function EmployeeDetail() {
                     handleProvisionGoogleWorkspace();
                   }}
                   disabled={provisioningActionLoading}
-                  className="px-3 py-1.5 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+                  className={`px-4 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50 transition-colors`}
                 >
                   {provisioningActionLoading ? 'Working...' : googleConnection?.connected ? 'Provision Now' : 'Connect Google'}
                 </button>
@@ -913,7 +951,7 @@ export default function EmployeeDetail() {
                   <button
                     onClick={() => handleRetryProvisioningRun(latestRetryableRun.run_id)}
                     disabled={provisioningActionLoading}
-                    className="px-3 py-1.5 border border-white/10 text-zinc-300 hover:text-white hover:border-white/30 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+                    className={`px-4 py-2 ${t.btnSecondary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50 transition-colors`}
                   >
                     Retry Last Run
                   </button>
@@ -922,19 +960,19 @@ export default function EmployeeDetail() {
 
               {recentProvisioningRuns.length > 0 && (
                 <div className="space-y-2">
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Recent Runs</p>
+                  <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>Recent Runs</p>
                   {recentProvisioningRuns.map((run) => (
-                    <div key={run.run_id} className="border border-white/10 bg-zinc-950/50 p-2">
+                    <div key={run.run_id} className={`border ${t.border} ${isLight ? 'bg-white' : 'bg-zinc-950/50'} p-3 rounded-xl`}>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] text-zinc-400">
+                        <span className={`text-[10px] ${t.textFaint}`}>
                           {new Date(run.created_at).toLocaleString()}
                         </span>
-                        <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(run.status)}`}>
+                        <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(run.status, isLight)}`}>
                           {run.status}
                         </span>
                       </div>
                       {run.last_error && (
-                        <p className="text-[10px] text-red-300 mt-1">{run.last_error}</p>
+                        <p className={`text-[10px] ${isLight ? 'text-red-700' : 'text-red-300'} mt-1`}>{run.last_error}</p>
                       )}
                     </div>
                   ))}
@@ -945,12 +983,12 @@ export default function EmployeeDetail() {
         </div>
 
         {/* Slack Provisioning Card */}
-        <div className="bg-zinc-900/50 border border-white/10 p-6 space-y-4">
+        <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Slack</h2>
+            <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Slack</h2>
             <button
               onClick={() => navigate('/app/matcha/slack-provisioning')}
-              className="text-[10px] uppercase tracking-wider text-zinc-400 hover:text-white"
+              className={`text-[10px] uppercase tracking-wider ${t.textMuted} hover:${t.textMain}`}
             >
               Settings
             </button>
@@ -958,31 +996,31 @@ export default function EmployeeDetail() {
 
           <div className="space-y-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-zinc-500 uppercase tracking-wider">Connection</span>
-              <span className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(slackConnection?.status)}`}>
+              <span className={`text-xs ${t.textMuted} uppercase tracking-wider`}>Connection</span>
+              <span className={`px-2 py-1 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(slackConnection?.status, isLight)}`}>
                 {slackConnection?.status || 'disconnected'}
               </span>
             </div>
 
             {slackConnection?.slack_team_name && (
-              <p className="text-xs text-zinc-400">
-                Workspace: <span className="text-white">{slackConnection.slack_team_name}</span>
+              <p className={`text-xs ${t.textDim}`}>
+                Workspace: <span className={t.textMain}>{slackConnection.slack_team_name}</span>
               </p>
             )}
 
             {slackProvisioningStatus?.external_identity ? (
-              <div className="space-y-1 border border-white/10 bg-zinc-950/50 p-3">
-                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">External Identity</p>
-                <p className="text-xs text-white">{slackProvisioningStatus.external_identity.external_email || 'No email returned'}</p>
-                <p className="text-[10px] text-zinc-500">
-                  Slack ID: <span className="text-zinc-300">{slackProvisioningStatus.external_identity.external_user_id || '—'}</span>
+              <div className={`space-y-1 border ${t.border} ${isLight ? 'bg-white' : 'bg-zinc-950/50'} p-3 rounded-xl`}>
+                <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>External Identity</p>
+                <p className={`text-xs ${t.textMain}`}>{slackProvisioningStatus.external_identity.external_email || 'No email returned'}</p>
+                <p className={`text-[10px] ${t.textMuted}`}>
+                  Slack ID: <span className={t.textDim}>{slackProvisioningStatus.external_identity.external_user_id || '—'}</span>
                 </p>
-                <p className="text-[10px] text-zinc-500">
-                  Status: <span className="text-zinc-300 uppercase">{slackProvisioningStatus.external_identity.status}</span>
+                <p className={`text-[10px] ${t.textMuted}`}>
+                  Status: <span className={`${t.textDim} uppercase`}>{slackProvisioningStatus.external_identity.status}</span>
                 </p>
               </div>
             ) : (
-              <p className="text-xs text-zinc-500">No Slack account provisioned yet.</p>
+              <p className={`text-xs ${t.textMuted}`}>No Slack account provisioned yet.</p>
             )}
 
             <div className="flex flex-wrap gap-2">
@@ -995,7 +1033,7 @@ export default function EmployeeDetail() {
                   handleProvisionSlack();
                 }}
                 disabled={slackActionLoading}
-                className="px-3 py-1.5 bg-white text-black hover:bg-zinc-200 text-[10px] font-bold uppercase tracking-wider disabled:opacity-50"
+                className={`px-4 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50 transition-colors`}
               >
                 {slackActionLoading ? 'Working...' : slackConnection?.connected ? 'Provision Now' : 'Connect Slack'}
               </button>
@@ -1003,7 +1041,7 @@ export default function EmployeeDetail() {
 
             {recentSlackRuns.length > 0 && (
               <div className="space-y-2">
-                <p className="text-[10px] text-zinc-500 uppercase tracking-wider">Recent Runs</p>
+                <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}>Recent Runs</p>
                 {recentSlackRuns.map((run) => {
                   const warningsRaw = run.steps?.[0]?.last_response?.warnings;
                   const warnings = Array.isArray(warningsRaw)
@@ -1011,20 +1049,20 @@ export default function EmployeeDetail() {
                     : [];
 
                   return (
-                    <div key={run.run_id} className="border border-white/10 bg-zinc-950/50 p-2">
+                    <div key={run.run_id} className={`border ${t.border} ${isLight ? 'bg-white' : 'bg-zinc-950/50'} p-3 rounded-xl`}>
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] text-zinc-400">
+                        <span className={`text-[10px] ${t.textFaint}`}>
                           {new Date(run.created_at).toLocaleString()}
                         </span>
-                        <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(run.status)}`}>
+                        <span className={`px-2 py-0.5 text-[10px] uppercase tracking-wider rounded ${provisioningStatusBadge(run.status, isLight)}`}>
                           {run.status}
                         </span>
                       </div>
                       {run.last_error && (
-                        <p className="text-[10px] text-red-300 mt-1">{run.last_error}</p>
+                        <p className={`text-[10px] ${isLight ? 'text-red-700' : 'text-red-300'} mt-1`}>{run.last_error}</p>
                       )}
                       {warnings.length > 0 && (
-                        <p className="text-[10px] text-amber-400 mt-1">{warnings[0]}</p>
+                        <p className={`text-[10px] ${isLight ? 'text-amber-700' : 'text-amber-400'} mt-1`}>{warnings[0]}</p>
                       )}
                     </div>
                   );
@@ -1037,18 +1075,18 @@ export default function EmployeeDetail() {
         {/* Onboarding Section */}
         <div className="lg:col-span-2 space-y-6">
           {/* Progress */}
-          <div className="bg-zinc-900/50 border border-white/10 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-bold uppercase tracking-wider text-zinc-500">Onboarding Progress</h2>
-              <div className="flex items-center gap-4">
-                <span className="text-sm text-zinc-400">
-                  <span className="text-white font-bold">{completedCount}</span> / {tasks.length} completed
+          <div className={`${t.card} p-6 shadow-sm`}>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+              <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Onboarding Progress</h2>
+              <div className="flex flex-wrap items-center gap-4">
+                <span className={`text-xs ${t.textDim}`}>
+                  <span className={`${t.textMain} font-bold`}>{completedCount}</span> / {tasks.length} completed
                 </span>
                 {tasks.length === 0 && (
                   <button
                     onClick={handleAssignAll}
                     disabled={assigningAll}
-                    className="flex items-center gap-2 px-4 py-1.5 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+                    className={`flex items-center gap-2 px-4 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50`}
                   >
                     {assigningAll ? 'Assigning...' : 'Assign All Tasks'}
                   </button>
@@ -1056,24 +1094,24 @@ export default function EmployeeDetail() {
                 {tasks.length > 0 && (
                   <button
                     onClick={() => setShowAssignModal(true)}
-                    className="flex items-center gap-1 px-3 py-1.5 border border-white/10 text-zinc-400 hover:text-white hover:border-white/30 text-xs font-bold uppercase tracking-wider transition-colors"
+                    className={`flex items-center gap-1 px-3 py-1.5 ${t.btnSecondary} text-[10px] font-bold uppercase tracking-wider rounded-xl transition-colors`}
                   >
                     <Plus size={12} /> Add Task
                   </button>
                 )}
               </div>
             </div>
-            <div className="w-full h-2 bg-zinc-800 rounded overflow-hidden">
+            <div className={`w-full h-2 ${isLight ? 'bg-stone-200' : 'bg-zinc-800'} rounded overflow-hidden`}>
               <div
                 className="h-full bg-emerald-500 transition-all duration-500"
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <div className="flex items-center gap-6 mt-3 text-xs text-zinc-500">
-              <span className="flex items-center gap-1">
+            <div className="flex items-center gap-6 mt-3 text-[10px] font-bold uppercase tracking-wider">
+              <span className={`flex items-center gap-1.5 ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
                 <span className="w-2 h-2 rounded-full bg-emerald-500" /> {completedCount} Completed
               </span>
-              <span className="flex items-center gap-1">
+              <span className={`flex items-center gap-1.5 ${isLight ? 'text-amber-700' : 'text-amber-400'}`}>
                 <span className="w-2 h-2 rounded-full bg-amber-500" /> {pendingCount} Pending
               </span>
             </div>
@@ -1081,13 +1119,13 @@ export default function EmployeeDetail() {
 
           {/* Tasks by Category */}
           {tasks.length === 0 ? (
-            <div className="text-center py-12 border border-dashed border-white/10 bg-white/5">
-              <CheckCircle size={32} className="mx-auto text-zinc-600 mb-4" />
-              <p className="text-zinc-500 text-sm">No onboarding tasks assigned yet</p>
+            <div className={`text-center py-12 border-2 border-dashed ${t.border} ${isLight ? 'bg-white' : 'bg-white/5'} rounded-2xl`}>
+              <CheckCircle size={32} className={`mx-auto ${t.textFaint} mb-4`} />
+              <p className={`${t.textMuted} text-xs font-mono uppercase`}>No onboarding tasks assigned yet</p>
               <button
                 onClick={handleAssignAll}
                 disabled={assigningAll}
-                className="mt-4 text-white text-xs uppercase tracking-wider underline underline-offset-4"
+                className={`${t.textMain} text-[10px] font-bold uppercase tracking-wider mt-4 underline underline-offset-4 hover:opacity-80 transition-opacity`}
               >
                 {assigningAll ? 'Assigning...' : 'Assign standard onboarding tasks'}
               </button>
@@ -1098,24 +1136,24 @@ export default function EmployeeDetail() {
               if (categoryTasks.length === 0) return null;
 
               return (
-                <div key={cat.value} className="bg-zinc-900/50 border border-white/10">
-                  <div className="flex items-center gap-2 px-6 py-4 border-b border-white/10">
+                <div key={cat.value} className={`${t.card} overflow-hidden shadow-sm`}>
+                  <div className={`flex items-center gap-2 px-6 py-4 border-b ${t.border} ${isLight ? 'bg-stone-200/40' : 'bg-white/5'}`}>
                     <cat.icon size={16} className={cat.color} />
-                    <h3 className="text-sm font-bold uppercase tracking-wider text-white">{cat.label}</h3>
-                    <span className="text-xs text-zinc-500 font-mono">
+                    <h3 className={`text-xs font-bold uppercase tracking-wider ${t.textMain}`}>{cat.label}</h3>
+                    <span className={`text-[10px] ${t.textMuted} font-mono`}>
                       ({categoryTasks.filter((t) => t.status === 'completed').length}/{categoryTasks.length})
                     </span>
                   </div>
-                  <div className="divide-y divide-white/5">
+                  <div className={`divide-y ${t.divide}`}>
                     {categoryTasks.map((task) => (
                       <div key={task.id} className="px-6 py-4 flex items-center gap-4">
                         <div
                           className={`w-8 h-8 rounded flex items-center justify-center ${
                             task.status === 'completed'
-                              ? 'bg-emerald-500/20 text-emerald-400'
+                              ? isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-500/20 text-emerald-400'
                               : task.status === 'skipped'
-                              ? 'bg-zinc-500/20 text-zinc-400'
-                              : cat.bgColor + ' ' + cat.color
+                              ? isLight ? 'bg-stone-200 text-stone-600' : 'bg-zinc-500/20 text-zinc-400'
+                              : isLight ? 'bg-stone-100 ' + cat.color : cat.bgColor + ' ' + cat.color
                           }`}
                         >
                           {task.status === 'completed' ? (
@@ -1129,23 +1167,23 @@ export default function EmployeeDetail() {
                         <div className="flex-1 min-w-0">
                           <p
                             className={`text-sm font-medium ${
-                              task.status === 'completed' ? 'text-zinc-400 line-through' : 'text-white'
+                              task.status === 'completed' ? t.textFaint + ' line-through' : t.textMain
                             }`}
                           >
                             {task.title}
                           </p>
                           {task.description && (
-                            <p className="text-xs text-zinc-500 truncate">{task.description}</p>
+                            <p className={`text-xs ${t.textMuted} truncate`}>{task.description}</p>
                           )}
                           <div className="flex items-center gap-4 mt-1">
-                            <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
+                            <span className={`text-[9px] ${t.textFaint} uppercase tracking-wider font-bold`}>
                               {task.is_employee_task ? 'Employee Task' : 'HR Task'}
                             </span>
                             {task.due_date && (
-                              <span className="text-[10px] text-zinc-500">Due: {task.due_date}</span>
+                              <span className={`text-[9px] ${t.textFaint} font-mono`}>Due: {task.due_date}</span>
                             )}
                             {task.completed_at && (
-                              <span className="text-[10px] text-emerald-400">
+                              <span className={`text-[9px] ${isLight ? 'text-emerald-700' : 'text-emerald-400'} font-mono`}>
                                 Completed: {new Date(task.completed_at).toLocaleDateString()}
                               </span>
                             )}
@@ -1156,14 +1194,14 @@ export default function EmployeeDetail() {
                             <>
                               <button
                                 onClick={() => handleUpdateTask(task.id, 'completed')}
-                                className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded transition-colors"
+                                className={`p-2 ${t.textMuted} hover:${isLight ? 'text-emerald-700' : 'text-emerald-400'} hover:${isLight ? 'bg-emerald-100' : 'bg-emerald-500/10'} rounded transition-colors`}
                                 title="Mark Complete"
                               >
                                 <CheckCircle size={16} />
                               </button>
                               <button
                                 onClick={() => handleUpdateTask(task.id, 'skipped')}
-                                className="p-2 text-zinc-400 hover:text-zinc-300 hover:bg-zinc-700 rounded transition-colors"
+                                className={`p-2 ${t.textMuted} hover:${t.textMain} hover:${isLight ? 'bg-stone-200' : 'bg-zinc-700'} rounded transition-colors`}
                                 title="Skip"
                               >
                                 <SkipForward size={16} />
@@ -1173,7 +1211,7 @@ export default function EmployeeDetail() {
                           {task.status !== 'pending' && (
                             <button
                               onClick={() => handleUpdateTask(task.id, 'pending')}
-                              className="p-2 text-zinc-400 hover:text-amber-400 hover:bg-amber-500/10 rounded transition-colors"
+                              className={`p-2 ${t.textMuted} hover:${isLight ? 'text-amber-700' : 'text-amber-400'} hover:${isLight ? 'bg-amber-100' : 'bg-amber-500/10'} rounded transition-colors`}
                               title="Reopen"
                             >
                               <Clock size={16} />
@@ -1181,7 +1219,7 @@ export default function EmployeeDetail() {
                           )}
                           <button
                             onClick={() => handleDeleteTask(task.id)}
-                            className="p-2 text-zinc-400 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                            className={`p-2 ${t.textMuted} hover:${isLight ? 'text-red-700' : 'text-red-400'} hover:${isLight ? 'bg-red-100' : 'bg-red-500/10'} rounded transition-colors`}
                             title="Remove"
                           >
                             <X size={16} />
@@ -1199,24 +1237,24 @@ export default function EmployeeDetail() {
 
       {/* Assign Tasks Modal */}
       {showAssignModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-          <div className="w-full max-w-lg bg-zinc-950 border border-zinc-800 shadow-2xl rounded-sm max-h-[80vh] flex flex-col">
-            <div className="flex items-center justify-between p-6 border-b border-white/10">
-              <h3 className="text-xl font-bold text-white uppercase tracking-tight">Add Tasks</h3>
-              <button onClick={() => setShowAssignModal(false)} className="text-zinc-500 hover:text-white transition-colors">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className={`w-full max-w-lg ${t.modalBg} max-h-[80vh] flex flex-col shadow-2xl overflow-hidden`} onClick={(e) => e.stopPropagation()}>
+            <div className={`flex items-center justify-between p-6 border-b ${t.border}`}>
+              <h3 className={`text-xl font-bold ${t.textMain} uppercase tracking-tight`}>Add Tasks</h3>
+              <button onClick={() => setShowAssignModal(false)} className={`${t.textMuted} hover:${t.textMain} transition-colors`}>
                 <X size={20} />
               </button>
             </div>
-            <div className="flex-1 overflow-y-auto p-6">
-              <p className="text-xs text-zinc-500 mb-4">Select templates to assign:</p>
+            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+              <p className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Select templates to assign</p>
               <div className="space-y-2">
                 {templates.map((template) => (
                   <label
                     key={template.id}
-                    className={`flex items-center gap-3 p-3 border cursor-pointer transition-colors ${
+                    className={`flex items-center gap-3 p-4 border rounded-xl cursor-pointer transition-colors ${
                       selectedTemplates.includes(template.id)
-                        ? 'border-white/30 bg-white/5'
-                        : 'border-white/10 hover:border-white/20'
+                        ? `${isLight ? 'border-zinc-900 bg-stone-200/50' : 'border-white/30 bg-white/5'}`
+                        : `${t.border} ${isLight ? 'hover:bg-stone-200/30' : 'hover:bg-white/5'}`
                     }`}
                   >
                     <input
@@ -1229,11 +1267,11 @@ export default function EmployeeDetail() {
                           setSelectedTemplates(selectedTemplates.filter((id) => id !== template.id));
                         }
                       }}
-                      className="w-4 h-4"
+                      className="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900"
                     />
                     <div className="flex-1">
-                      <p className="text-sm text-white">{template.title}</p>
-                      <p className="text-xs text-zinc-500">
+                      <p className={`text-sm font-bold ${t.textMain}`}>{template.title}</p>
+                      <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider mt-0.5`}>
                         {template.category} - Due in {template.due_days} days
                       </p>
                     </div>
@@ -1241,17 +1279,17 @@ export default function EmployeeDetail() {
                 ))}
               </div>
             </div>
-            <div className="p-6 border-t border-white/10 flex justify-end gap-3">
+            <div className={`p-6 border-t ${t.border} flex justify-end gap-3`}>
               <button
                 onClick={() => setShowAssignModal(false)}
-                className="px-4 py-2 text-zinc-500 hover:text-white text-xs font-bold uppercase tracking-wider"
+                className={`px-4 py-2 ${t.textMuted} hover:${t.textMain} text-[10px] font-bold uppercase tracking-wider transition-colors`}
               >
                 Cancel
               </button>
               <button
                 onClick={handleAssignSelected}
                 disabled={selectedTemplates.length === 0}
-                className="px-6 py-2 bg-white text-black hover:bg-zinc-200 text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+                className={`px-6 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50 transition-colors`}
               >
                 Assign ({selectedTemplates.length})
               </button>
@@ -1259,6 +1297,7 @@ export default function EmployeeDetail() {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

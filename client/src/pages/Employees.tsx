@@ -320,7 +320,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
   return (
     <div
       onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
+      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors p-5 md:px-8 flex flex-col lg:flex-row lg:items-center gap-6 cursor-pointer`}
     >
       <div className="flex items-center min-w-0 flex-1">
         <div className="flex-shrink-0">
@@ -343,7 +343,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
         </div>
       </div>
 
-      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-4 lg:border-0 lg:pt-0`}>
+      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-6 gap-y-4 lg:gap-10 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-5 lg:border-0 lg:pt-0`}>
         <div className="lg:text-right lg:w-28">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Department</p>
           <p className={`text-xs ${t.textDim} truncate`}>{employee.department || '—'}</p>
@@ -1450,7 +1450,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       </div>
 
       {/* Search + Filters */}
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-4">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
           <Search size={14} className={`absolute left-3 top-1/2 -translate-y-1/2 ${t.textFaint}`} />
           <input
@@ -1541,7 +1541,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         <div data-tour="emp-list" className={`${t.cardDark} overflow-hidden shadow-lg`}>
            {/* Table Header */}
            {!groupByLocation && (
-             <div className={`hidden md:flex items-center gap-4 py-3 px-6 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
+             <div className={`hidden md:flex items-center gap-6 py-4 px-8 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
                 <div className="flex-1">Name / Role</div>
                 <div className="w-28 text-right">Department</div>
                 <div className="w-32 text-right">Location</div>
