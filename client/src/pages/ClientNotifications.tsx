@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { clientNotifications } from '../api/client';
 import type { ClientNotificationItem } from '../api/client';
+import { useIsLightMode } from '../hooks/useIsLightMode';
 import {
   AlertTriangle,
   UserPlus,
@@ -21,7 +22,7 @@ const TYPE_ICONS: Record<ClientNotificationItem['type'], React.ReactNode> = {
   compliance_alert: <AlertCircle size={15} className="text-orange-400" />,
 };
 
-const TYPE_BG: Record<ClientNotificationItem['type'], string> = {
+const TYPE_BG_DARK: Record<ClientNotificationItem['type'], string> = {
   incident: 'bg-red-900/30 border-red-500/20',
   employee: 'bg-emerald-900/30 border-emerald-500/20',
   offer_letter: 'bg-sky-900/30 border-sky-500/20',
@@ -30,14 +31,30 @@ const TYPE_BG: Record<ClientNotificationItem['type'], string> = {
   compliance_alert: 'bg-orange-900/30 border-orange-500/20',
 };
 
-const SEVERITY_CLASSES: Record<string, string> = {
+const TYPE_BG_LIGHT: Record<ClientNotificationItem['type'], string> = {
+  incident: 'bg-red-50 border-red-200',
+  employee: 'bg-emerald-50 border-emerald-200',
+  offer_letter: 'bg-sky-50 border-sky-200',
+  er_case: 'bg-violet-50 border-violet-200',
+  handbook: 'bg-amber-50 border-amber-200',
+  compliance_alert: 'bg-orange-50 border-orange-200',
+};
+
+const SEVERITY_DARK: Record<string, string> = {
   critical: 'bg-red-500/10 text-red-400 border-red-500/20',
   high: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   medium: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
   low: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
 };
 
-const STATUS_CLASSES: Record<string, string> = {
+const SEVERITY_LIGHT: Record<string, string> = {
+  critical: 'bg-red-100 text-red-700 border-red-200',
+  high: 'bg-amber-100 text-amber-700 border-amber-200',
+  medium: 'bg-yellow-100 text-yellow-700 border-yellow-200',
+  low: 'bg-sky-100 text-sky-700 border-sky-200',
+};
+
+const STATUS_DARK: Record<string, string> = {
   investigating: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   pending: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
   draft: 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20',
@@ -50,6 +67,64 @@ const STATUS_CLASSES: Record<string, string> = {
   sent: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
   open: 'bg-sky-500/10 text-sky-400 border-sky-500/20',
 };
+
+const STATUS_LIGHT: Record<string, string> = {
+  investigating: 'bg-amber-100 text-amber-700 border-amber-200',
+  pending: 'bg-amber-100 text-amber-700 border-amber-200',
+  draft: 'bg-stone-100 text-stone-600 border-stone-200',
+  onboarded: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  approved: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  active: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  resolved: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  closed: 'bg-stone-100 text-stone-600 border-stone-200',
+  rejected: 'bg-red-100 text-red-700 border-red-200',
+  sent: 'bg-sky-100 text-sky-700 border-sky-200',
+  open: 'bg-sky-100 text-sky-700 border-sky-200',
+};
+
+const LT = {
+  card: 'bg-stone-100 rounded-2xl',
+  border: 'border-stone-200',
+  divide: 'divide-stone-200',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  rowHover: 'hover:bg-stone-50',
+  skeleton: 'bg-stone-200',
+  skeletonFaint: 'bg-stone-200/50',
+  emptyBg: 'bg-stone-100 rounded-2xl',
+  emptyIcon: 'text-stone-300',
+  emptyText: 'text-stone-400',
+  errorBg: 'bg-red-50 border-red-200 text-red-700',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  subtitleMono: 'text-stone-400',
+  badgeBg: 'bg-stone-200 border-stone-300 text-stone-500',
+  typeBg: TYPE_BG_LIGHT,
+  severity: SEVERITY_LIGHT,
+  status: STATUS_LIGHT,
+} as const;
+
+const DK = {
+  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  border: 'border-white/10',
+  divide: 'divide-white/5',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  rowHover: 'hover:bg-white/5',
+  skeleton: 'bg-zinc-800',
+  skeletonFaint: 'bg-zinc-800/50',
+  emptyBg: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  emptyIcon: 'text-zinc-700',
+  emptyText: 'text-zinc-500',
+  errorBg: 'bg-red-500/10 border-red-500/20 text-red-400',
+  btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600',
+  subtitleMono: 'text-zinc-500',
+  badgeBg: 'bg-zinc-500/10 border-zinc-500/20 text-zinc-400',
+  typeBg: TYPE_BG_DARK,
+  severity: SEVERITY_DARK,
+  status: STATUS_DARK,
+} as const;
 
 function relativeTime(dateStr: string): string {
   const now = Date.now();
@@ -71,6 +146,8 @@ const PAGE_SIZE = 30;
 
 export function ClientNotifications() {
   const navigate = useNavigate();
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
   const [items, setItems] = useState<ClientNotificationItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -113,19 +190,19 @@ export function ClientNotifications() {
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto space-y-8">
-        <div className="border-b border-white/10 pb-6 md:pb-8">
-          <div className="h-8 w-64 bg-zinc-800 animate-pulse" />
-          <div className="h-4 w-96 bg-zinc-800/50 animate-pulse mt-3" />
+        <div className={`border-b ${t.border} pb-6 md:pb-8`}>
+          <div className={`h-8 w-64 ${t.skeleton} animate-pulse rounded`} />
+          <div className={`h-4 w-96 ${t.skeletonFaint} animate-pulse mt-3 rounded`} />
         </div>
         <div className="space-y-3">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className="border border-white/10 bg-zinc-900/30 p-4 flex items-center gap-4">
-              <div className="w-8 h-8 bg-zinc-800 animate-pulse shrink-0" />
+            <div key={i} className={`border ${t.border} ${t.card} p-4 flex items-center gap-4`}>
+              <div className={`w-8 h-8 ${t.skeleton} animate-pulse shrink-0 rounded`} />
               <div className="flex-1 space-y-2">
-                <div className="h-4 w-48 bg-zinc-800 animate-pulse" />
-                <div className="h-3 w-32 bg-zinc-800/50 animate-pulse" />
+                <div className={`h-4 w-48 ${t.skeleton} animate-pulse rounded`} />
+                <div className={`h-3 w-32 ${t.skeletonFaint} animate-pulse rounded`} />
               </div>
-              <div className="h-3 w-16 bg-zinc-800/50 animate-pulse" />
+              <div className={`h-3 w-16 ${t.skeletonFaint} animate-pulse rounded`} />
             </div>
           ))}
         </div>
@@ -136,38 +213,38 @@ export function ClientNotifications() {
   return (
     <div className="max-w-7xl mx-auto space-y-8">
       {/* Header */}
-      <div className="border-b border-white/10 pb-6 md:pb-8">
-        <h1 className="text-2xl md:text-4xl font-bold tracking-tighter text-white uppercase">Notifications</h1>
-        <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">
+      <div className={`border-b ${t.border} pb-6 md:pb-8`}>
+        <h1 className={`text-2xl md:text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>Notifications</h1>
+        <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>
           Recent activity &mdash; {total} total
         </p>
       </div>
 
       {/* Error */}
       {error && (
-        <div className="p-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm">
+        <div className={`p-4 border text-sm rounded-xl ${t.errorBg}`}>
           {error}
         </div>
       )}
 
       {/* Feed */}
       {items.length === 0 && !error ? (
-        <div className="border border-white/10 bg-zinc-900/30 text-center py-24">
-          <Bell size={24} className="text-zinc-600 mx-auto mb-3" />
-          <div className="text-zinc-500 font-mono text-sm uppercase tracking-wider">
+        <div className={`${t.emptyBg} text-center py-24`}>
+          <Bell size={24} className={`${t.emptyIcon} mx-auto mb-3`} />
+          <div className={`${t.emptyText} font-mono text-sm uppercase tracking-wider`}>
             No notifications yet
           </div>
         </div>
       ) : (
-        <div className="border border-white/10 bg-zinc-900/30 divide-y divide-white/5">
+        <div className={`${t.card} divide-y ${t.divide} overflow-hidden`}>
           {items.map((item) => (
             <div
               key={item.id}
               onClick={() => item.link && navigate(item.link)}
-              className="p-4 md:px-6 md:py-4 hover:bg-white/5 transition-colors cursor-pointer active:bg-white/10 flex items-start gap-3 md:gap-4"
+              className={`p-4 md:px-6 md:py-4 ${t.rowHover} transition-colors cursor-pointer active:opacity-80 flex items-start gap-3 md:gap-4`}
             >
               {/* Type Icon */}
-              <div className={`w-8 h-8 border flex items-center justify-center shrink-0 mt-0.5 ${TYPE_BG[item.type]}`}>
+              <div className={`w-8 h-8 border flex items-center justify-center shrink-0 mt-0.5 rounded-lg ${t.typeBg[item.type]}`}>
                 {TYPE_ICONS[item.type]}
               </div>
 
@@ -175,12 +252,12 @@ export function ClientNotifications() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className="text-sm text-white font-bold truncate">{item.title}</div>
+                    <div className={`text-sm ${t.textMain} font-bold truncate`}>{item.title}</div>
                     {item.subtitle && (
-                      <div className="text-[11px] text-zinc-500 font-mono mt-0.5 truncate">{item.subtitle}</div>
+                      <div className={`text-[11px] ${t.subtitleMono} font-mono mt-0.5 truncate`}>{item.subtitle}</div>
                     )}
                   </div>
-                  <div className="text-[10px] text-zinc-600 font-mono tracking-wide whitespace-nowrap shrink-0 mt-0.5">
+                  <div className={`text-[10px] ${t.textFaint} font-mono tracking-wide whitespace-nowrap shrink-0 mt-0.5`}>
                     {relativeTime(item.created_at)}
                   </div>
                 </div>
@@ -188,14 +265,14 @@ export function ClientNotifications() {
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   {/* Severity badge */}
                   {item.severity && (
-                    <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] uppercase tracking-wider font-bold ${SEVERITY_CLASSES[item.severity] || 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] uppercase tracking-wider font-bold rounded ${t.severity[item.severity] || t.badgeBg}`}>
                       {item.severity}
                     </span>
                   )}
 
                   {/* Status badge */}
                   {item.status && (
-                    <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] uppercase tracking-wider font-bold ${STATUS_CLASSES[item.status] || 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] uppercase tracking-wider font-bold rounded ${t.status[item.status] || t.badgeBg}`}>
                       {item.status}
                     </span>
                   )}
@@ -212,7 +289,7 @@ export function ClientNotifications() {
           <button
             onClick={handleLoadMore}
             disabled={loadingMore}
-            className="px-8 py-3 bg-white text-black border border-white text-[10px] uppercase tracking-widest font-bold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-zinc-200 transition-colors"
+            className={`px-8 py-3 border text-[10px] uppercase tracking-widest font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${t.btnPrimary}`}
           >
             {loadingMore ? 'Loading...' : `Load More (${items.length} of ${total})`}
           </button>
