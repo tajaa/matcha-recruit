@@ -115,9 +115,13 @@ def _snapshot_to_response(row) -> RiskAssessmentResponse:
 @router.get("", response_model=RiskAssessmentResponse)
 async def get_risk_assessment(
     current_user=Depends(require_admin_or_client),
+    company_id_override: str | None = Query(None, alias="company_id"),
 ):
     """Return the last stored risk assessment snapshot for the company."""
-    company_id = await get_client_company_id(current_user)
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No company associated with this account")
 
@@ -139,9 +143,13 @@ async def get_risk_assessment(
 async def get_risk_history(
     current_user=Depends(require_admin_or_client),
     months: int = Query(12, ge=1, le=36),
+    company_id_override: str | None = Query(None, alias="company_id"),
 ):
     """Return risk assessment history for the company as a time series."""
-    company_id = await get_client_company_id(current_user)
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=403, detail="No company associated")
 
@@ -283,6 +291,16 @@ async def run_risk_assessment(
             result.computed_at,
         )
 
+        # Advance next_risk_assessment so the scheduler doesn't re-run immediately
+        await conn.execute(
+            """
+            UPDATE companies
+            SET next_risk_assessment = NOW() + INTERVAL '1 day' * COALESCE(risk_assessment_interval_days, 7)
+            WHERE id = $1
+            """,
+            company_id,
+        )
+
     return _snapshot_to_response(row)
 
 
@@ -330,8 +348,12 @@ class AssignableUserResponse(BaseModel):
 async def list_action_items(
     current_user=Depends(require_admin_or_client),
     item_status: str = Query("open", alias="status"),
+    company_id_override: str | None = Query(None, alias="company_id"),
 ):
-    company_id = await get_client_company_id(current_user)
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=403, detail="No company associated")
 
@@ -523,8 +545,12 @@ async def update_action_item(
 @router.get("/assignable-users", response_model=list[AssignableUserResponse])
 async def get_assignable_users(
     current_user=Depends(require_admin_or_client),
+    company_id_override: str | None = Query(None, alias="company_id"),
 ):
-    company_id = await get_client_company_id(current_user)
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=403, detail="No company associated")
 

@@ -249,7 +249,7 @@ function formatStatus(status: string): string {
   return status.replace(/_/g, ' ');
 }
 
-function ActionItems({ data }: { data: RiskAssessmentResult }) {
+function ActionItems({ data, companyId }: { data: RiskAssessmentResult; companyId?: string }) {
   const [items, setItems] = useState<RiskActionItem[]>([]);
   const [closedItems, setClosedItems] = useState<RiskActionItem[]>([]);
   const [users, setUsers] = useState<AssignableUser[]>([]);
@@ -276,19 +276,19 @@ function ActionItems({ data }: { data: RiskAssessmentResult }) {
   const fetchItems = useCallback(async () => {
     try {
       const [open, all] = await Promise.all([
-        riskAssessment.listActionItems('open'),
-        riskAssessment.listActionItems('all'),
+        riskAssessment.listActionItems('open', companyId),
+        riskAssessment.listActionItems('all', companyId),
       ]);
       setItems(open);
       setClosedItems(all.filter(i => i.status !== 'open'));
     } catch { /* silently fail */ }
-  }, []);
+  }, [companyId]);
 
   const fetchUsers = useCallback(async () => {
     try {
-      setUsers(await riskAssessment.getAssignableUsers());
+      setUsers(await riskAssessment.getAssignableUsers(companyId));
     } catch { /* silently fail */ }
-  }, []);
+  }, [companyId]);
 
   useEffect(() => { fetchItems(); fetchUsers(); }, [fetchItems, fetchUsers]);
 
@@ -570,7 +570,7 @@ function TrendTooltip({ active, payload, label }: { active?: boolean; payload?: 
   );
 }
 
-function RiskTrendChart() {
+function RiskTrendChart({ companyId }: { companyId?: string }) {
   const [history, setHistory] = useState<RiskHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [months, setMonths] = useState(12);
@@ -579,7 +579,7 @@ function RiskTrendChart() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    riskAssessment.getHistory(months)
+    riskAssessment.getHistory(months, companyId)
       .then((data) => {
         if (!cancelled) setHistory(data);
       })
@@ -590,7 +590,7 @@ function RiskTrendChart() {
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; };
-  }, [months]);
+  }, [months, companyId]);
 
   const toggleDimension = (dim: string) => {
     setVisibleDimensions(prev => {
@@ -768,12 +768,14 @@ export default function RiskAssessment() {
     }
   }, []);
 
+  const adminCompanyId = isAdmin ? selectedCompanyId : undefined;
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     setNotAssessed(false);
     try {
-      setData(await riskAssessment.get());
+      setData(await riskAssessment.get(adminCompanyId));
     } catch (err) {
       if (err instanceof ApiRequestError && err.status === 404) {
         setNotAssessed(true);
@@ -783,7 +785,7 @@ export default function RiskAssessment() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [adminCompanyId]);
 
   // Load companies list for admin company selector
   useEffect(() => {
@@ -933,7 +935,7 @@ export default function RiskAssessment() {
           </div>
 
           {/* Risk Trend Chart */}
-          <RiskTrendChart />
+          <RiskTrendChart companyId={adminCompanyId} />
 
           {/* Dimension detail cards */}
           <div>
@@ -951,7 +953,7 @@ export default function RiskAssessment() {
           </div>
 
           {/* Action Items */}
-          <ActionItems data={data} />
+          <ActionItems data={data} companyId={adminCompanyId} />
 
           {/* ER Case Metrics */}
           <div>

@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.workers.tasks.resume_screening",
         "app.workers.tasks.project_close",
         "app.workers.tasks.handbook_freshness",
+        "app.workers.tasks.risk_assessment",
     ],
 )
 
@@ -171,3 +172,10 @@ def on_worker_ready(**kwargs):
         run_handbook_freshness_checks.delay()
     else:
         print("[Worker] Handbook freshness checks scheduler is disabled, skipping.")
+
+    from app.workers.tasks.risk_assessment import enqueue_scheduled_risk_assessments
+
+    if _is_scheduler_enabled("risk_assessment"):
+        enqueue_scheduled_risk_assessments.delay()
+    else:
+        print("[Worker] Risk assessment scheduler is disabled, skipping.")

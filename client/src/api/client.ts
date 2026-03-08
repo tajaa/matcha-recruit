@@ -3880,19 +3880,24 @@ export const matchaWorkPublic = {
 };
 
 // Risk Assessment API
+function _raParams(base: string, companyId?: string): string {
+  if (!companyId) return base;
+  const sep = base.includes('?') ? '&' : '?';
+  return `${base}${sep}company_id=${companyId}`;
+}
 export const riskAssessment = {
-  get: (): Promise<RiskAssessmentResult> =>
-    request('/risk-assessment'),
-  listActionItems: (status?: string): Promise<RiskActionItem[]> =>
-    request(`/risk-assessment/action-items${status ? `?status=${status}` : ''}`),
+  get: (companyId?: string): Promise<RiskAssessmentResult> =>
+    request(_raParams('/risk-assessment', companyId)),
+  listActionItems: (status?: string, companyId?: string): Promise<RiskActionItem[]> =>
+    request(_raParams(`/risk-assessment/action-items${status ? `?status=${status}` : ''}`, companyId)),
   createActionItem: (data: RiskActionItemCreate): Promise<RiskActionItem> =>
     request('/risk-assessment/action-items', { method: 'POST', body: JSON.stringify(data) }),
   updateActionItem: (id: string, data: RiskActionItemUpdate): Promise<RiskActionItem> =>
     request(`/risk-assessment/action-items/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
-  getAssignableUsers: (): Promise<AssignableUser[]> =>
-    request('/risk-assessment/assignable-users'),
-  getHistory: (months?: number): Promise<RiskHistoryEntry[]> =>
-    request(`/risk-assessment/history${months ? `?months=${months}` : ''}`),
+  getAssignableUsers: (companyId?: string): Promise<AssignableUser[]> =>
+    request(_raParams('/risk-assessment/assignable-users', companyId)),
+  getHistory: (months?: number, companyId?: string): Promise<RiskHistoryEntry[]> =>
+    request(_raParams(`/risk-assessment/history${months ? `?months=${months}` : ''}`, companyId)),
   adminRun: (companyId: string): Promise<RiskAssessmentResult> =>
     request(`/risk-assessment/admin/run/${companyId}`, { method: 'POST' }),
 };

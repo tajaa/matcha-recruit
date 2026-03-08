@@ -91,15 +91,8 @@ async def _run_assessment(company_id: str) -> dict:
             result.computed_at,
         )
 
-        # Advance next_risk_assessment based on interval (default 7 days)
-        await conn.execute(
-            """
-            UPDATE companies
-            SET next_risk_assessment = NOW() + INTERVAL '1 day' * COALESCE(risk_assessment_interval_days, 7)
-            WHERE id = $1
-            """,
-            cid,
-        )
+        # next_risk_assessment is already advanced by the dispatcher (claim-before-enqueue).
+        # Manual runs via the route handle their own advancement.
     finally:
         await conn.close()
 
@@ -129,13 +122,19 @@ async def _enqueue_due_assessments() -> dict:
 
         limit = (sched_row["max_per_cycle"] if sched_row and sched_row["max_per_cycle"] and sched_row["max_per_cycle"] > 0 else 3)
 
+        # Claim due companies by advancing next_risk_assessment before enqueueing.
+        # This prevents duplicate enqueues if the dispatcher runs again before tasks finish.
         rows = await conn.fetch(
             """
-            SELECT id
-            FROM companies
-            WHERE next_risk_assessment IS NULL OR next_risk_assessment <= NOW()
-            ORDER BY next_risk_assessment ASC NULLS FIRST
-            LIMIT $1
+            UPDATE companies
+            SET next_risk_assessment = NOW() + INTERVAL '1 day' * COALESCE(risk_assessment_interval_days, 7)
+            WHERE id IN (
+                SELECT id FROM companies
+                WHERE next_risk_assessment IS NULL OR next_risk_assessment <= NOW()
+                ORDER BY next_risk_assessment ASC NULLS FIRST
+                LIMIT $1
+            )
+            RETURNING id
             """,
             limit,
         )
