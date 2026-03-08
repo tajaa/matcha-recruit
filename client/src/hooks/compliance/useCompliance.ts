@@ -108,7 +108,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
       queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
     },
-    onError: () => setMutationError('Failed to delete location'),
+    onError: (err: Error) => setMutationError(err.message || 'Failed to delete location'),
   });
 
   const markAlertReadMutation = useMutation({

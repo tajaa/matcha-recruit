@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAccessToken, provisioning, onboardingDraft, employees as employeesApi } from '../api/client';
 import { useAuth } from '../context/AuthContext';
-import { complianceAPI } from '../api/compliance';
 import { Plus, X, Mail, AlertTriangle, CheckCircle, UserX, Clock, ChevronRight, HelpCircle, ChevronDown, Settings, ClipboardCheck, Upload, Download, Search, MapPin } from 'lucide-react';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
@@ -156,7 +155,6 @@ interface NewEmployee {
 }
 
 type EmailEntryMode = 'generated' | 'existing';
-type WorkLocationMode = 'remote' | 'office';
 type AddWizardStep = 1 | 2 | 3;
 type BatchWizardStep = 1 | 2 | 3;
 
@@ -250,6 +248,35 @@ function createBatchRow(defaultStartDate: string): BatchEmployeeRow {
     work_city: '',
   };
 }
+
+const US_STATES = [
+  { value: 'AL', label: 'Alabama' }, { value: 'AK', label: 'Alaska' },
+  { value: 'AZ', label: 'Arizona' }, { value: 'AR', label: 'Arkansas' },
+  { value: 'CA', label: 'California' }, { value: 'CO', label: 'Colorado' },
+  { value: 'CT', label: 'Connecticut' }, { value: 'DE', label: 'Delaware' },
+  { value: 'FL', label: 'Florida' }, { value: 'GA', label: 'Georgia' },
+  { value: 'HI', label: 'Hawaii' }, { value: 'ID', label: 'Idaho' },
+  { value: 'IL', label: 'Illinois' }, { value: 'IN', label: 'Indiana' },
+  { value: 'IA', label: 'Iowa' }, { value: 'KS', label: 'Kansas' },
+  { value: 'KY', label: 'Kentucky' }, { value: 'LA', label: 'Louisiana' },
+  { value: 'ME', label: 'Maine' }, { value: 'MD', label: 'Maryland' },
+  { value: 'MA', label: 'Massachusetts' }, { value: 'MI', label: 'Michigan' },
+  { value: 'MN', label: 'Minnesota' }, { value: 'MS', label: 'Mississippi' },
+  { value: 'MO', label: 'Missouri' }, { value: 'MT', label: 'Montana' },
+  { value: 'NE', label: 'Nebraska' }, { value: 'NV', label: 'Nevada' },
+  { value: 'NH', label: 'New Hampshire' }, { value: 'NJ', label: 'New Jersey' },
+  { value: 'NM', label: 'New Mexico' }, { value: 'NY', label: 'New York' },
+  { value: 'NC', label: 'North Carolina' }, { value: 'ND', label: 'North Dakota' },
+  { value: 'OH', label: 'Ohio' }, { value: 'OK', label: 'Oklahoma' },
+  { value: 'OR', label: 'Oregon' }, { value: 'PA', label: 'Pennsylvania' },
+  { value: 'RI', label: 'Rhode Island' }, { value: 'SC', label: 'South Carolina' },
+  { value: 'SD', label: 'South Dakota' }, { value: 'TN', label: 'Tennessee' },
+  { value: 'TX', label: 'Texas' }, { value: 'UT', label: 'Utah' },
+  { value: 'VT', label: 'Vermont' }, { value: 'VA', label: 'Virginia' },
+  { value: 'WA', label: 'Washington' }, { value: 'WV', label: 'West Virginia' },
+  { value: 'WI', label: 'Wisconsin' }, { value: 'WY', label: 'Wyoming' },
+  { value: 'DC', label: 'Washington D.C.' }
+];
 
 interface OnboardingProgress {
   employee_id: string;
@@ -499,13 +526,11 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const [generatedEmailLocalPart, setGeneratedEmailLocalPart] = useState('');
   const [generatedEmailEdited, setGeneratedEmailEdited] = useState(false);
   const [skipGoogleAutoProvision, setSkipGoogleAutoProvision] = useState(false);
-  const [workLocationMode, setWorkLocationMode] = useState<WorkLocationMode>('remote');
   const [addWizardStep, setAddWizardStep] = useState<AddWizardStep>(1);
 
   const [showBatchWizardModal, setShowBatchWizardModal] = useState(false);
   const [batchWizardStep, setBatchWizardStep] = useState<BatchWizardStep>(1);
   const [batchEmailMode, setBatchEmailMode] = useState<EmailEntryMode>('existing');
-  const [batchWorkLocationMode, setBatchWorkLocationMode] = useState<WorkLocationMode>('remote');
   const [batchRows, setBatchRows] = useState<BatchEmployeeRow[]>([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [batchResult, setBatchResult] = useState<BatchCreateResult | null>(null);
@@ -548,7 +573,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const [groupByLocation, setGroupByLocation] = useState(false);
   const [departments, setDepartments] = useState<string[]>([]);
   const [locations, setLocations] = useState<{ state: string; city: string | null }[]>([]);
-  const [complianceLocations, setComplianceLocations] = useState<{ city: string; state: string }[]>([]);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const normalizedGoogleDomain = (googleWorkspaceStatus?.domain || '')
@@ -582,7 +606,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     setGeneratedEmailLocalPart('');
     setGeneratedEmailEdited(false);
     setSkipGoogleAutoProvision(false);
-    setWorkLocationMode('remote');
     setAddWizardStep(1);
   }, [googleDomainAvailable]);
 
@@ -590,7 +613,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     const defaultStartDate = new Date().toISOString().split('T')[0];
     setBatchWizardStep(1);
     setBatchEmailMode(googleDomainAvailable ? 'generated' : 'existing');
-    setBatchWorkLocationMode('remote');
     setBatchRows([
       createBatchRow(defaultStartDate),
       createBatchRow(defaultStartDate),
@@ -604,9 +626,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   // Dirty detection for batch wizard draft
   useEffect(() => {
     if (!draftLoaded) return;
-    const current = JSON.stringify({ batchRows, emailMode: batchEmailMode, workLocationMode: batchWorkLocationMode, wizardStep: batchWizardStep });
+    const current = JSON.stringify({ batchRows, emailMode: batchEmailMode, wizardStep: batchWizardStep });
     setDraftDirty(current !== draftSnapshotRef.current);
-  }, [batchRows, batchEmailMode, batchWorkLocationMode, batchWizardStep, draftLoaded]);
+  }, [batchRows, batchEmailMode, batchWizardStep, draftLoaded]);
 
   // Autosave batch wizard draft with 5-second debounce
   const DRAFT_AUTOSAVE_MS = 5000;
@@ -615,7 +637,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     const timer = setTimeout(async () => {
       setDraftSaving(true);
       try {
-        const state = { batchRows, emailMode: batchEmailMode, workLocationMode: batchWorkLocationMode, wizardStep: batchWizardStep };
+        const state = { batchRows, emailMode: batchEmailMode, wizardStep: batchWizardStep };
         await onboardingDraft.save(state as unknown as Record<string, unknown>);
         draftSnapshotRef.current = JSON.stringify(state);
         setDraftDirty(false);
@@ -626,7 +648,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       }
     }, DRAFT_AUTOSAVE_MS);
     return () => clearTimeout(timer);
-  }, [draftLoaded, draftDirty, batchRows, batchEmailMode, batchWorkLocationMode, batchWizardStep]);
+  }, [draftLoaded, draftDirty, batchRows, batchEmailMode, batchWizardStep]);
 
   const fetchEmployees = async () => {
     try {
@@ -735,10 +757,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   useEffect(() => {
     fetchGoogleWorkspaceStatus();
     fetchFilterOptions();
-    complianceAPI.getLocations().then(
-      (locs) => setComplianceLocations(locs.map((l) => ({ city: l.city, state: l.state }))),
-      () => {} // non-critical
-    );
   }, []);
 
   useEffect(() => {
@@ -746,7 +764,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     setEmailEntryMode(googleDomainAvailable ? 'generated' : 'existing');
     setGeneratedEmailEdited(false);
     setSkipGoogleAutoProvision(false);
-    setWorkLocationMode('remote');
     if (!googleDomainAvailable) setGeneratedEmailLocalPart('');
   }, [showAddModal, googleDomainAvailable]);
 
@@ -812,11 +829,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       if (!resolvedWorkEmail) {
         throw new Error('Work email is required');
       }
-      if (workLocationMode === 'remote' && (!newEmployee.work_state || !newEmployee.work_city)) {
-        throw new Error('Work location is required for remote employees');
-      }
-      if (workLocationMode === 'office' && !newEmployee.office_location.trim()) {
-        throw new Error('Office/store location is required for on-site employees');
+      if (!newEmployee.work_state) {
+        throw new Error('Work state is required');
       }
 
       const payload = {
@@ -825,8 +839,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         personal_email: newEmployee.personal_email || undefined,
         first_name: newEmployee.first_name,
         last_name: newEmployee.last_name,
-        work_state: workLocationMode === 'remote' ? (newEmployee.work_state || undefined) : undefined,
-        address: workLocationMode === 'office' ? (newEmployee.office_location || undefined) : undefined,
+        work_state: newEmployee.work_state || undefined,
+        address: newEmployee.office_location || undefined,
         employment_type: newEmployee.employment_type,
         start_date: newEmployee.start_date,
         skip_google_workspace_provisioning:
@@ -980,14 +994,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     handleFileSelect(file);
   };
 
-  // Unique "City, ST" pairs from compliance locations for the work location dropdown
-  const complianceLocationOptions = Array.from(
-    new Set(complianceLocations.map((l) => `${l.city}|${l.state}`))
-  ).map((key) => {
-    const [city, state] = key.split('|');
-    return { city, state, label: `${city}, ${state}` };
-  }).sort((a, b) => a.label.localeCompare(b.label));
-
   const generatedSingleWorkEmail = googleDomainAvailable && generatedEmailLocalPart
     ? `${generatedEmailLocalPart}@${normalizedGoogleDomain}`
     : '';
@@ -997,9 +1003,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
   const canProceedAddStep2 = emailEntryMode === 'generated'
     ? Boolean(generatedSingleWorkEmail)
     : looksLikeEmail(newEmployee.work_email);
-  const hasSingleLocation = workLocationMode === 'remote'
-    ? Boolean(newEmployee.work_state && newEmployee.work_city)
-    : Boolean(newEmployee.office_location.trim());
+  const hasSingleLocation = Boolean(newEmployee.work_state);
   const canSubmitSingleWizard = canProceedAddStep1 && canProceedAddStep2 && hasSingleLocation;
 
   const BATCH_MAX_ROWS = 50;
@@ -1009,8 +1013,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         row.last_name.trim() ||
         row.work_email.trim() ||
         row.personal_email.trim() ||
-        row.work_state.trim() ||
-        row.office_location.trim()
+        row.work_state.trim()
     )
   );
 
@@ -1031,11 +1034,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       return 'Valid work email is required';
     }
 
-    if (batchWorkLocationMode === 'remote' && (!row.work_state.trim() || !row.work_city.trim())) {
-      return 'Work location is required for remote employees';
-    }
-    if (batchWorkLocationMode === 'office' && !row.office_location.trim()) {
-      return 'Office/store is required for on-site employees';
+    if (!row.work_state.trim()) {
+      return 'Work state is required';
     }
     return null;
   };
@@ -1096,8 +1096,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           personal_email: row.personal_email.trim() || undefined,
           first_name: row.first_name.trim(),
           last_name: row.last_name.trim(),
-          work_state: batchWorkLocationMode === 'remote' ? row.work_state.trim() : undefined,
-          address: batchWorkLocationMode === 'office' ? row.office_location.trim() : undefined,
+          work_state: row.work_state.trim() || undefined,
+          address: row.office_location.trim() || undefined,
           employment_type: row.employment_type,
           start_date: row.start_date,
           skip_google_workspace_provisioning:
@@ -1324,7 +1324,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     const s = draft.draft_state as Record<string, unknown>;
                     setBatchRows(s.batchRows as BatchEmployeeRow[]);
                     setBatchEmailMode((s.emailMode as EmailEntryMode) ?? 'existing');
-                    setBatchWorkLocationMode((s.workLocationMode as WorkLocationMode) ?? 'remote');
                     setBatchWizardStep((s.wizardStep as BatchWizardStep) ?? 1);
                   }
                   draftSnapshotRef.current = JSON.stringify(draft?.draft_state ?? {});
@@ -1895,85 +1894,54 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       <p className={`text-[11px] ${t.textMuted}`}>
                         Final step: define where they work and verify a quick summary before creating.
                       </p>
-                      <div className="space-y-2">
-                        <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
-                          Work Location
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setWorkLocationMode('remote')}
-                            className={`border px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
-                              workLocationMode === 'remote'
-                                ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                                : t.btnSecondary
-                            }`}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
+                            State <span className="text-red-500">*</span>
+                          </label>
+                          <select
+                            value={newEmployee.work_state}
+                            onChange={(e) =>
+                              setNewEmployee({ ...newEmployee, work_state: e.target.value })
+                            }
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
                           >
-                            Remote
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setWorkLocationMode('office')}
-                            className={`border px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
-                              workLocationMode === 'office'
-                                ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                                : t.btnSecondary
-                            }`}
-                          >
-                            Office / Store
-                          </button>
+                            <option value="">Select state</option>
+                            {US_STATES.map((s) => (
+                              <option key={s.value} value={s.value}>{s.label}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
+                            City
+                          </label>
+                          <input
+                            type="text"
+                            value={newEmployee.work_city}
+                            onChange={(e) =>
+                              setNewEmployee({ ...newEmployee, work_city: e.target.value })
+                            }
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
+                            placeholder="San Francisco"
+                          />
                         </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          {workLocationMode === 'remote' ? (
-                            <>
-                              <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
-                                Work Location <span className="text-red-500">*</span>
-                              </label>
-                              {complianceLocationOptions.length > 0 ? (
-                                <select
-                                  value={newEmployee.work_city && newEmployee.work_state ? `${newEmployee.work_city}|${newEmployee.work_state}` : ''}
-                                  onChange={(e) => {
-                                    if (!e.target.value) {
-                                      setNewEmployee({ ...newEmployee, work_city: '', work_state: '' });
-                                    } else {
-                                      const [city, state] = e.target.value.split('|');
-                                      setNewEmployee({ ...newEmployee, work_city: city, work_state: state });
-                                    }
-                                  }}
-                                  className={`w-full px-3 py-2 ${t.inputCls}`}
-                                >
-                                  <option value="">Select location</option>
-                                  {complianceLocationOptions.map((loc) => (
-                                    <option key={`${loc.city}|${loc.state}`} value={`${loc.city}|${loc.state}`}>
-                                      {loc.label}
-                                    </option>
-                                  ))}
-                                </select>
-                              ) : (
-                                <p className={`text-xs ${t.textMuted} px-3 py-2 ${t.innerEl}`}>
-                                  No compliance locations found. Add locations in the Compliance page first.
-                                </p>
-                              )}
-                            </>
-                          ) : (
-                            <>
-                              <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
-                                Office / Store <span className="text-red-500">*</span>
-                              </label>
-                              <input
-                                type="text"
-                                value={newEmployee.office_location}
-                                onChange={(e) =>
-                                  setNewEmployee({ ...newEmployee, office_location: e.target.value })
-                                }
-                                className={`w-full px-3 py-2 ${t.inputCls}`}
-                                placeholder="Downtown HQ"
-                              />
-                            </>
-                          )}
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
+                            Office / Building (optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={newEmployee.office_location}
+                            onChange={(e) =>
+                              setNewEmployee({ ...newEmployee, office_location: e.target.value })
+                            }
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
+                            placeholder="Downtown HQ, Floor 3"
+                          />
                         </div>
                         <div>
                           <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
@@ -2083,9 +2051,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         </p>
                         <p>
                           <span className={t.textMain}>Location:</span>{' '}
-                          {workLocationMode === 'remote'
-                            ? `Remote (${newEmployee.work_city && newEmployee.work_state ? `${newEmployee.work_city}, ${newEmployee.work_state}` : 'location required'})`
-                            : `Office/Store (${newEmployee.office_location || 'location required'})`}
+                          {newEmployee.work_state
+                            ? `${newEmployee.work_city ? `${newEmployee.work_city}, ` : ''}${US_STATES.find(s => s.value === newEmployee.work_state)?.label || newEmployee.work_state}${newEmployee.office_location ? ` (${newEmployee.office_location})` : ''}`
+                            : 'state required'}
                         </p>
                       </div>
                     </div>
@@ -2252,38 +2220,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     )}
                   </div>
 
-                  <div className="space-y-2">
-                    <label className={`block text-[10px] uppercase tracking-wider ${t.textMuted}`}>
-                      Work Location Mode
-                    </label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setBatchWorkLocationMode('remote')}
-                        className={`border p-3 text-left rounded-xl transition-colors ${
-                          batchWorkLocationMode === 'remote'
-                            ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                            : t.btnSecondary
-                        }`}
-                      >
-                        <p className={`text-xs font-bold uppercase tracking-wider ${batchWorkLocationMode === 'remote' ? 'text-zinc-50' : t.textMain}`}>Remote</p>
-                        <p className={`text-[11px] mt-1 ${batchWorkLocationMode === 'remote' ? 'text-zinc-400' : t.textMuted}`}>Each employee must include a compliance location</p>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setBatchWorkLocationMode('office')}
-                        className={`border p-3 text-left rounded-xl transition-colors ${
-                          batchWorkLocationMode === 'office'
-                            ? 'border-zinc-900 bg-zinc-900 text-zinc-50'
-                            : t.btnSecondary
-                        }`}
-                      >
-                        <p className={`text-xs font-bold uppercase tracking-wider ${batchWorkLocationMode === 'office' ? 'text-zinc-50' : t.textMain}`}>Office / Store</p>
-                        <p className={`text-[11px] mt-1 ${batchWorkLocationMode === 'office' ? 'text-zinc-400' : t.textMuted}`}>Each employee must include office/store location</p>
-                      </button>
-                    </div>
-                  </div>
-
                   <div className={`${t.innerEl} p-3 text-[11px] ${t.textMuted} space-y-1`}>
                     <p>Step 2 lets you enter up to 50 rows.</p>
                     <p>Only non-empty rows are processed.</p>
@@ -2318,7 +2254,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                           <th className="px-2 py-2 text-left">Last</th>
                           <th className="px-2 py-2 text-left">{batchEmailMode === 'generated' ? 'Generated Email' : 'Work Email'}</th>
                           <th className="px-2 py-2 text-left">Personal Email</th>
-                          <th className="px-2 py-2 text-left">{batchWorkLocationMode === 'remote' ? 'Location' : 'Office/Store'}</th>
+                          <th className="px-2 py-2 text-left">State</th>
+                          <th className="px-2 py-2 text-left">City</th>
                           <th className="px-2 py-2 text-left">Type</th>
                           <th className="px-2 py-2 text-left">Start</th>
                           {batchEmailMode === 'existing' && <th className="px-2 py-2 text-left">Skip Google</th>}
@@ -2328,7 +2265,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       <tbody>
                         {batchRows.map((row, idx) => {
                           const rowEmailPreview = resolveBatchRowWorkEmail(row);
-                          const rowError = row.first_name || row.last_name || row.work_email || row.personal_email || row.work_state || row.office_location
+                          const rowError = row.first_name || row.last_name || row.work_email || row.personal_email || row.work_state
                             ? batchRowValidationError(row)
                             : null;
                           return (
@@ -2373,41 +2310,25 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                 />
                               </td>
                               <td className="px-2 py-2">
-                                {batchWorkLocationMode === 'remote' ? (
-                                  complianceLocationOptions.length > 0 ? (
-                                    <select
-                                      value={row.work_city && row.work_state ? `${row.work_city}|${row.work_state}` : ''}
-                                      onChange={(e) => {
-                                        if (!e.target.value) {
-                                          updateBatchRowField(row.id, 'work_city', '');
-                                          updateBatchRowField(row.id, 'work_state', '');
-                                        } else {
-                                          const [city, state] = e.target.value.split('|');
-                                          updateBatchRowField(row.id, 'work_city', city);
-                                          updateBatchRowField(row.id, 'work_state', state);
-                                        }
-                                      }}
-                                      className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
-                                    >
-                                      <option value="">Location</option>
-                                      {complianceLocationOptions.map((loc) => (
-                                        <option key={`${loc.city}|${loc.state}`} value={`${loc.city}|${loc.state}`}>
-                                          {loc.label}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  ) : (
-                                    <span className={`text-[10px] ${t.textMuted} px-2 py-1.5`}>No locations</span>
-                                  )
-                                ) : (
-                                  <input
-                                    type="text"
-                                    value={row.office_location}
-                                    onChange={(e) => updateBatchRowField(row.id, 'office_location', e.target.value)}
-                                    className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
-                                    placeholder="Downtown HQ"
-                                  />
-                                )}
+                                <select
+                                  value={row.work_state}
+                                  onChange={(e) => updateBatchRowField(row.id, 'work_state', e.target.value)}
+                                  className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
+                                >
+                                  <option value="">State</option>
+                                  {US_STATES.map((s) => (
+                                    <option key={s.value} value={s.value}>{s.value}</option>
+                                  ))}
+                                </select>
+                              </td>
+                              <td className="px-2 py-2">
+                                <input
+                                  type="text"
+                                  value={row.work_city}
+                                  onChange={(e) => updateBatchRowField(row.id, 'work_city', e.target.value)}
+                                  className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
+                                  placeholder="City"
+                                />
                               </td>
                               <td className="px-2 py-2">
                                 <select
@@ -2473,7 +2394,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                       Ready to create <span className={`${t.textMain} font-semibold`}>{batchRowsWithInput.length}</span> employees.
                     </p>
                     <p>Email mode: <span className={t.textMain}>{batchEmailMode === 'generated' ? 'Generated' : 'Existing'}</span></p>
-                    <p>Location mode: <span className={t.textMain}>{batchWorkLocationMode === 'remote' ? 'Remote (state)' : 'Office/Store'}</span></p>
+                    <p>Each row includes <span className={t.textMain}>state + city</span> for compliance</p>
                   </div>
 
                   {batchResult && (

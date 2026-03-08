@@ -2532,6 +2532,48 @@ export const adminJurisdictions = {
     }),
 };
 
+// Jurisdiction Coverage Requests (admin queue for unknown jurisdictions)
+export interface JurisdictionCoverageRequest {
+  id: string;
+  city: string;
+  state: string;
+  county: string | null;
+  requested_by_company_id: string;
+  company_name?: string;
+  location_id: string | null;
+  employee_count?: number;
+  status: 'pending' | 'in_progress' | 'completed' | 'dismissed';
+  admin_notes: string | null;
+  processed_by: string | null;
+  processed_at: string | null;
+  created_at: string;
+}
+
+export interface ProcessCoverageRequest {
+  has_local_ordinance?: boolean;
+  county?: string;
+  admin_notes?: string;
+}
+
+export const adminCoverageRequests = {
+  list: (status?: string): Promise<JurisdictionCoverageRequest[]> =>
+    request<JurisdictionCoverageRequest[]>(
+      `/admin/jurisdiction-requests${status ? `?status=${status}` : ''}`
+    ),
+
+  process: (id: string, data: ProcessCoverageRequest): Promise<{ status: string }> =>
+    request<{ status: string }>(`/admin/jurisdiction-requests/${id}/process`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  dismiss: (id: string, notes?: string): Promise<{ status: string }> =>
+    request<{ status: string }>(`/admin/jurisdiction-requests/${id}/dismiss`, {
+      method: 'POST',
+      body: JSON.stringify({ admin_notes: notes || null }),
+    }),
+};
+
 // Jurisdiction Data Overview (repository dashboard)
 export interface JurisdictionDataCitySummary {
   id: string;

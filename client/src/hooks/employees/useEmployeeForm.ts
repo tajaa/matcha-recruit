@@ -4,7 +4,6 @@ import { getAccessToken } from '../../api/client';
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 type EmailEntryMode = 'generated' | 'existing';
-type WorkLocationMode = 'remote' | 'office';
 type AddWizardStep = 1 | 2 | 3;
 
 export interface NewEmployee {
@@ -62,7 +61,6 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
   const [generatedEmailLocalPart, setGeneratedEmailLocalPart] = useState('');
   const [generatedEmailEdited, setGeneratedEmailEdited] = useState(false);
   const [skipGoogleAutoProvision, setSkipGoogleAutoProvision] = useState(false);
-  const [workLocationMode, setWorkLocationMode] = useState<WorkLocationMode>('remote');
   const [addWizardStep, setAddWizardStep] = useState<AddWizardStep>(1);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +83,6 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
     setGeneratedEmailLocalPart('');
     setGeneratedEmailEdited(false);
     setSkipGoogleAutoProvision(false);
-    setWorkLocationMode('remote');
     setAddWizardStep(1);
     setError(null);
   }, [googleDomainAvailable]);
@@ -105,9 +102,7 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
   const canProceedAddStep2 = emailEntryMode === 'generated'
     ? Boolean(generatedSingleWorkEmail)
     : looksLikeEmail(newEmployee.work_email);
-  const hasSingleLocation = workLocationMode === 'remote'
-    ? Boolean(newEmployee.work_state)
-    : Boolean(newEmployee.office_location.trim());
+  const hasSingleLocation = Boolean(newEmployee.work_state);
   const canSubmitSingleWizard = canProceedAddStep1 && canProceedAddStep2 && hasSingleLocation;
 
   const handleAddEmployee = async (normalizedGoogleDomain: string) => {
@@ -127,11 +122,8 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
       if (!resolvedWorkEmail) {
         throw new Error('Work email is required');
       }
-      if (workLocationMode === 'remote' && !newEmployee.work_state) {
-        throw new Error('Work state is required for remote employees');
-      }
-      if (workLocationMode === 'office' && !newEmployee.office_location.trim()) {
-        throw new Error('Office/store location is required for on-site employees');
+      if (!newEmployee.work_state) {
+        throw new Error('Work state is required');
       }
 
       const payload = {
@@ -140,8 +132,8 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
         personal_email: newEmployee.personal_email || undefined,
         first_name: newEmployee.first_name,
         last_name: newEmployee.last_name,
-        work_state: workLocationMode === 'remote' ? (newEmployee.work_state || undefined) : undefined,
-        address: workLocationMode === 'office' ? (newEmployee.office_location || undefined) : undefined,
+        work_state: newEmployee.work_state || undefined,
+        address: newEmployee.office_location || undefined,
         employment_type: newEmployee.employment_type,
         start_date: newEmployee.start_date,
         skip_google_workspace_provisioning:
@@ -191,8 +183,6 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
     setGeneratedEmailEdited,
     skipGoogleAutoProvision,
     setSkipGoogleAutoProvision,
-    workLocationMode,
-    setWorkLocationMode,
     addWizardStep,
     setAddWizardStep,
     submitting,

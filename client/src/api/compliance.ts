@@ -16,6 +16,9 @@ export interface BusinessLocation {
     has_local_ordinance: boolean | null;
     requirements_count: number;
     unread_alerts_count: number;
+    source?: 'manual' | 'employee_derived';
+    coverage_status?: 'covered' | 'pending_review';
+    employee_count?: number;
 }
 
 export interface LocationCreate {
@@ -280,7 +283,14 @@ export const complianceAPI = {
                 'Authorization': `Bearer ${getAccessToken()}`,
             },
         });
-        if (!response.ok) throw new Error('Failed to delete location');
+        if (!response.ok) {
+            let message = 'Failed to delete location';
+            try {
+                const body = await response.json();
+                if (body.detail) message = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail);
+            } catch { /* use default message */ }
+            throw new Error(message);
+        }
     },
 
     async getRequirements(locationId: string, category?: string, companyId?: string): Promise<ComplianceRequirement[]> {

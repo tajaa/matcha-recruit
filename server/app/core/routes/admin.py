@@ -11,7 +11,7 @@ from typing import Optional, Any, AsyncGenerator
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Body, HTTPException, Depends, Query, status
+from fastapi import APIRouter, BackgroundTasks, Body, HTTPException, Depends, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, EmailStr, Field
 
@@ -25,6 +25,7 @@ from ..models.compliance import AutoCheckSettings
 from ..services.compliance_service import (
     update_auto_check_settings,
     _jurisdiction_row_to_dict,
+    run_compliance_check_background,
 )
 from ..services.rate_limiter import get_rate_limiter
 from ..services.auth import hash_password
@@ -63,6 +64,13 @@ class JurisdictionResearchModelModeUpdate(BaseModel):
 
 class ERSimilarityWeightsUpdate(BaseModel):
     weights: dict[str, float]
+
+
+class JurisdictionProcessRequest(BaseModel):
+    """Request model for processing a jurisdiction coverage request."""
+    has_local_ordinance: bool = False
+    county: Optional[str] = None
+    admin_notes: Optional[str] = None
 
 
 class PlatformSettingsResponse(BaseModel):
@@ -5276,3 +5284,215 @@ async def get_admin_notifications(
         )
 
     return AdminNotificationsResponse(items=items, total=total)
+
+
+# ---------------------------------------------------------------------------
+# Jurisdiction coverage requests
+# ---------------------------------------------------------------------------
+
+@router.get("/jurisdiction-requests")
+async def list_jurisdiction_requests(
+    status: str = "pending",
+    current_user=Depends(require_admin),
+):
+    """List jurisdiction coverage requests with company info and employee counts."""
+    async with get_connection() as conn:
+        if status == "all":
+            rows = await conn.fetch(
+                """
+                SELECT
+                    jcr.id, jcr.city, jcr.state, jcr.county, jcr.status,
+                    jcr.admin_notes, jcr.created_at, jcr.location_id,
+                    c.name AS company_name,
+                    COALESCE(emp_count.cnt, 0) AS employee_count
+                FROM jurisdiction_coverage_requests jcr
+                JOIN companies c ON c.id = jcr.requested_by_company_id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS cnt FROM employees e
+                    WHERE e.work_location_id = jcr.location_id AND e.termination_date IS NULL
+                ) emp_count ON true
+                ORDER BY jcr.created_at DESC
+                """
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT
+                    jcr.id, jcr.city, jcr.state, jcr.county, jcr.status,
+                    jcr.admin_notes, jcr.created_at, jcr.location_id,
+                    c.name AS company_name,
+                    COALESCE(emp_count.cnt, 0) AS employee_count
+                FROM jurisdiction_coverage_requests jcr
+                JOIN companies c ON c.id = jcr.requested_by_company_id
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*) AS cnt FROM employees e
+                    WHERE e.work_location_id = jcr.location_id AND e.termination_date IS NULL
+                ) emp_count ON true
+                WHERE jcr.status = $1
+                ORDER BY jcr.created_at DESC
+                """,
+                status,
+            )
+
+        return [
+            {
+                "id": str(row["id"]),
+                "city": row["city"],
+                "state": row["state"],
+                "county": row["county"],
+                "status": row["status"],
+                "company_name": row["company_name"],
+                "employee_count": row["employee_count"],
+                "admin_notes": row["admin_notes"],
+                "location_id": str(row["location_id"]) if row["location_id"] else None,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            }
+            for row in rows
+        ]
+
+
+@router.post("/jurisdiction-requests/{request_id}/process")
+async def process_jurisdiction_request(
+    request_id: UUID,
+    body: JurisdictionProcessRequest,
+    background_tasks: BackgroundTasks,
+    current_user=Depends(require_admin),
+):
+    """Admin processes a jurisdiction coverage request — adds reference data and triggers compliance check."""
+    async with get_connection() as conn:
+        # 1. Fetch the request row
+        req = await conn.fetchrow(
+            "SELECT * FROM jurisdiction_coverage_requests WHERE id = $1",
+            request_id,
+        )
+        if not req:
+            raise HTTPException(status_code=404, detail="Jurisdiction request not found")
+
+        city = req["city"]
+        state = req["state"]
+        location_id = req["location_id"]
+        company_id = req["requested_by_company_id"]
+        county = body.county or req["county"]
+
+        # 2. Optionally upsert into jurisdiction_reference
+        await conn.execute(
+            """
+            INSERT INTO jurisdiction_reference (city, state, county, has_local_ordinance)
+            VALUES (LOWER($1), UPPER($2), $3, $4)
+            ON CONFLICT (city, state) DO UPDATE
+                SET county = COALESCE(EXCLUDED.county, jurisdiction_reference.county),
+                    has_local_ordinance = EXCLUDED.has_local_ordinance
+            """,
+            city,
+            state,
+            county,
+            body.has_local_ordinance,
+        )
+
+        # 3. Update the request status
+        updated = await conn.fetchrow(
+            """
+            UPDATE jurisdiction_coverage_requests
+            SET status = 'completed',
+                processed_by = $2,
+                processed_at = NOW(),
+                admin_notes = COALESCE($3, admin_notes)
+            WHERE id = $1
+            RETURNING *
+            """,
+            request_id,
+            current_user.id,
+            body.admin_notes,
+        )
+
+        # 4. Update the associated business_location
+        if location_id:
+            await conn.execute(
+                "UPDATE business_locations SET coverage_status = 'covered' WHERE id = $1",
+                location_id,
+            )
+
+        # 5. Update ALL business_locations matching the same (city, state) across companies
+        await conn.execute(
+            """
+            UPDATE business_locations
+            SET coverage_status = 'covered'
+            WHERE LOWER(city) = LOWER($1) AND UPPER(state) = UPPER($2)
+              AND coverage_status != 'covered'
+            """,
+            city,
+            state,
+        )
+
+        # 6. Trigger background compliance checks for ALL matching locations
+        affected_locations = await conn.fetch(
+            """
+            SELECT bl.id, bl.company_id
+            FROM business_locations bl
+            WHERE LOWER(bl.city) = LOWER($1) AND UPPER(bl.state) = UPPER($2)
+              AND bl.is_active = true
+            """,
+            city,
+            state,
+        )
+        for loc in affected_locations:
+            background_tasks.add_task(
+                run_compliance_check_background, loc["id"], loc["company_id"]
+            )
+
+        return {
+            "id": str(updated["id"]),
+            "city": updated["city"],
+            "state": updated["state"],
+            "county": updated["county"],
+            "status": updated["status"],
+            "admin_notes": updated["admin_notes"],
+            "processed_by": str(updated["processed_by"]) if updated["processed_by"] else None,
+            "processed_at": updated["processed_at"].isoformat() if updated["processed_at"] else None,
+            "created_at": updated["created_at"].isoformat() if updated["created_at"] else None,
+        }
+
+
+@router.post("/jurisdiction-requests/{request_id}/dismiss")
+async def dismiss_jurisdiction_request(
+    request_id: UUID,
+    body: dict | None = None,
+    current_user=Depends(require_admin),
+):
+    """Dismiss a jurisdiction coverage request (e.g., invalid city)."""
+    async with get_connection() as conn:
+        req = await conn.fetchrow(
+            "SELECT id FROM jurisdiction_coverage_requests WHERE id = $1",
+            request_id,
+        )
+        if not req:
+            raise HTTPException(status_code=404, detail="Jurisdiction request not found")
+
+        admin_notes = body.get("admin_notes") if body else None
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE jurisdiction_coverage_requests
+            SET status = 'dismissed',
+                processed_by = $2,
+                processed_at = NOW(),
+                admin_notes = COALESCE($3, admin_notes)
+            WHERE id = $1
+            RETURNING *
+            """,
+            request_id,
+            current_user.id,
+            admin_notes,
+        )
+
+        return {
+            "id": str(updated["id"]),
+            "city": updated["city"],
+            "state": updated["state"],
+            "county": updated["county"],
+            "status": updated["status"],
+            "admin_notes": updated["admin_notes"],
+            "processed_by": str(updated["processed_by"]) if updated["processed_by"] else None,
+            "processed_at": updated["processed_at"].isoformat() if updated["processed_at"] else None,
+            "created_at": updated["created_at"].isoformat() if updated["created_at"] else None,
+        }

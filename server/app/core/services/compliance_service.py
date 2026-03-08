@@ -6,6 +6,7 @@ import json
 import re
 
 import asyncpg
+from fastapi import HTTPException
 
 from .jurisdiction_context import (
     get_known_sources,
@@ -2533,6 +2534,180 @@ async def _filter_with_preemption(conn, requirements, state: str):
     return filtered
 
 
+async def ensure_location_for_employee(
+    conn,
+    company_id: UUID,
+    work_city: Optional[str],
+    work_state: str,
+    background_tasks=None,
+) -> Optional[UUID]:
+    """Find or create a business_location for an employee's work address.
+
+    Used during employee create/update to auto-derive compliance locations from
+    employee addresses.  Works within the caller's connection (no
+    ``get_connection()`` call).
+
+    Returns the ``location_id`` (UUID) or None if ``work_state`` is falsy.
+    """
+    if not work_state:
+        return None
+
+    norm_state = work_state.upper().strip()
+    norm_city = _normalize_city_key(work_city) if work_city else None
+
+    # 1. Look for existing location matching (company_id, city, state)
+    if norm_city:
+        existing = await conn.fetchrow(
+            """
+            SELECT id, is_active FROM business_locations
+            WHERE company_id = $1 AND LOWER(city) = $2 AND UPPER(state) = $3
+            """,
+            company_id, norm_city, norm_state,
+        )
+    else:
+        # State-only: match locations with empty/null city
+        existing = await conn.fetchrow(
+            """
+            SELECT id, is_active FROM business_locations
+            WHERE company_id = $1 AND (city IS NULL OR city = '') AND UPPER(state) = $2
+            """,
+            company_id, norm_state,
+        )
+
+    # 2. Found + active → return id
+    if existing and existing["is_active"]:
+        return existing["id"]
+
+    # 3. Found + inactive → reactivate
+    if existing and not existing["is_active"]:
+        await conn.execute(
+            "UPDATE business_locations SET is_active = true, updated_at = NOW() WHERE id = $1",
+            existing["id"],
+        )
+        return existing["id"]
+
+    # 4. Not found → create
+    # 4a. Check jurisdiction_reference for known jurisdiction
+    is_known_jurisdiction = False
+    ref_county = None
+    if norm_city:
+        resolved_city, ref_county = await _resolve_reference_city(conn, norm_city, norm_state)
+        # Check if city was actually found in jurisdiction_reference
+        # (vs. just returned as-is from _resolve_reference_city)
+        try:
+            ref_row = await conn.fetchrow(
+                """
+                SELECT city, county
+                FROM jurisdiction_reference
+                WHERE state = $2
+                  AND (
+                    city = $1
+                    OR EXISTS (
+                      SELECT 1
+                      FROM unnest(COALESCE(aliases, ARRAY[]::text[])) AS alias
+                      WHERE LOWER(alias) = $1
+                    )
+                  )
+                LIMIT 1
+                """,
+                _normalize_city_key(norm_city),
+                norm_state,
+            )
+            is_known_jurisdiction = ref_row is not None
+            if ref_row and ref_row["county"]:
+                ref_county = ref_row["county"]
+        except asyncpg.UndefinedTableError:
+            is_known_jurisdiction = False
+    else:
+        # State-only: always considered known (states are always covered)
+        resolved_city = ""
+        is_known_jurisdiction = True
+
+    # Determine source and coverage
+    source = "employee_derived"
+    coverage_status = "covered" if is_known_jurisdiction else "pending_review"
+    display_city = work_city.strip() if work_city else ""
+
+    # Insert the new location
+    location_id = await conn.fetchval(
+        """
+        INSERT INTO business_locations
+            (company_id, name, address, city, state, county, zipcode, source, coverage_status)
+        VALUES ($1, $2, '', $3, $4, $5, '', $6, $7)
+        ON CONFLICT (company_id, LOWER(city), UPPER(state)) DO UPDATE
+            SET is_active = true, updated_at = NOW()
+        RETURNING id
+        """,
+        company_id,
+        f"{display_city}, {norm_state}" if display_city else norm_state,
+        display_city,
+        norm_state,
+        ref_county,
+        source,
+        coverage_status,
+    )
+
+    # Resolve jurisdiction and link
+    jurisdiction_id = await _get_or_create_jurisdiction(
+        conn, display_city or norm_state, work_state, ref_county
+    )
+    await conn.execute(
+        "UPDATE business_locations SET jurisdiction_id = $1 WHERE id = $2",
+        jurisdiction_id, location_id,
+    )
+
+    if is_known_jurisdiction:
+        # 4b. Known jurisdiction → clone repository data + trigger compliance check
+        has_local_ordinance = await _lookup_has_local_ordinance(conn, display_city, norm_state)
+        j_reqs = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+        req_dicts = None
+
+        if j_reqs:
+            req_dicts = [_jurisdiction_row_to_dict(jr) for jr in j_reqs]
+            await _fill_missing_categories_from_parents(conn, jurisdiction_id, req_dicts, 7)
+        elif has_local_ordinance is False:
+            county_reqs = await _try_load_county_requirements(conn, jurisdiction_id, 7)
+            if county_reqs:
+                req_dicts = county_reqs
+            else:
+                state_reqs = await _try_load_state_requirements(conn, jurisdiction_id, 7)
+                if state_reqs:
+                    req_dicts = state_reqs
+            if req_dicts:
+                await _fill_missing_categories_from_parents(conn, jurisdiction_id, req_dicts, 7)
+
+        if req_dicts:
+            if has_local_ordinance is False and display_city:
+                req_dicts = _filter_city_level_requirements(req_dicts, norm_state)
+            _normalize_requirement_categories(req_dicts)
+            req_dicts = await _filter_with_preemption(conn, req_dicts, norm_state)
+            for req in req_dicts:
+                _clamp_varchar_fields(req)
+            await _sync_requirements_to_location(
+                conn, location_id, company_id, req_dicts, create_alerts=False,
+            )
+
+        if background_tasks is not None:
+            background_tasks.add_task(
+                run_compliance_check_background, location_id, company_id,
+                check_type="auto_derive", allow_live_research=True,
+            )
+    else:
+        # 4c. Unknown jurisdiction → queue for admin review, do NOT trigger check
+        await conn.execute(
+            """
+            INSERT INTO jurisdiction_coverage_requests
+                (city, state, county, requested_by_company_id, location_id, status)
+            VALUES ($1, $2, $3, $4, $5, 'pending')
+            ON CONFLICT (city, state) DO UPDATE
+                SET location_id = COALESCE(jurisdiction_coverage_requests.location_id, EXCLUDED.location_id)
+            """,
+            display_city, norm_state, ref_county, company_id, location_id,
+        )
+
+    return location_id
+
+
 async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
     """Create a location, map it to a jurisdiction, and clone repository data if available.
 
@@ -3537,15 +3712,20 @@ async def get_locations(company_id: UUID) -> List[BusinessLocation]:
 
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT bl.*, jr.has_local_ordinance
+            """SELECT bl.*, jr.has_local_ordinance,
+                      COALESCE(ec.cnt, 0) AS employee_count
                FROM business_locations bl
                LEFT JOIN jurisdiction_reference jr
                  ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
+               LEFT JOIN LATERAL (
+                   SELECT COUNT(*) AS cnt FROM employees e
+                   WHERE e.work_location_id = bl.id AND e.termination_date IS NULL
+               ) ec ON true
                WHERE bl.company_id = $1
                ORDER BY bl.created_at DESC""",
             company_id,
         )
-        return [BusinessLocation(**dict(row)) for row in rows]
+        return [BusinessLocation(**{**dict(row)}) for row in rows]
 
 
 async def get_location(
@@ -3626,6 +3806,17 @@ async def delete_location(location_id: UUID, company_id: UUID) -> bool:
     from ...database import get_connection
 
     async with get_connection() as conn:
+        # Protect locations with active employees
+        active_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM employees WHERE work_location_id = $1 AND termination_date IS NULL",
+            location_id,
+        )
+        if active_count and active_count > 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot delete: {active_count} active employee{'s' if active_count != 1 else ''} assigned to this location.",
+            )
+
         result = await conn.execute(
             "DELETE FROM business_locations WHERE id = $1 AND company_id = $2",
             location_id,
@@ -3641,13 +3832,9 @@ async def get_employee_impact_for_location(
 
     Returns total affected employees plus per-rate_type violation details.
 
-    Matching logic:
-    - If the location has a city, match employees whose work_city matches that city
-      AND work_state matches that state (precise city match).
-    - Also match office/store employees whose address contains the city name
-      (for employees created via the office workflow who lack work_state/work_city).
-    - If the location has no city (state-level only), match employees whose
-      work_state matches AND work_city is NULL (state-only remote workers).
+    Primary path: query by work_location_id FK (fast, exact).
+    Fallback: heuristic matching for employees with work_location_id IS NULL
+    (legacy rows that predate the FK linkage).
     """
     from ...database import get_connection
 
@@ -3663,44 +3850,57 @@ async def get_employee_impact_for_location(
         loc_state = loc["state"]
         loc_city = loc["city"]
 
+        # Primary path: employees linked via FK
+        fk_employees = await conn.fetch(
+            """
+            SELECT id, first_name, last_name, pay_classification, pay_rate,
+                   work_city, work_state
+            FROM employees
+            WHERE org_id = $1 AND work_location_id = $2 AND termination_date IS NULL
+            """,
+            company_id, location_id,
+        )
+
+        # Fallback: heuristic for legacy employees with work_location_id IS NULL
         if loc_city:
-            # City-level location: match employees precisely in that city+state
-            employees = await conn.fetch(
+            heuristic_employees = await conn.fetch(
                 """
                 SELECT id, first_name, last_name, pay_classification, pay_rate,
                        work_city, work_state
                 FROM employees
                 WHERE org_id = $1
                   AND termination_date IS NULL
+                  AND work_location_id IS NULL
                   AND (
-                      -- Remote employees with explicit city+state
                       (LOWER(work_city) = LOWER($2) AND UPPER(work_state) = UPPER($3))
-                      -- Office employees whose address contains the city (no work_state set)
                       OR (work_state IS NULL AND work_city IS NULL
                           AND address IS NOT NULL AND address ILIKE '%' || $2 || '%')
-                      -- Employees assigned directly to this location
-                      OR work_location_id = $4
                   )
                 """,
-                company_id, loc_city, loc_state, location_id,
+                company_id, loc_city, loc_state,
             )
         else:
-            # State-level only location: match state-level remote employees
-            # who don't have a specific city (to avoid double-counting with city locations)
-            employees = await conn.fetch(
+            heuristic_employees = await conn.fetch(
                 """
                 SELECT id, first_name, last_name, pay_classification, pay_rate,
                        work_city, work_state
                 FROM employees
                 WHERE org_id = $1
                   AND termination_date IS NULL
-                  AND (
-                      (UPPER(work_state) = UPPER($2) AND (work_city IS NULL OR work_city = ''))
-                      OR work_location_id = $3
-                  )
+                  AND work_location_id IS NULL
+                  AND UPPER(work_state) = UPPER($2)
+                  AND (work_city IS NULL OR work_city = '')
                 """,
-                company_id, loc_state, location_id,
+                company_id, loc_state,
             )
+
+        # Deduplicate (in case FK and heuristic overlap during migration)
+        seen_ids = {emp["id"] for emp in fk_employees}
+        employees = list(fk_employees)
+        for emp in heuristic_employees:
+            if emp["id"] not in seen_ids:
+                employees.append(emp)
+                seen_ids.add(emp["id"])
 
         total_affected = len(employees)
 

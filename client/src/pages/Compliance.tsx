@@ -725,15 +725,15 @@ export function Compliance() {
                             <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
                                 <MapPin size={20} className={t.textMuted} />
                             </div>
-                            <h3 className={`${t.textDim} text-[10px] font-bold uppercase tracking-widest mb-2`}>Zero Endpoints</h3>
+                            <h3 className={`${t.textDim} text-[10px] font-bold uppercase tracking-widest mb-2`}>No Locations Yet</h3>
                             <p className={`${t.textFaint} text-[10px] mb-6 leading-relaxed uppercase tracking-tighter`}>
-                                Register business locations to initialize monitoring.
+                                Locations are automatically created when employees are onboarded. You can also add locations manually.
                             </p>
                             <button
                                 onClick={() => setShowAddModal(true)}
                                 className={`${t.textMain} text-[10px] font-bold uppercase tracking-[0.2em] underline underline-offset-8 ${t.border}`}
                             >
-                                Register First Node
+                                Add Location Manually
                             </button>
                         </div>
                     ) : (
@@ -761,7 +761,7 @@ export function Compliance() {
                                 )}
                                 <div className="flex items-start justify-between">
                                     <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2">
+                                        <div className="flex items-center gap-2 flex-wrap">
                                             <h3 className={`font-bold text-xs truncate uppercase tracking-widest ${
                                                 selectedLocationId === location.id ? t.textMain : t.textDim
                                             }`}>
@@ -769,6 +769,17 @@ export function Compliance() {
                                             </h3>
                                             {location.has_local_ordinance && (
                                                 <span className={`text-[7px] px-1 py-0.5 ${t.neutralBadge} rounded-xs uppercase tracking-widest`}>Local</span>
+                                            )}
+                                            {location.source === 'employee_derived' && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 dark:text-blue-300">
+                                                    Auto-derived
+                                                </span>
+                                            )}
+                                            {location.coverage_status === 'pending_review' && (
+                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 dark:text-amber-300"
+                                                      title="Platform admin is reviewing this jurisdiction">
+                                                    Pending coverage
+                                                </span>
                                             )}
                                         </div>
                                         <p className={`${t.textFaint} text-[10px] truncate mt-1 font-mono uppercase tracking-tighter`}>
@@ -788,6 +799,22 @@ export function Compliance() {
                                     </div>
                                     <div className="flex items-center gap-1 ml-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                         {confirmDeleteId === location.id ? (
+                                            (location.employee_count && location.employee_count > 0) ? (
+                                                <>
+                                                    <span className="text-[9px] text-amber-400 font-mono uppercase tracking-wider mr-1">
+                                                        {location.employee_count} employee{location.employee_count > 1 ? 's' : ''} linked
+                                                    </span>
+                                                    <button
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            setConfirmDeleteId(null);
+                                                        }}
+                                                        className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest ${t.textMuted} border ${t.border} rounded transition-colors`}
+                                                    >
+                                                        OK
+                                                    </button>
+                                                </>
+                                            ) : (
                                             <>
                                                 <button
                                                     onClick={(e) => {
@@ -809,6 +836,7 @@ export function Compliance() {
                                                     Cancel
                                                 </button>
                                             </>
+                                            )
                                         ) : (
                                             <>
                                                 <button
@@ -828,7 +856,7 @@ export function Compliance() {
                                                         setConfirmDeleteId(location.id);
                                                     }}
                                                     className={`p-1.5 ${t.textFaint} hover:text-red-500 rounded transition-colors`}
-                                                    title="Delete"
+                                                    title={location.employee_count && location.employee_count > 0 ? `Cannot delete: ${location.employee_count} employee(s) linked` : 'Delete'}
                                                 >
                                                     <Trash2 size={11} />
                                                 </button>

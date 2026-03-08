@@ -4,7 +4,6 @@ import { getAccessToken, onboardingDraft } from '../../api/client';
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 type EmailEntryMode = 'generated' | 'existing';
-type WorkLocationMode = 'remote' | 'office';
 type BatchWizardStep = 1 | 2 | 3;
 
 export interface BatchEmployeeRow {
@@ -79,7 +78,6 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
   const [showBatchWizardModal, setShowBatchWizardModal] = useState(false);
   const [batchWizardStep, setBatchWizardStep] = useState<BatchWizardStep>(1);
   const [batchEmailMode, setBatchEmailMode] = useState<EmailEntryMode>('existing');
-  const [batchWorkLocationMode, setBatchWorkLocationMode] = useState<WorkLocationMode>('remote');
   const [batchRows, setBatchRows] = useState<BatchEmployeeRow[]>([]);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [batchResult, setBatchResult] = useState<BatchCreateResult | null>(null);
@@ -92,7 +90,6 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
     const defaultStartDate = new Date().toISOString().split('T')[0];
     setBatchWizardStep(1);
     setBatchEmailMode(googleDomainAvailable ? 'generated' : 'existing');
-    setBatchWorkLocationMode('remote');
     setBatchRows([
       createBatchRow(defaultStartDate),
       createBatchRow(defaultStartDate),
@@ -106,9 +103,9 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
   // Dirty detection for batch wizard draft
   useEffect(() => {
     if (!draftLoaded) return;
-    const current = JSON.stringify({ batchRows, emailMode: batchEmailMode, workLocationMode: batchWorkLocationMode, wizardStep: batchWizardStep });
+    const current = JSON.stringify({ batchRows, emailMode: batchEmailMode, wizardStep: batchWizardStep });
     setDraftDirty(current !== draftSnapshotRef.current);
-  }, [batchRows, batchEmailMode, batchWorkLocationMode, batchWizardStep, draftLoaded]);
+  }, [batchRows, batchEmailMode, batchWizardStep, draftLoaded]);
 
   // Autosave batch wizard draft with 5-second debounce
   const DRAFT_AUTOSAVE_MS = 5000;
@@ -117,7 +114,7 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
     const timer = setTimeout(async () => {
       setDraftSaving(true);
       try {
-        const state = { batchRows, emailMode: batchEmailMode, workLocationMode: batchWorkLocationMode, wizardStep: batchWizardStep };
+        const state = { batchRows, emailMode: batchEmailMode, wizardStep: batchWizardStep };
         await onboardingDraft.save(state as unknown as Record<string, unknown>);
         draftSnapshotRef.current = JSON.stringify(state);
         setDraftDirty(false);
@@ -128,7 +125,7 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
       }
     }, DRAFT_AUTOSAVE_MS);
     return () => clearTimeout(timer);
-  }, [draftLoaded, draftDirty, batchRows, batchEmailMode, batchWorkLocationMode, batchWizardStep]);
+  }, [draftLoaded, draftDirty, batchRows, batchEmailMode, batchWizardStep]);
 
   const BATCH_MAX_ROWS = 50;
   const batchRowsWithInput = batchRows.filter((row) =>
@@ -159,11 +156,8 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
       return 'Valid work email is required';
     }
 
-    if (batchWorkLocationMode === 'remote' && !row.work_state.trim()) {
-      return 'Work state is required for remote employees';
-    }
-    if (batchWorkLocationMode === 'office' && !row.office_location.trim()) {
-      return 'Office/store is required for on-site employees';
+    if (!row.work_state.trim()) {
+      return 'Work state is required';
     }
     return null;
   };
@@ -224,8 +218,8 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
           personal_email: row.personal_email.trim() || undefined,
           first_name: row.first_name.trim(),
           last_name: row.last_name.trim(),
-          work_state: batchWorkLocationMode === 'remote' ? row.work_state.trim() : undefined,
-          address: batchWorkLocationMode === 'office' ? row.office_location.trim() : undefined,
+          work_state: row.work_state.trim() || undefined,
+          address: row.office_location.trim() || undefined,
           employment_type: row.employment_type,
           start_date: row.start_date,
           skip_google_workspace_provisioning:
@@ -285,8 +279,6 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
     setBatchWizardStep,
     batchEmailMode,
     setBatchEmailMode,
-    batchWorkLocationMode,
-    setBatchWorkLocationMode,
     batchRows,
     batchSubmitting,
     batchResult,

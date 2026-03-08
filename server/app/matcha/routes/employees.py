@@ -23,6 +23,7 @@ from ...core.dependencies import get_current_user
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
 from ...core.services.email import EmailService, get_email_service
+from ...core.services.compliance_service import ensure_location_for_employee
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -798,6 +799,22 @@ async def create_employee(
             *insert_vals,
         )
 
+        # Auto-derive compliance location from employee address
+        if row["work_state"]:
+            location_id = await ensure_location_for_employee(
+                conn,
+                company_id,
+                row.get("work_city") if compensation_fields_available else None,
+                row["work_state"],
+                background_tasks,
+            )
+            if location_id and location_id != row.get("work_location_id"):
+                await conn.execute(
+                    "UPDATE employees SET work_location_id = $1 WHERE id = $2",
+                    location_id,
+                    row["id"],
+                )
+
         # Auto-assign active onboarding task templates to the new employee
         try:
             template_rows = await conn.fetch(
@@ -991,6 +1008,7 @@ async def get_employee(
 async def update_employee(
     employee_id: UUID,
     request: EmployeeUpdateRequest,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update employee details."""
@@ -999,13 +1017,17 @@ async def update_employee(
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
         org_fields_available = await _employee_org_fields_available(conn)
-        # Check employee exists
-        existing = await conn.fetchval(
-            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+        # Check employee exists and capture current location-related fields
+        existing_row = await conn.fetchrow(
+            "SELECT id, work_state, work_city, work_location_id FROM employees WHERE id = $1 AND org_id = $2",
             employee_id, company_id
         )
-        if not existing:
+        if not existing_row:
             raise HTTPException(status_code=404, detail="Employee not found")
+
+        old_work_state = existing_row["work_state"]
+        old_work_city = existing_row.get("work_city")
+        old_work_location_id = existing_row.get("work_location_id")
 
         # Build update query dynamically
         updates = []
@@ -1123,6 +1145,48 @@ async def update_employee(
         values.extend([employee_id, company_id])
 
         row = await conn.fetchrow(query, *values)
+
+        # Sync compliance location if work_state or work_city changed
+        new_work_state = row["work_state"]
+        new_work_city = row.get("work_city")
+        location_changed = (
+            new_work_state != old_work_state
+            or new_work_city != old_work_city
+        )
+        if location_changed and new_work_state:
+            new_location_id = await ensure_location_for_employee(
+                conn,
+                company_id,
+                new_work_city,
+                new_work_state,
+                background_tasks,
+            )
+            if new_location_id and new_location_id != row.get("work_location_id"):
+                await conn.execute(
+                    "UPDATE employees SET work_location_id = $1 WHERE id = $2",
+                    new_location_id,
+                    row["id"],
+                )
+
+            # Deactivate old auto-derived location if no active employees remain
+            if old_work_location_id and old_work_location_id != new_location_id:
+                remaining = await conn.fetchval(
+                    """
+                    SELECT COUNT(*) FROM employees
+                    WHERE work_location_id = $1
+                      AND termination_date IS NULL
+                      AND id != $2
+                    """,
+                    old_work_location_id,
+                    employee_id,
+                )
+                if remaining == 0:
+                    # Only auto-deactivate employee_derived locations; manual ones stay active
+                    await conn.execute(
+                        """UPDATE business_locations SET is_active = false, updated_at = NOW()
+                           WHERE id = $1 AND source = 'employee_derived'""",
+                        old_work_location_id,
+                    )
 
         # Get manager name
         manager_name = None
@@ -1518,6 +1582,22 @@ async def bulk_upload_employees_csv(
 
                 employee_ids.append(employee['id'])
                 created += 1
+
+                # Auto-derive compliance location from employee address
+                if work_state:
+                    loc_id = await ensure_location_for_employee(
+                        conn,
+                        company_id,
+                        work_city,
+                        work_state,
+                        background_tasks,
+                    )
+                    if loc_id:
+                        await conn.execute(
+                            "UPDATE employees SET work_location_id = $1 WHERE id = $2",
+                            loc_id,
+                            employee['id'],
+                        )
 
                 # Schedule Google Workspace / Slack provisioning
                 run_google = google_workspace_auto_provision

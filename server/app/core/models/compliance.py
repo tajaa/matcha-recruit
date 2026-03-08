@@ -72,6 +72,9 @@ class BusinessLocation(BaseModel):
     next_auto_check: Optional[datetime] = None
     last_compliance_check: Optional[datetime] = None
     has_local_ordinance: Optional[bool] = None
+    source: Optional[str] = "manual"
+    coverage_status: Optional[str] = "covered"
+    employee_count: Optional[int] = 0
     created_at: datetime
     updated_at: datetime
 

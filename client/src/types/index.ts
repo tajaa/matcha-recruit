@@ -65,6 +65,9 @@ export interface BusinessLocation {
   last_compliance_check: string | null;
   created_at: string;
   updated_at: string;
+  source?: 'manual' | 'employee_derived';
+  coverage_status?: 'covered' | 'pending_review';
+  employee_count?: number;
 }
 
 export interface CultureProfile {

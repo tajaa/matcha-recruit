@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { adminJurisdictions, adminSchedulers, adminPlatformSettings } from '../../api/client';
+import { adminJurisdictions, adminSchedulers, adminPlatformSettings, adminCoverageRequests } from '../../api/client';
 import { CityCombobox } from '../../components/CityCombobox';
 import type {
   Jurisdiction, JurisdictionTotals, JurisdictionDetail, JurisdictionCreate,
   JurisdictionRequirement, JurisdictionLegislation, JurisdictionLocation,
   SchedulerSetting, SchedulerStatsResponse, SchedulerLogEntry,
+  JurisdictionCoverageRequest,
 } from '../../api/client';
 
 function formatRelative(iso: string | null): string {
@@ -313,8 +314,15 @@ export function Jurisdictions() {
   const [stats, setStats] = useState<SchedulerStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'jurisdictions' | 'activity' | 'jobs'>('jurisdictions');
+  const [activeTab, setActiveTab] = useState<'jurisdictions' | 'activity' | 'jobs' | 'coverage_requests'>('jurisdictions');
   const [triggering, setTriggering] = useState<string | null>(null);
+  const [coverageRequests, setCoverageRequests] = useState<JurisdictionCoverageRequest[]>([]);
+  const [coverageLoading, setCoverageLoading] = useState(false);
+  const [coverageFilter, setCoverageFilter] = useState<'pending' | 'all'>('pending');
+  const [processingId, setProcessingId] = useState<string | null>(null);
+  const [processForm, setProcessForm] = useState<{ has_local_ordinance: boolean; county: string; admin_notes: string }>({ has_local_ordinance: false, county: '', admin_notes: '' });
+  const [dismissingId, setDismissingId] = useState<string | null>(null);
+  const [dismissNotes, setDismissNotes] = useState('');
   const [toggling, setToggling] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [detailCache, setDetailCache] = useState<Record<string, JurisdictionDetail>>({});
@@ -362,7 +370,26 @@ export function Jurisdictions() {
     }
   }, []);
 
+  const fetchCoverageRequests = useCallback(async (status?: string) => {
+    setCoverageLoading(true);
+    try {
+      const data = await adminCoverageRequests.list(status || 'pending');
+      setCoverageRequests(data);
+    } catch (err) {
+      console.error('Failed to fetch coverage requests:', err);
+      setError('Failed to load coverage requests');
+    } finally {
+      setCoverageLoading(false);
+    }
+  }, []);
+
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  useEffect(() => {
+    if (activeTab === 'coverage_requests') {
+      fetchCoverageRequests(coverageFilter);
+    }
+  }, [activeTab, coverageFilter, fetchCoverageRequests]);
 
   useEffect(() => {
     const handlePlatformSettingsUpdate = () => {
@@ -772,6 +799,40 @@ export function Jurisdictions() {
     }
   };
 
+  const handleProcessRequest = async (id: string) => {
+    setError(null);
+    setNotice(null);
+    try {
+      await adminCoverageRequests.process(id, {
+        has_local_ordinance: processForm.has_local_ordinance,
+        county: processForm.county.trim() || undefined,
+        admin_notes: processForm.admin_notes.trim() || undefined,
+      });
+      setProcessingId(null);
+      setProcessForm({ has_local_ordinance: false, county: '', admin_notes: '' });
+      setNotice('Coverage request processed. Compliance check triggered.');
+      fetchCoverageRequests(coverageFilter);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to process request';
+      setError(msg);
+    }
+  };
+
+  const handleDismissRequest = async (id: string) => {
+    setError(null);
+    setNotice(null);
+    try {
+      await adminCoverageRequests.dismiss(id, dismissNotes.trim() || undefined);
+      setDismissingId(null);
+      setDismissNotes('');
+      setNotice('Coverage request dismissed.');
+      fetchCoverageRequests(coverageFilter);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to dismiss request';
+      setError(msg);
+    }
+  };
+
   const statusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
@@ -781,8 +842,21 @@ export function Jurisdictions() {
     }
   };
 
+  const coverageStatusColor = (status: string) => {
+    switch (status) {
+      case 'pending': return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+      case 'in_progress': return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+      case 'completed': return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20';
+      case 'dismissed': return 'bg-zinc-700/30 text-zinc-500 border-zinc-600/30';
+      default: return 'bg-zinc-500/10 text-zinc-400 border-zinc-500/20';
+    }
+  };
+
+  const pendingRequestCount = coverageRequests.filter(r => r.status === 'pending').length;
+
   const tabItems: { id: typeof activeTab; label: string; count?: number }[] = [
     { id: 'jurisdictions', label: 'Jurisdictions', count: jurisdictions.length },
+    { id: 'coverage_requests', label: 'Coverage Requests', count: pendingRequestCount || undefined },
     { id: 'activity', label: 'Recent Activity', count: stats?.recent_logs.length },
     { id: 'jobs', label: 'Scheduled Jobs', count: schedulers.length },
   ];
@@ -1219,6 +1293,218 @@ export function Jurisdictions() {
                             </div>
                           );
                         })}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {activeTab === 'coverage_requests' && (
+              <div className="space-y-4">
+                {/* Filter */}
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setCoverageFilter('pending')}
+                    className={`px-3 py-1.5 text-[10px] uppercase tracking-[0.15em] font-mono border transition-colors ${
+                      coverageFilter === 'pending'
+                        ? 'text-white bg-white/10 border-zinc-500'
+                        : 'text-zinc-500 border-zinc-700 hover:text-zinc-300'
+                    }`}
+                  >
+                    Pending
+                  </button>
+                  <button
+                    onClick={() => setCoverageFilter('all')}
+                    className={`px-3 py-1.5 text-[10px] uppercase tracking-[0.15em] font-mono border transition-colors ${
+                      coverageFilter === 'all'
+                        ? 'text-white bg-white/10 border-zinc-500'
+                        : 'text-zinc-500 border-zinc-700 hover:text-zinc-300'
+                    }`}
+                  >
+                    All
+                  </button>
+                  <button
+                    onClick={() => fetchCoverageRequests(coverageFilter)}
+                    disabled={coverageLoading}
+                    className="ml-auto px-3 py-1.5 text-[10px] uppercase tracking-[0.15em] font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {/* Table */}
+                {coverageLoading ? (
+                  <div className="border border-white/10 bg-zinc-950/20 p-12 text-center text-xs text-zinc-500 font-mono animate-pulse">
+                    Loading coverage requests...
+                  </div>
+                ) : coverageRequests.length === 0 ? (
+                  <div className="border border-white/10 bg-zinc-950/20 p-12 text-center text-xs text-zinc-500 font-mono">
+                    No {coverageFilter === 'pending' ? 'pending ' : ''}coverage requests.
+                  </div>
+                ) : (
+                  <div className="border border-white/10 divide-y divide-white/[0.05] bg-zinc-950/20">
+                    {/* Header */}
+                    <div className="grid grid-cols-[1fr_80px_1fr_80px_100px_100px_120px] gap-4 px-6 py-3 bg-zinc-900/80">
+                      <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">City</span>
+                      <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">State</span>
+                      <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">Company</span>
+                      <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">Employees</span>
+                      <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">Status</span>
+                      <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">Requested</span>
+                      <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500 text-right">Actions</span>
+                    </div>
+
+                    {/* Rows */}
+                    {coverageRequests.map(req => (
+                      <div key={req.id}>
+                        <div className="grid grid-cols-[1fr_80px_1fr_80px_100px_100px_120px] gap-4 px-6 py-4 hover:bg-white/[0.02] transition-colors items-center">
+                          <span className="text-xs text-zinc-200 font-mono">{req.city}</span>
+                          <span className="text-xs text-zinc-400 font-mono">{req.state}</span>
+                          <span className="text-xs text-zinc-400 font-mono truncate">{req.company_name || req.requested_by_company_id.slice(0, 8)}</span>
+                          <span className="text-xs text-zinc-400 font-mono">{req.employee_count ?? '—'}</span>
+                          <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border inline-block w-fit ${coverageStatusColor(req.status)}`}>
+                            {req.status.replace(/_/g, ' ')}
+                          </span>
+                          <span className="text-[10px] text-zinc-500 font-mono">{formatRelative(req.created_at)}</span>
+                          <div className="flex items-center gap-2 justify-end">
+                            {req.status === 'pending' && (
+                              <>
+                                <button
+                                  onClick={() => {
+                                    setProcessingId(processingId === req.id ? null : req.id);
+                                    setDismissingId(null);
+                                    setProcessForm({ has_local_ordinance: false, county: req.county || '', admin_notes: '' });
+                                  }}
+                                  className="px-2.5 py-1 text-[9px] uppercase tracking-wider font-mono font-bold text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/10 transition-colors"
+                                >
+                                  Process
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setDismissingId(dismissingId === req.id ? null : req.id);
+                                    setProcessingId(null);
+                                    setDismissNotes('');
+                                  }}
+                                  className="px-2.5 py-1 text-[9px] uppercase tracking-wider font-mono font-bold text-zinc-400 border border-zinc-600 hover:bg-zinc-700/30 transition-colors"
+                                >
+                                  Dismiss
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Process form */}
+                        {processingId === req.id && (
+                          <div className="px-6 py-4 bg-zinc-900/60 border-t border-white/5 space-y-4" style={{ animation: 'fadeSlideDown 0.2s ease-out' }}>
+                            <div className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500 mb-3">
+                              Process: {req.city}, {req.state}
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                              {/* Local ordinance toggle */}
+                              <div>
+                                <label className="text-[9px] uppercase tracking-widest font-mono text-zinc-500 block mb-2">
+                                  Has Local Ordinance
+                                </label>
+                                <div className="flex items-center gap-3">
+                                  <button
+                                    onClick={() => setProcessForm(f => ({ ...f, has_local_ordinance: false }))}
+                                    className={`px-3 py-1.5 text-[10px] uppercase tracking-wider font-mono border transition-colors ${
+                                      !processForm.has_local_ordinance
+                                        ? 'text-white bg-white/10 border-zinc-500'
+                                        : 'text-zinc-500 border-zinc-700 hover:text-zinc-300'
+                                    }`}
+                                  >
+                                    No
+                                  </button>
+                                  <button
+                                    onClick={() => setProcessForm(f => ({ ...f, has_local_ordinance: true }))}
+                                    className={`px-3 py-1.5 text-[10px] uppercase tracking-wider font-mono border transition-colors ${
+                                      processForm.has_local_ordinance
+                                        ? 'text-white bg-white/10 border-zinc-500'
+                                        : 'text-zinc-500 border-zinc-700 hover:text-zinc-300'
+                                    }`}
+                                  >
+                                    Yes
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* County */}
+                              <div>
+                                <label className="text-[9px] uppercase tracking-widest font-mono text-zinc-500 block mb-2">
+                                  County (optional)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={processForm.county}
+                                  onChange={e => setProcessForm(f => ({ ...f, county: e.target.value }))}
+                                  placeholder="e.g. Los Angeles"
+                                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors"
+                                />
+                              </div>
+
+                              {/* Admin Notes */}
+                              <div>
+                                <label className="text-[9px] uppercase tracking-widest font-mono text-zinc-500 block mb-2">
+                                  Notes (optional)
+                                </label>
+                                <textarea
+                                  value={processForm.admin_notes}
+                                  onChange={e => setProcessForm(f => ({ ...f, admin_notes: e.target.value }))}
+                                  placeholder="Any notes for this jurisdiction..."
+                                  rows={2}
+                                  className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors resize-none"
+                                />
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-3 pt-2">
+                              <button
+                                onClick={() => handleProcessRequest(req.id)}
+                                className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono font-bold text-black bg-emerald-400 hover:bg-emerald-300 transition-colors"
+                              >
+                                Run Compliance Check
+                              </button>
+                              <button
+                                onClick={() => setProcessingId(null)}
+                                className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Dismiss form */}
+                        {dismissingId === req.id && (
+                          <div className="px-6 py-4 bg-zinc-900/60 border-t border-white/5 space-y-3" style={{ animation: 'fadeSlideDown 0.2s ease-out' }}>
+                            <div className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500 mb-2">
+                              Dismiss: {req.city}, {req.state}
+                            </div>
+                            <textarea
+                              value={dismissNotes}
+                              onChange={e => setDismissNotes(e.target.value)}
+                              placeholder="Reason for dismissal (optional)..."
+                              rows={2}
+                              className="w-full px-3 py-2 bg-zinc-900 border border-zinc-700 text-xs text-white font-mono placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 transition-colors resize-none"
+                            />
+                            <div className="flex items-center gap-3">
+                              <button
+                                onClick={() => handleDismissRequest(req.id)}
+                                className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono font-bold text-red-400 border border-red-500/30 hover:bg-red-500/10 transition-colors"
+                              >
+                                Confirm Dismiss
+                              </button>
+                              <button
+                                onClick={() => setDismissingId(null)}
+                                className="px-4 py-2 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
