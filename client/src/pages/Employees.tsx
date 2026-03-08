@@ -320,7 +320,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
   return (
     <div
       onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors p-5 md:px-8 flex flex-col lg:flex-row lg:items-center gap-6 cursor-pointer`}
+      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors p-6 md:px-10 flex flex-col lg:flex-row lg:items-center gap-8 cursor-pointer`}
     >
       <div className="flex items-center min-w-0 flex-1">
         <div className="flex-shrink-0">
@@ -343,7 +343,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
         </div>
       </div>
 
-      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-6 gap-y-4 lg:gap-10 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-5 lg:border-0 lg:pt-0`}>
+      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-6 gap-y-4 lg:gap-10 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-6 lg:border-0 lg:pt-0`}>
         <div className="lg:text-right lg:w-28">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Department</p>
           <p className={`text-xs ${t.textDim} truncate`}>{employee.department || '—'}</p>
@@ -1189,9 +1189,9 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
 
   return (
     <div className={wrapperClass}>
-    <div className={`mx-auto ${mode === 'directory' ? 'max-w-5xl animate-in fade-in duration-500' : 'max-w-7xl space-y-8'}`}>
+    <div className={`mx-auto space-y-8 ${mode === 'directory' ? 'max-w-5xl animate-in fade-in duration-500' : 'max-w-7xl'}`}>
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-8">
+      <div className={`flex flex-col lg:flex-row lg:items-center justify-between gap-6 border-b ${t.borderTab} pb-8`}>
         {mode === 'directory' ? (
           <>
             <div>
@@ -1216,7 +1216,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <div className="flex items-center gap-2 sm:gap-3">
               <button
                 onClick={() => navigate('/app/matcha/onboarding?tab=employees')}
-                className={`flex items-center justify-center gap-2 px-4 sm:px-6 py-2 ${t.btnPrimary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
+                className={`flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 ${t.btnPrimary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
               >
                 <Plus size={14} />
                 Onboard New Employee
@@ -1228,7 +1228,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <button
               data-tour="emp-help-btn"
               onClick={() => setShowHelp(!showHelp)}
-              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
+              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 border text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
                 showHelp ? t.btnSecondaryActive : t.btnSecondary
               }`}
             >
@@ -1240,7 +1240,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <div className="relative">
               <button
                 onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
-                className={`w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 border text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
+                className={`w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 border text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors ${
                   showSettingsDropdown ? t.btnSecondaryActive : t.btnSecondary
                 }`}
               >
@@ -1272,7 +1272,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             <button
               data-tour="emp-bulk-btn"
               onClick={() => setShowBulkUploadModal(true)}
-              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
+              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
             >
               <Upload size={14} />
               <span>Bulk CSV</span>
@@ -1299,7 +1299,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                 }
                 setDraftLoaded(true);
               }}
-              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
+              className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
             >
               <ClipboardCheck size={14} />
               <span>Batch Wizard</span>
@@ -1311,7 +1311,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                 resetAddEmployeeForm();
                 setShowAddModal(true);
               }}
-              className={`flex items-center justify-center gap-2 px-4 sm:px-6 py-2 ${t.btnPrimary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
+              className={`flex items-center justify-center gap-2 px-4 sm:px-6 py-2.5 ${t.btnPrimary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors`}
             >
               <Plus size={14} />
               Add Employee
@@ -1354,7 +1354,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                     }
                   }}
                   disabled={inviteAllLoading}
-                  className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50`}
+                  className={`flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 ${t.btnSecondary} text-[10px] sm:text-xs font-bold uppercase tracking-wider rounded-xl transition-colors disabled:opacity-50`}
                 >
                   {inviteAllLoading ? (
                     <span className="w-3 h-3 border-2 border-current/20 border-t-current rounded-full animate-spin" />
@@ -1458,14 +1458,14 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
             placeholder="Search name, email, title..."
-            className={`w-full pl-9 pr-3 py-2 ${t.inputCls} text-xs`}
+            className={`w-full pl-9 pr-3 py-2.5 ${t.inputCls} text-xs`}
           />
         </div>
         {departments.length > 0 && (
           <select
             value={filterDepartment}
             onChange={(e) => setFilterDepartment(e.target.value)}
-            className={`px-3 py-2 ${t.inputCls} text-xs`}
+            className={`px-3 py-2.5 ${t.inputCls} text-xs`}
           >
             <option value="">All Departments</option>
             {departments.map((d) => (
@@ -1476,7 +1476,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         <select
           value={filterEmploymentType}
           onChange={(e) => setFilterEmploymentType(e.target.value)}
-          className={`px-3 py-2 ${t.inputCls} text-xs`}
+          className={`px-3 py-2.5 ${t.inputCls} text-xs`}
         >
           <option value="">All Types</option>
           <option value="full_time">Full Time</option>
@@ -1488,7 +1488,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           <select
             value={filterLocation}
             onChange={(e) => setFilterLocation(e.target.value)}
-            className={`px-3 py-2 ${t.inputCls} text-xs`}
+            className={`px-3 py-2.5 ${t.inputCls} text-xs`}
           >
             <option value="">All Locations</option>
             {locations.map((loc) => {
@@ -1500,7 +1500,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         )}
         <button
           onClick={() => setGroupByLocation(!groupByLocation)}
-          className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${
+          className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors ${
             groupByLocation ? t.btnSecondaryActive : t.btnSecondary
           }`}
         >
@@ -1541,7 +1541,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         <div data-tour="emp-list" className={`${t.cardDark} overflow-hidden shadow-lg`}>
            {/* Table Header */}
            {!groupByLocation && (
-             <div className={`hidden md:flex items-center gap-6 py-4 px-8 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
+             <div className={`hidden md:flex items-center gap-8 py-5 px-10 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
                 <div className="flex-1">Name / Role</div>
                 <div className="w-28 text-right">Department</div>
                 <div className="w-32 text-right">Location</div>
