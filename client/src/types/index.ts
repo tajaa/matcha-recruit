@@ -1577,6 +1577,13 @@ export interface ERCaseIntakeContext {
   };
 }
 
+// Employee linkage
+export type EREmployeeRole = 'complainant' | 'respondent' | 'witness';
+export interface ERInvolvedEmployee {
+  employee_id: string;
+  role: EREmployeeRole;
+}
+
 // Case types
 export interface ERCase {
   id: string;
@@ -1590,6 +1597,7 @@ export interface ERCase {
   created_by: string | null;
   assigned_to: string | null;
   document_count: number;
+  involved_employees: ERInvolvedEmployee[];
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -1600,6 +1608,7 @@ export interface ERCaseCreate {
   description?: string;
   intake_context?: ERCaseIntakeContext | null;
   category?: ERCaseCategory;
+  involved_employees?: ERInvolvedEmployee[];
 }
 
 export interface ERCaseUpdate {
@@ -1610,6 +1619,7 @@ export interface ERCaseUpdate {
   intake_context?: ERCaseIntakeContext | null;
   category?: ERCaseCategory;
   outcome?: ERCaseOutcome;
+  involved_employees?: ERInvolvedEmployee[];
 }
 
 export interface ERCaseListResponse {

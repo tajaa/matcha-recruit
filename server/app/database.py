@@ -1497,6 +1497,14 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_er_cases_outcome ON er_cases(outcome)
         """)
+        await conn.execute("""
+            ALTER TABLE er_cases
+            ADD COLUMN IF NOT EXISTS involved_employees JSONB DEFAULT '[]'
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_er_cases_involved_employees
+            ON er_cases USING GIN (involved_employees jsonb_path_ops)
+        """)
 
         # ER Case Documents table (uploaded evidence files)
         await conn.execute("""

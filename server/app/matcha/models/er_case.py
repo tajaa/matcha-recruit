@@ -14,6 +14,13 @@ ERDocumentType = Literal["transcript", "policy", "email", "other"]
 ERProcessingStatus = Literal["pending", "processing", "completed", "failed"]
 ERAnalysisType = Literal["timeline", "discrepancies", "policy_check", "summary", "determination", "similar_cases"]
 ERCaseNoteType = Literal["general", "question", "answer", "guidance", "system"]
+EREmployeeRole = Literal["complainant", "respondent", "witness"]
+
+
+class ERInvolvedEmployee(BaseModel):
+    """An employee linked to an ER case with their role."""
+    employee_id: UUID
+    role: EREmployeeRole
 ConfidenceLevel = Literal["high", "medium", "low"]
 SeverityLevel = Literal["high", "medium", "low"]
 ViolationSeverity = Literal["major", "minor"]
@@ -31,6 +38,7 @@ class ERCaseCreate(BaseModel):
     description: Optional[str] = Field(None, max_length=5000)
     intake_context: Optional[dict[str, Any]] = None
     category: Optional[ERCaseCategory] = None
+    involved_employees: list[ERInvolvedEmployee] = []
 
 
 class ERCaseUpdate(BaseModel):
@@ -42,6 +50,7 @@ class ERCaseUpdate(BaseModel):
     intake_context: Optional[dict[str, Any]] = None
     category: Optional[ERCaseCategory] = None
     outcome: Optional[ERCaseOutcome] = None
+    involved_employees: Optional[list[ERInvolvedEmployee]] = None
 
 
 class ERCaseResponse(BaseModel):
@@ -58,6 +67,7 @@ class ERCaseResponse(BaseModel):
     created_by: Optional[UUID] = None
     assigned_to: Optional[UUID] = None
     document_count: int = 0
+    involved_employees: list[dict[str, Any]] = []
     created_at: datetime
     updated_at: datetime
     closed_at: Optional[datetime] = None

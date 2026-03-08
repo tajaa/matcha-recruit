@@ -161,11 +161,73 @@ If picking the highest-impact gaps for the "insurance broker selling this to cli
 | 1 | Broker portfolio dashboard | Core broker workflow — seeing all clients at once |
 | 2 | Risk score history / trending | Brokers need trend data for renewals and client conversations |
 | 3 | One-click underwriting summary (PDF) | Required for policy submissions; closes the insurance workflow loop |
-| 4 | Pre-termination risk checklist | EPL is the primary liability covered; this reduces the highest-frequency claim type |
+| 4 | Pre-termination risk checklist | EPL is the primary liability covered; this reduces the highest-frequency claim type (see detailed spec below) |
 | 5 | Workers' comp incident → claim linkage | Closes the loop between the platform and actual insurance losses |
 | 6 | OSHA recordkeeping | Regulatory requirement that naturally integrates with the existing IR module |
 | 7 | Settlement / outcome tracking | Loss history is foundational to underwriting; currently invisible |
 | 8 | Automated broker alerts on risk escalation | Proactive value delivery to brokers without them having to log in |
+
+---
+
+## Detailed Spec: Pre-Termination Risk Checklist
+
+### Why This Matters
+
+Wrongful termination is the **#1 EPL claim type** by frequency. EEOC data shows termination-related charges (wrongful discharge, constructive discharge, retaliation for reporting) account for ~45% of all employment practices claims. For brokers selling EPL coverage, a client that runs every termination through a structured risk check is a materially better risk — and that's a selling point for both the platform and the policy.
+
+The goal isn't to prevent all terminations — it's to ensure they're **well-documented, legally defensible, and free of obvious red flags** before they happen.
+
+### What It Does
+
+When a manager or HR initiates a separation (voluntary or involuntary), the system runs an automated risk scan across the employee's history on the platform and produces a risk report with a go/no-go recommendation.
+
+### Risk Dimensions Checked
+
+| Dimension | What It Scans | Red Flag Example |
+|-----------|---------------|------------------|
+| **Active ER cases** | Open ER Copilot cases involving this employee | Employee has an open harassment complaint — terminating now looks retaliatory |
+| **Recent IR involvement** | Incidents filed by or about this employee in last 90 days | Employee filed a safety complaint 2 weeks ago — retaliation risk |
+| **FMLA / ADA / Leave status** | Active leave, recent accommodation requests, pending leave requests | Employee is on intermittent FMLA — termination during protected leave |
+| **Protected activity signals** | Recent complaints, whistleblower reports, union activity, EEOC charges | Employee participated in a wage complaint — protected concerted activity |
+| **Documentation completeness** | Performance reviews, PIPs, written warnings, coaching notes in the system | No documented performance issues — "at-will" won't save you in front of a jury |
+| **Tenure & timing** | Length of service, proximity to vesting/benefits milestones, recent promotion/raise | 19-year employee terminated 6 months before pension vesting |
+| **Consistency check** | Similar situations with other employees — were they treated the same? | Last 3 employees who did the same thing got warnings, this one is being fired |
+| **Manager risk profile** | Manager's ER case rate, IR rate, turnover rate vs. peers | This manager has 4x the termination rate of peer managers |
+
+### Output: Pre-Termination Risk Report
+
+- **Risk score** (low / moderate / high / critical) — same band system as company risk assessment
+- **Flag summary** — each dimension gets a green/yellow/red status with explanation
+- **Recommended actions before proceeding** — e.g., "Consult employment counsel," "Complete PIP documentation," "Wait until FMLA leave concludes"
+- **AI narrative** — Gemini-generated plain-language summary of the risk posture, suitable for sharing with in-house counsel or the broker
+
+### Workflow Integration
+
+1. **Trigger**: HR clicks "Initiate Separation" on an employee profile (new button)
+2. **Scan**: System runs the 8-dimension check automatically (async, ~5-10 seconds)
+3. **Review**: HR sees the risk report with flags and recommendations
+4. **Decision gate**:
+   - **Low risk**: Proceed with standard offboarding flow
+   - **Moderate risk**: System recommends documentation review; proceed with acknowledgment
+   - **High/Critical risk**: System recommends legal review; requires manager + HR director sign-off before proceeding
+5. **Audit trail**: The risk report, decision, and sign-offs are stored permanently — this becomes evidence of good faith if a claim is filed later
+
+### What Already Exists That This Builds On
+
+- **ER Copilot** — case data for the employee (open cases, history)
+- **IR module** — incident involvement (filed by, filed about, witness)
+- **Leave management** — FMLA/ADA status, active accommodations
+- **Performance reviews** — review history, scores
+- **Employee records** — tenure, department, manager
+- **Risk assessment service** — scoring engine, band system, Gemini narrative generation
+- **Incident consistency analytics** — the consistency check pattern already exists for IR
+
+### Value to the Broker Channel
+
+- **Underwriting**: "100% of our client's terminations go through a pre-separation risk check" is a concrete risk mitigation control
+- **Loss prevention**: Catching a retaliation-risk termination before it happens saves $50K-$500K+ in litigation costs
+- **Renewal justification**: Trend data on pre-termination checks (% flagged, % resolved before proceeding) demonstrates program effectiveness
+- **Differentiation**: Most HR compliance tools don't have this — it's a feature that directly maps to insurance outcomes
 
 ---
 

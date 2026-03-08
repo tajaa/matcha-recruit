@@ -170,6 +170,20 @@ def _normalize_intake_context(raw_value: Any) -> Optional[dict]:
     return _normalize_json_dict(raw_value)
 
 
+def _normalize_json_list(raw_value: Any) -> list:
+    """Normalize JSONB list payloads (asyncpg may return a string)."""
+    if isinstance(raw_value, list):
+        return raw_value
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            return []
+    return []
+
+
 def _build_er_analyzer(model_override: Optional[str] = None):
     """Create ERAnalyzer using shared Gemini credential cascade."""
     from ..services.er_analyzer import ERAnalyzer
@@ -211,9 +225,9 @@ async def create_case(
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO er_cases (case_number, title, description, intake_context, created_by, company_id, category)
-            VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7)
-            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at, category, outcome
+            INSERT INTO er_cases (case_number, title, description, intake_context, created_by, company_id, category, involved_employees)
+            VALUES ($1, $2, $3, $4::jsonb, $5, $6, $7, $8::jsonb)
+            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at, category, outcome, involved_employees
             """,
             case_number,
             case.title,
@@ -222,6 +236,7 @@ async def create_case(
             str(current_user.id),
             company_id,
             case.category,
+            json.dumps([e.model_dump(mode="json") for e in case.involved_employees]) if case.involved_employees else "[]",
         )
 
         # Log audit
@@ -249,6 +264,7 @@ async def create_case(
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
             document_count=0,
+            involved_employees=_normalize_json_list(row.get("involved_employees")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             closed_at=row["closed_at"],
@@ -296,6 +312,7 @@ async def list_cases(
                 created_by=row["created_by"],
                 assigned_to=row["assigned_to"],
                 document_count=row["document_count"],
+                involved_employees=_normalize_json_list(row.get("involved_employees")),
                 created_at=row["created_at"],
                 updated_at=row["updated_at"],
                 closed_at=row["closed_at"],
@@ -365,6 +382,62 @@ async def get_case_metrics(
         }
 
 
+@router.get("/by-employee/{employee_id}", response_model=ERCaseListResponse)
+async def get_cases_by_employee(
+    employee_id: UUID,
+    status: Optional[ERCaseStatus] = None,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get all ER cases involving a specific employee."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return ERCaseListResponse(cases=[], total=0)
+
+    is_admin = current_user.role == "admin"
+    async with get_connection() as conn:
+        company_filter = "(c.company_id = $1 OR c.company_id IS NULL)" if is_admin else "c.company_id = $1"
+        containment = json.dumps([{"employee_id": str(employee_id)}])
+
+        base_query = f"""
+            SELECT c.*, COUNT(d.id) as document_count
+            FROM er_cases c
+            LEFT JOIN er_case_documents d ON c.id = d.case_id
+            WHERE {company_filter}
+              AND c.involved_employees @> $2::jsonb
+        """
+
+        if status:
+            query = base_query + " AND c.status = $3 GROUP BY c.id ORDER BY c.updated_at DESC"
+            rows = await conn.fetch(query, company_id, containment, status)
+        else:
+            query = base_query + " GROUP BY c.id ORDER BY c.updated_at DESC"
+            rows = await conn.fetch(query, company_id, containment)
+
+        cases = [
+            ERCaseResponse(
+                id=row["id"],
+                case_number=row["case_number"],
+                title=row["title"],
+                description=row["description"],
+                intake_context=_normalize_intake_context(row["intake_context"]),
+                status=row["status"],
+                category=row.get("category"),
+                outcome=row.get("outcome"),
+                company_id=row["company_id"],
+                created_by=row["created_by"],
+                assigned_to=row["assigned_to"],
+                document_count=row["document_count"],
+                involved_employees=_normalize_json_list(row.get("involved_employees")),
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+                closed_at=row["closed_at"],
+            )
+            for row in rows
+        ]
+
+        return ERCaseListResponse(cases=cases, total=len(cases))
+
+
 @router.get("/{case_id}", response_model=ERCaseResponse)
 async def get_case(
     case_id: UUID,
@@ -406,6 +479,7 @@ async def get_case(
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
             document_count=row["document_count"],
+            involved_employees=_normalize_json_list(row.get("involved_employees")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             closed_at=row["closed_at"],
@@ -471,6 +545,11 @@ async def update_case(
             params.append(case.outcome)
             param_count += 1
 
+        if case.involved_employees is not None:
+            updates.append(f"involved_employees = ${param_count}::jsonb")
+            params.append(json.dumps([e.model_dump(mode="json") for e in case.involved_employees]))
+            param_count += 1
+
         if not updates:
             raise HTTPException(status_code=400, detail="No updates provided")
 
@@ -484,7 +563,7 @@ async def update_case(
             UPDATE er_cases
             SET {', '.join(updates)}
             WHERE id = ${param_count - 1} AND {company_filter}
-            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at, category, outcome
+            RETURNING id, case_number, title, description, intake_context, status, company_id, created_by, assigned_to, created_at, updated_at, closed_at, category, outcome, involved_employees
         """
 
         row = await conn.fetchrow(query, *params)
@@ -506,7 +585,7 @@ async def update_case(
             "case_updated",
             "case",
             str(case_id),
-            case.model_dump(exclude_none=True),
+            case.model_dump(mode="json", exclude_none=True),
             request.client.host if request.client else None,
         )
 
@@ -523,6 +602,7 @@ async def update_case(
             created_by=row["created_by"],
             assigned_to=row["assigned_to"],
             document_count=doc_count or 0,
+            involved_employees=_normalize_json_list(row.get("involved_employees")),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             closed_at=row["closed_at"],

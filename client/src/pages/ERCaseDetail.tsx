@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { Button, FileUpload } from '../components';
-import { erCopilot } from '../api/client';
+import { erCopilot, employees as employeesAPI } from '../api/client';
 import { useIsLightMode } from '../hooks/useIsLightMode';
 import type {
   ERCase,
@@ -12,6 +12,7 @@ import type {
   ERDocument,
   ERDocumentType,
   ERCaseIntakeContext,
+  EREmployeeRole,
   ERGuidanceCard,
   ERGuidancePriority,
   ERSuggestedGuidanceResponse,
@@ -505,6 +506,12 @@ export function ERCaseDetail() {
   // Outcome analysis state (determination panel)
   const [outcomeAnalysis, setOutcomeAnalysis] = useState<OutcomeAnalysisResponse | null>(null);
   const [outcomeLoading, setOutcomeLoading] = useState(false);
+
+  // Involved employees
+  const [companyEmployees, setCompanyEmployees] = useState<{id: string; first_name: string; last_name: string}[]>([]);
+  const [editingPeople, setEditingPeople] = useState(false);
+  const [pickerEmployeeId, setPickerEmployeeId] = useState('');
+  const [pickerRole, setPickerRole] = useState<EREmployeeRole>('complainant');
   const [outcomeStatusMsgs, setOutcomeStatusMsgs] = useState<string[]>([]);
   const [outcomeError, setOutcomeError] = useState<string | null>(null);
   const [selectedOutcomeIdx, setSelectedOutcomeIdx] = useState<number | null>(null);
@@ -785,6 +792,10 @@ export function ERCaseDetail() {
   useEffect(() => {
     fetchAnalysis(activeTab);
   }, [activeTab, fetchAnalysis]);
+
+  useEffect(() => {
+    employeesAPI.list('active').then(setCompanyEmployees).catch(() => {});
+  }, []);
 
   // Outcome analysis is loaded on-demand via the "Generate" button — no auto-trigger.
 
@@ -1592,6 +1603,106 @@ export function ERCaseDetail() {
           </div>
         </div>
       </div>
+
+      {/* Involved Employees */}
+      {(erCase.involved_employees?.length > 0 || editingPeople) && (
+        <div className="flex items-center gap-3 flex-wrap mt-3">
+          <span className={`text-[10px] ${t.textMuted} uppercase tracking-widest`}>People</span>
+          {erCase.involved_employees.map((ie) => {
+            const emp = companyEmployees.find((e) => e.id === ie.employee_id);
+            const roleLabel = ie.role === 'complainant' ? 'Complainant' : ie.role === 'respondent' ? 'Respondent' : 'Witness';
+            return (
+              <span
+                key={ie.employee_id}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider ${t.btnPrimary} rounded-xl`}
+              >
+                {emp ? `${emp.first_name} ${emp.last_name}` : ie.employee_id.slice(0, 8)}
+                <span className="opacity-60 font-normal normal-case">({roleLabel})</span>
+                {editingPeople && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const updated = erCase.involved_employees.filter((e) => e.employee_id !== ie.employee_id);
+                      const result = await erCopilot.updateCase(erCase.id, { involved_employees: updated });
+                      setCase(result);
+                    }}
+                    className="hover:opacity-70 ml-0.5"
+                  >
+                    &times;
+                  </button>
+                )}
+              </span>
+            );
+          })}
+          {editingPeople ? (
+            <div className="flex items-center gap-2">
+              <select
+                value={pickerEmployeeId}
+                onChange={(e) => setPickerEmployeeId(e.target.value)}
+                className={`${t.select} text-xs px-2 py-1 focus:outline-none`}
+              >
+                <option value="">Employee...</option>
+                {companyEmployees
+                  .filter((emp) => !erCase.involved_employees.some((ie) => ie.employee_id === emp.id))
+                  .map((emp) => (
+                    <option key={emp.id} value={emp.id}>{emp.first_name} {emp.last_name}</option>
+                  ))}
+              </select>
+              <select
+                value={pickerRole}
+                onChange={(e) => setPickerRole(e.target.value as EREmployeeRole)}
+                className={`${t.select} text-xs px-2 py-1 focus:outline-none`}
+              >
+                <option value="complainant">Complainant</option>
+                <option value="respondent">Respondent</option>
+                <option value="witness">Witness</option>
+              </select>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!pickerEmployeeId) return;
+                  const updated = [...erCase.involved_employees, { employee_id: pickerEmployeeId, role: pickerRole }];
+                  const result = await erCopilot.updateCase(erCase.id, { involved_employees: updated });
+                  setCase(result);
+                  setPickerEmployeeId('');
+                }}
+                disabled={!pickerEmployeeId}
+                className={`text-[10px] ${t.btnGhost} uppercase tracking-wider font-bold disabled:opacity-30`}
+              >
+                + Add
+              </button>
+              <button
+                type="button"
+                onClick={() => setEditingPeople(false)}
+                className={`text-[10px] ${t.textMuted} uppercase tracking-wider`}
+              >
+                Done
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setEditingPeople(true)}
+              className={`text-[10px] ${t.btnGhost} uppercase tracking-wider font-bold`}
+            >
+              Edit
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Add people link when no employees are linked */}
+      {(!erCase.involved_employees || erCase.involved_employees.length === 0) && !editingPeople && companyEmployees.length > 0 && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setEditingPeople(true)}
+            className={`text-[10px] ${t.btnGhost} uppercase tracking-wider font-bold`}
+          >
+            + Link employees to this case
+          </button>
+        </div>
+      )}
 
       {showAssistancePanel && (
         <div className={`${t.assistPanel} p-4 space-y-2`}>

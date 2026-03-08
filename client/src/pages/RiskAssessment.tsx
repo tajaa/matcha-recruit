@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock, Play } from 'lucide-react';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList, AreaChart, Area, LineChart, Line, ReferenceArea } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList, AreaChart, Area, Line, ReferenceArea } from 'recharts';
 import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser, RiskHistoryEntry } from '../types';
 import { riskAssessment, erCopilot, companies as companiesApi, ApiRequestError } from '../api/client';
 import { useAuth } from '../context/AuthContext';

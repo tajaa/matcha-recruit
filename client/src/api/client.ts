@@ -1600,6 +1600,11 @@ export const erCopilot = {
       method: 'DELETE',
     }),
 
+  getCasesByEmployee: (employeeId: string, status?: ERCaseStatus): Promise<ERCaseListResponse> => {
+    const params = status ? `?status=${status}` : '';
+    return request<ERCaseListResponse>(`/er/cases/by-employee/${employeeId}${params}`);
+  },
+
   // Metrics
   getMetrics: (days?: number): Promise<ERCaseMetrics> =>
     request<ERCaseMetrics>(`/er/cases/metrics${days ? `?days=${days}` : ''}`),
@@ -3991,6 +3996,8 @@ export const adminPlatformSettings = {
 };
 
 export const employees = {
+  list: (status?: string): Promise<{ id: string; first_name: string; last_name: string; email: string }[]> =>
+    request(`/employees${status ? `?status=${status}` : ''}`),
   getIncidents: (employeeId: string): Promise<EmployeeIncidentItem[]> =>
     request<EmployeeIncidentItem[]>(`/employees/${employeeId}/incidents`),
   getIncidentCounts: (): Promise<Record<string, number>> =>

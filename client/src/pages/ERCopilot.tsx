@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { erCopilot } from '../api/client';
+import { erCopilot, employees as employeesAPI } from '../api/client';
 import type {
   ERCase,
   ERCaseCategory,
@@ -8,8 +8,10 @@ import type {
   ERCaseIntakeContext,
   ERCaseStatus,
   ERDocumentType,
+  EREmployeeRole,
   ERIntakeImmediateRisk,
   ERIntakeObjective,
+  ERInvolvedEmployee,
 } from '../types';
 import { FileUpload } from '../components';
 import { X, ChevronRight, ArrowLeft } from 'lucide-react';
@@ -137,6 +139,12 @@ const CATEGORY_OPTIONS: { value: ERCaseCategory; label: string }[] = [
   { value: 'other', label: 'Other' },
 ];
 
+const ROLE_OPTIONS: { value: EREmployeeRole; label: string }[] = [
+  { value: 'complainant', label: 'Complainant' },
+  { value: 'respondent', label: 'Respondent' },
+  { value: 'witness', label: 'Witness' },
+];
+
 type CreateStep = 'details' | 'documents_prompt' | 'documents_upload' | 'assistance_prompt' | 'assistance_questions';
 
 const DEFAULT_FORM: ERCaseCreate = {
@@ -249,6 +257,12 @@ export function ERCopilot() {
   const [uploadDocType, setUploadDocType] = useState<ERDocumentType>('transcript');
   const [assistanceData, setAssistanceData] = useState(DEFAULT_ASSISTANCE);
 
+  // Involved employees picker
+  const [companyEmployees, setCompanyEmployees] = useState<{id: string; first_name: string; last_name: string}[]>([]);
+  const [involvedEmployees, setInvolvedEmployees] = useState<ERInvolvedEmployee[]>([]);
+  const [employeePickerValue, setEmployeePickerValue] = useState('');
+  const [employeeRoleValue, setEmployeeRoleValue] = useState<EREmployeeRole>('complainant');
+
   const fetchCases = useCallback(async () => {
     try {
       setLoading(true);
@@ -266,6 +280,10 @@ export function ERCopilot() {
     fetchCases();
   }, [fetchCases]);
 
+  useEffect(() => {
+    employeesAPI.list('active').then(setCompanyEmployees).catch(() => {});
+  }, []);
+
   const resetCreateFlow = () => {
     setShowCreateModal(false);
     setCreateStep('details');
@@ -275,6 +293,9 @@ export function ERCopilot() {
     setFormData(DEFAULT_FORM);
     setUploadDocType('transcript');
     setAssistanceData(DEFAULT_ASSISTANCE);
+    setInvolvedEmployees([]);
+    setEmployeePickerValue('');
+    setEmployeeRoleValue('complainant');
     setCreating(false);
     setUploading(false);
     setSavingAssistance(false);
@@ -303,6 +324,7 @@ export function ERCopilot() {
         title: formData.title.trim(),
         description: formData.description.trim(),
         category: formData.category || undefined,
+        involved_employees: involvedEmployees.length > 0 ? involvedEmployees : undefined,
       });
       setCreatedCaseId(created.id);
       setCreateStep('documents_prompt');
@@ -648,6 +670,77 @@ export function ERCopilot() {
                       ))}
                     </select>
                   </div>
+
+                  {companyEmployees.length > 0 && (
+                    <div>
+                      <label className={`block ${t.label} mb-2`}>Involved Employees</label>
+                      <div className="flex gap-2 items-center">
+                        <select
+                          value={employeePickerValue}
+                          onChange={(e) => setEmployeePickerValue(e.target.value)}
+                          className={`flex-1 ${t.select} text-sm px-3 py-2.5 focus:outline-none`}
+                        >
+                          <option value="">Select employee...</option>
+                          {companyEmployees
+                            .filter((emp) => !involvedEmployees.some((ie) => ie.employee_id === emp.id))
+                            .map((emp) => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.first_name} {emp.last_name}
+                              </option>
+                            ))}
+                        </select>
+                        <select
+                          value={employeeRoleValue}
+                          onChange={(e) => setEmployeeRoleValue(e.target.value as EREmployeeRole)}
+                          className={`${t.select} text-sm px-3 py-2.5 focus:outline-none`}
+                        >
+                          {ROLE_OPTIONS.map(opt => (
+                            <option key={opt.value} value={opt.value}>{opt.label}</option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (employeePickerValue && !involvedEmployees.some((ie) => ie.employee_id === employeePickerValue)) {
+                              setInvolvedEmployees([...involvedEmployees, { employee_id: employeePickerValue, role: employeeRoleValue }]);
+                              setEmployeePickerValue('');
+                            }
+                          }}
+                          disabled={!employeePickerValue}
+                          className={`text-[10px] ${t.btnGhost} uppercase tracking-wider font-bold disabled:opacity-30 whitespace-nowrap`}
+                        >
+                          + Add
+                        </button>
+                      </div>
+                      {involvedEmployees.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          {involvedEmployees.map((ie) => {
+                            const emp = companyEmployees.find((e) => e.id === ie.employee_id);
+                            const roleLabel = ROLE_OPTIONS.find((r) => r.value === ie.role)?.label || ie.role;
+                            return (
+                              <span
+                                key={ie.employee_id}
+                                className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider ${t.btnPrimary} rounded-xl`}
+                              >
+                                {emp ? `${emp.first_name} ${emp.last_name}` : ie.employee_id}
+                                <span className="opacity-60 font-normal normal-case">({roleLabel})</span>
+                                <button
+                                  type="button"
+                                  onClick={() => setInvolvedEmployees(involvedEmployees.filter((e) => e.employee_id !== ie.employee_id))}
+                                  className="hover:opacity-70 ml-0.5"
+                                >
+                                  &times;
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div className={`text-[10px] ${t.textMuted} mt-1 uppercase tracking-wide`}>
+                        Link employees involved in this case with their role.
+                      </div>
+                    </div>
+                  )}
                 </>
               )}
 
