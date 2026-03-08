@@ -754,37 +754,42 @@ async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, pa
             )
             docs_html = f"<h2>Documents ({len(doc_rows)})</h2><table><tr><th>Filename</th><th>Type</th><th>Size</th><th>Uploaded</th></tr>{rows_html}</table>"
 
+            # Fetch all S3 files concurrently
+            async def _fetch(path: str) -> bytes | None:
+                try:
+                    return await storage.download_file(path)
+                except Exception as exc:
+                    logger.warning("Could not fetch attachment %s: %s", path, exc)
+                    return None
+
+            fetch_rows = [r for r in doc_rows if r["file_path"] and not any((r["mime_type"] or "").lower().startswith(s) for s in SKIP_MIMES)]
+            fetched = await asyncio.gather(*[_fetch(r["file_path"]) for r in fetch_rows])
+            fetch_map = {r["file_path"]: data for r, data in zip(fetch_rows, fetched)}
+
             for r in doc_rows:
                 mime = (r["mime_type"] or "").lower()
                 fname = r["filename"] or ""
                 ext = os.path.splitext(fname)[1].lower()
 
-                # Skip video/audio
                 if any(mime.startswith(s) for s in SKIP_MIMES):
                     continue
 
-                # Images: download and embed as base64
-                if mime in IMAGE_MIMES and r["file_path"]:
-                    try:
-                        img_bytes = await storage.download_file(r["file_path"])
-                        b64 = base64.b64encode(img_bytes).decode("ascii")
-                        docs_html += (
-                            f'<h3>{esc(fname)}</h3>'
-                            f'<img src="data:{mime};base64,{b64}" '
-                            f'style="max-width:100%;max-height:600px;margin:8px 0;" />'
-                        )
-                    except Exception as img_exc:
-                        logger.warning("Could not embed image %s in export: %s", fname, img_exc)
+                file_data = fetch_map.get(r["file_path"]) if r["file_path"] else None
+
+                # Images: embed as base64
+                if mime in IMAGE_MIMES and file_data:
+                    b64 = base64.b64encode(file_data).decode("ascii")
+                    docs_html += (
+                        f'<h3>{esc(fname)}</h3>'
+                        f'<img src="data:{mime};base64,{b64}" '
+                        f'style="max-width:100%;max-height:600px;margin:8px 0;" />'
+                    )
                     continue
 
-                # PDF attachments: append original pages (preserves formatting)
-                if ext == ".pdf" and r["file_path"]:
-                    try:
-                        pdf_attachment = await storage.download_file(r["file_path"])
-                        attachment_pdfs.append(pdf_attachment)
-                        docs_html += f'<h3>{esc(fname)}</h3><p style="color:#666;font-size:10px;">(Original PDF attached at end of export)</p>'
-                    except Exception as pdf_exc:
-                        logger.warning("Could not fetch PDF attachment %s for export: %s", fname, pdf_exc)
+                # PDF attachments: append original pages
+                if ext == ".pdf" and file_data:
+                    attachment_pdfs.append(file_data)
+                    docs_html += f'<h3>{esc(fname)}</h3><p style="color:#666;font-size:10px;">(Original PDF attached at end of export)</p>'
                     continue
 
                 # Other text-extractable files: include extracted text
