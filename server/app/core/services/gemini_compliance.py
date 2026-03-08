@@ -186,6 +186,11 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
     else:
         normalized["rate_type"] = None
 
+    rwp = normalized.get("requires_written_policy")
+    if isinstance(rwp, str):
+        rwp = rwp.strip().lower() not in ("false", "0", "no", "")
+    normalized["requires_written_policy"] = bool(rwp) if rwp is not None else None
+
     return normalized
 
 
@@ -361,6 +366,8 @@ If no specific scheduling/reporting-time law applies, explicitly say so.""",
 If there is no distinct rule beyond federal/state baseline, still return one state-level requirement that explicitly says no additional jurisdiction-specific rule applies.
 Do NOT return an empty requirements list.
 
+For each requirement, determine whether the statute explicitly requires the employer to include this policy in a written employee handbook or written notice. Set "requires_written_policy" to true only if written disclosure is legally mandated. If the obligation is satisfied by a workplace poster, verbal notice, or operational compliance alone, set it to false.
+
 Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
 
 Respond with JSON:
@@ -377,7 +384,8 @@ Respond with JSON:
       "numeric_value": <float or null>,
       "effective_date": "YYYY-MM-DD" or null,
       "source_url": "https://...",
-      "source_name": "Source Name"
+      "source_name": "Source Name",
+      "requires_written_policy": true | false
     }}
   ]
 }}

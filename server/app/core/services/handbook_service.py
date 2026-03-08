@@ -841,6 +841,60 @@ def _requirement_to_prose(req: dict[str, Any]) -> str:
     return f"{value}."
 
 
+# Categories where higher numeric_value = more employee-friendly
+_NUMERIC_GENEROUS_CATEGORIES = {"minimum_wage"}
+
+# Jurisdiction level priority: more local = generally more generous
+_LEVEL_PRIORITY = {"city": 3, "county": 2, "state": 1}
+
+
+def _apply_most_generous_per_category(requirements: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """For each (category, rate_type) group with entries at multiple jurisdiction levels,
+    keep only the most employee-friendly level. Preserves all entries at the winning level
+    (e.g. multiple city requirements for different selected cities)."""
+    from collections import defaultdict
+
+    groups: dict[tuple, list[dict[str, Any]]] = defaultdict(list)
+    ungrouped: list[dict[str, Any]] = []
+
+    for req in requirements:
+        category = (req.get("category") or "").strip().lower()
+        rate_type = req.get("rate_type")
+        if not category:
+            ungrouped.append(req)
+            continue
+        groups[(category, rate_type)].append(req)
+
+    result: list[dict[str, Any]] = list(ungrouped)
+    for (category, _rate_type), reqs in groups.items():
+        # Check how many distinct jurisdiction levels exist
+        levels = {(r.get("jurisdiction_level") or "").lower() for r in reqs}
+        if len(levels) <= 1:
+            # All at the same level (e.g. multiple cities) — keep all
+            result.extend(reqs)
+            continue
+
+        if category in _NUMERIC_GENEROUS_CATEGORIES:
+            # Pick the entry with the highest numeric_value, then keep all at that level
+            best = max(
+                reqs,
+                key=lambda r: (r.get("numeric_value") or 0, _LEVEL_PRIORITY.get((r.get("jurisdiction_level") or "").lower(), 0)),
+            )
+            best_level = (best.get("jurisdiction_level") or "").lower()
+            result.extend(r for r in reqs if (r.get("jurisdiction_level") or "").lower() == best_level)
+        else:
+            # Pick the most local jurisdiction level, keep all at that level
+            best_priority = max(
+                _LEVEL_PRIORITY.get((r.get("jurisdiction_level") or "").lower(), 0) for r in reqs
+            )
+            result.extend(
+                r for r in reqs
+                if _LEVEL_PRIORITY.get((r.get("jurisdiction_level") or "").lower(), 0) == best_priority
+            )
+
+    return result
+
+
 def _select_representative_requirements(requirements: list[dict[str, Any]], limit: int = 5) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
     seen: set[tuple[Any, ...]] = set()
@@ -940,7 +994,7 @@ def _build_state_addendum_content(
     # ── intro ────────────────────────────────────────────────────────
     paragraphs: list[str] = [
         f"This addendum applies to employees working in {state_name}. "
-        "Where state and local rules differ, the rule that provides greater employee protection controls.",
+        "Where state and local rules differ, this addendum reflects the provision most beneficial to the employee.",
     ]
 
     if selected_cities:
@@ -1208,9 +1262,45 @@ def _translate_handbook_db_error(exc: Exception) -> Optional[str]:
     return None
 
 
+async def derive_handbook_scopes_from_employees(conn, company_id: str) -> list[dict]:
+    """Derive handbook scopes from active employee work locations."""
+    rows = await conn.fetch(
+        """
+        SELECT DISTINCT
+            COALESCE(bl.state, e.work_state) AS state,
+            bl.city AS city,
+            e.work_location_id AS location_id
+        FROM employees e
+        LEFT JOIN business_locations bl ON bl.id = e.work_location_id
+        WHERE e.org_id = $1
+          AND e.termination_date IS NULL
+          AND COALESCE(bl.state, e.work_state) IS NOT NULL
+        ORDER BY state, city NULLS LAST
+        """,
+        company_id,
+    )
+    scopes: list[dict] = []
+    seen: set[tuple] = set()
+    for row in rows:
+        state = (row["state"] or "").strip().upper()
+        city = (row["city"] or "").strip() if row["city"] else None
+        key = (state, city)
+        if not state or key in seen:
+            continue
+        seen.add(key)
+        scopes.append({
+            "state": state,
+            "city": city,
+            "zipcode": None,
+            "location_id": row["location_id"],
+        })
+    return scopes
+
+
 async def _fetch_state_requirements(
     conn,
     scopes: list[dict[str, Any]],
+    written_policy_only: bool = False,
 ) -> dict[str, list[dict[str, Any]]]:
     normalized_states, _, selected_city_tokens_by_state = _collect_state_city_scope(scopes)
     if not normalized_states:
@@ -1231,6 +1321,7 @@ async def _fetch_state_requirements(
                 jr.source_url,
                 jr.source_name,
                 jr.rate_type,
+                jr.numeric_value,
                 jr.updated_at
             FROM jurisdiction_requirements jr
             JOIN jurisdictions j ON j.id = jr.jurisdiction_id
@@ -1241,6 +1332,7 @@ async def _fetch_state_requirements(
                 OR COALESCE(jr.description, '') ILIKE ANY($3::text[])
               )
               AND (jr.expiration_date IS NULL OR jr.expiration_date >= CURRENT_DATE)
+              AND ($4::boolean IS FALSE OR jr.requires_written_policy IS NOT false)
             ORDER BY
                 j.state,
                 CASE jr.jurisdiction_level
@@ -1255,6 +1347,7 @@ async def _fetch_state_requirements(
             normalized_states,
             list(ADDENDUM_CORE_CATEGORIES),
             list(ADDENDUM_KEYWORD_PATTERNS),
+            written_policy_only,
         )
     except Exception:
         return {}
@@ -1292,6 +1385,9 @@ async def _fetch_state_requirements(
         seen_by_state[state].add(dedupe_key)
 
         by_state[state].append(row)
+
+    for state in by_state:
+        by_state[state] = _apply_most_generous_per_category(by_state[state])
 
     return by_state
 
@@ -2460,6 +2556,10 @@ class HandbookService:
         created_by: Optional[str] = None,
     ) -> HandbookDetailResponse:
         normalized_scopes = [_normalize_scope(scope) for scope in data.scopes]
+        if data.auto_scope_from_employees and not normalized_scopes:
+            async with get_connection() as _conn:
+                auto_scopes = await derive_handbook_scopes_from_employees(_conn, company_id)
+            normalized_scopes = [_normalize_scope(HandbookScopeInput(**s)) for s in auto_scopes]
         profile = _normalize_profile(data.profile)
         guided_answers = _sanitize_answer_map(data.guided_answers)
         profile_row: Optional[CompanyHandbookProfileResponse] = None
@@ -2529,6 +2629,7 @@ class HandbookService:
                         state_requirement_map = await _fetch_state_requirements(
                             conn,
                             normalized_scopes,
+                            written_policy_only=True,
                         )
                         sections = _build_template_sections(
                             data.mode,
@@ -3248,7 +3349,7 @@ class HandbookService:
                         json.dumps(normalized_profile, sort_keys=True, default=str).encode()
                     ).hexdigest()
 
-                    requirement_map = await _fetch_state_requirements(conn, scopes)
+                    requirement_map = await _fetch_state_requirements(conn, scopes, written_policy_only=True)
                     current_fingerprint, latest_requirement_update, _ = _build_requirements_fingerprint(
                         requirement_map
                     )

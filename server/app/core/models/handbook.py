@@ -58,13 +58,15 @@ class HandbookCreateRequest(BaseModel):
     file_url: Optional[str] = None
     file_name: Optional[str] = None
     create_from_template: bool = True
+    auto_scope_from_employees: bool = False
 
     @model_validator(mode="after")
     def validate_shape(self):
-        if self.mode == "single_state" and len(self.scopes) != 1:
-            raise ValueError("Single-state handbooks must have exactly one scope")
-        if self.mode == "multi_state" and len(self.scopes) < 2:
-            raise ValueError("Multi-state handbooks must include at least two scopes")
+        if not self.auto_scope_from_employees:
+            if self.mode == "single_state" and len(self.scopes) != 1:
+                raise ValueError("Single-state handbooks must have exactly one scope")
+            if self.mode == "multi_state" and len(self.scopes) < 2:
+                raise ValueError("Multi-state handbooks must include at least two scopes")
         if self.source_type == "upload" and not self.file_url:
             raise ValueError("Uploaded handbooks require file_url")
         return self

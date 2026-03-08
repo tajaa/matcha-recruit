@@ -1047,8 +1047,8 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
-                 effective_date, expiration_date, last_verified_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+                 effective_date, expiration_date, last_verified_at, requires_written_policy)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1061,6 +1061,7 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
                 numeric_value = EXCLUDED.numeric_value,
                 source_url = EXCLUDED.source_url,
                 source_name = EXCLUDED.source_name,
+                requires_written_policy = EXCLUDED.requires_written_policy,
                 effective_date = EXCLUDED.effective_date,
                 expiration_date = EXCLUDED.expiration_date,
                 last_verified_at = NOW(),
@@ -1083,6 +1084,7 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
             req.get("source_name"),
             parse_date(req.get("effective_date")),
             parse_date(req.get("expiration_date")),
+            req.get("requires_written_policy"),
         )
 
 
@@ -1283,8 +1285,8 @@ async def _upsert_jurisdiction_requirements(
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
-                 effective_date, expiration_date, last_verified_at)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW())
+                 effective_date, expiration_date, last_verified_at, requires_written_policy)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1297,6 +1299,7 @@ async def _upsert_jurisdiction_requirements(
                 numeric_value = EXCLUDED.numeric_value,
                 source_url = EXCLUDED.source_url,
                 source_name = EXCLUDED.source_name,
+                requires_written_policy = EXCLUDED.requires_written_policy,
                 effective_date = EXCLUDED.effective_date,
                 expiration_date = EXCLUDED.expiration_date,
                 last_verified_at = NOW(),
@@ -1319,6 +1322,7 @@ async def _upsert_jurisdiction_requirements(
             req.get("source_name"),
             parse_date(req.get("effective_date")),
             parse_date(req.get("expiration_date")),
+            req.get("requires_written_policy"),
         )
 
     # Remove jurisdiction rows not in new result set

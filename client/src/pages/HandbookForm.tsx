@@ -1937,6 +1937,22 @@ export function HandbookForm() {
               );
             })}
           </div>
+          <button
+            type="button"
+            onClick={async () => {
+              try {
+                const scopes = await handbooks.getAutoScopes();
+                if (scopes.length === 0) return;
+                const states = [...new Set(scopes.map((s) => s.state.toUpperCase()))];
+                setSelectedStates(states);
+              } catch {
+                // silently ignore — manual selection still works
+              }
+            }}
+            className={`text-[10px] font-mono ${t.textMuted} underline hover:no-underline`}
+          >
+            Auto-detect from employees
+          </button>
           <p className={`text-[10px] ${t.textMuted} font-mono`}>
             Compliance locations found: {locationsStates.length > 0 ? locationsStates.join(', ') : 'none'}.
           </p>

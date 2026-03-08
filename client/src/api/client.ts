@@ -2929,6 +2929,9 @@ export const handbooks = {
   getProfile: () =>
     request<CompanyHandbookProfile>(`/handbooks/profile`),
 
+  getAutoScopes: () =>
+    request<Array<{ state: string; city: string | null; zipcode: string | null; location_id: string | null }>>(`/handbooks/auto-scopes`),
+
   updateProfile: (data: CompanyHandbookProfile) =>
     request<CompanyHandbookProfile>(`/handbooks/profile`, {
       method: 'PUT',

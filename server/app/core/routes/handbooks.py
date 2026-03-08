@@ -27,7 +27,7 @@ from ..models.handbook import (
     HandbookWizardDraftResponse,
     HandbookWizardDraftUpsertRequest,
 )
-from ..services.handbook_service import GuidedDraftRateLimitError, HandbookService
+from ..services.handbook_service import GuidedDraftRateLimitError, HandbookService, derive_handbook_scopes_from_employees
 from ..services.storage import get_storage
 from ...database import get_connection
 
@@ -52,6 +52,17 @@ async def get_handbook_profile(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
     return await HandbookService.get_or_default_profile(str(company_id))
+
+
+@router.get("/auto-scopes")
+async def get_auto_scopes(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+    async with get_connection() as conn:
+        return await derive_handbook_scopes_from_employees(conn, str(company_id))
 
 
 @router.put("/profile", response_model=CompanyHandbookProfileResponse)
