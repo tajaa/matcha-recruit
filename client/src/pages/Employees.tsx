@@ -383,7 +383,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handl
   return (
     <div
       onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
+      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors py-3 px-4 md:px-6 flex flex-col xl:flex-row xl:items-center gap-4 cursor-pointer`}
     >
       <div className="flex items-center min-w-[240px] flex-1">
         <div className="flex-shrink-0">
@@ -393,7 +393,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handl
         </div>
         <div className="ml-3 min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className={`text-sm font-bold ${t.textMain} truncate`}>
+            <p className={`text-sm font-bold ${isLight ? 'text-zinc-900' : 'text-zinc-50'} truncate`}>
               {employee.first_name} {employee.last_name}
             </p>
           </div>
@@ -401,28 +401,28 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handl
             {employee.job_title || (employee.work_email || employee.email)}
           </p>
         </div>
-        <div className="lg:hidden">
+        <div className="xl:hidden">
           <ChevronRight size={16} className={t.textFaint} />
         </div>
       </div>
 
-      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-6 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-3 lg:border-0 lg:pt-0`}>
-        <div className="lg:text-left lg:w-24">
-          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Department</p>
-          <p className={`text-xs ${t.textDim} truncate`}>{employee.department || '—'}</p>
+      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between xl:justify-end gap-x-4 gap-y-3 xl:gap-6 w-full xl:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-3 xl:border-0 xl:pt-0`}>
+        <div className="xl:text-left xl:w-24">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider xl:hidden mb-0.5`}>Department</p>
+          <p className={`text-xs ${isLight ? 'text-stone-600' : 'text-zinc-300'} truncate`}>{employee.department || '—'}</p>
         </div>
-        <div className="lg:text-left lg:w-28">
-          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Location</p>
-          <p className={`text-[10px] ${t.textDim} font-mono leading-tight`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
+        <div className="xl:text-left xl:w-28">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider xl:hidden mb-0.5`}>Location</p>
+          <p className={`text-[10px] ${isLight ? 'text-stone-600' : 'text-zinc-300'} font-mono leading-tight`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
         </div>
-        <div className="lg:text-left lg:w-20">
-          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Type</p>
+        <div className="xl:text-left xl:w-20">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider xl:hidden mb-0.5`}>Type</p>
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider truncate`}>
             {employee.employment_type?.replace('_', ' ') || '—'}
           </p>
         </div>
-        <div className="lg:text-center lg:w-10">
-          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>IR</p>
+        <div className="xl:text-center xl:w-10">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider xl:hidden mb-0.5`}>IR</p>
           {incidentCount > 0 ? (
             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded ${isLight ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-amber-950/40 text-amber-400 border border-amber-500/30'}`}>
               <AlertTriangle size={10} />
@@ -432,8 +432,8 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handl
             <span className={`text-[10px] ${t.textFaint}`}>—</span>
           )}
         </div>
-        <div data-tour="emp-onboarding-col" className="lg:w-28 flex flex-col lg:items-start lg:justify-center">
-          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Onboarding</p>
+        <div data-tour="emp-onboarding-col" className="xl:w-28 flex flex-col xl:items-start xl:justify-center">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider xl:hidden mb-0.5`}>Onboarding</p>
           {onboardingProgress[employee.id]?.has_onboarding ? (
             <div className="flex items-center gap-2">
               <div className={`w-12 h-1.5 ${isLight ? 'bg-stone-300' : 'bg-zinc-800'} rounded-full overflow-hidden`}>
@@ -452,12 +452,12 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handl
             <span className={`text-[10px] ${t.textFaint} uppercase tracking-wider`}>Not started</span>
           )}
         </div>
-        <div className="col-span-2 sm:col-auto lg:w-48 flex lg:justify-end mt-2 sm:mt-0">
-          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Status</p>
+        <div className="col-span-2 sm:col-auto xl:w-48 flex xl:justify-end mt-2 sm:mt-0">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider xl:hidden mb-0.5`}>Status</p>
           <StatusActionBadge employee={employee} isLight={isLight} handleSendInvite={handleSendInvite} invitingId={invitingId} />
         </div>
-        <div className="hidden lg:flex w-6 justify-end">
-          <ChevronRight size={14} className={`${t.textFaint} group-hover:${t.textDim} transition-colors`} />
+        <div className="hidden xl:flex w-6 justify-end">
+          <ChevronRight size={14} className={`${t.textFaint} group-hover:${isLight ? 'text-stone-600' : 'text-zinc-300'} transition-colors`} />
         </div>
       </div>
     </div>
