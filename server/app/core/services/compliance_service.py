@@ -2540,6 +2540,7 @@ async def ensure_location_for_employee(
     work_city: Optional[str],
     work_state: str,
     background_tasks=None,
+    work_zip: Optional[str] = None,
 ) -> Optional[UUID]:
     """Find or create a business_location for an employee's work address.
 
@@ -2629,13 +2630,16 @@ async def ensure_location_for_employee(
     display_city = work_city.strip() if work_city else ""
 
     # Insert the new location
+    norm_zip = work_zip.strip() if work_zip else ""
     location_id = await conn.fetchval(
         """
         INSERT INTO business_locations
             (company_id, name, address, city, state, county, zipcode, source, coverage_status)
-        VALUES ($1, $2, '', $3, $4, $5, '', $6, $7)
+        VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8)
         ON CONFLICT (company_id, LOWER(city), UPPER(state)) DO UPDATE
-            SET is_active = true, updated_at = NOW()
+            SET is_active = true, updated_at = NOW(),
+                zipcode = CASE WHEN business_locations.zipcode = '' OR business_locations.zipcode IS NULL
+                               THEN EXCLUDED.zipcode ELSE business_locations.zipcode END
         RETURNING id
         """,
         company_id,
@@ -2643,6 +2647,7 @@ async def ensure_location_for_employee(
         display_city,
         norm_state,
         ref_county,
+        norm_zip,
         source,
         coverage_status,
     )

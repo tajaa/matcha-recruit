@@ -18,6 +18,7 @@ export interface NewEmployee {
   pay_classification: string;
   pay_rate: string;
   work_city: string;
+  work_zip: string;
 }
 
 function sanitizeEmailLocalPart(value: string): string {
@@ -56,6 +57,7 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
     pay_classification: '',
     pay_rate: '',
     work_city: '',
+    work_zip: '',
   });
   const [emailEntryMode, setEmailEntryMode] = useState<EmailEntryMode>(googleDomainAvailable ? 'generated' : 'existing');
   const [generatedEmailLocalPart, setGeneratedEmailLocalPart] = useState('');
@@ -78,6 +80,7 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
       pay_classification: '',
       pay_rate: '',
       work_city: '',
+      work_zip: '',
     });
     setEmailEntryMode(googleDomainAvailable ? 'generated' : 'existing');
     setGeneratedEmailLocalPart('');
@@ -102,7 +105,7 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
   const canProceedAddStep2 = emailEntryMode === 'generated'
     ? Boolean(generatedSingleWorkEmail)
     : looksLikeEmail(newEmployee.work_email);
-  const hasSingleLocation = Boolean(newEmployee.work_state);
+  const hasSingleLocation = Boolean(newEmployee.work_state && newEmployee.work_city.trim() && newEmployee.work_zip.trim());
   const canSubmitSingleWizard = canProceedAddStep1 && canProceedAddStep2 && hasSingleLocation;
 
   const handleAddEmployee = async (normalizedGoogleDomain: string) => {
@@ -125,6 +128,12 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
       if (!newEmployee.work_state) {
         throw new Error('Work state is required');
       }
+      if (!newEmployee.work_city.trim()) {
+        throw new Error('Work city is required');
+      }
+      if (!newEmployee.work_zip.trim()) {
+        throw new Error('Work zip code is required');
+      }
 
       const payload = {
         email: resolvedWorkEmail,
@@ -141,6 +150,7 @@ export function useEmployeeForm(googleDomainAvailable: boolean, onSuccess: (empl
         pay_classification: newEmployee.pay_classification || undefined,
         pay_rate: newEmployee.pay_rate ? parseFloat(newEmployee.pay_rate) : undefined,
         work_city: newEmployee.work_city || undefined,
+        work_zip: newEmployee.work_zip || undefined,
       };
       const response = await fetch(`${API_BASE}/employees`, {
         method: 'POST',

@@ -144,6 +144,7 @@ class EmployeeCreateRequest(BaseModel):
     pay_classification: Optional[str] = None
     pay_rate: Optional[Decimal] = None
     work_city: Optional[str] = None
+    work_zip: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
 
@@ -768,11 +769,12 @@ async def create_employee(
         ]
 
         if compensation_fields_available:
-            insert_cols.extend(["pay_classification", "pay_rate", "work_city"])
+            insert_cols.extend(["pay_classification", "pay_rate", "work_city", "work_zip"])
             insert_vals.extend([
                 request.pay_classification,
                 request.pay_rate,
                 request.work_city.strip() if request.work_city else None,
+                request.work_zip.strip() if request.work_zip else None,
             ])
         elif request.pay_classification or request.pay_rate is not None or request.work_city:
             logger.warning(
@@ -807,6 +809,7 @@ async def create_employee(
                 row.get("work_city") if compensation_fields_available else None,
                 row["work_state"],
                 background_tasks,
+                work_zip=row.get("work_zip") if compensation_fields_available else None,
             )
             if location_id and location_id != row.get("work_location_id"):
                 await conn.execute(
@@ -1160,6 +1163,7 @@ async def update_employee(
                 new_work_city,
                 new_work_state,
                 background_tasks,
+                work_zip=row.get("work_zip"),
             )
             if new_location_id and new_location_id != row.get("work_location_id"):
                 await conn.execute(
@@ -1585,12 +1589,14 @@ async def bulk_upload_employees_csv(
 
                 # Auto-derive compliance location from employee address
                 if work_state:
+                    work_zip_val = row_data.get("work_zip", "").strip() if row_data else None
                     loc_id = await ensure_location_for_employee(
                         conn,
                         company_id,
                         work_city,
                         work_state,
                         background_tasks,
+                        work_zip=work_zip_val or None,
                     )
                     if loc_id:
                         await conn.execute(

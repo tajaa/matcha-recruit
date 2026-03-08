@@ -133,6 +133,7 @@ interface Employee {
   pay_classification: string | null;
   pay_rate: number | null;
   work_city: string | null;
+  work_zip: string | null;
   job_title: string | null;
   department: string | null;
   created_at: string;
@@ -150,6 +151,7 @@ interface NewEmployee {
   pay_classification: string;
   pay_rate: string;
   work_city: string;
+  work_zip: string;
   job_title: string;
   department: string;
 }
@@ -172,6 +174,7 @@ interface BatchEmployeeRow {
   pay_classification: string;
   pay_rate: string;
   work_city: string;
+  work_zip: string;
 }
 
 interface BatchCreateError {
@@ -246,6 +249,7 @@ function createBatchRow(defaultStartDate: string): BatchEmployeeRow {
     pay_classification: '',
     pay_rate: '',
     work_city: '',
+    work_zip: '',
   };
 }
 
@@ -519,6 +523,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     pay_classification: '',
     pay_rate: '',
     work_city: '',
+    work_zip: '',
     job_title: '',
     department: '',
   });
@@ -848,6 +853,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         pay_classification: newEmployee.pay_classification || undefined,
         pay_rate: newEmployee.pay_rate ? parseFloat(newEmployee.pay_rate) : undefined,
         work_city: newEmployee.work_city || undefined,
+        work_zip: newEmployee.work_zip || undefined,
         job_title: newEmployee.job_title || undefined,
         department: newEmployee.department || undefined,
       };
@@ -1105,6 +1111,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           pay_classification: row.pay_classification || undefined,
           pay_rate: row.pay_rate ? parseFloat(row.pay_rate) : undefined,
           work_city: row.work_city || undefined,
+          work_zip: row.work_zip || undefined,
         };
 
         try {
@@ -1914,7 +1921,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         </div>
                         <div>
                           <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
-                            City
+                            City <span className="text-red-400">*</span>
                           </label>
                           <input
                             type="text"
@@ -1924,6 +1931,21 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                             }
                             className={`w-full px-3 py-2 ${t.inputCls}`}
                             placeholder="San Francisco"
+                          />
+                        </div>
+                        <div>
+                          <label className={`block text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-2`}>
+                            Zip Code <span className="text-red-400">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={newEmployee.work_zip}
+                            onChange={(e) =>
+                              setNewEmployee({ ...newEmployee, work_zip: e.target.value })
+                            }
+                            className={`w-full px-3 py-2 ${t.inputCls}`}
+                            placeholder="94105"
+                            maxLength={10}
                           />
                         </div>
                       </div>
@@ -2052,8 +2074,8 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         <p>
                           <span className={t.textMain}>Location:</span>{' '}
                           {newEmployee.work_state
-                            ? `${newEmployee.work_city ? `${newEmployee.work_city}, ` : ''}${US_STATES.find(s => s.value === newEmployee.work_state)?.label || newEmployee.work_state}${newEmployee.office_location ? ` (${newEmployee.office_location})` : ''}`
-                            : 'state required'}
+                            ? `${newEmployee.work_city ? `${newEmployee.work_city}, ` : ''}${US_STATES.find(s => s.value === newEmployee.work_state)?.label || newEmployee.work_state}${newEmployee.work_zip ? ` ${newEmployee.work_zip}` : ''}${newEmployee.office_location ? ` (${newEmployee.office_location})` : ''}`
+                            : 'state, city & zip required'}
                         </p>
                       </div>
                     </div>
@@ -2256,6 +2278,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                           <th className="px-2 py-2 text-left">Personal Email</th>
                           <th className="px-2 py-2 text-left">State</th>
                           <th className="px-2 py-2 text-left">City</th>
+                          <th className="px-2 py-2 text-left">Zip</th>
                           <th className="px-2 py-2 text-left">Type</th>
                           <th className="px-2 py-2 text-left">Start</th>
                           {batchEmailMode === 'existing' && <th className="px-2 py-2 text-left">Skip Google</th>}
@@ -2328,6 +2351,16 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                                   onChange={(e) => updateBatchRowField(row.id, 'work_city', e.target.value)}
                                   className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
                                   placeholder="City"
+                                />
+                              </td>
+                              <td className="px-2 py-2">
+                                <input
+                                  type="text"
+                                  value={row.work_zip}
+                                  onChange={(e) => updateBatchRowField(row.id, 'work_zip', e.target.value)}
+                                  className={`w-full px-2 py-1.5 ${t.batchInputCls}`}
+                                  placeholder="Zip"
+                                  maxLength={10}
                                 />
                               </td>
                               <td className="px-2 py-2">

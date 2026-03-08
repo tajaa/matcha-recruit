@@ -20,6 +20,7 @@ export interface BatchEmployeeRow {
   pay_classification: string;
   pay_rate: string;
   work_city: string;
+  work_zip: string;
 }
 
 export interface BatchCreateError {
@@ -71,6 +72,7 @@ function createBatchRow(defaultStartDate: string): BatchEmployeeRow {
     pay_classification: '',
     pay_rate: '',
     work_city: '',
+    work_zip: '',
   };
 }
 
@@ -159,6 +161,12 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
     if (!row.work_state.trim()) {
       return 'Work state is required';
     }
+    if (!row.work_city.trim()) {
+      return 'Work city is required';
+    }
+    if (!row.work_zip.trim()) {
+      return 'Work zip code is required';
+    }
     return null;
   };
 
@@ -227,6 +235,7 @@ export function useBatchWizard(googleDomainAvailable: boolean, normalizedGoogleD
           pay_classification: row.pay_classification || undefined,
           pay_rate: row.pay_rate ? parseFloat(row.pay_rate) : undefined,
           work_city: row.work_city || undefined,
+          work_zip: row.work_zip || undefined,
         };
 
         try {

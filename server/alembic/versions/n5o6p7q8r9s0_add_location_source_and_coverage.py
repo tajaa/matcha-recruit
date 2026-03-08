@@ -41,6 +41,12 @@ def upgrade() -> None:
         "UPDATE business_locations SET coverage_status = 'covered' WHERE coverage_status IS NULL"
     )
 
+    # --- employees: add work_zip column ---
+    op.execute(
+        "ALTER TABLE employees "
+        "ADD COLUMN IF NOT EXISTS work_zip VARCHAR(10)"
+    )
+
     # Prevent duplicate locations for same city+state within a company
     op.execute(
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_bl_company_city_state "
@@ -74,6 +80,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS idx_jcr_status")
     op.execute("DROP TABLE IF EXISTS jurisdiction_coverage_requests")
+    op.execute("ALTER TABLE employees DROP COLUMN IF EXISTS work_zip")
     op.execute("DROP INDEX IF EXISTS idx_bl_company_city_state")
     op.execute(
         "ALTER TABLE business_locations DROP COLUMN IF EXISTS coverage_status"
