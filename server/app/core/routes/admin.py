@@ -26,6 +26,7 @@ from ..services.compliance_service import (
     update_auto_check_settings,
     _jurisdiction_row_to_dict,
     run_compliance_check_background,
+    run_compliance_check_stream,
 )
 from ..services.rate_limiter import get_rate_limiter
 from ..services.auth import hash_password
@@ -5496,3 +5497,92 @@ async def dismiss_jurisdiction_request(
             "processed_at": updated["processed_at"].isoformat() if updated["processed_at"] else None,
             "created_at": updated["created_at"].isoformat() if updated["created_at"] else None,
         }
+
+
+# ─── Research Queue ────────────────────────────────────────────────────────────
+
+@router.get("/research-queue", dependencies=[Depends(require_admin)])
+async def get_research_queue():
+    """List city-level jurisdictions with research status."""
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT
+                j.id AS jurisdiction_id,
+                j.city, j.state, j.county,
+                COALESCE(jrc.cnt, 0) AS repo_count,
+                COALESCE(lc.location_count, 0) AS location_count,
+                COALESCE(lc.company_count, 0) AS company_count,
+                j.created_at
+            FROM jurisdictions j
+            LEFT JOIN LATERAL (
+                SELECT COUNT(*) AS cnt
+                FROM jurisdiction_requirements jr
+                WHERE jr.jurisdiction_id = j.id
+            ) jrc ON true
+            LEFT JOIN LATERAL (
+                SELECT COUNT(*) AS location_count,
+                       COUNT(DISTINCT bl.company_id) AS company_count
+                FROM business_locations bl
+                WHERE bl.jurisdiction_id = j.id
+            ) lc ON true
+            WHERE j.level = 'city'
+            ORDER BY
+                COALESCE(jrc.cnt, 0) ASC,
+                COALESCE(lc.location_count, 0) DESC,
+                j.state, j.city
+        """)
+        return [
+            {
+                "jurisdiction_id": str(r["jurisdiction_id"]),
+                "city": r["city"],
+                "state": r["state"],
+                "county": r["county"],
+                "repo_count": r["repo_count"],
+                "location_count": r["location_count"],
+                "company_count": r["company_count"],
+                "status": "researched" if r["repo_count"] > 0 else "needs_research",
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ]
+
+
+@router.post("/research-queue/{jurisdiction_id}/research", dependencies=[Depends(require_admin)])
+async def research_jurisdiction(jurisdiction_id: UUID):
+    """Trigger Gemini research for a jurisdiction. Returns SSE stream."""
+    async with get_connection() as conn:
+        j = await conn.fetchrow(
+            "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
+            jurisdiction_id,
+        )
+        if not j:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
+
+        loc = await conn.fetchrow(
+            "SELECT id, company_id FROM business_locations WHERE jurisdiction_id = $1 LIMIT 1",
+            jurisdiction_id,
+        )
+        if not loc:
+            raise HTTPException(
+                status_code=400,
+                detail="No locations linked to this jurisdiction yet",
+            )
+
+    async def event_stream():
+        try:
+            async for event in run_compliance_check_stream(
+                loc["id"], loc["company_id"], allow_live_research=True,
+            ):
+                if event.get("type") == "heartbeat":
+                    yield ": heartbeat\n\n"
+                else:
+                    yield f"data: {json.dumps(event)}\n\n"
+        except Exception as e:
+            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )

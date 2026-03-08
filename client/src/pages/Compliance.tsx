@@ -10,10 +10,10 @@ import { adminOverview, api } from '../api/client';
 import type { AvailablePoster, PosterOrder } from '../types';
 import { useAuth } from '../context/AuthContext';
 import {
-    MapPin, Plus, Trash2, Edit2, X,
+    MapPin, Trash2, Edit2, X,
     ChevronDown, AlertTriangle, Bell, CheckCircle,
     ExternalLink, Building2, Loader2, Clock, Calendar,
-    History, Eye, Zap, Info, ShieldCheck
+    History, Eye, Zap, Info, ShieldCheck, Users
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
@@ -647,26 +647,13 @@ export function Compliance() {
                             Return To Handbook
                         </button>
                     )}
-                    <button
-                        data-tour="compliance-add-btn"
-                        onClick={() => {
-                            setFormData(emptyFormData);
-                            setEditingLocation(null);
-                            setJurisdictionSearch('');
-                            setShowAddModal(true);
-                        }}
-                        className={`flex items-center gap-2 px-6 py-2.5 ${t.pageBtnPrimary} text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm shadow-xl`}
-                    >
-                        <Plus size={14} />
-                        Add Location
-                    </button>
                 </div>
             </div>
 
             <LifecycleWizard
               steps={COMPLIANCE_CYCLE_STEPS}
               activeStep={
-                (alerts && alerts.length > 0) ? 3
+                (locations && locations.some(l => (l.unread_alerts_count || 0) > 0)) ? 3
                 : (locations && locations.some(l => (l.requirements_count || 0) > 0)) ? 2
                 : (locations && locations.length > 0) ? 2
                 : 1
@@ -727,14 +714,8 @@ export function Compliance() {
                             </div>
                             <h3 className={`${t.textDim} text-[10px] font-bold uppercase tracking-widest mb-2`}>No Locations Yet</h3>
                             <p className={`${t.textFaint} text-[10px] mb-6 leading-relaxed uppercase tracking-tighter`}>
-                                Locations are automatically created when employees are onboarded. You can also add locations manually.
+                                Locations are automatically created when employees are onboarded with a workplace address.
                             </p>
-                            <button
-                                onClick={() => setShowAddModal(true)}
-                                className={`${t.textMain} text-[10px] font-bold uppercase tracking-[0.2em] underline underline-offset-8 ${t.border}`}
-                            >
-                                Add Location Manually
-                            </button>
                         </div>
                     ) : (
                     <div className="space-y-1.5">
@@ -786,6 +767,10 @@ export function Compliance() {
                                             {location.city}, {location.state} {location.zipcode}
                                         </p>
                                         <div className="flex items-center gap-4 mt-3">
+                                            <span className={`flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] ${t.textMuted}`}>
+                                                <Users size={9} />
+                                                {location.employee_count ?? 0}
+                                            </span>
                                             <span className={`text-[9px] font-bold uppercase tracking-[0.15em] ${t.textMuted}`}>
                                                 {location.requirements_count} Nodes
                                             </span>
@@ -793,6 +778,16 @@ export function Compliance() {
                                                 <span className="text-amber-500 flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] animate-pulse">
                                                     <Bell size={8} />
                                                     {location.unread_alerts_count} Alerts
+                                                </span>
+                                            )}
+                                            {location.data_status === 'needs_research' && (
+                                                <span className="text-[8px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 uppercase tracking-wider font-bold">
+                                                    Needs Research
+                                                </span>
+                                            )}
+                                            {location.data_status === 'available' && (
+                                                <span className="text-[8px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 uppercase tracking-wider font-bold">
+                                                    Ready to Sync
                                                 </span>
                                             )}
                                         </div>

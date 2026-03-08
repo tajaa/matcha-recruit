@@ -3742,25 +3742,56 @@ async def get_location_counts(location_id: UUID) -> dict:
         }
 
 
-async def get_locations(company_id: UUID) -> List[BusinessLocation]:
+async def get_locations(company_id: UUID) -> list[dict]:
+    """Return locations with employee/requirements/alerts counts in a single query."""
     from ...database import get_connection
 
     async with get_connection() as conn:
         rows = await conn.fetch(
             """SELECT bl.*, jr.has_local_ordinance,
-                      COALESCE(ec.cnt, 0) AS employee_count
+                      COALESCE(ec.cnt, 0) AS employee_count,
+                      COALESCE(rc.cnt, 0) AS requirements_count,
+                      COALESCE(ac.cnt, 0) AS unread_alerts_count,
+                      COALESCE(jrc.cnt, 0) AS jurisdiction_repo_count
                FROM business_locations bl
                LEFT JOIN jurisdiction_reference jr
                  ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
                LEFT JOIN LATERAL (
                    SELECT COUNT(*) AS cnt FROM employees e
-                   WHERE e.work_location_id = bl.id AND e.termination_date IS NULL
+                   WHERE e.org_id = bl.company_id
+                     AND LOWER(e.work_city) = LOWER(bl.city)
+                     AND UPPER(e.work_state) = UPPER(bl.state)
+                     AND e.termination_date IS NULL
                ) ec ON true
+               LEFT JOIN LATERAL (
+                   SELECT COUNT(*) AS cnt FROM compliance_requirements cr
+                   WHERE cr.location_id = bl.id
+               ) rc ON true
+               LEFT JOIN LATERAL (
+                   SELECT COUNT(*) AS cnt FROM compliance_alerts ca
+                   WHERE ca.location_id = bl.id AND ca.status = 'unread'
+               ) ac ON true
+               LEFT JOIN LATERAL (
+                   SELECT COUNT(*) AS cnt FROM jurisdiction_requirements jreq
+                   WHERE jreq.jurisdiction_id = bl.jurisdiction_id
+               ) jrc ON true
                WHERE bl.company_id = $1
                ORDER BY bl.created_at DESC""",
             company_id,
         )
-        return [BusinessLocation(**{**dict(row)}) for row in rows]
+        result = []
+        for row in rows:
+            d = dict(row)
+            req_count = d.get("requirements_count", 0)
+            repo_count = d.get("jurisdiction_repo_count", 0)
+            if req_count > 0:
+                d["data_status"] = "synced"
+            elif repo_count > 0:
+                d["data_status"] = "available"
+            else:
+                d["data_status"] = "needs_research"
+            result.append(d)
+        return result
 
 
 async def get_location(

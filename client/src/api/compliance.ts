@@ -19,6 +19,7 @@ export interface BusinessLocation {
     source?: 'manual' | 'employee_derived';
     coverage_status?: 'covered' | 'pending_review';
     employee_count?: number;
+    data_status?: 'synced' | 'available' | 'needs_research';
 }
 
 export interface LocationCreate {

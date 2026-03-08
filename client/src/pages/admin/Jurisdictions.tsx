@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { adminJurisdictions, adminSchedulers, adminPlatformSettings, adminCoverageRequests } from '../../api/client';
+import { adminJurisdictions, adminSchedulers, adminPlatformSettings, adminCoverageRequests, adminResearchQueue } from '../../api/client';
+import type { ResearchQueueItem } from '../../api/client';
 import { CityCombobox } from '../../components/CityCombobox';
 import type {
   Jurisdiction, JurisdictionTotals, JurisdictionDetail, JurisdictionCreate,
@@ -314,7 +315,11 @@ export function Jurisdictions() {
   const [stats, setStats] = useState<SchedulerStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'jurisdictions' | 'activity' | 'jobs' | 'coverage_requests'>('jurisdictions');
+  const [activeTab, setActiveTab] = useState<'jurisdictions' | 'activity' | 'jobs' | 'coverage_requests' | 'research_queue'>('jurisdictions');
+  const [researchQueue, setResearchQueue] = useState<ResearchQueueItem[]>([]);
+  const [researchLoading, setResearchLoading] = useState(false);
+  const [researchingId, setResearchingId] = useState<string | null>(null);
+  const [researchProgress, setResearchProgress] = useState<string | null>(null);
   const [triggering, setTriggering] = useState<string | null>(null);
   const [coverageRequests, setCoverageRequests] = useState<JurisdictionCoverageRequest[]>([]);
   const [coverageLoading, setCoverageLoading] = useState(false);
@@ -390,6 +395,66 @@ export function Jurisdictions() {
       fetchCoverageRequests(coverageFilter);
     }
   }, [activeTab, coverageFilter, fetchCoverageRequests]);
+
+  const fetchResearchQueue = useCallback(async () => {
+    setResearchLoading(true);
+    try {
+      const data = await adminResearchQueue.list();
+      setResearchQueue(data);
+    } catch (err) {
+      console.error('Failed to fetch research queue:', err);
+    } finally {
+      setResearchLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'research_queue') {
+      fetchResearchQueue();
+    }
+  }, [activeTab, fetchResearchQueue]);
+
+  const handleResearch = async (item: ResearchQueueItem) => {
+    setResearchingId(item.jurisdiction_id);
+    setResearchProgress('Starting research...');
+    try {
+      const url = adminResearchQueue.research(item.jurisdiction_id);
+      const token = localStorage.getItem('matcha_access_token');
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error('Research request failed');
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No stream');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const payload = line.slice(6).trim();
+            if (payload === '[DONE]') continue;
+            try {
+              const event = JSON.parse(payload);
+              setResearchProgress(event.message || event.type || 'Processing...');
+            } catch { /* skip non-JSON */ }
+          }
+        }
+      }
+      setResearchProgress('Done!');
+      setTimeout(() => { setResearchingId(null); setResearchProgress(null); }, 1500);
+      fetchResearchQueue();
+    } catch (err) {
+      console.error('Research failed:', err);
+      setResearchProgress('Failed');
+      setTimeout(() => { setResearchingId(null); setResearchProgress(null); }, 2000);
+    }
+  };
 
   useEffect(() => {
     const handlePlatformSettingsUpdate = () => {
@@ -854,8 +919,11 @@ export function Jurisdictions() {
 
   const pendingRequestCount = coverageRequests.filter(r => r.status === 'pending').length;
 
+  const needsResearchCount = researchQueue.filter(r => r.status === 'needs_research').length;
+
   const tabItems: { id: typeof activeTab; label: string; count?: number }[] = [
     { id: 'jurisdictions', label: 'Jurisdictions', count: jurisdictions.length },
+    { id: 'research_queue', label: 'Research Queue', count: needsResearchCount || undefined },
     { id: 'coverage_requests', label: 'Coverage Requests', count: pendingRequestCount || undefined },
     { id: 'activity', label: 'Recent Activity', count: stats?.recent_logs.length },
     { id: 'jobs', label: 'Scheduled Jobs', count: schedulers.length },
@@ -1581,6 +1649,84 @@ export function Jurisdictions() {
                       </button>
                     </div>
                   ))
+                )}
+              </div>
+            )}
+
+            {activeTab === 'research_queue' && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-zinc-500 font-mono uppercase tracking-wider">
+                    Jurisdictions needing Gemini research are shown first
+                  </p>
+                  <button
+                    onClick={fetchResearchQueue}
+                    disabled={researchLoading}
+                    className="px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase font-mono text-zinc-400 border border-zinc-700 hover:text-white hover:border-zinc-500 transition-colors disabled:opacity-50"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {researchLoading ? (
+                  <div className="border border-white/10 bg-zinc-900/30 p-12 text-center text-xs text-zinc-500 font-mono">Loading...</div>
+                ) : researchQueue.length === 0 ? (
+                  <div className="border border-white/10 bg-zinc-900/30 p-12 text-center text-xs text-zinc-500 font-mono">No jurisdictions found.</div>
+                ) : (
+                  <div className="border border-white/10 bg-zinc-900/30 overflow-hidden">
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="border-b border-white/10">
+                          <th className="px-4 py-3 text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">City</th>
+                          <th className="px-4 py-3 text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">State</th>
+                          <th className="px-4 py-3 text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">County</th>
+                          <th className="px-4 py-3 text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">Repo Data</th>
+                          <th className="px-4 py-3 text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">Locations</th>
+                          <th className="px-4 py-3 text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">Status</th>
+                          <th className="px-4 py-3 text-[9px] font-bold uppercase tracking-[0.2em] text-zinc-500">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {researchQueue.map(item => (
+                          <tr key={item.jurisdiction_id} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
+                            <td className="px-4 py-3 text-xs text-white font-medium">{item.city}</td>
+                            <td className="px-4 py-3 text-xs text-zinc-400 font-mono">{item.state}</td>
+                            <td className="px-4 py-3 text-xs text-zinc-500">{item.county || '—'}</td>
+                            <td className="px-4 py-3 text-xs font-mono text-zinc-400">{item.repo_count}</td>
+                            <td className="px-4 py-3 text-xs font-mono text-zinc-400">
+                              {item.location_count} <span className="text-zinc-600">({item.company_count} co.)</span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <span className={`text-[9px] px-1.5 py-0.5 uppercase tracking-wider font-bold border ${
+                                item.status === 'researched'
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                  : 'bg-red-500/10 text-red-400 border-red-500/20'
+                              }`}>
+                                {item.status === 'researched' ? 'Researched' : 'Needs Research'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              {researchingId === item.jurisdiction_id ? (
+                                <span className="text-[10px] text-amber-400 font-mono animate-pulse">
+                                  {researchProgress}
+                                </span>
+                              ) : item.status === 'needs_research' ? (
+                                <button
+                                  onClick={() => handleResearch(item)}
+                                  disabled={researchingId !== null}
+                                  className="px-3 py-1 text-[10px] tracking-[0.15em] uppercase font-mono text-blue-300 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 transition-colors disabled:opacity-50"
+                                >
+                                  Research
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-zinc-600 font-mono">Up to date</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             )}

@@ -162,22 +162,27 @@ async def check_location_compliance_endpoint(
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
 
-    # Enable live research when repository coverage is missing/partial.
-    async with get_connection() as conn:
-        rows = await conn.fetch(
-            """
-            SELECT r.category
-            FROM business_locations bl
-            LEFT JOIN jurisdiction_requirements r ON r.jurisdiction_id = bl.jurisdiction_id
-            WHERE bl.id = $1
-            """,
-            loc_uuid,
-        )
-    repository_requirements = [
-        {"category": row["category"]} for row in rows if row["category"]
-    ]
-    missing_categories = _missing_required_categories(repository_requirements)
-    allow_live = len(missing_categories) > 0
+    # Only admin can trigger live Gemini research (Tier 3).
+    # Clients can only sync from existing repository data.
+    is_admin = current_user.get("role") == "admin"
+
+    allow_live = False
+    if is_admin:
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT r.category
+                FROM business_locations bl
+                LEFT JOIN jurisdiction_requirements r ON r.jurisdiction_id = bl.jurisdiction_id
+                WHERE bl.id = $1
+                """,
+                loc_uuid,
+            )
+        repository_requirements = [
+            {"category": row["category"]} for row in rows if row["category"]
+        ]
+        missing_categories = _missing_required_categories(repository_requirements)
+        allow_live = len(missing_categories) > 0
 
     async def event_stream():
         try:
@@ -211,34 +216,35 @@ async def get_locations_endpoint(
         return []
 
     locations = await get_locations(company_id)
-    from ..services.compliance_service import get_location_counts
 
     result = []
     for loc in locations:
-        counts = await get_location_counts(loc.id)
+        next_check = loc.get("next_auto_check")
+        last_check = loc.get("last_compliance_check")
+        created = loc.get("created_at")
         result.append(
             {
-                "id": str(loc.id),
-                "company_id": str(loc.company_id),
-                "name": loc.name,
-                "address": loc.address,
-                "city": loc.city,
-                "state": loc.state,
-                "county": loc.county,
-                "zipcode": loc.zipcode,
-                "is_active": loc.is_active,
-                "auto_check_enabled": loc.auto_check_enabled,
-                "auto_check_interval_days": loc.auto_check_interval_days,
-                "next_auto_check": loc.next_auto_check.isoformat()
-                if loc.next_auto_check
-                else None,
-                "last_compliance_check": loc.last_compliance_check.isoformat()
-                if loc.last_compliance_check
-                else None,
-                "created_at": loc.created_at.isoformat(),
-                "has_local_ordinance": loc.has_local_ordinance,
-                "requirements_count": counts["requirements_count"],
-                "unread_alerts_count": counts["unread_alerts_count"],
+                "id": str(loc["id"]),
+                "company_id": str(loc["company_id"]),
+                "name": loc.get("name"),
+                "address": loc.get("address"),
+                "city": loc["city"],
+                "state": loc["state"],
+                "county": loc.get("county"),
+                "zipcode": loc.get("zipcode", ""),
+                "is_active": loc.get("is_active", True),
+                "auto_check_enabled": loc.get("auto_check_enabled", True),
+                "auto_check_interval_days": loc.get("auto_check_interval_days", 7),
+                "next_auto_check": next_check.isoformat() if next_check else None,
+                "last_compliance_check": last_check.isoformat() if last_check else None,
+                "created_at": created.isoformat() if created else None,
+                "has_local_ordinance": loc.get("has_local_ordinance"),
+                "source": loc.get("source", "manual"),
+                "coverage_status": loc.get("coverage_status", "covered"),
+                "employee_count": loc.get("employee_count", 0),
+                "requirements_count": loc.get("requirements_count", 0),
+                "unread_alerts_count": loc.get("unread_alerts_count", 0),
+                "data_status": loc.get("data_status", "needs_research"),
             }
         )
     return result

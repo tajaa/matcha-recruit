@@ -3,6 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { BusinessLocation, LocationCreate } from '../../api/compliance';
 import { complianceAPI } from '../../api/compliance';
 
+const ONE_HOUR = 1000 * 60 * 60;
+
 export function useCompliance(companyId: string | null, selectedLocationId: string | null, isAdmin = false) {
   const queryClient = useQueryClient();
   const [showAddModal, setShowAddModal] = useState(false);
@@ -27,40 +29,53 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
   const [useManualEntry, setUseManualEntry] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
 
-  // Query hooks for data fetching
+  // --- Card-level data: fetched on mount ---
   const { data: locations, isLoading: loadingLocations } = useQuery({
     queryKey: ['compliance-locations', companyId],
     queryFn: () => complianceAPI.getLocations(companyId || undefined),
     enabled: !isAdmin || !!companyId,
   });
 
+  // --- Detail data: fetched only when a location is selected, cached 1hr ---
   const { data: requirements, isLoading: loadingRequirements } = useQuery({
     queryKey: ['compliance-requirements', selectedLocationId, companyId],
-    queryFn: () => selectedLocationId ? complianceAPI.getRequirements(selectedLocationId, undefined, companyId || undefined) : Promise.resolve([]),
+    queryFn: () => complianceAPI.getRequirements(selectedLocationId!, undefined, companyId || undefined),
     enabled: !!selectedLocationId,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_HOUR,
   });
 
   const { data: alerts, isLoading: loadingAlerts } = useQuery({
-    queryKey: ['compliance-alerts', companyId],
-    queryFn: () => complianceAPI.getAlerts(undefined, companyId || undefined),
-    enabled: !isAdmin || !!companyId,
+    queryKey: ['compliance-alerts', selectedLocationId, companyId],
+    queryFn: () => complianceAPI.getAlerts(selectedLocationId || undefined, companyId || undefined),
+    enabled: !!selectedLocationId,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_HOUR,
   });
 
   const { data: upcomingLegislation } = useQuery({
     queryKey: ['compliance-upcoming', selectedLocationId, companyId],
-    queryFn: () => selectedLocationId ? complianceAPI.getUpcomingLegislation(selectedLocationId, companyId || undefined) : Promise.resolve([]),
+    queryFn: () => complianceAPI.getUpcomingLegislation(selectedLocationId!, companyId || undefined),
     enabled: !!selectedLocationId,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_HOUR,
   });
 
   const { data: checkLog } = useQuery({
     queryKey: ['compliance-check-log', selectedLocationId, companyId],
-    queryFn: () => selectedLocationId ? complianceAPI.getCheckLog(selectedLocationId, 20, companyId || undefined) : Promise.resolve([]),
+    queryFn: () => complianceAPI.getCheckLog(selectedLocationId!, 20, companyId || undefined),
     enabled: !!selectedLocationId,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_HOUR,
   });
 
+  // Jurisdictions: only needed when add modal is open
   const { data: jurisdictions } = useQuery({
     queryKey: ['compliance-jurisdictions'],
     queryFn: complianceAPI.getJurisdictions,
+    enabled: showAddModal,
+    staleTime: ONE_HOUR,
+    gcTime: ONE_HOUR,
   });
 
   // Mutations
@@ -114,7 +129,8 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
   const markAlertReadMutation = useMutation({
     mutationFn: (id: string) => complianceAPI.markAlertRead(id, companyId || undefined),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', selectedLocationId, companyId] });
+      queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
     },
     onError: () => setMutationError('Failed to acknowledge alert'),
@@ -123,7 +139,8 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
   const dismissAlertMutation = useMutation({
     mutationFn: (id: string) => complianceAPI.dismissAlert(id, companyId || undefined),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', companyId] });
+      queryClient.invalidateQueries({ queryKey: ['compliance-alerts', selectedLocationId, companyId] });
+      queryClient.invalidateQueries({ queryKey: ['compliance-locations', companyId] });
       queryClient.invalidateQueries({ queryKey: ['compliance-summary'] });
     },
     onError: () => setMutationError('Failed to dismiss alert'),

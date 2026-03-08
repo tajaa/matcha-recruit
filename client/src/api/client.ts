@@ -2574,6 +2574,27 @@ export const adminCoverageRequests = {
     }),
 };
 
+// Research Queue
+export interface ResearchQueueItem {
+  jurisdiction_id: string;
+  city: string;
+  state: string;
+  county: string | null;
+  repo_count: number;
+  location_count: number;
+  company_count: number;
+  status: 'researched' | 'needs_research';
+  created_at: string | null;
+}
+
+export const adminResearchQueue = {
+  list: (): Promise<ResearchQueueItem[]> =>
+    request<ResearchQueueItem[]>('/admin/research-queue'),
+
+  research: (jurisdictionId: string): string =>
+    `${BASE_URL}/admin/research-queue/${jurisdictionId}/research`,
+};
+
 // Jurisdiction Data Overview (repository dashboard)
 export interface JurisdictionDataCitySummary {
   id: string;
