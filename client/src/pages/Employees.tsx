@@ -320,7 +320,7 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
   return (
     <div
       onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors p-6 md:px-10 flex flex-col lg:flex-row lg:items-center gap-8 cursor-pointer`}
+      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
     >
       <div className="flex items-center min-w-0 flex-1">
         <div className="flex-shrink-0">
@@ -343,22 +343,22 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
         </div>
       </div>
 
-      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-6 gap-y-4 lg:gap-10 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-6 lg:border-0 lg:pt-0`}>
-        <div className="lg:text-right lg:w-28">
+      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-4 lg:border-0 lg:pt-0`}>
+        <div className="lg:text-right lg:w-24">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Department</p>
           <p className={`text-xs ${t.textDim} truncate`}>{employee.department || '—'}</p>
         </div>
-        <div className="lg:text-right lg:w-32">
+        <div className="lg:text-right lg:w-28">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Location</p>
-          <p className={`text-xs ${t.textDim} font-mono`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
+          <p className={`text-[10px] ${t.textDim} font-mono leading-tight`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
         </div>
-        <div className="lg:text-right lg:w-24">
+        <div className="lg:text-right lg:w-20">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Type</p>
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider truncate`}>
             {employee.employment_type?.replace('_', ' ') || '—'}
           </p>
         </div>
-        <div className="lg:text-right lg:w-16">
+        <div className="lg:text-right lg:w-12">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>IR</p>
           {incidentCount > 0 ? (
             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded ${isLight ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-amber-950/40 text-amber-400 border border-amber-500/30'}`}>
@@ -369,11 +369,11 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
             <span className={`text-[10px] ${t.textFaint}`}>—</span>
           )}
         </div>
-        <div data-tour="emp-onboarding-col" className="lg:w-36 flex flex-col lg:items-end lg:justify-end">
+        <div data-tour="emp-onboarding-col" className="lg:w-32 flex flex-col lg:items-end lg:justify-end">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Onboarding</p>
           {onboardingProgress[employee.id]?.has_onboarding ? (
             <div className="flex items-center gap-2">
-              <div className={`w-16 h-1.5 ${isLight ? 'bg-stone-300' : 'bg-zinc-800'} rounded-full overflow-hidden`}>
+              <div className={`w-12 h-1.5 ${isLight ? 'bg-stone-300' : 'bg-zinc-800'} rounded-full overflow-hidden`}>
                 <div
                   className="h-full bg-emerald-500 rounded-full transition-all"
                   style={{
@@ -389,17 +389,17 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
             <span className={`text-[10px] ${t.textFaint} uppercase tracking-wider`}>Not started</span>
           )}
         </div>
-        <div className="flex flex-col lg:items-end lg:justify-end lg:w-32">
+        <div className="flex flex-col lg:items-end lg:justify-end lg:w-20">
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Status</p>
           {getStatusBadge(employee)}
         </div>
-        <div className="col-span-2 sm:col-auto lg:w-32 flex lg:justify-end mt-2 sm:mt-0">
+        <div className="col-span-2 sm:col-auto lg:w-28 flex lg:justify-end mt-2 sm:mt-0">
           {!employee.user_id && !employee.termination_date && (
             <button
               data-tour="emp-invite-btn"
               onClick={(e) => { e.stopPropagation(); handleSendInvite(employee.id); }}
               disabled={invitingId === employee.id}
-              className={`flex-1 lg:flex-none inline-flex items-center justify-center px-3 py-1.5 border ${isLight ? 'border-stone-300 text-stone-500 hover:text-zinc-900 hover:bg-stone-50' : 'border-white/10 text-zinc-400 hover:text-white hover:bg-white/5'} text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed`}
+              className={`flex-1 lg:flex-none inline-flex items-center justify-center px-2 py-1 border ${isLight ? 'border-stone-300 text-stone-500 hover:text-zinc-900 hover:bg-stone-50' : 'border-white/10 text-zinc-400 hover:text-white hover:bg-white/5'} text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap`}
             >
               {invitingId === employee.id ? (
                 <span className="animate-pulse">Sending...</span>
@@ -411,8 +411,8 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
             </button>
           )}
         </div>
-        <div className="hidden lg:flex w-8 justify-end">
-          <ChevronRight size={16} className={`${t.textFaint} group-hover:${t.textDim} transition-colors`} />
+        <div className="hidden lg:flex w-6 justify-end">
+          <ChevronRight size={14} className={`${t.textFaint} group-hover:${t.textDim} transition-colors`} />
         </div>
       </div>
     </div>
@@ -940,8 +940,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
       return <span className={`${base} ${active}`}><CheckCircle size={10} /> Active</span>;
     }
     if (employee.invitation_status === 'pending') {
-      const invited = isLight ? 'bg-amber-50 text-amber-700 border border-amber-300' : 'bg-amber-950/40 text-amber-400 border border-amber-500/30';
-      return <span className={`${base} ${invited}`}><Clock size={10} /> Invited</span>;
+      return <span className={`${base} ${neutral}`}><Clock size={10} /> Invited</span>;
     }
     return <span className={`${base} ${muted}`}><Mail size={10} /> Not Invited</span>;
   };
@@ -1541,15 +1540,15 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         <div data-tour="emp-list" className={`${t.cardDark} overflow-hidden shadow-lg`}>
            {/* Table Header */}
            {!groupByLocation && (
-             <div className={`hidden md:flex items-center gap-8 py-5 px-10 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
+             <div className={`hidden md:flex items-center gap-8 py-4 px-6 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
                 <div className="flex-1">Name / Role</div>
-                <div className="w-28 text-right">Department</div>
-                <div className="w-32 text-right">Location</div>
-                <div className="w-24 text-right">Type</div>
-                <div className="w-16 text-right">IR</div>
-                <div className="w-36 text-right">Onboarding</div>
-                <div className="w-32 text-right">Status</div>
-                <div className="w-32"></div>
+                <div className="w-24 text-right">Department</div>
+                <div className="w-28 text-right">Location</div>
+                <div className="w-20 text-right">Type</div>
+                <div className="w-12 text-right">IR</div>
+                <div className="w-32 text-right">Onboarding</div>
+                <div className="w-20 text-right">Status</div>
+                <div className="w-24"></div>
              </div>
            )}
 
