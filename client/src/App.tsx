@@ -58,6 +58,7 @@ const BlogEditor = lazy(() => import('./pages/BlogEditor'));
 const BlogCommentsAdmin = lazy(() => import('./pages/BlogCommentsAdmin'));
 const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.TestBot })));
 const AdminOverview = lazy(() => import('./pages/admin/AdminOverview'));
+const ClientNotifications = lazy(() => import('./pages/ClientNotifications'));
 const AdminNotifications = lazy(() => import('./pages/admin/AdminNotifications'));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
@@ -270,6 +271,15 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']}>
                     <Dashboard />
+                  </ProtectedRoute>
+                }
+              />
+
+              <Route
+                path="notifications"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']}>
+                    <ClientNotifications />
                   </ProtectedRoute>
                 }
               />

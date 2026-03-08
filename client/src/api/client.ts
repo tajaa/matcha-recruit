@@ -2321,7 +2321,29 @@ export interface AdminNotificationsResponse {
 
 export const adminNotifications = {
   get: (limit = 30, offset = 0): Promise<AdminNotificationsResponse> =>
-    request<AdminNotificationsResponse>(`/core/admin/notifications?limit=${limit}&offset=${offset}`),
+    request<AdminNotificationsResponse>(`/admin/notifications?limit=${limit}&offset=${offset}`),
+};
+
+// Client Notifications API
+export interface ClientNotificationItem {
+  id: string;
+  type: 'incident' | 'employee' | 'offer_letter' | 'er_case' | 'handbook' | 'compliance_alert';
+  title: string;
+  subtitle: string | null;
+  severity: string | null;
+  status: string | null;
+  created_at: string;
+  link: string | null;
+}
+
+export interface ClientNotificationsResponse {
+  items: ClientNotificationItem[];
+  total: number;
+}
+
+export const clientNotifications = {
+  get: (limit = 30, offset = 0): Promise<ClientNotificationsResponse> =>
+    request<ClientNotificationsResponse>(`/dashboard/notifications?limit=${limit}&offset=${offset}`),
 };
 
 // Jurisdiction Admin API

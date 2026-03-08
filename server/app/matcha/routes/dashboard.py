@@ -5,7 +5,8 @@ from datetime import datetime, timezone
 from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+import asyncpg
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
 from ...database import get_connection
@@ -240,3 +241,146 @@ def _format_action(action: str, details: dict | None) -> str:
         if title:
             base = f"{base}: {title}"
     return base
+
+
+# ---------------------------------------------------------------------------
+# Client notifications / activity feed
+# ---------------------------------------------------------------------------
+
+
+class ClientNotification(BaseModel):
+    id: str
+    type: str  # "incident", "employee", "offer_letter", "er_case", "handbook", "compliance_alert"
+    title: str
+    subtitle: Optional[str] = None
+    severity: Optional[str] = None
+    status: Optional[str] = None
+    created_at: datetime
+    link: Optional[str] = None
+
+
+class ClientNotificationsResponse(BaseModel):
+    items: list[ClientNotification]
+    total: int
+
+
+_CLIENT_NOTIFICATION_LINK_MAP: dict[str, str] = {
+    "incident": "/app/matcha/ir/{id}",
+    "employee": "/app/matcha/employees/{id}",
+    "offer_letter": "/app/matcha/offer-letters",
+    "er_case": "/app/matcha/er-copilot/{id}",
+    "handbook": "/app/matcha/handbooks/{id}",
+    "compliance_alert": "/app/matcha/compliance",
+}
+
+# Each sub-query is parameterized with $1 = company_id.
+_CLIENT_NOTIFICATION_SUBQUERIES: list[str] = [
+    # Incidents
+    """SELECT id::text, 'incident' AS type,
+            title, incident_number AS subtitle,
+            severity, status, created_at
+       FROM ir_incidents
+       WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'""",
+    # Employees
+    """SELECT e.id::text, 'employee' AS type,
+            e.first_name || ' ' || e.last_name AS title,
+            e.job_title AS subtitle,
+            NULL AS severity, 'onboarded' AS status, e.created_at
+       FROM employees e
+       WHERE e.org_id = $1 AND e.created_at > NOW() - INTERVAL '30 days'""",
+    # Offer letters
+    """SELECT id::text, 'offer_letter' AS type,
+            candidate_name || ' - ' || position_title AS title,
+            status AS subtitle,
+            NULL AS severity, status, created_at
+       FROM offer_letters
+       WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'""",
+    # ER cases
+    """SELECT id::text, 'er_case' AS type,
+            title, case_number AS subtitle,
+            NULL AS severity, status, created_at
+       FROM er_cases
+       WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'""",
+    # Handbooks
+    """SELECT id::text, 'handbook' AS type,
+            title, status AS subtitle,
+            NULL AS severity, status, created_at
+       FROM handbooks
+       WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'""",
+    # Compliance alerts
+    """SELECT id::text, 'compliance_alert' AS type,
+            title, message AS subtitle,
+            severity, status, created_at
+       FROM compliance_alerts
+       WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'""",
+]
+
+
+@router.get("/notifications", response_model=ClientNotificationsResponse)
+async def get_client_notifications(
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return a chronological activity feed of recent events for the client's company."""
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return ClientNotificationsResponse(items=[], total=0)
+
+    async with get_connection() as conn:
+        # Build UNION ALL dynamically, skipping tables that don't exist.
+        valid_parts: list[str] = []
+        for sq in _CLIENT_NOTIFICATION_SUBQUERIES:
+            try:
+                await conn.fetch(f"SELECT * FROM ({sq}) _probe LIMIT 0", company_id)
+                valid_parts.append(sq)
+            except asyncpg.UndefinedTableError:
+                logger.debug("Skipping client notification subquery (table missing): %s", sq[:60])
+            except asyncpg.UndefinedColumnError:
+                logger.debug("Skipping client notification subquery (column missing): %s", sq[:60])
+
+        if not valid_parts:
+            return ClientNotificationsResponse(items=[], total=0)
+
+        union_sql = " UNION ALL ".join(valid_parts)
+
+        # Total count
+        count_row = await conn.fetchrow(
+            f"SELECT COUNT(*) AS total FROM ({union_sql}) AS _all",
+            company_id,
+        )
+        total = count_row["total"] if count_row else 0
+
+        # Paginated rows
+        rows = await conn.fetch(
+            f"""SELECT *
+                FROM ({union_sql}) AS n
+                ORDER BY n.created_at DESC
+                LIMIT $2 OFFSET $3""",
+            company_id,
+            limit,
+            offset,
+        )
+
+    items: list[ClientNotification] = []
+    for row in rows:
+        row_type = row["type"]
+        row_id = row["id"]
+        link_template = _CLIENT_NOTIFICATION_LINK_MAP.get(row_type, "")
+        link = link_template.replace("{id}", row_id) if link_template else None
+
+        items.append(
+            ClientNotification(
+                id=row_id,
+                type=row_type,
+                title=row["title"] or "",
+                subtitle=row["subtitle"],
+                severity=row["severity"],
+                status=row["status"],
+                created_at=row["created_at"],
+                link=link,
+            )
+        )
+
+    return ClientNotificationsResponse(items=items, total=total)

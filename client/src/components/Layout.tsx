@@ -40,6 +40,13 @@ const navSections: NavSection[] = [
           </svg>
         ),
       },
+      {
+        path: '/app/notifications',
+        label: 'Notifications',
+        roles: ['admin', 'client'],
+        helpText: 'Recent activity in your company.',
+        icon: <Bell className="w-4 h-4" />,
+      },
     ],
   },
 
