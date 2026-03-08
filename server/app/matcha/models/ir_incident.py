@@ -254,6 +254,55 @@ class PrecedentAnalysis(BaseModel):
     cache_reason: Optional[str] = None
 
 
+class ActionProbability(BaseModel):
+    """Probability weight for a corrective action category."""
+    category: str
+    probability: float
+    weighted_count: float
+
+
+class ConsistencyGuidance(BaseModel):
+    """Consistency guidance derived from similar incident outcomes."""
+    sample_size: int
+    effective_sample_size: float
+    confidence: Literal["insufficient", "limited", "strong"]
+    unprecedented: bool
+    action_distribution: Optional[list[ActionProbability]] = None
+    dominant_action: Optional[str] = None
+    dominant_probability: Optional[float] = None
+    weighted_avg_resolution_days: Optional[float] = None
+    weighted_effectiveness_rate: Optional[float] = None
+    consistency_insight: Optional[str] = None
+    generated_at: str
+    from_cache: bool = False
+
+
+class ActionByType(BaseModel):
+    """Action distribution grouped by incident type."""
+    incident_type: str
+    total: int
+    actions: list[ActionProbability]
+
+
+class ActionBySeverity(BaseModel):
+    """Action distribution grouped by severity."""
+    severity: str
+    total: int
+    actions: list[ActionProbability]
+
+
+class ConsistencyAnalytics(BaseModel):
+    """Company-wide consistency analytics across resolved incidents."""
+    total_resolved: int
+    total_with_actions: int
+    action_distribution: list[ActionProbability]
+    by_incident_type: list[ActionByType]
+    by_severity: list[ActionBySeverity]
+    avg_resolution_by_action: dict[str, float]
+    generated_at: str
+    from_cache: bool = False
+
+
 # ===========================================
 # Analytics Models
 # ===========================================
