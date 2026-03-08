@@ -405,7 +405,7 @@ async def scan_leave_status(
 async def scan_protected_activity(
     employee_id: UUID, company_id: UUID, conn,
 ) -> PreTermDimensionResult:
-    """Cross-reference ER complaints and IR reports for protected activity."""
+    """Cross-reference ER complaints, IR reports, and agency charges for protected activity."""
     try:
         now = _NOW_UTC()
         twelve_months_ago = now - timedelta(days=365)
@@ -498,7 +498,57 @@ async def scan_protected_activity(
                     "occurred_at": row["occurred_at"].isoformat() if row["occurred_at"] else None,
                 })
 
-        all_signals = complainant_signals + ir_reporter_signals + witness_signals
+        # Agency charges (EEOC, NLRB, OSHA, etc.)
+        agency_charge_signals = []
+        resolved_agency_signals = []
+        try:
+            agency_rows = await conn.fetch(
+                """
+                SELECT id, charge_type, filing_date, agency_name, status
+                FROM agency_charges
+                WHERE employee_id = $1 AND company_id = $2
+                  AND filing_date > $3
+                ORDER BY filing_date DESC
+                """,
+                employee_id, company_id, twelve_months_ago,
+            )
+
+            for row in agency_rows:
+                charge_info = {
+                    "source": "agency_charge",
+                    "charge_id": str(row["id"]),
+                    "charge_type": row["charge_type"],
+                    "agency_name": row["agency_name"],
+                    "filing_date": row["filing_date"].isoformat() if row["filing_date"] else None,
+                    "status": row["status"],
+                }
+                status_lower = (row["status"] or "").lower()
+                if status_lower in ("filed", "investigating", "open", "pending"):
+                    agency_charge_signals.append(charge_info)
+                elif status_lower in ("resolved", "dismissed", "closed"):
+                    resolved_agency_signals.append(charge_info)
+        except Exception:
+            logger.warning("agency_charges table not available — skipping agency charge scan")
+
+        all_signals = (
+            agency_charge_signals + complainant_signals
+            + ir_reporter_signals + resolved_agency_signals + witness_signals
+        )
+
+        # Red (STRONGEST): active agency charge (EEOC, NLRB, OSHA)
+        if agency_charge_signals:
+            sig = agency_charge_signals[0]
+            return _red(
+                f"Employee has active {sig['agency_name']} {sig['charge_type']} charge "
+                f"(filed {sig['filing_date']}, status: {sig['status']}) — "
+                f"STRONGEST protected activity signal, termination creates near-certain retaliation claim",
+                signals=all_signals,
+                agency_charges_active=len(agency_charge_signals),
+                agency_charges_resolved=len(resolved_agency_signals),
+                complainant_cases=len(complainant_signals),
+                ir_reports=len(ir_reporter_signals),
+                witness_involvement=len(witness_signals),
+            )
 
         # Red: filed complaint or safety report in last 12 months
         if complainant_signals:
@@ -507,6 +557,8 @@ async def scan_protected_activity(
                 f"Employee filed complaint as complainant in ER case \"{sig['title']}\" "
                 f"({sig['case_number']}) — protected activity under Title VII/SOX",
                 signals=all_signals,
+                agency_charges_active=0,
+                agency_charges_resolved=len(resolved_agency_signals),
                 complainant_cases=len(complainant_signals),
                 ir_reports=len(ir_reporter_signals),
                 witness_involvement=len(witness_signals),
@@ -518,8 +570,24 @@ async def scan_protected_activity(
                 f"Employee filed safety/incident report \"{sig['title']}\" "
                 f"({sig['incident_number']}) — protected activity under OSHA Section 11(c)",
                 signals=all_signals,
+                agency_charges_active=0,
+                agency_charges_resolved=len(resolved_agency_signals),
                 complainant_cases=len(complainant_signals),
                 ir_reports=len(ir_reporter_signals),
+                witness_involvement=len(witness_signals),
+            )
+
+        # Yellow: resolved/dismissed agency charge within last 12 months
+        if resolved_agency_signals:
+            sig = resolved_agency_signals[0]
+            return _yellow(
+                f"Employee had {sig['agency_name']} {sig['charge_type']} charge "
+                f"({sig['status']}) within last 12 months — residual retaliation risk",
+                signals=all_signals,
+                agency_charges_active=0,
+                agency_charges_resolved=len(resolved_agency_signals),
+                complainant_cases=0,
+                ir_reports=0,
                 witness_involvement=len(witness_signals),
             )
 
@@ -529,6 +597,8 @@ async def scan_protected_activity(
                 f"Employee participated as witness in {len(witness_signals)} "
                 f"investigation(s) in the last 12 months",
                 signals=all_signals,
+                agency_charges_active=0,
+                agency_charges_resolved=0,
                 complainant_cases=0,
                 ir_reports=0,
                 witness_involvement=len(witness_signals),
@@ -547,7 +617,7 @@ async def scan_protected_activity(
 async def scan_documentation(
     employee_id: UUID, company_id: UUID, conn,
 ) -> PreTermDimensionResult:
-    """Check performance review existence, recency, and scores."""
+    """Check performance review existence, recency, scores, and progressive discipline trail."""
     try:
         # Check if performance_reviews table exists
         table_exists = await conn.fetchval(
@@ -560,35 +630,142 @@ async def scan_documentation(
             """
         )
 
-        if not table_exists:
-            return _red(
-                "No performance review system configured — no documentation on file",
-                table_exists=False,
-                reviews=[],
-            )
-
         now = _NOW_UTC()
         six_months_ago = now - timedelta(days=183)
         twelve_months_ago = now - timedelta(days=365)
 
-        # Get performance reviews for this employee, most recent first
-        reviews = await conn.fetch(
-            """
-            SELECT id, status, manager_overall_rating, completed_at, created_at
-            FROM performance_reviews
-            WHERE employee_id = $1
-              AND status IN ('completed', 'manager_submitted')
-            ORDER BY COALESCE(completed_at, created_at) DESC
-            """,
-            employee_id,
-        )
+        # ------- Progressive discipline check -------
+        discipline_records = []
+        discipline_trail = None  # None = table missing, [] = no records
+        try:
+            disc_rows = await conn.fetch(
+                """
+                SELECT id, discipline_type, issued_date, status, description
+                FROM progressive_discipline
+                WHERE employee_id = $1 AND company_id = $2
+                ORDER BY issued_date DESC
+                """,
+                employee_id, company_id,
+            )
+            discipline_records = [
+                {
+                    "discipline_id": str(r["id"]),
+                    "discipline_type": r["discipline_type"],
+                    "issued_date": r["issued_date"].isoformat() if r["issued_date"] else None,
+                    "status": r["status"],
+                    "description": (r["description"] or "")[:200],
+                }
+                for r in disc_rows
+            ]
+            discipline_trail = discipline_records
+        except Exception:
+            logger.warning("progressive_discipline table not available — skipping discipline trail scan")
 
-        if not reviews:
+        # Evaluate discipline trail quality
+        has_progressive_path = False
+        has_recent_pip = False
+        discipline_types_present = set()
+        if discipline_trail is not None and discipline_trail:
+            for rec in discipline_trail:
+                dtype = (rec["discipline_type"] or "").lower()
+                discipline_types_present.add(dtype)
+                # Check for recent PIP (within 6 months)
+                if dtype in ("pip", "performance_improvement_plan"):
+                    issued = rec["issued_date"]
+                    status = (rec["status"] or "").lower()
+                    if issued and status in ("completed", "escalated", "in_progress"):
+                        try:
+                            issued_dt = datetime.fromisoformat(issued)
+                            if issued_dt.tzinfo is None:
+                                issued_dt = issued_dt.replace(tzinfo=timezone.utc)
+                            if issued_dt >= six_months_ago:
+                                has_recent_pip = True
+                        except (ValueError, TypeError):
+                            pass
+
+            # Check for progressive path: verbal -> written -> PIP
+            progressive_steps = {"verbal_warning", "verbal", "written_warning", "written",
+                                 "pip", "performance_improvement_plan"}
+            steps_present = discipline_types_present & progressive_steps
+            # A clear path requires at least 2 different step types
+            has_progressive_path = len(steps_present) >= 2
+
+        # ------- Performance reviews -------
+        reviews = []
+        if table_exists:
+            reviews = await conn.fetch(
+                """
+                SELECT id, status, manager_overall_rating, completed_at, created_at
+                FROM performance_reviews
+                WHERE employee_id = $1
+                  AND status IN ('completed', 'manager_submitted')
+                ORDER BY COALESCE(completed_at, created_at) DESC
+                """,
+                employee_id,
+            )
+
+        # ------- Combined scoring logic -------
+
+        # GREEN: Progressive discipline shows a clear documented trail
+        if has_progressive_path or has_recent_pip:
+            trail_desc = []
+            if has_progressive_path:
+                trail_desc.append(f"progressive steps: {', '.join(sorted(discipline_types_present))}")
+            if has_recent_pip:
+                trail_desc.append("recent PIP on file")
+            trail_summary = "; ".join(trail_desc)
+
+            review_info = None
+            if reviews:
+                latest = reviews[0]
+                review_date = latest["completed_at"] or latest["created_at"]
+                rating = float(latest["manager_overall_rating"]) if latest["manager_overall_rating"] else None
+                review_info = {
+                    "review_id": str(latest["id"]),
+                    "rating": rating,
+                    "review_date": review_date.isoformat() if review_date else None,
+                    "total_reviews": len(reviews),
+                }
+
+            return _green(
+                f"Strong documentation trail — {trail_summary}",
+                table_exists=table_exists,
+                last_review=review_info,
+                discipline_records=discipline_records,
+                discipline_trail_quality="strong",
+            )
+
+        # From here, no strong discipline trail — fall back to review-based logic
+        has_no_reviews = not table_exists or not reviews
+
+        if has_no_reviews:
+            # Check if discipline records exist but are incomplete
+            if discipline_trail is not None and discipline_trail:
+                return _yellow(
+                    f"Some discipline records on file ({len(discipline_trail)} record(s)) "
+                    f"but incomplete trail (no PIP or progressive path) and no performance reviews",
+                    table_exists=table_exists,
+                    reviews=[],
+                    last_review=None,
+                    discipline_records=discipline_records,
+                    discipline_trail_quality="incomplete",
+                )
+            if not table_exists:
+                return _red(
+                    "No performance review system configured and no discipline records — "
+                    "no documentation on file",
+                    table_exists=False,
+                    reviews=[],
+                    discipline_records=discipline_records,
+                    discipline_trail_quality="none",
+                )
             return _red(
-                "No performance reviews on file for this employee",
+                "No performance reviews on file and no progressive discipline records",
                 table_exists=True,
                 reviews=[],
                 last_review=None,
+                discipline_records=discipline_records,
+                discipline_trail_quality="none" if discipline_trail is not None else "unknown",
             )
 
         latest = reviews[0]
@@ -604,12 +781,17 @@ async def scan_documentation(
             "total_reviews": len(reviews),
         }
 
-        # Red: last review was positive (>= 4.0) with no subsequent documented issues
-        # A positive review followed by sudden termination is the plaintiff's best exhibit
+        # Red: last review was positive (>= 4.0) with no discipline trail
         if rating is not None and rating >= 4.0:
+            discipline_note = ""
+            if discipline_trail is not None and discipline_trail:
+                discipline_note = (
+                    f" (note: {len(discipline_trail)} discipline record(s) on file "
+                    f"but incomplete progressive path)"
+                )
             return _red(
                 f"Last performance review score was {rating:.1f}/5.0 — "
-                f"positive review followed by termination is high-risk",
+                f"positive review followed by termination is high-risk{discipline_note}",
                 table_exists=True,
                 last_review=review_info,
                 reviews=[{
@@ -617,24 +799,37 @@ async def scan_documentation(
                     "rating": float(r["manager_overall_rating"]) if r["manager_overall_rating"] else None,
                     "date": (r["completed_at"] or r["created_at"]).isoformat() if (r["completed_at"] or r["created_at"]) else None,
                 } for r in reviews[:5]],
+                discipline_records=discipline_records,
+                discipline_trail_quality="incomplete" if discipline_trail else "none",
             )
 
         # Yellow: reviews exist but > 12 months old
         if review_date and review_date < twelve_months_ago:
             months_ago = (now - review_date).days // 30
+            discipline_note = ""
+            if discipline_trail is not None and discipline_trail:
+                discipline_note = f" ({len(discipline_trail)} discipline record(s) on file but incomplete trail)"
             return _yellow(
-                f"Last performance review was {months_ago} months ago — documentation is stale",
+                f"Last performance review was {months_ago} months ago — "
+                f"documentation is stale{discipline_note}",
                 table_exists=True,
                 last_review=review_info,
+                discipline_records=discipline_records,
+                discipline_trail_quality="incomplete" if discipline_trail else "none",
             )
 
         # Green: recent review (< 6 months) with score < 4.0
         if review_date and review_date >= six_months_ago and rating is not None and rating < 4.0:
+            discipline_note = ""
+            if discipline_trail is not None and discipline_trail:
+                discipline_note = f" (plus {len(discipline_trail)} discipline record(s))"
             return _green(
                 f"Recent performance review ({review_date.strftime('%Y-%m-%d')}) "
-                f"with score {rating:.1f}/5.0 supports documented performance concerns",
+                f"with score {rating:.1f}/5.0 supports documented performance concerns{discipline_note}",
                 table_exists=True,
                 last_review=review_info,
+                discipline_records=discipline_records,
+                discipline_trail_quality="incomplete" if discipline_trail else "none",
             )
 
         # Yellow: reviews exist but between 6-12 months old, or rating is None
@@ -644,6 +839,8 @@ async def scan_documentation(
                 f"Last performance review was {months_ago} months ago",
                 table_exists=True,
                 last_review=review_info,
+                discipline_records=discipline_records,
+                discipline_trail_quality="incomplete" if discipline_trail else "none",
             )
 
         # Default green for cases with recent review and no clear issue
@@ -652,6 +849,8 @@ async def scan_documentation(
             f"{review_date.strftime('%Y-%m-%d') if review_date else 'unknown'})",
             table_exists=True,
             last_review=review_info,
+            discipline_records=discipline_records,
+            discipline_trail_quality="incomplete" if (discipline_trail is not None and discipline_trail) else "none",
         )
 
     except Exception as exc:
@@ -663,9 +862,9 @@ async def scan_documentation(
 # ---------------------------------------------------------------------------
 
 async def scan_tenure_timing(
-    employee_id: UUID, conn,
+    employee_id: UUID, company_id: UUID, conn,
 ) -> PreTermDimensionResult:
-    """Evaluate risk based on employee tenure length."""
+    """Evaluate risk based on employee tenure length and benefit vesting proximity."""
     try:
         row = await conn.fetchrow(
             "SELECT start_date FROM employees WHERE id = $1",
@@ -677,6 +876,7 @@ async def scan_tenure_timing(
                 "No start date on file — unable to calculate tenure",
                 tenure_years=None,
                 start_date=None,
+                vesting_risks=[],
             )
 
         start_date = row["start_date"]
@@ -685,15 +885,75 @@ async def scan_tenure_timing(
 
         today = date.today()
         tenure_days = (today - start_date).days
-        tenure_years = round(tenure_days / 365.25, 1)
+        tenure_years = round(tenure_days / 365.25, 2)
+
+        # ------- Vesting schedule check -------
+        vesting_risks = []
+        approaching_6mo = []  # within 6 months of vesting
+        approaching_12mo = []  # within 12 months of vesting
+        try:
+            company_row = await conn.fetchrow(
+                "SELECT vesting_schedules FROM companies WHERE id = $1",
+                company_id,
+            )
+            if company_row and company_row["vesting_schedules"]:
+                vesting_raw = company_row["vesting_schedules"]
+                if isinstance(vesting_raw, str):
+                    vesting_schedules = json.loads(vesting_raw)
+                else:
+                    vesting_schedules = vesting_raw
+
+                if isinstance(vesting_schedules, list):
+                    for schedule in vesting_schedules:
+                        if not isinstance(schedule, dict):
+                            continue
+                        vest_years = schedule.get("vesting_years")
+                        if vest_years is None:
+                            continue
+                        try:
+                            vest_years = float(vest_years)
+                        except (ValueError, TypeError):
+                            continue
+
+                        gap = vest_years - tenure_years
+                        vest_info = {
+                            "type": schedule.get("type", "unknown"),
+                            "vesting_years": vest_years,
+                            "description": schedule.get("description", ""),
+                            "gap_years": round(gap, 2),
+                        }
+
+                        if 0 < gap <= 0.5:
+                            # Within 6 months of vesting milestone
+                            approaching_6mo.append(vest_info)
+                        elif 0 < gap <= 1.0:
+                            # Within 12 months of vesting milestone
+                            approaching_12mo.append(vest_info)
+
+                        if 0 < gap <= 1.0:
+                            vesting_risks.append(vest_info)
+        except Exception:
+            logger.warning("Could not query companies.vesting_schedules — skipping vesting check")
 
         details = {
             "tenure_years": tenure_years,
             "start_date": start_date.isoformat(),
             "tenure_days": tenure_days,
+            "vesting_risks": vesting_risks,
         }
 
-        # Red: tenure > 10 years
+        # Red: tenure > 10 years OR termination within 6 months of vesting milestone
+        if approaching_6mo:
+            vest = approaching_6mo[0]
+            return _red(
+                f"Employee tenure: {tenure_years} years — termination is within "
+                f"{vest['gap_years']} years of {vest['type']} vesting milestone "
+                f"({vest['vesting_years']} years) — creates strong inference of "
+                f"benefit-motivated termination",
+                **details,
+                approaching_vesting_6mo=[v["type"] for v in approaching_6mo],
+            )
+
         if tenure_years > 10:
             return _red(
                 f"Employee tenure: {tenure_years} years — long-tenured employees "
@@ -701,7 +961,17 @@ async def scan_tenure_timing(
                 **details,
             )
 
-        # Yellow: tenure 5-10 years
+        # Yellow: tenure 5-10 years OR approaching vesting within 12 months
+        if approaching_12mo:
+            vest = approaching_12mo[0]
+            return _yellow(
+                f"Employee tenure: {tenure_years} years — approaching "
+                f"{vest['type']} vesting milestone ({vest['vesting_years']} years) "
+                f"within {vest['gap_years']} years — monitor for benefit-timing risk",
+                **details,
+                approaching_vesting_12mo=[v["type"] for v in approaching_12mo],
+            )
+
         if tenure_years >= 5:
             return _yellow(
                 f"Employee tenure: {tenure_years} years — moderate tenure "
@@ -709,7 +979,7 @@ async def scan_tenure_timing(
                 **details,
             )
 
-        # Green: tenure < 5 years
+        # Green: tenure < 5 years with no approaching milestones
         return _green(
             f"Employee tenure: {tenure_years} years",
             **details,
@@ -723,102 +993,186 @@ async def scan_tenure_timing(
 # Dimension 7: Consistency Check
 # ---------------------------------------------------------------------------
 
+def _compute_kish_effective_n(weights: list[float]) -> float:
+    """Kish effective sample size: (sum w_i)^2 / sum(w_i^2)."""
+    if not weights:
+        return 0.0
+    sum_w = sum(weights)
+    sum_w2 = sum(w * w for w in weights)
+    if sum_w2 == 0:
+        return 0.0
+    return (sum_w * sum_w) / sum_w2
+
+
 async def scan_consistency(
     employee_id: UUID,
     company_id: UUID,
     separation_reason: Optional[str],
     conn,
 ) -> PreTermDimensionResult:
-    """Compare this termination to similar past cases for consistency."""
+    """Compare this termination to similar past cases using weighted precedent matching."""
     try:
         if not separation_reason:
             return _yellow(
                 "No separation reason provided — unable to assess consistency",
                 comparable_cases=0,
-                minimum_required=3,
+                effective_n=0.0,
             )
 
-        # Find offboarding cases for same company with any reason
-        cases = await conn.fetch(
-            """
-            SELECT oc.id, oc.reason, oc.is_voluntary, oc.status,
-                   oc.created_at, e.department, e.job_title
-            FROM offboarding_cases oc
-            JOIN employees e ON oc.employee_id = e.id
-            WHERE oc.org_id = $1
-              AND oc.employee_id != $2
-            ORDER BY oc.created_at DESC
-            LIMIT 50
-            """,
-            company_id, employee_id,
+        # Get the current employee's context for similarity matching
+        emp_row = await conn.fetchrow(
+            "SELECT department, title, start_date FROM employees WHERE id = $1",
+            employee_id,
         )
+        current_department = emp_row["department"] if emp_row else None
+        current_title = emp_row["title"] if emp_row else None
+        current_start_date = emp_row["start_date"] if emp_row else None
+
+        current_tenure_years = None
+        if current_start_date:
+            sd = current_start_date
+            if isinstance(sd, datetime):
+                sd = sd.date()
+            current_tenure_years = (date.today() - sd).days / 365.25
+
+        now = _NOW_UTC()
+        twelve_months_ago = now - timedelta(days=365)
+
+        # Query historical offboarding cases for the same company
+        try:
+            cases = await conn.fetch(
+                """
+                SELECT oc.id, oc.reason, oc.is_voluntary, oc.created_at, oc.status,
+                       e.department, e.title, e.start_date,
+                       EXTRACT(YEAR FROM AGE(oc.created_at, e.start_date)) as tenure_years
+                FROM offboarding_cases oc
+                JOIN employees e ON e.id = oc.employee_id
+                WHERE oc.org_id = $1 AND oc.status = 'completed'
+                  AND oc.employee_id != $2
+                ORDER BY oc.created_at DESC
+                LIMIT 50
+                """,
+                company_id, employee_id,
+            )
+        except Exception:
+            logger.warning("Error querying offboarding_cases for consistency — falling back")
+            return _yellow(
+                "Unable to query offboarding history for consistency analysis",
+                comparable_cases=0,
+                effective_n=0.0,
+                error="offboarding_cases query failed",
+            )
 
         if not cases:
             return _yellow(
-                "No prior offboarding cases found — insufficient data for consistency analysis",
+                "No prior completed offboarding cases found — insufficient data for consistency analysis",
                 comparable_cases=0,
-                minimum_required=3,
+                effective_n=0.0,
             )
 
-        # Simple keyword-matching for similar reason
+        # Compute similarity scores for each historical case
         reason_lower = separation_reason.lower()
         reason_keywords = set(reason_lower.split())
-        # Filter out very common words
         stop_words = {"the", "a", "an", "and", "or", "for", "to", "of", "in", "is", "was", "not"}
         reason_keywords -= stop_words
 
-        similar_cases = []
+        scored_cases = []
         for case in cases:
+            similarity = 0.0
+
+            # Same department: +0.3
+            case_dept = case.get("department")
+            if current_department and case_dept and current_department.lower() == case_dept.lower():
+                similarity += 0.3
+
+            # Similar reason (keyword overlap): +0.3
             case_reason = (case["reason"] or "").lower()
-            if not case_reason:
-                continue
-            case_words = set(case_reason.split()) - stop_words
-            overlap = reason_keywords & case_words
-            if overlap and len(overlap) >= max(1, len(reason_keywords) // 2):
-                similar_cases.append({
+            if case_reason and reason_keywords:
+                case_words = set(case_reason.split()) - stop_words
+                if case_words:
+                    overlap = reason_keywords & case_words
+                    overlap_ratio = len(overlap) / max(len(reason_keywords), 1)
+                    if overlap_ratio > 0:
+                        similarity += 0.3 * min(overlap_ratio * 2, 1.0)
+
+            # Similar tenure (within 2 years): +0.2
+            case_tenure = case.get("tenure_years")
+            if current_tenure_years is not None and case_tenure is not None:
+                try:
+                    case_tenure_f = float(case_tenure)
+                    tenure_diff = abs(current_tenure_years - case_tenure_f)
+                    if tenure_diff <= 2.0:
+                        similarity += 0.2 * (1.0 - tenure_diff / 2.0)
+                except (ValueError, TypeError):
+                    pass
+
+            # Recent (within last 12 months): +0.2
+            case_created = case["created_at"]
+            if case_created:
+                if case_created.tzinfo is None:
+                    case_created = case_created.replace(tzinfo=timezone.utc)
+                if case_created >= twelve_months_ago:
+                    similarity += 0.2
+
+            if similarity >= 0.3:
+                scored_cases.append({
                     "case_id": str(case["id"]),
                     "reason": case["reason"],
                     "is_voluntary": case["is_voluntary"],
                     "status": case["status"],
                     "department": case.get("department"),
+                    "title": case.get("title"),
+                    "tenure_years": float(case["tenure_years"]) if case.get("tenure_years") is not None else None,
                     "created_at": case["created_at"].isoformat() if case["created_at"] else None,
+                    "similarity_score": round(similarity, 3),
                 })
 
-        comparable_count = len(similar_cases)
+        # Compute Kish effective N from similarity weights
+        weights = [c["similarity_score"] for c in scored_cases]
+        effective_n = round(_compute_kish_effective_n(weights), 2)
 
-        if comparable_count < 3:
+        comparable_count = len(scored_cases)
+
+        if effective_n < 2:
             return _yellow(
-                f"Insufficient comparable cases ({comparable_count} found, "
-                f"minimum 3 required for consistency analysis)",
+                f"Insufficient comparable data for consistency analysis "
+                f"({comparable_count} similar case(s), effective N = {effective_n})",
                 comparable_cases=comparable_count,
-                minimum_required=3,
-                similar_cases=similar_cases,
+                effective_n=effective_n,
+                similar_cases=scored_cases[:5],
             )
 
-        # Check if any similar cases resulted in non-termination outcomes
-        # (i.e., status != 'completed' which might indicate warnings were given instead)
-        non_terminated = [
-            c for c in similar_cases
-            if c["status"] not in ("completed", "in_progress")
-        ]
+        # With effective N >= 2, check if similar employees were given warnings
+        # instead of terminated (is_voluntary=true or non-completed status would
+        # indicate different treatment)
+        # In completed offboarding cases, is_voluntary=false means involuntary term.
+        # If we find similar cases where the outcome was voluntary or
+        # the reason is similar but it wasn't involuntary, that's inconsistent.
+        involuntary_terms = [c for c in scored_cases if c["is_voluntary"] is False]
+        voluntary_or_other = [c for c in scored_cases if c["is_voluntary"] is not False]
 
-        if non_terminated:
+        if voluntary_or_other:
+            # Some similar situations had different outcomes
+            inconsistent_pct = len(voluntary_or_other) / comparable_count * 100
             return _red(
-                f"Similar situations were handled differently — "
-                f"{len(non_terminated)} of {comparable_count} comparable cases "
-                f"did not result in termination — inconsistent treatment creates "
+                f"Inconsistent treatment detected — {len(voluntary_or_other)} of "
+                f"{comparable_count} comparable cases (effective N = {effective_n}) "
+                f"had different outcomes ({inconsistent_pct:.0f}% non-involuntary) — "
                 f"disparate treatment risk",
                 comparable_cases=comparable_count,
-                minimum_required=3,
-                similar_cases=similar_cases,
-                non_terminated_count=len(non_terminated),
+                effective_n=effective_n,
+                similar_cases=scored_cases[:5],
+                involuntary_count=len(involuntary_terms),
+                non_involuntary_count=len(voluntary_or_other),
             )
 
+        # All similar cases also resulted in involuntary termination
         return _green(
-            f"Treatment is consistent with {comparable_count} similar prior cases",
+            f"Treatment is consistent with {comparable_count} similar prior cases "
+            f"(effective N = {effective_n})",
             comparable_cases=comparable_count,
-            minimum_required=3,
-            similar_cases=similar_cases[:5],
+            effective_n=effective_n,
+            similar_cases=scored_cases[:5],
         )
 
     except Exception as exc:
@@ -1168,7 +1522,7 @@ async def run_pre_termination_check(
             scan_leave_status(employee_id, conn),
             scan_protected_activity(employee_id, company_id, conn),
             scan_documentation(employee_id, company_id, conn),
-            scan_tenure_timing(employee_id, conn),
+            scan_tenure_timing(employee_id, company_id, conn),
             scan_consistency(employee_id, company_id, separation_reason, conn),
             scan_manager_profile(employee_id, company_id, conn),
             return_exceptions=True,

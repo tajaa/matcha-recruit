@@ -757,6 +757,9 @@ export interface BrokerPortfolioCompanyMetric {
   open_action_items: number;
   active_employee_count: number;
   risk_signal: 'healthy' | 'watch' | 'at_risk';
+  pre_term_checks?: number;
+  separation_override_rate?: number;
+  avg_separation_risk?: number;
 }
 
 export interface BrokerPortfolioReportResponse {
@@ -1682,6 +1685,129 @@ export interface PreTermAcknowledgeRequest {
 
 export interface PreTermOutcomeRequest {
   outcome: PreTermOutcome;
+}
+
+// Progressive Discipline types
+export type DisciplineType = 'verbal_warning' | 'written_warning' | 'pip' | 'final_warning' | 'suspension';
+export type DisciplineStatus = 'active' | 'completed' | 'expired' | 'escalated';
+
+export interface ProgressiveDiscipline {
+  id: string;
+  employee_id: string;
+  company_id: string;
+  discipline_type: DisciplineType;
+  issued_date: string;
+  issued_by: string;
+  description: string | null;
+  expected_improvement: string | null;
+  review_date: string | null;
+  status: DisciplineStatus;
+  outcome_notes: string | null;
+  documents: any[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DisciplineCreateRequest {
+  employee_id: string;
+  discipline_type: DisciplineType;
+  issued_date: string;
+  description?: string;
+  expected_improvement?: string;
+  review_date?: string;
+}
+
+export interface DisciplineUpdateRequest {
+  status?: DisciplineStatus;
+  outcome_notes?: string;
+  review_date?: string;
+  description?: string;
+}
+
+// Agency Charges types
+export type ChargeType = 'eeoc' | 'nlrb' | 'osha' | 'state_agency' | 'other';
+export type ChargeStatus = 'filed' | 'investigating' | 'mediation' | 'resolved' | 'dismissed' | 'litigated';
+
+export interface AgencyCharge {
+  id: string;
+  employee_id: string;
+  company_id: string;
+  charge_type: ChargeType;
+  charge_number: string | null;
+  filing_date: string;
+  agency_name: string | null;
+  status: ChargeStatus;
+  description: string | null;
+  resolution_amount: number | null;
+  resolution_date: string | null;
+  resolution_notes: string | null;
+  documents: any[];
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgencyChargeCreateRequest {
+  employee_id: string;
+  charge_type: ChargeType;
+  filing_date: string;
+  charge_number?: string;
+  agency_name?: string;
+  description?: string;
+}
+
+export interface AgencyChargeUpdateRequest {
+  status?: ChargeStatus;
+  resolution_amount?: number;
+  resolution_date?: string;
+  resolution_notes?: string;
+  description?: string;
+}
+
+// Post-Termination Claims types
+export type ClaimStatus = 'filed' | 'investigating' | 'mediation' | 'settled' | 'dismissed' | 'litigated' | 'judgment';
+
+export interface PostTermClaim {
+  id: string;
+  employee_id: string;
+  company_id: string;
+  pre_termination_check_id: string | null;
+  offboarding_case_id: string | null;
+  claim_type: string;
+  filed_date: string;
+  status: ClaimStatus;
+  resolution_amount: number | null;
+  resolution_date: string | null;
+  description: string | null;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PostTermClaimCreateRequest {
+  employee_id: string;
+  pre_termination_check_id?: string;
+  claim_type: string;
+  filed_date: string;
+  description?: string;
+}
+
+export interface PostTermClaimUpdateRequest {
+  status?: ClaimStatus;
+  resolution_amount?: number;
+  resolution_date?: string;
+  description?: string;
+}
+
+// Pre-Termination Analytics
+export interface PreTermAnalytics {
+  total_checks: number;
+  by_band: Record<string, number>;
+  by_outcome: Record<string, number>;
+  override_rate: number;
+  avg_score: number;
+  most_common_red_flags: { dimension: string; count: number }[];
+  period: string;
 }
 
 export interface ERCaseNote {

@@ -175,6 +175,16 @@ import type {
   PreTermCheckRequest,
   PreTermAcknowledgeRequest,
   PreTermOutcomeRequest,
+  ProgressiveDiscipline,
+  DisciplineCreateRequest,
+  DisciplineUpdateRequest,
+  AgencyCharge,
+  AgencyChargeCreateRequest,
+  AgencyChargeUpdateRequest,
+  PostTermClaim,
+  PostTermClaimCreateRequest,
+  PostTermClaimUpdateRequest,
+  PreTermAnalytics,
   } from '../types';
 import type {
   Lead,
@@ -4023,4 +4033,58 @@ export const employees = {
       method: 'PATCH',
       body: JSON.stringify(body),
     }),
+};
+
+export const preTermination = {
+  // Progressive Discipline
+  createDiscipline: (body: DisciplineCreateRequest): Promise<ProgressiveDiscipline> =>
+    request<ProgressiveDiscipline>('/pre-termination/discipline', { method: 'POST', body: JSON.stringify(body) }),
+
+  getEmployeeDiscipline: (employeeId: string): Promise<ProgressiveDiscipline[]> =>
+    request<ProgressiveDiscipline[]>(`/pre-termination/discipline/employee/${employeeId}`),
+
+  getDiscipline: (recordId: string): Promise<ProgressiveDiscipline> =>
+    request<ProgressiveDiscipline>(`/pre-termination/discipline/${recordId}`),
+
+  updateDiscipline: (recordId: string, body: DisciplineUpdateRequest): Promise<ProgressiveDiscipline> =>
+    request<ProgressiveDiscipline>(`/pre-termination/discipline/${recordId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  deleteDiscipline: (recordId: string): Promise<void> =>
+    request<void>(`/pre-termination/discipline/${recordId}`, { method: 'DELETE' }),
+
+  // Agency Charges
+  createCharge: (body: AgencyChargeCreateRequest): Promise<AgencyCharge> =>
+    request<AgencyCharge>('/pre-termination/agency-charges', { method: 'POST', body: JSON.stringify(body) }),
+
+  getEmployeeCharges: (employeeId: string): Promise<AgencyCharge[]> =>
+    request<AgencyCharge[]>(`/pre-termination/agency-charges/employee/${employeeId}`),
+
+  getCharge: (chargeId: string): Promise<AgencyCharge> =>
+    request<AgencyCharge>(`/pre-termination/agency-charges/${chargeId}`),
+
+  updateCharge: (chargeId: string, body: AgencyChargeUpdateRequest): Promise<AgencyCharge> =>
+    request<AgencyCharge>(`/pre-termination/agency-charges/${chargeId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  deleteCharge: (chargeId: string): Promise<void> =>
+    request<void>(`/pre-termination/agency-charges/${chargeId}`, { method: 'DELETE' }),
+
+  // Post-Termination Claims
+  createClaim: (body: PostTermClaimCreateRequest): Promise<PostTermClaim> =>
+    request<PostTermClaim>('/pre-termination/claims', { method: 'POST', body: JSON.stringify(body) }),
+
+  getEmployeeClaims: (employeeId: string): Promise<PostTermClaim[]> =>
+    request<PostTermClaim[]>(`/pre-termination/claims/employee/${employeeId}`),
+
+  getClaim: (claimId: string): Promise<PostTermClaim> =>
+    request<PostTermClaim>(`/pre-termination/claims/${claimId}`),
+
+  updateClaim: (claimId: string, body: PostTermClaimUpdateRequest): Promise<PostTermClaim> =>
+    request<PostTermClaim>(`/pre-termination/claims/${claimId}`, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  getCompanyClaims: (): Promise<PostTermClaim[]> =>
+    request<PostTermClaim[]>('/pre-termination/claims/company'),
+
+  // Analytics
+  getAnalytics: (period?: string): Promise<PreTermAnalytics> =>
+    request<PreTermAnalytics>(`/employees/pre-termination-checks/analytics${period ? `?period=${period}` : ''}`),
 };

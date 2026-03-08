@@ -166,6 +166,9 @@ export default function BrokerReporting() {
                     <th className="text-left p-3 font-medium">Open Items</th>
                     <th className="text-left p-3 font-medium">Employees</th>
                     <th className="text-left p-3 font-medium">Handbook</th>
+                    <th className="text-left p-3 font-medium">Risk Checks</th>
+                    <th className="text-left p-3 font-medium">Override Rate</th>
+                    <th className="text-left p-3 font-medium">Avg Sep. Risk</th>
                     <th className="text-left p-3 font-medium">Risk</th>
                   </tr>
                 </thead>
@@ -194,6 +197,45 @@ export default function BrokerReporting() {
                           </span>
                         ) : (
                           <span className="text-zinc-600 text-[10px]">No handbook</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-zinc-300">
+                        {company.pre_term_checks ? company.pre_term_checks : <span className="text-zinc-600">&mdash;</span>}
+                      </td>
+                      <td className="p-3">
+                        {company.pre_term_checks ? (
+                          <span
+                            className={`px-2 py-1 text-[10px] uppercase tracking-wide border ${
+                              (company.separation_override_rate ?? 0) > 25
+                                ? 'border-red-700 text-red-300'
+                                : (company.separation_override_rate ?? 0) > 10
+                                ? 'border-amber-700 text-amber-300'
+                                : 'border-emerald-700 text-emerald-300'
+                            }`}
+                          >
+                            {Math.round(company.separation_override_rate ?? 0)}%
+                          </span>
+                        ) : (
+                          <span className="text-zinc-600">&mdash;</span>
+                        )}
+                      </td>
+                      <td className="p-3">
+                        {company.pre_term_checks ? (
+                          <span
+                            className={`px-2 py-1 text-[10px] uppercase tracking-wide border ${
+                              (company.avg_separation_risk ?? 0) > 75
+                                ? 'border-red-700 text-red-300'
+                                : (company.avg_separation_risk ?? 0) > 50
+                                ? 'border-orange-700 text-orange-300'
+                                : (company.avg_separation_risk ?? 0) > 25
+                                ? 'border-amber-700 text-amber-300'
+                                : 'border-emerald-700 text-emerald-300'
+                            }`}
+                          >
+                            {Math.round(company.avg_separation_risk ?? 0)}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-600">&mdash;</span>
                         )}
                       </td>
                       <td className="p-3">

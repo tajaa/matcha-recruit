@@ -2627,6 +2627,89 @@ async def delete_employee_onboarding_task(
 # ================================
 
 
+@router.get("/pre-termination-checks/analytics")
+async def get_pre_termination_analytics(
+    period: Optional[str] = Query("12m", description="Time period: 30d, 90d, 12m"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return aggregate analytics for pre-termination risk checks across the company."""
+    company_id = await get_client_company_id(current_user)
+
+    period_days = {"30d": 30, "90d": 90, "12m": 365}
+    days = period_days.get(period, 365)
+    period_start = datetime.utcnow() - timedelta(days=days)
+
+    async with get_connection() as conn:
+        summary = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) AS total_checks,
+                COUNT(*) FILTER (WHERE overall_band = 'low') AS band_low,
+                COUNT(*) FILTER (WHERE overall_band = 'moderate') AS band_moderate,
+                COUNT(*) FILTER (WHERE overall_band = 'high') AS band_high,
+                COUNT(*) FILTER (WHERE overall_band = 'critical') AS band_critical,
+                COUNT(*) FILTER (WHERE outcome = 'proceeded') AS outcome_proceeded,
+                COUNT(*) FILTER (WHERE outcome = 'modified') AS outcome_modified,
+                COUNT(*) FILTER (WHERE outcome = 'abandoned') AS outcome_abandoned,
+                COUNT(*) FILTER (WHERE outcome = 'pending') AS outcome_pending,
+                COALESCE(AVG(overall_score), 0)::int AS avg_score,
+                COUNT(*) FILTER (WHERE overall_band IN ('high', 'critical') AND outcome = 'proceeded') AS high_risk_proceeded,
+                COUNT(*) FILTER (WHERE overall_band IN ('high', 'critical')) AS high_risk_total
+            FROM pre_termination_checks
+            WHERE company_id = $1 AND computed_at > $2
+            """,
+            company_id,
+            period_start,
+        )
+
+        high_risk_total = int(summary["high_risk_total"] or 0)
+        high_risk_proceeded = int(summary["high_risk_proceeded"] or 0)
+        override_rate = round(high_risk_proceeded / high_risk_total, 2) if high_risk_total > 0 else 0.0
+
+        try:
+            red_flag_rows = await conn.fetch(
+                """
+                SELECT key AS dimension, COUNT(*) AS count
+                FROM pre_termination_checks,
+                     jsonb_each(dimensions) AS d(key, value)
+                WHERE company_id = $1
+                  AND computed_at > $2
+                  AND value->>'status' = 'red'
+                GROUP BY key
+                ORDER BY count DESC
+                LIMIT 5
+                """,
+                company_id,
+                period_start,
+            )
+            most_common_red_flags = [
+                {"dimension": row["dimension"], "count": int(row["count"])}
+                for row in red_flag_rows
+            ]
+        except Exception:
+            most_common_red_flags = []
+
+    return {
+        "total_checks": int(summary["total_checks"] or 0),
+        "by_band": {
+            "low": int(summary["band_low"] or 0),
+            "moderate": int(summary["band_moderate"] or 0),
+            "high": int(summary["band_high"] or 0),
+            "critical": int(summary["band_critical"] or 0),
+        },
+        "by_outcome": {
+            "proceeded": int(summary["outcome_proceeded"] or 0),
+            "modified": int(summary["outcome_modified"] or 0),
+            "abandoned": int(summary["outcome_abandoned"] or 0),
+            "pending": int(summary["outcome_pending"] or 0),
+        },
+        "override_rate": override_rate,
+        "avg_score": int(summary["avg_score"] or 0),
+        "most_common_red_flags": most_common_red_flags,
+        "period": period,
+    }
+
+
 @router.post("/{employee_id}/pre-termination-check", response_model=PreTermCheckResponse)
 async def create_pre_termination_check(
     employee_id: UUID,

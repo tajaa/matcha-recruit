@@ -777,55 +777,127 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
         )
         setup_status_counts = {row["status"]: row["count"] for row in setup_counts}
 
-        rows = await conn.fetch(
-            """
-            SELECT
-                c.id as company_id,
-                c.name as company_name,
-                l.status as link_status,
-                COALESCE(s.status, 'none') as setup_status,
-                COALESCE(ps.pending_signatures, 0) as pending_signatures,
-                COALESCE(ps.policy_compliance_rate, 0)::numeric as policy_compliance_rate,
-                COALESCE(isum.open_incidents, 0) as open_incidents,
-                COALESCE(es.active_employees, 0) as active_employees
-            FROM broker_company_links l
-            JOIN companies c ON c.id = l.company_id
-            LEFT JOIN broker_client_setups s
-                ON s.broker_id = l.broker_id
-               AND s.company_id = l.company_id
-            LEFT JOIN LATERAL (
+        try:
+            rows = await conn.fetch(
+                """
                 SELECT
-                    COUNT(*) FILTER (WHERE ps.status = 'pending')::int AS pending_signatures,
-                    CASE
-                        WHEN COUNT(*) = 0 THEN 0
-                        ELSE ROUND(
-                            (COUNT(*) FILTER (WHERE ps.status = 'signed')::numeric / COUNT(*)::numeric) * 100,
-                            1
-                        )
-                    END AS policy_compliance_rate
-                FROM policies p
-                LEFT JOIN policy_signatures ps ON ps.policy_id = p.id
-                WHERE p.company_id = c.id
-                  AND p.status = 'active'
-            ) ps ON true
-            LEFT JOIN LATERAL (
-                SELECT COUNT(*)::int AS open_incidents
-                FROM ir_incidents i
-                WHERE i.company_id = c.id
-                  AND i.status IN ('reported', 'investigating', 'action_required')
-            ) isum ON true
-            LEFT JOIN LATERAL (
-                SELECT COUNT(*)::int AS active_employees
-                FROM employees e
-                WHERE e.org_id = c.id
-                  AND e.termination_date IS NULL
-            ) es ON true
-            WHERE l.broker_id = $1
-              AND l.status <> 'terminated'
-            ORDER BY c.name
-            """,
-            membership["broker_id"],
-        )
+                    c.id AS company_id,
+                    c.name AS company_name,
+                    l.status AS link_status,
+                    COALESCE(s.status, 'none') AS setup_status,
+                    COALESCE(ps.pending_signatures, 0) AS pending_signatures,
+                    COALESCE(ps.policy_compliance_rate, 0)::numeric AS policy_compliance_rate,
+                    COALESCE(isum.open_incidents, 0) AS open_incidents,
+                    COALESCE(es.active_employees, 0) AS active_employees,
+                    COALESCE(ptm.total_checks, 0) AS total_checks,
+                    COALESCE(ptm.avg_separation_risk, 0) AS avg_separation_risk,
+                    COALESCE(ptm.override_rate, 0) AS override_rate
+                FROM broker_company_links l
+                JOIN companies c ON c.id = l.company_id
+                LEFT JOIN broker_client_setups s
+                    ON s.broker_id = l.broker_id
+                   AND s.company_id = l.company_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COUNT(*) FILTER (WHERE ps.status = 'pending')::int AS pending_signatures,
+                        CASE
+                            WHEN COUNT(*) = 0 THEN 0
+                            ELSE ROUND(
+                                (COUNT(*) FILTER (WHERE ps.status = 'signed')::numeric / COUNT(*)::numeric) * 100,
+                                1
+                            )
+                        END AS policy_compliance_rate
+                    FROM policies p
+                    LEFT JOIN policy_signatures ps ON ps.policy_id = p.id
+                    WHERE p.company_id = c.id
+                      AND p.status = 'active'
+                ) ps ON true
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::int AS open_incidents
+                    FROM ir_incidents i
+                    WHERE i.company_id = c.id
+                      AND i.status IN ('reported', 'investigating', 'action_required')
+                ) isum ON true
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::int AS active_employees
+                    FROM employees e
+                    WHERE e.org_id = c.id
+                      AND e.termination_date IS NULL
+                ) es ON true
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COUNT(*)::int AS total_checks,
+                        COALESCE(AVG(overall_score), 0)::int AS avg_separation_risk,
+                        CASE
+                            WHEN COUNT(*) FILTER (WHERE overall_band IN ('high', 'critical')) = 0 THEN 0
+                            ELSE ROUND(
+                                COUNT(*) FILTER (WHERE overall_band IN ('high', 'critical') AND outcome = 'proceeded')::numeric /
+                                NULLIF(COUNT(*) FILTER (WHERE overall_band IN ('high', 'critical')), 0)::numeric,
+                                2
+                            )
+                        END AS override_rate
+                    FROM pre_termination_checks ptc
+                    WHERE ptc.company_id = c.id
+                      AND ptc.computed_at > NOW() - INTERVAL '12 months'
+                ) ptm ON true
+                WHERE l.broker_id = $1
+                  AND l.status <> 'terminated'
+                ORDER BY c.name
+                """,
+                membership["broker_id"],
+            )
+            has_pre_term = True
+        except Exception:
+            has_pre_term = False
+            rows = await conn.fetch(
+                """
+                SELECT
+                    c.id as company_id,
+                    c.name as company_name,
+                    l.status as link_status,
+                    COALESCE(s.status, 'none') as setup_status,
+                    COALESCE(ps.pending_signatures, 0) as pending_signatures,
+                    COALESCE(ps.policy_compliance_rate, 0)::numeric as policy_compliance_rate,
+                    COALESCE(isum.open_incidents, 0) as open_incidents,
+                    COALESCE(es.active_employees, 0) as active_employees
+                FROM broker_company_links l
+                JOIN companies c ON c.id = l.company_id
+                LEFT JOIN broker_client_setups s
+                    ON s.broker_id = l.broker_id
+                   AND s.company_id = l.company_id
+                LEFT JOIN LATERAL (
+                    SELECT
+                        COUNT(*) FILTER (WHERE ps.status = 'pending')::int AS pending_signatures,
+                        CASE
+                            WHEN COUNT(*) = 0 THEN 0
+                            ELSE ROUND(
+                                (COUNT(*) FILTER (WHERE ps.status = 'signed')::numeric / COUNT(*)::numeric) * 100,
+                                1
+                            )
+                        END AS policy_compliance_rate
+                    FROM policies p
+                    LEFT JOIN policy_signatures ps ON ps.policy_id = p.id
+                    WHERE p.company_id = c.id
+                      AND p.status = 'active'
+                ) ps ON true
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::int AS open_incidents
+                    FROM ir_incidents i
+                    WHERE i.company_id = c.id
+                      AND i.status IN ('reported', 'investigating', 'action_required')
+                ) isum ON true
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::int AS active_employees
+                    FROM employees e
+                    WHERE e.org_id = c.id
+                      AND e.termination_date IS NULL
+                ) es ON true
+                WHERE l.broker_id = $1
+                  AND l.status <> 'terminated'
+                ORDER BY c.name
+                """,
+                membership["broker_id"],
+            )
 
     company_metrics = []
     healthy_count = 0
@@ -849,33 +921,44 @@ async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(req
         else:
             risk_signal = "watch"
 
-        company_metrics.append(
-            {
-                "company_id": str(row["company_id"]),
-                "company_name": row["company_name"],
-                "link_status": row["link_status"],
-                "setup_status": row["setup_status"],
-                "policy_compliance_rate": compliance_rate,
-                "open_action_items": open_action_items,
-                "active_employee_count": int(row["active_employees"] or 0),
-                "risk_signal": risk_signal,
-            }
-        )
+        metrics = {
+            "company_id": str(row["company_id"]),
+            "company_name": row["company_name"],
+            "link_status": row["link_status"],
+            "setup_status": row["setup_status"],
+            "policy_compliance_rate": compliance_rate,
+            "open_action_items": open_action_items,
+            "active_employee_count": int(row["active_employees"] or 0),
+            "risk_signal": risk_signal,
+        }
+        if has_pre_term:
+            metrics["pre_term_checks"] = int(row.get("total_checks") or 0)
+            metrics["avg_separation_risk"] = int(row.get("avg_separation_risk") or 0)
+            metrics["separation_override_rate"] = float(row.get("override_rate") or 0)
+
+        company_metrics.append(metrics)
 
     company_count = len(company_metrics)
     avg_compliance_rate = round(total_compliance_rate / company_count, 1) if company_count else 0.0
 
+    summary = {
+        "total_linked_companies": company_count,
+        "active_link_count": sum(1 for row in company_metrics if row["link_status"] in {"active", "grace"}),
+        "pending_setup_count": setup_status_counts.get("draft", 0) + setup_status_counts.get("invited", 0),
+        "expired_setup_count": setup_status_counts.get("expired", 0),
+        "healthy_companies": healthy_count,
+        "at_risk_companies": at_risk_count,
+        "average_policy_compliance_rate": avg_compliance_rate,
+        "open_action_item_total": action_item_total,
+    }
+    if has_pre_term:
+        summary["total_pre_term_checks"] = sum(m.get("pre_term_checks", 0) for m in company_metrics)
+        summary["avg_portfolio_override_rate"] = round(
+            sum(m.get("separation_override_rate", 0) for m in company_metrics) / max(len(company_metrics), 1), 2
+        ) if company_metrics else 0
+
     return {
-        "summary": {
-            "total_linked_companies": company_count,
-            "active_link_count": sum(1 for row in company_metrics if row["link_status"] in {"active", "grace"}),
-            "pending_setup_count": setup_status_counts.get("draft", 0) + setup_status_counts.get("invited", 0),
-            "expired_setup_count": setup_status_counts.get("expired", 0),
-            "healthy_companies": healthy_count,
-            "at_risk_companies": at_risk_count,
-            "average_policy_compliance_rate": avg_compliance_rate,
-            "open_action_item_total": action_item_total,
-        },
+        "summary": summary,
         "setup_status_counts": setup_status_counts,
         "companies": company_metrics,
         "redaction": {
