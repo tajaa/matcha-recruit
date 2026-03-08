@@ -1,7 +1,7 @@
 import asyncio
 import sys
 import types
-from datetime import date
+from datetime import date, datetime
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -17,6 +17,7 @@ from app.core.services.handbook_service import (
     _build_template_sections,
     _build_state_sections,
     _coerce_jurisdiction_scope,
+    _fetch_state_requirements,
     _normalize_custom_sections,
     _sanitize_guided_profile_updates,
     _sanitize_guided_questions,
@@ -71,6 +72,36 @@ class _FakeConnContext:
 
 def _patch_connection(monkeypatch, conn: _FakeConnection):
     monkeypatch.setattr(handbook_service_module, "get_connection", lambda: _FakeConnContext(conn))
+
+
+class _RequirementsConn:
+    def __init__(self, column_exists: bool):
+        self.column_exists = column_exists
+        self.fetch_queries: list[str] = []
+
+    async def fetchval(self, query, *args):
+        if "information_schema.columns" in query:
+            return self.column_exists
+        raise AssertionError(f"Unexpected fetchval query: {query}")
+
+    async def fetch(self, query, *args):
+        self.fetch_queries.append(query)
+        return [
+            {
+                "state": "CA",
+                "category": "minimum_wage",
+                "jurisdiction_level": "state",
+                "jurisdiction_name": "California",
+                "title": "California Minimum Wage",
+                "description": "Statewide minimum wage baseline.",
+                "current_value": "$16.00/hr",
+                "effective_date": date(2026, 1, 1),
+                "source_url": "https://example.com/ca-minimum-wage",
+                "source_name": "CA Source",
+                "rate_type": "general",
+                "updated_at": datetime(2026, 3, 8, 12, 0, 0),
+            }
+        ]
 
 
 def test_update_handbook_rejects_mode_scope_mismatch(monkeypatch):
@@ -329,6 +360,37 @@ def test_build_state_sections_mentions_selected_city_scope():
     assert len(sections) == 1
     content = sections[0]["content"]
     assert "Covered city/local scopes in this state: Los Angeles." in content
+
+
+def test_fetch_state_requirements_skips_written_policy_filter_when_schema_column_missing():
+    conn = _RequirementsConn(column_exists=False)
+
+    result = asyncio.run(
+        _fetch_state_requirements(
+            conn,
+            [{"state": "CA", "city": None, "zipcode": None, "location_id": None}],
+            written_policy_only=True,
+        )
+    )
+
+    assert result["CA"][0]["title"] == "California Minimum Wage"
+    assert conn.fetch_queries
+    assert "requires_written_policy" not in conn.fetch_queries[0]
+
+
+def test_fetch_state_requirements_uses_written_policy_filter_when_schema_column_exists():
+    conn = _RequirementsConn(column_exists=True)
+
+    asyncio.run(
+        _fetch_state_requirements(
+            conn,
+            [{"state": "CA", "city": None, "zipcode": None, "location_id": None}],
+            written_policy_only=True,
+        )
+    )
+
+    assert conn.fetch_queries
+    assert "jr.requires_written_policy IS NOT false" in conn.fetch_queries[0]
 
 
 def test_build_template_sections_requires_mandatory_topics_for_hospitality():

@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta
 from hashlib import sha256
 import json
 import html
+import logging
 import re
 from typing import Any, Optional
 from uuid import UUID
@@ -40,6 +41,8 @@ from ..models.handbook import (
     HandbookUpdateRequest,
     HandbookWizardDraftResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 
 STATE_NAMES = {
@@ -1306,9 +1309,36 @@ async def _fetch_state_requirements(
     if not normalized_states:
         return {}
 
-    try:
-        rows = await conn.fetch(
-            """
+    include_written_policy_filter = False
+    if written_policy_only:
+        try:
+            include_written_policy_filter = bool(
+                await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_name = 'jurisdiction_requirements'
+                          AND column_name = 'requires_written_policy'
+                    )
+                    """
+                )
+            )
+        except Exception as exc:
+            logger.warning(
+                "Unable to verify jurisdiction_requirements.requires_written_policy column; "
+                "falling back to handbook coverage query without the written-policy filter: %s",
+                exc,
+            )
+            include_written_policy_filter = False
+
+    written_policy_clause = (
+        "\n              AND ($4::boolean IS FALSE OR jr.requires_written_policy IS NOT false)"
+        if include_written_policy_filter
+        else ""
+    )
+
+    query = f"""
             SELECT
                 j.state,
                 jr.category,
@@ -1332,7 +1362,7 @@ async def _fetch_state_requirements(
                 OR COALESCE(jr.description, '') ILIKE ANY($3::text[])
               )
               AND (jr.expiration_date IS NULL OR jr.expiration_date >= CURRENT_DATE)
-              AND ($4::boolean IS FALSE OR jr.requires_written_policy IS NOT false)
+              {written_policy_clause}
             ORDER BY
                 j.state,
                 CASE jr.jurisdiction_level
@@ -1343,13 +1373,19 @@ async def _fetch_state_requirements(
                 END,
                 COALESCE(jr.effective_date, CURRENT_DATE) DESC,
                 COALESCE(jr.updated_at, jr.created_at) DESC
-            """,
-            normalized_states,
-            list(ADDENDUM_CORE_CATEGORIES),
-            list(ADDENDUM_KEYWORD_PATTERNS),
-            written_policy_only,
-        )
-    except Exception:
+            """
+    query_args: list[Any] = [
+        normalized_states,
+        list(ADDENDUM_CORE_CATEGORIES),
+        list(ADDENDUM_KEYWORD_PATTERNS),
+    ]
+    if include_written_policy_filter:
+        query_args.append(written_policy_only)
+
+    try:
+        rows = await conn.fetch(query, *query_args)
+    except Exception as exc:
+        logger.warning("Failed to fetch handbook state requirements: %s", exc)
         return {}
 
     by_state: dict[str, list[dict[str, Any]]] = {state: [] for state in normalized_states}
