@@ -5110,3 +5110,148 @@ async def delete_industry_profile(profile_id: UUID):
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Profile not found")
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Admin notifications / activity feed
+# ---------------------------------------------------------------------------
+
+class AdminNotification(BaseModel):
+    id: str
+    type: str  # "incident", "employee", "offer_letter", "er_case", "handbook", "compliance_alert", "registration"
+    title: str
+    subtitle: Optional[str] = None
+    severity: Optional[str] = None
+    status: Optional[str] = None
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
+    created_at: datetime
+    link: Optional[str] = None
+
+
+class AdminNotificationsResponse(BaseModel):
+    items: list[AdminNotification]
+    total: int
+
+
+_NOTIFICATION_LINK_MAP: dict[str, str] = {
+    "incident": "/app/matcha/ir/{id}",
+    "employee": "/app/matcha/employees/{id}",
+    "offer_letter": "/app/matcha/offer-letters",
+    "er_case": "/app/matcha/er-copilot/{id}",
+    "handbook": "/app/matcha/handbooks/{id}",
+    "compliance_alert": "/app/matcha/compliance",
+    "registration": "/app/admin/business-registrations",
+}
+
+# Each sub-query is wrapped in a helper so we can gracefully skip tables that
+# don't exist in every environment (e.g. dev vs prod schema drift).
+
+_NOTIFICATION_SUBQUERIES: list[str] = [
+    # New incidents
+    """SELECT id::text, 'incident' AS type,
+            title, incident_number AS subtitle,
+            severity, status, company_id::text, created_at
+       FROM ir_incidents WHERE created_at > NOW() - INTERVAL '30 days'""",
+    # New employees
+    """SELECT e.id::text, 'employee' AS type,
+            e.first_name || ' ' || e.last_name AS title,
+            e.job_title AS subtitle,
+            NULL AS severity, 'onboarded' AS status, e.org_id::text AS company_id, e.created_at
+       FROM employees e WHERE e.created_at > NOW() - INTERVAL '30 days'""",
+    # Offer letters
+    """SELECT id::text, 'offer_letter' AS type,
+            candidate_name || ' - ' || position_title AS title,
+            status AS subtitle,
+            NULL AS severity, status, company_id::text, created_at
+       FROM offer_letters WHERE created_at > NOW() - INTERVAL '30 days'""",
+    # ER cases
+    """SELECT id::text, 'er_case' AS type,
+            title, case_number AS subtitle,
+            NULL AS severity, status, company_id::text, created_at
+       FROM er_cases WHERE created_at > NOW() - INTERVAL '30 days'""",
+    # Handbooks
+    """SELECT id::text, 'handbook' AS type,
+            title, status AS subtitle,
+            NULL AS severity, status, company_id::text, created_at
+       FROM handbooks WHERE created_at > NOW() - INTERVAL '30 days'""",
+    # Compliance alerts
+    """SELECT id::text, 'compliance_alert' AS type,
+            title, message AS subtitle,
+            severity, status, company_id::text, created_at
+       FROM compliance_alerts WHERE created_at > NOW() - INTERVAL '30 days'""",
+    # New company registrations
+    """SELECT id::text, 'registration' AS type,
+            name AS title, status AS subtitle,
+            NULL AS severity, status, NULL AS company_id, created_at
+       FROM companies WHERE created_at > NOW() - INTERVAL '30 days'""",
+]
+
+
+@router.get(
+    "/notifications",
+    response_model=AdminNotificationsResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def get_admin_notifications(
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """Return a chronological activity feed of recent platform events across all companies."""
+
+    # Build the UNION ALL dynamically, skipping any tables that are missing.
+    async with get_connection() as conn:
+        valid_parts: list[str] = []
+        for sq in _NOTIFICATION_SUBQUERIES:
+            try:
+                # Dry-run with LIMIT 0 to verify the table/columns exist.
+                await conn.fetch(f"SELECT * FROM ({sq}) _probe LIMIT 0")
+                valid_parts.append(sq)
+            except asyncpg.UndefinedTableError:
+                logger.debug("Skipping notification subquery (table missing): %s", sq[:60])
+            except asyncpg.UndefinedColumnError:
+                logger.debug("Skipping notification subquery (column missing): %s", sq[:60])
+
+        if not valid_parts:
+            return AdminNotificationsResponse(items=[], total=0)
+
+        union_sql = " UNION ALL ".join(valid_parts)
+
+        # Total count
+        count_row = await conn.fetchrow(f"SELECT COUNT(*) AS total FROM ({union_sql}) AS _all")
+        total = count_row["total"] if count_row else 0
+
+        # Paginated rows with company name join
+        rows = await conn.fetch(
+            f"""SELECT n.*, c.name AS company_name
+                FROM ({union_sql}) AS n
+                LEFT JOIN companies c ON c.id::text = n.company_id
+                ORDER BY n.created_at DESC
+                LIMIT $1 OFFSET $2""",
+            limit,
+            offset,
+        )
+
+    items: list[AdminNotification] = []
+    for row in rows:
+        row_type = row["type"]
+        row_id = row["id"]
+        link_template = _NOTIFICATION_LINK_MAP.get(row_type, "")
+        link = link_template.replace("{id}", row_id) if link_template else None
+
+        items.append(
+            AdminNotification(
+                id=row_id,
+                type=row_type,
+                title=row["title"] or "",
+                subtitle=row["subtitle"],
+                severity=row["severity"],
+                status=row["status"],
+                company_id=row["company_id"],
+                company_name=row["company_name"],
+                created_at=row["created_at"],
+                link=link,
+            )
+        )
+
+    return AdminNotificationsResponse(items=items, total=total)

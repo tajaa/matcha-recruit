@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
-import { HelpCircle, X, ChevronDown, Sliders, Sun, Moon } from 'lucide-react';
+import { HelpCircle, X, ChevronDown, Sliders, Sun, Moon, Bell } from 'lucide-react';
 import { PendingApproval } from './PendingApproval';
 import { PlatformFeatureManager } from '../pages/admin/PlatformFeatureManager';
 
@@ -47,6 +47,13 @@ const navSections: NavSection[] = [
     title: 'Platform',
     roles: ['admin'],
     items: [
+      {
+        path: '/app/admin/notifications',
+        label: 'Notifications',
+        roles: ['admin'],
+        helpText: 'Recent activity feed across all companies.',
+        icon: <Bell className="w-4 h-4" />,
+      },
       {
         path: '/app/admin/overview',
         label: 'Overview',

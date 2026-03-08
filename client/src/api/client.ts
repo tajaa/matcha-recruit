@@ -2300,6 +2300,30 @@ export const adminOverview = {
     request<AdminOverviewResponse>('/admin/overview'),
 };
 
+// Admin Notifications API
+export interface AdminNotificationItem {
+  id: string;
+  type: 'incident' | 'employee' | 'offer_letter' | 'er_case' | 'handbook' | 'compliance_alert' | 'registration';
+  title: string;
+  subtitle: string | null;
+  severity: 'critical' | 'high' | 'medium' | 'low' | null;
+  status: string | null;
+  company_id: string;
+  company_name: string;
+  created_at: string;
+  link: string;
+}
+
+export interface AdminNotificationsResponse {
+  items: AdminNotificationItem[];
+  total: number;
+}
+
+export const adminNotifications = {
+  get: (limit = 30, offset = 0): Promise<AdminNotificationsResponse> =>
+    request<AdminNotificationsResponse>(`/core/admin/notifications?limit=${limit}&offset=${offset}`),
+};
+
 // Jurisdiction Admin API
 export interface JurisdictionLocation {
   id: string;
