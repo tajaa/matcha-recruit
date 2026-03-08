@@ -164,7 +164,7 @@ async def check_location_compliance_endpoint(
 
     # Only admin can trigger live Gemini research (Tier 3).
     # Clients can only sync from existing repository data.
-    is_admin = current_user.get("role") == "admin"
+    is_admin = current_user.role == "admin"
 
     allow_live = False
     if is_admin:
