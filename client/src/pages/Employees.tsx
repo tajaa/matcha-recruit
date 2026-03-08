@@ -306,13 +306,76 @@ type EmployeeEmptyState = {
   icon: 'add' | 'invited' | 'terminated';
 };
 
-function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getStatusBadge, handleSendInvite, invitingId, incidentCount }: {
+function StatusActionBadge({ employee, isLight, handleSendInvite, invitingId }: { employee: Employee, isLight: boolean, handleSendInvite: (id: string) => void, invitingId: string | null }) {
+  const [mode, setMode] = useState<'view' | 'edit'>('view');
+  const [selectedAction, setSelectedAction] = useState('invite');
+
+  const base = 'inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold';
+
+  if (employee.termination_date) {
+    const neutral = isLight ? 'bg-stone-200 text-stone-600 border border-stone-300' : 'bg-zinc-800 text-zinc-400 border border-zinc-700';
+    return <span className={`${base} ${neutral}`}><UserX size={10} /> Terminated</span>;
+  }
+  if (employee.user_id) {
+    const active = isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-300' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30';
+    return <span className={`${base} ${active}`}><CheckCircle size={10} /> Active</span>;
+  }
+
+  const isPending = employee.invitation_status === 'pending';
+  const badgeLabel = isPending ? 'Invited' : 'Not Invited';
+  const bwClass = isLight ? 'bg-white text-zinc-900 border border-zinc-300 shadow-sm' : 'bg-zinc-100 text-zinc-900 border border-zinc-300';
+  const notInvitedClass = isLight ? 'bg-stone-200 text-stone-500 border border-stone-300' : 'bg-zinc-800 text-zinc-500 border border-zinc-700';
+
+  if (mode === 'view') {
+    return (
+      <button
+        onClick={(e) => { e.stopPropagation(); setMode('edit'); setSelectedAction('invite'); }}
+        className={`${base} ${isPending ? bwClass : notInvitedClass} hover:opacity-80 transition-opacity`}
+      >
+        {isPending ? <Clock size={10} /> : <Mail size={10} />}
+        {badgeLabel}
+        <ChevronDown size={10} className="ml-1 opacity-50" />
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+      <select
+        value={selectedAction}
+        onChange={(e) => setSelectedAction(e.target.value)}
+        className={`px-2 py-1 text-[10px] uppercase tracking-wider font-bold rounded-lg cursor-pointer focus:outline-none ${isLight ? 'bg-white text-zinc-900 border border-zinc-300' : 'bg-zinc-800 text-zinc-100 border border-zinc-600'}`}
+      >
+        <option value="invite">{isPending ? 'Resend Invite' : 'Send Invite'}</option>
+      </select>
+      <button
+        onClick={() => {
+          if (selectedAction === 'invite') {
+            handleSendInvite(employee.id);
+          }
+          setMode('view');
+        }}
+        disabled={invitingId === employee.id}
+        className={`px-2 py-1 text-[10px] uppercase tracking-wider font-bold rounded-lg transition-colors ${isLight ? 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800' : 'bg-zinc-100 text-zinc-900 hover:bg-white'} disabled:opacity-50`}
+      >
+        {invitingId === employee.id ? '...' : 'Submit'}
+      </button>
+      <button
+        onClick={() => setMode('view')}
+        className={`p-1 rounded-full ${isLight ? 'text-zinc-500 hover:bg-stone-200' : 'text-zinc-400 hover:bg-zinc-700'}`}
+      >
+        <X size={12} />
+      </button>
+    </div>
+  );
+}
+
+function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, handleSendInvite, invitingId, incidentCount }: {
   employee: Employee;
   t: typeof LT | typeof DK;
   isLight: boolean;
   navigate: (path: string) => void;
   onboardingProgress: Record<string, OnboardingProgress>;
-  getStatusBadge: (emp: Employee) => React.ReactNode;
   handleSendInvite: (id: string) => void;
   invitingId: string | null;
   incidentCount: number;
@@ -320,21 +383,21 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
   return (
     <div
       onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors p-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
+      className={`group ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'} transition-colors py-3 px-4 md:px-6 flex flex-col lg:flex-row lg:items-center gap-4 cursor-pointer`}
     >
-      <div className="flex items-center min-w-0 flex-1">
+      <div className="flex items-center min-w-[240px] flex-1">
         <div className="flex-shrink-0">
-          <div className={`h-10 w-10 rounded-xl ${isLight ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-800 border border-white/5 text-zinc-300'} flex items-center justify-center font-bold text-xs`}>
+          <div className={`h-9 w-9 rounded-xl ${isLight ? 'bg-zinc-900 text-zinc-50' : 'bg-zinc-200 text-zinc-900'} flex items-center justify-center font-bold text-[11px]`}>
             {employee.first_name[0]}{employee.last_name[0]}
           </div>
         </div>
-        <div className="ml-4 min-w-0 flex-1">
+        <div className="ml-3 min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className={`text-sm font-bold ${t.textMain} truncate`}>
               {employee.first_name} {employee.last_name}
             </p>
           </div>
-          <p className={`text-xs ${t.textMuted} truncate`}>
+          <p className={`text-[11px] ${t.textMuted} truncate mt-0.5`}>
             {employee.job_title || (employee.work_email || employee.email)}
           </p>
         </div>
@@ -343,23 +406,23 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
         </div>
       </div>
 
-      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-8 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-4 lg:border-0 lg:pt-0`}>
-        <div className="lg:text-right lg:w-24">
-          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Department</p>
+      <div className={`grid grid-cols-2 sm:flex sm:items-center justify-between lg:justify-end gap-x-4 gap-y-3 lg:gap-6 w-full lg:w-auto border-t ${isLight ? 'border-stone-200' : 'border-white/5'} pt-3 lg:border-0 lg:pt-0`}>
+        <div className="lg:text-left lg:w-24">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Department</p>
           <p className={`text-xs ${t.textDim} truncate`}>{employee.department || '—'}</p>
         </div>
-        <div className="lg:text-right lg:w-28">
-          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Location</p>
+        <div className="lg:text-left lg:w-28">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Location</p>
           <p className={`text-[10px] ${t.textDim} font-mono leading-tight`}>{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '—')}</p>
         </div>
-        <div className="lg:text-right lg:w-20">
-          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>Type</p>
+        <div className="lg:text-left lg:w-20">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Type</p>
           <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider truncate`}>
             {employee.employment_type?.replace('_', ' ') || '—'}
           </p>
         </div>
-        <div className="lg:text-right lg:w-12">
-          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden`}>IR</p>
+        <div className="lg:text-center lg:w-10">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>IR</p>
           {incidentCount > 0 ? (
             <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider rounded ${isLight ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-amber-950/40 text-amber-400 border border-amber-500/30'}`}>
               <AlertTriangle size={10} />
@@ -369,8 +432,8 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
             <span className={`text-[10px] ${t.textFaint}`}>—</span>
           )}
         </div>
-        <div data-tour="emp-onboarding-col" className="lg:w-32 flex flex-col lg:items-end lg:justify-end">
-          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Onboarding</p>
+        <div data-tour="emp-onboarding-col" className="lg:w-28 flex flex-col lg:items-start lg:justify-center">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Onboarding</p>
           {onboardingProgress[employee.id]?.has_onboarding ? (
             <div className="flex items-center gap-2">
               <div className={`w-12 h-1.5 ${isLight ? 'bg-stone-300' : 'bg-zinc-800'} rounded-full overflow-hidden`}>
@@ -389,27 +452,9 @@ function EmployeeRow({ employee, t, isLight, navigate, onboardingProgress, getSt
             <span className={`text-[10px] ${t.textFaint} uppercase tracking-wider`}>Not started</span>
           )}
         </div>
-        <div className="flex flex-col lg:items-end lg:justify-end lg:w-20">
-          <p className={`text-[10px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-1`}>Status</p>
-          {getStatusBadge(employee)}
-        </div>
-        <div className="col-span-2 sm:col-auto lg:w-28 flex lg:justify-end mt-2 sm:mt-0">
-          {!employee.user_id && !employee.termination_date && (
-            <button
-              data-tour="emp-invite-btn"
-              onClick={(e) => { e.stopPropagation(); handleSendInvite(employee.id); }}
-              disabled={invitingId === employee.id}
-              className={`flex-1 lg:flex-none inline-flex items-center justify-center px-2 py-1 border ${isLight ? 'border-stone-300 text-stone-500 hover:text-zinc-900 hover:bg-stone-50' : 'border-white/10 text-zinc-400 hover:text-white hover:bg-white/5'} text-[10px] font-bold uppercase tracking-wider rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap`}
-            >
-              {invitingId === employee.id ? (
-                <span className="animate-pulse">Sending...</span>
-              ) : employee.invitation_status === 'pending' ? (
-                'Resend Invite'
-              ) : (
-                'Send Invite'
-              )}
-            </button>
-          )}
+        <div className="col-span-2 sm:col-auto lg:w-48 flex lg:justify-end mt-2 sm:mt-0">
+          <p className={`text-[9px] ${t.textMuted} uppercase tracking-wider lg:hidden mb-0.5`}>Status</p>
+          <StatusActionBadge employee={employee} isLight={isLight} handleSendInvite={handleSendInvite} invitingId={invitingId} />
         </div>
         <div className="hidden lg:flex w-6 justify-end">
           <ChevronRight size={14} className={`${t.textFaint} group-hover:${t.textDim} transition-colors`} />
@@ -926,23 +971,6 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
     setIsDragging(false);
     const file = e.dataTransfer.files[0];
     handleFileSelect(file);
-  };
-
-  const getStatusBadge = (employee: Employee) => {
-    const base = 'inline-flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold';
-    const neutral = isLight ? 'bg-stone-200 text-stone-600 border border-stone-300' : 'bg-zinc-800 text-zinc-400 border border-zinc-700';
-    const muted = isLight ? 'bg-stone-200 text-stone-500 border border-stone-300' : 'bg-zinc-800 text-zinc-500 border border-zinc-700';
-    if (employee.termination_date) {
-      return <span className={`${base} ${neutral}`}><UserX size={10} /> Terminated</span>;
-    }
-    if (employee.user_id) {
-      const active = isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-300' : 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30';
-      return <span className={`${base} ${active}`}><CheckCircle size={10} /> Active</span>;
-    }
-    if (employee.invitation_status === 'pending') {
-      return <span className={`${base} ${neutral}`}><Clock size={10} /> Invited</span>;
-    }
-    return <span className={`${base} ${muted}`}><Mail size={10} /> Not Invited</span>;
   };
 
   // Unique "City, ST" pairs from compliance locations for the work location dropdown
@@ -1540,15 +1568,15 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
         <div data-tour="emp-list" className={`${t.cardDark} overflow-hidden shadow-lg`}>
            {/* Table Header */}
            {!groupByLocation && (
-             <div className={`hidden md:flex items-center gap-8 py-4 px-6 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
-                <div className="flex-1">Name / Role</div>
-                <div className="w-24 text-right">Department</div>
-                <div className="w-28 text-right">Location</div>
-                <div className="w-20 text-right">Type</div>
-                <div className="w-12 text-right">IR</div>
-                <div className="w-32 text-right">Onboarding</div>
-                <div className="w-20 text-right">Status</div>
-                <div className="w-24"></div>
+             <div className={`hidden xl:flex items-center gap-6 py-4 px-6 text-[10px] ${t.textMuted} font-bold uppercase tracking-wider border-b ${isLight ? 'border-stone-200' : 'border-white/5'}`}>
+                <div className="flex-1 min-w-[240px]">Name / Role</div>
+                <div className="w-24 text-left">Department</div>
+                <div className="w-28 text-left">Location</div>
+                <div className="w-20 text-left">Type</div>
+                <div className="w-10 text-center">IR</div>
+                <div className="w-28 text-left">Onboarding</div>
+                <div className="w-48 text-right pr-6">Status / Action</div>
+                <div className="w-6"></div>
              </div>
            )}
 
@@ -1585,7 +1613,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
                         </summary>
                         <div className={`divide-y ${isLight ? 'divide-stone-200' : 'divide-white/5'}`}>
                           {emps.map((employee) => (
-                            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} getStatusBadge={getStatusBadge} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
+                            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
                           ))}
                         </div>
                       </details>
@@ -1597,8 +1625,7 @@ export default function Employees({ mode = 'directory' }: { mode?: 'onboarding' 
           ) : (
           <div className={`divide-y ${isLight ? 'divide-stone-200' : 'divide-white/5'}`}>
           {employees.map((employee) => (
-            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} getStatusBadge={getStatusBadge} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
-          ))}
+            <EmployeeRow key={employee.id} employee={employee} t={t} isLight={isLight} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />          ))}
           </div>
           )}
         </div>
