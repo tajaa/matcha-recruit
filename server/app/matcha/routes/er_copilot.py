@@ -37,6 +37,7 @@ from ..services.er_guidance import (
     _normalize_analysis_payload,
     _normalize_suggested_guidance_payload,
 )
+from ..services.er_export import extract_analysis_export_text
 from ..models.er_case import (
     ERCaseCreate,
     ERCaseUpdate,
@@ -802,17 +803,8 @@ async def _generate_case_pdf(case_id: UUID, company_id: UUID, is_admin: bool, pa
                 continue
             atype = esc((a["analysis_type"] or "unknown").replace("_", " ").title())
             result = a["analysis_data"]
-            if isinstance(result, str):
-                try:
-                    result = json.loads(result)
-                except Exception:
-                    pass
-            summary = ""
-            if isinstance(result, dict):
-                summary = result.get("summary") or result.get("timeline_summary") or json.dumps(result, indent=2)[:500]
-            else:
-                summary = str(result)[:500] if result else "No results."
-            analyses_html += f"<h3>{atype}</h3><p>{esc(summary)}</p>"
+            summary = extract_analysis_export_text(result)
+            analyses_html += f"<h3>{atype}</h3><div class='analysis-text'>{esc(summary)}</div>"
         if analyses_html:
             analyses_html = f"<h2>Analyses</h2>{analyses_html}"
 
@@ -843,6 +835,7 @@ th {{ background: #f5f5f5; font-weight: 600; text-transform: uppercase; font-siz
 .note {{ border-left: 3px solid #ddd; padding: 8px 12px; margin: 8px 0; background: #fafafa; }}
 .note-type {{ font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.5px; }}
 .note-date {{ color: #999; font-size: 10px; margin-left: 8px; }}
+.analysis-text {{ white-space: pre-wrap; }}
 .footer {{ margin-top: 40px; border-top: 1px solid #ddd; padding-top: 12px; color: #999; font-size: 10px; text-align: center; }}
 </style></head><body>
 <h1>{case_title}</h1>
