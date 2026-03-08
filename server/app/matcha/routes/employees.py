@@ -1589,7 +1589,7 @@ async def bulk_upload_employees_csv(
 
                 # Auto-derive compliance location from employee address
                 if work_state:
-                    work_zip_val = row_data.get("work_zip", "").strip() if row_data else None
+                    work_zip_val = row.get("work_zip", "").strip() or None
                     loc_id = await ensure_location_for_employee(
                         conn,
                         company_id,
