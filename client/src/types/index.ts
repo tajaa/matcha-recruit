@@ -1636,6 +1636,54 @@ export interface ERCaseMetrics {
   trend: { date: string; count: number }[];
 }
 
+// Pre-termination risk check types
+export type PreTermDimensionStatus = 'green' | 'yellow' | 'red';
+export type PreTermRiskBand = 'low' | 'moderate' | 'high' | 'critical';
+export type PreTermOutcome = 'proceeded' | 'modified' | 'abandoned' | 'pending';
+
+export interface PreTermDimension {
+  status: PreTermDimensionStatus;
+  score: number;
+  summary: string;
+  details: Record<string, any>;
+}
+
+export interface PreTermCheck {
+  id: string;
+  employee_id: string;
+  company_id: string;
+  initiated_by: string;
+  overall_score: number;
+  overall_band: PreTermRiskBand;
+  dimensions: Record<string, PreTermDimension>;
+  ai_narrative: string | null;
+  recommended_actions: string[];
+  requires_acknowledgment: boolean;
+  acknowledged: boolean;
+  acknowledged_by: string | null;
+  acknowledged_at: string | null;
+  acknowledgment_notes: string | null;
+  outcome: PreTermOutcome | null;
+  offboarding_case_id: string | null;
+  separation_reason: string | null;
+  is_voluntary: boolean;
+  computed_at: string;
+  created_at: string;
+}
+
+export interface PreTermCheckRequest {
+  separation_reason?: string;
+  is_voluntary: boolean;
+}
+
+export interface PreTermAcknowledgeRequest {
+  notes: string;
+}
+
+export interface PreTermOutcomeRequest {
+  outcome: PreTermOutcome;
+}
+
 export interface ERCaseNote {
   id: string;
   case_id: string;

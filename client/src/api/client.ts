@@ -171,6 +171,10 @@ import type {
   RiskActionItemUpdate,
   AssignableUser,
   RiskHistoryEntry,
+  PreTermCheck,
+  PreTermCheckRequest,
+  PreTermAcknowledgeRequest,
+  PreTermOutcomeRequest,
   } from '../types';
 import type {
   Lead,
@@ -4002,4 +4006,21 @@ export const employees = {
     request<EmployeeIncidentItem[]>(`/employees/${employeeId}/incidents`),
   getIncidentCounts: (): Promise<Record<string, number>> =>
     request<Record<string, number>>('/employees/incident-counts'),
+  runPreTermCheck: (employeeId: string, body: PreTermCheckRequest): Promise<PreTermCheck> =>
+    request<PreTermCheck>(`/employees/${employeeId}/pre-termination-check`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  getPreTermChecks: (employeeId: string): Promise<PreTermCheck[]> =>
+    request<PreTermCheck[]>(`/employees/${employeeId}/pre-termination-checks`),
+  acknowledgePreTermCheck: (checkId: string, body: PreTermAcknowledgeRequest): Promise<PreTermCheck> =>
+    request<PreTermCheck>(`/employees/pre-termination-checks/${checkId}/acknowledge`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updatePreTermOutcome: (checkId: string, body: PreTermOutcomeRequest): Promise<PreTermCheck> =>
+    request<PreTermCheck>(`/employees/pre-termination-checks/${checkId}/outcome`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
 };

@@ -11,7 +11,7 @@ import re
 import secrets
 from datetime import datetime, date, timedelta
 from decimal import Decimal
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query, Body, BackgroundTasks
@@ -1906,6 +1906,9 @@ class OffboardingCaseCreateRequest(BaseModel):
     reason: Optional[str] = None
     is_voluntary: bool = True
     assign_default_tasks: bool = True
+    pre_termination_check_id: Optional[UUID] = None
+    risk_acknowledged: bool = False
+    acknowledgment_notes: Optional[str] = None
 
 
 class OffboardingCaseCompleteRequest(BaseModel):
@@ -1952,6 +1955,96 @@ class OffboardingCaseResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ================================
+# Pre-Termination Check Models
+# ================================
+
+
+class PreTermCheckRequest(BaseModel):
+    separation_reason: Optional[str] = None
+    is_voluntary: bool = False
+
+
+class PreTermDimensionResponse(BaseModel):
+    status: str  # green/yellow/red
+    score: int
+    summary: str
+    details: dict[str, Any] = {}
+
+
+class PreTermCheckResponse(BaseModel):
+    id: UUID
+    employee_id: UUID
+    company_id: UUID
+    initiated_by: UUID
+    overall_score: int
+    overall_band: str
+    dimensions: dict[str, Any]
+    ai_narrative: Optional[str] = None
+    recommended_actions: list[str] = []
+    requires_acknowledgment: bool = False
+    acknowledged: bool = False
+    acknowledged_by: Optional[UUID] = None
+    acknowledged_at: Optional[datetime] = None
+    acknowledgment_notes: Optional[str] = None
+    outcome: Optional[str] = None
+    offboarding_case_id: Optional[UUID] = None
+    separation_reason: Optional[str] = None
+    is_voluntary: bool = False
+    computed_at: datetime
+    created_at: datetime
+
+
+class PreTermAcknowledgeRequest(BaseModel):
+    notes: str
+
+
+class PreTermOutcomeRequest(BaseModel):
+    outcome: str  # proceeded/modified/abandoned
+
+
+VALID_PRE_TERM_OUTCOMES = {"proceeded", "modified", "abandoned"}
+
+
+def _normalize_json(value, default=None):
+    """Parse JSONB string from asyncpg if needed."""
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            return default
+    return default
+
+
+def _to_pre_term_check_response(row) -> PreTermCheckResponse:
+    return PreTermCheckResponse(
+        id=row["id"],
+        employee_id=row["employee_id"],
+        company_id=row["company_id"],
+        initiated_by=row["initiated_by"],
+        overall_score=row["overall_score"],
+        overall_band=row["overall_band"],
+        dimensions=_normalize_json(row["dimensions"], {}),
+        ai_narrative=row.get("ai_narrative"),
+        recommended_actions=_normalize_json(row.get("recommended_actions"), []),
+        requires_acknowledgment=row["requires_acknowledgment"],
+        acknowledged=row["acknowledged"],
+        acknowledged_by=row.get("acknowledged_by"),
+        acknowledged_at=row.get("acknowledged_at"),
+        acknowledgment_notes=row.get("acknowledgment_notes"),
+        outcome=row.get("outcome"),
+        offboarding_case_id=row.get("offboarding_case_id"),
+        separation_reason=row.get("separation_reason"),
+        is_voluntary=row.get("is_voluntary", False),
+        computed_at=row["computed_at"],
+        created_at=row["created_at"],
+    )
 
 
 def _to_offboarding_task_response(row) -> OffboardingTaskResponse:
@@ -2530,6 +2623,167 @@ async def delete_employee_onboarding_task(
 
 
 # ================================
+# Pre-Termination Risk Checks
+# ================================
+
+
+@router.post("/{employee_id}/pre-termination-check", response_model=PreTermCheckResponse)
+async def create_pre_termination_check(
+    employee_id: UUID,
+    request: PreTermCheckRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Run a pre-termination risk check for an employee without creating an offboarding case."""
+    from ..services.pre_termination_service import run_pre_termination_check
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        emp = await conn.fetchrow(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2 AND termination_date IS NULL",
+            employee_id,
+            company_id,
+        )
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+    result = await run_pre_termination_check(
+        employee_id=employee_id,
+        company_id=company_id,
+        initiated_by=current_user.id,
+        separation_reason=request.separation_reason,
+        is_voluntary=request.is_voluntary,
+    )
+    return PreTermCheckResponse(**result)
+
+
+@router.get("/{employee_id}/pre-termination-checks", response_model=list[PreTermCheckResponse])
+async def list_pre_termination_checks(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List all prior pre-termination checks for an employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        emp = await conn.fetchrow(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id,
+            company_id,
+        )
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        rows = await conn.fetch(
+            """
+            SELECT *
+            FROM pre_termination_checks
+            WHERE employee_id = $1 AND company_id = $2
+            ORDER BY computed_at DESC
+            """,
+            employee_id,
+            company_id,
+        )
+
+    return [_to_pre_term_check_response(row) for row in rows]
+
+
+@router.post("/pre-termination-checks/{check_id}/acknowledge", response_model=PreTermCheckResponse)
+async def acknowledge_pre_termination_check(
+    check_id: UUID,
+    request: PreTermAcknowledgeRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Acknowledge a high/critical pre-termination risk check to allow offboarding to proceed."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        check_row = await conn.fetchrow(
+            """
+            SELECT *
+            FROM pre_termination_checks
+            WHERE id = $1 AND company_id = $2
+            """,
+            check_id,
+            company_id,
+        )
+        if not check_row:
+            raise HTTPException(status_code=404, detail="Pre-termination check not found")
+
+        if not check_row["requires_acknowledgment"]:
+            raise HTTPException(
+                status_code=400,
+                detail="This check does not require acknowledgment",
+            )
+
+        if check_row["acknowledged"]:
+            raise HTTPException(
+                status_code=400,
+                detail="This check has already been acknowledged",
+            )
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE pre_termination_checks
+            SET acknowledged = true,
+                acknowledged_by = $2,
+                acknowledged_at = NOW(),
+                acknowledgment_notes = $3,
+                updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+            """,
+            check_id,
+            current_user.id,
+            request.notes,
+        )
+
+    return _to_pre_term_check_response(updated)
+
+
+@router.patch("/pre-termination-checks/{check_id}/outcome", response_model=PreTermCheckResponse)
+async def update_pre_termination_outcome(
+    check_id: UUID,
+    request: PreTermOutcomeRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update the outcome of a pre-termination check after a decision is made."""
+    company_id = await get_client_company_id(current_user)
+
+    if request.outcome not in VALID_PRE_TERM_OUTCOMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid outcome. Must be one of: {sorted(VALID_PRE_TERM_OUTCOMES)}",
+        )
+
+    async with get_connection() as conn:
+        check_row = await conn.fetchrow(
+            """
+            SELECT id
+            FROM pre_termination_checks
+            WHERE id = $1 AND company_id = $2
+            """,
+            check_id,
+            company_id,
+        )
+        if not check_row:
+            raise HTTPException(status_code=404, detail="Pre-termination check not found")
+
+        updated = await conn.fetchrow(
+            """
+            UPDATE pre_termination_checks
+            SET outcome = $2, updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+            """,
+            check_id,
+            request.outcome,
+        )
+
+    return _to_pre_term_check_response(updated)
+
+
+# ================================
 # Employee Offboarding
 # ================================
 
@@ -2539,7 +2793,13 @@ async def create_offboarding_case(
     request: OffboardingCaseCreateRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Create or return the active offboarding case for an employee."""
+    """Create or return the active offboarding case for an employee.
+
+    For involuntary separations, a pre-termination risk check is required.
+    If risk is high/critical and not acknowledged, returns HTTP 409 with the risk report.
+    """
+    from ..services.pre_termination_service import run_pre_termination_check
+
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
@@ -2560,6 +2820,77 @@ async def create_offboarding_case(
             if employee["start_date"] and request.last_day < employee["start_date"]:
                 raise HTTPException(status_code=400, detail="last_day cannot be before employee start_date")
 
+            # --- Pre-termination risk check for involuntary separations ---
+            pre_term_check_id = None
+
+            if not request.is_voluntary:
+                pre_term_result = None
+
+                if request.pre_termination_check_id:
+                    # Reuse an existing check — verify it belongs to this employee/company
+                    existing_check = await conn.fetchrow(
+                        """
+                        SELECT *
+                        FROM pre_termination_checks
+                        WHERE id = $1 AND employee_id = $2 AND company_id = $3
+                        """,
+                        request.pre_termination_check_id,
+                        employee_id,
+                        company_id,
+                    )
+                    if not existing_check:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Pre-termination check not found for this employee",
+                        )
+                    pre_term_result = dict(existing_check)
+                    # Normalize JSONB fields
+                    pre_term_result["dimensions"] = _normalize_json(pre_term_result.get("dimensions"), {})
+                    pre_term_result["recommended_actions"] = _normalize_json(
+                        pre_term_result.get("recommended_actions"), []
+                    )
+                    pre_term_check_id = existing_check["id"]
+                else:
+                    # Auto-run the pre-termination check
+                    pre_term_result = await run_pre_termination_check(
+                        employee_id=employee_id,
+                        company_id=company_id,
+                        initiated_by=current_user.id,
+                        separation_reason=request.reason,
+                        is_voluntary=False,
+                    )
+                    pre_term_check_id = pre_term_result.get("id")
+
+                # Gate on high/critical risk
+                overall_band = pre_term_result.get("overall_band", "low")
+                if overall_band in ("high", "critical") and not request.risk_acknowledged:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={
+                            "message": "Pre-termination risk check required",
+                            "risk_report": pre_term_result,
+                            "requires_acknowledgment": True,
+                        },
+                    )
+
+                # If acknowledged, update the check record
+                if overall_band in ("high", "critical") and request.risk_acknowledged:
+                    await conn.execute(
+                        """
+                        UPDATE pre_termination_checks
+                        SET acknowledged = true,
+                            acknowledged_by = $2,
+                            acknowledged_at = NOW(),
+                            acknowledgment_notes = $3,
+                            updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        pre_term_check_id,
+                        current_user.id,
+                        request.acknowledgment_notes,
+                    )
+
+            # --- Check for existing in-progress case ---
             existing_case = await conn.fetchrow(
                 """
                 SELECT *
@@ -2575,20 +2906,40 @@ async def create_offboarding_case(
             if existing_case:
                 case_row = existing_case
             else:
-                case_row = await conn.fetchrow(
-                    """
-                    INSERT INTO offboarding_cases
-                    (org_id, employee_id, status, reason, is_voluntary, last_day, created_by)
-                    VALUES ($1, $2, 'in_progress', $3, $4, $5, $6)
-                    RETURNING *
-                    """,
-                    company_id,
-                    employee_id,
-                    request.reason,
-                    request.is_voluntary,
-                    request.last_day,
-                    current_user.id,
-                )
+                # Build the INSERT, optionally including pre_termination_check_id
+                has_check_col = await _column_exists(conn, "offboarding_cases", "pre_termination_check_id")
+
+                if has_check_col and pre_term_check_id:
+                    case_row = await conn.fetchrow(
+                        """
+                        INSERT INTO offboarding_cases
+                        (org_id, employee_id, status, reason, is_voluntary, last_day, created_by, pre_termination_check_id)
+                        VALUES ($1, $2, 'in_progress', $3, $4, $5, $6, $7)
+                        RETURNING *
+                        """,
+                        company_id,
+                        employee_id,
+                        request.reason,
+                        request.is_voluntary,
+                        request.last_day,
+                        current_user.id,
+                        pre_term_check_id,
+                    )
+                else:
+                    case_row = await conn.fetchrow(
+                        """
+                        INSERT INTO offboarding_cases
+                        (org_id, employee_id, status, reason, is_voluntary, last_day, created_by)
+                        VALUES ($1, $2, 'in_progress', $3, $4, $5, $6)
+                        RETURNING *
+                        """,
+                        company_id,
+                        employee_id,
+                        request.reason,
+                        request.is_voluntary,
+                        request.last_day,
+                        current_user.id,
+                    )
 
                 await conn.execute(
                     """
@@ -2617,6 +2968,20 @@ async def create_offboarding_case(
                             template["assignee_type"],
                             due_date,
                         )
+
+                # Link the pre-termination check to the offboarding case
+                if pre_term_check_id:
+                    await conn.execute(
+                        """
+                        UPDATE pre_termination_checks
+                        SET offboarding_case_id = $2,
+                            outcome = 'proceeded',
+                            updated_at = NOW()
+                        WHERE id = $1
+                        """,
+                        pre_term_check_id,
+                        case_row["id"],
+                    )
 
             task_rows = await conn.fetch(
                 """
