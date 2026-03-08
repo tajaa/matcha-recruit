@@ -15,8 +15,20 @@ depends_on = None
 
 
 def upgrade():
-    op.execute("ALTER TABLE handbooks ADD COLUMN IF NOT EXISTS guided_answers JSONB DEFAULT '{}'")
+    op.execute("""
+        DO $$ BEGIN
+            IF to_regclass('handbooks') IS NOT NULL THEN
+                ALTER TABLE handbooks ADD COLUMN IF NOT EXISTS guided_answers JSONB DEFAULT '{}';
+            END IF;
+        END $$
+    """)
 
 
 def downgrade():
-    op.execute("ALTER TABLE handbooks DROP COLUMN IF EXISTS guided_answers")
+    op.execute("""
+        DO $$ BEGIN
+            IF to_regclass('handbooks') IS NOT NULL THEN
+                ALTER TABLE handbooks DROP COLUMN IF EXISTS guided_answers;
+            END IF;
+        END $$
+    """)
