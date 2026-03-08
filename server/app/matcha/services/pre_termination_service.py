@@ -206,12 +206,12 @@ async def scan_ir_involvement(
 
         # Get employee's email for reporter matching
         emp_row = await conn.fetchrow(
-            "SELECT work_email, email FROM employees WHERE id = $1",
+            "SELECT email, personal_email FROM employees WHERE id = $1",
             employee_id,
         )
         employee_email = None
         if emp_row:
-            employee_email = emp_row["work_email"] or emp_row.get("email")
+            employee_email = emp_row["email"] or emp_row.get("personal_email")
 
         # Query incidents where employee is involved or is the reporter
         if employee_email:
@@ -1335,12 +1335,12 @@ async def scan_retaliation_risk(
 
         # Get employee's email for reporter matching
         emp_row = await conn.fetchrow(
-            "SELECT work_email, email FROM employees WHERE id = $1",
+            "SELECT email, personal_email FROM employees WHERE id = $1",
             employee_id,
         )
         employee_email = None
         if emp_row:
-            employee_email = emp_row["work_email"] or emp_row.get("email")
+            employee_email = emp_row["email"] or emp_row.get("personal_email")
 
         # ---------------------------------------------------------------
         # Collect protected activity events (last 12 months)
