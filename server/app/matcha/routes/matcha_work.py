@@ -24,6 +24,7 @@ from ..models.matcha_work import (
     HandbookDocument,
     MWMessageOut,
     OnboardingDocument,
+    PolicyDocument,
     PresentationDocument,
     ReviewDocument,
     RevertRequest,
@@ -70,6 +71,7 @@ VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys()) - {"images"}
 VALID_ONBOARDING_FIELDS = set(OnboardingDocument.model_fields.keys())
 VALID_PRESENTATION_FIELDS = set(PresentationDocument.model_fields.keys()) - {"cover_image_url"}
 VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys())
+VALID_POLICY_FIELDS = set(PolicyDocument.model_fields.keys())
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 
@@ -88,6 +90,8 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
         valid_fields = VALID_PRESENTATION_FIELDS
     elif skill == "handbook":
         valid_fields = VALID_HANDBOOK_FIELDS
+    elif skill == "policy":
+        valid_fields = VALID_POLICY_FIELDS
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -501,7 +505,7 @@ async def _apply_ai_updates_and_operations(
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
     # inferring from the update keys themselves so workbook/review/etc. updates
     # created on a fresh thread aren't silently dropped.
-    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
         skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
         if skill_from_updates != "chat":
             skill = skill_from_updates
@@ -796,6 +800,58 @@ async def _apply_ai_updates_and_operations(
                         if coverage_updates.get("handbook_strength_score") is not None:
                             score_note = f" Coverage score: {coverage_updates['handbook_strength_score']}/100 ({coverage_updates['handbook_strength_label']})."
                         action_note = f"Handbook created with {section_count} sections.{score_note}"
+            elif operation == "generate_policy":
+                if skill != "policy":
+                    action_note = "Policy generation is only available in policy threads."
+                else:
+                    policy_type = current_state.get("policy_type")
+                    location_names = current_state.get("policy_location_names") or []
+
+                    if not policy_type:
+                        action_note = "Cannot generate — missing required field: policy_type"
+                    elif not location_names:
+                        action_note = "Cannot generate — please specify at least one location (city, state)."
+                    else:
+                        await doc_svc.apply_update(thread_id, {"policy_status": "generating"})
+
+                        # Resolve location names to location IDs from company_locations
+                        location_ids: list[str] = []
+                        async with get_connection() as conn:
+                            for loc_name in location_names:
+                                parts = [p.strip() for p in loc_name.split(",")]
+                                if len(parts) == 2:
+                                    city, state = parts[0], parts[1]
+                                    row = await conn.fetchrow(
+                                        "SELECT id FROM company_locations WHERE company_id = $1 AND city ILIKE $2 AND state ILIKE $3",
+                                        str(company_id), city, state,
+                                    )
+                                    if row:
+                                        location_ids.append(str(row["id"]))
+
+                        from ...core.services.policy_draft_service import generate_policy_draft_stream, PolicyDraftRequest
+
+                        draft_request = PolicyDraftRequest(
+                            policy_type=policy_type,
+                            location_ids=location_ids if location_ids else None,
+                            additional_context=current_state.get("policy_additional_context"),
+                        )
+
+                        # Collect the full generated content
+                        policy_content = ""
+                        async for event in generate_policy_draft_stream(str(company_id), draft_request):
+                            if event.get("type") == "content":
+                                policy_content += event.get("text", "")
+                            elif event.get("type") == "error":
+                                raise ValueError(event.get("message", "Policy generation failed"))
+
+                        result = await doc_svc.apply_update(thread_id, {
+                            "policy_status": "created",
+                            "policy_content": policy_content,
+                        })
+                        current_version = result["version"]
+                        current_state = result["current_state"]
+                        changed = True
+                        action_note = "Policy draft generated. Review in the Preview panel, then edit or save."
             else:
                 action_note = f"The action '{operation}' is not supported yet."
         except ValueError as e:

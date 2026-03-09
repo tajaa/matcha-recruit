@@ -12,7 +12,7 @@ from google.genai import types
 
 from ...config import get_settings
 from ...core.services.platform_settings import get_matcha_work_model_mode
-from ..models.matcha_work import HandbookDocument, OfferLetterDocument, OnboardingDocument, PresentationDocument, ReviewDocument, WorkbookDocument
+from ..models.matcha_work import HandbookDocument, OfferLetterDocument, OnboardingDocument, PolicyDocument, PresentationDocument, ReviewDocument, WorkbookDocument
 
 logger = logging.getLogger(__name__)
 
@@ -24,9 +24,10 @@ WORKBOOK_FIELDS = list(WorkbookDocument.model_fields.keys())
 ONBOARDING_FIELDS = list(OnboardingDocument.model_fields.keys())
 PRESENTATION_FIELDS = list(PresentationDocument.model_fields.keys())
 HANDBOOK_FIELDS = list(HandbookDocument.model_fields.keys())
+POLICY_FIELDS = list(PolicyDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "none"}
+SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -38,6 +39,7 @@ SUPPORTED_AI_OPERATIONS = {
     "create_employees",
     "generate_presentation",
     "generate_handbook",
+    "generate_policy",
     "none",
 }
 
@@ -93,6 +95,31 @@ Supported skills:
   Use generate_handbook operation ONLY when user explicitly says to generate/create.
   Required before generation: handbook_title, handbook_states (>=1), handbook_legal_name, handbook_ceo.
   Ask about profile booleans naturally based on industry context (e.g., for hospitality ask about tips).
+- policy: draft jurisdiction-aware workplace policies using compliance data + AI.
+  When the user asks to create/draft a policy, begin a guided wizard:
+  Step 1: Ask what kind of policy they need. Present the options naturally:
+    PTO & Sick Leave, Meal & Rest Breaks, Overtime & Hours, Pay Practices,
+    Scheduling, Youth Employment, Anti-Harassment, Workplace Safety,
+    Remote Work, Drug & Alcohol, Attendance, Code of Conduct, Whistleblower.
+  Step 2: Ask which locations/states the policy should cover.
+    Use the company profile work_state if available as a suggestion.
+  Step 3: Ask if there are any company-specific details to incorporate
+    (e.g. "we offer unlimited PTO", "our standard workweek is 4 days").
+  Step 4: Confirm the selections and offer to generate.
+
+  Fields collected through conversation:
+  - policy_type (string): pto_sick_leave, meal_rest_breaks, overtime, pay_practices,
+    scheduling, youth_employment, anti_harassment, workplace_safety, remote_work,
+    drug_alcohol, attendance, code_of_conduct, whistleblower
+  - policy_title (string): auto-derived from policy_type if not given (e.g. "PTO and Sick Leave Policy")
+  - policy_location_names (array of "City, ST" strings): e.g. ["San Francisco, CA", "New York, NY"]
+  - policy_additional_context (string, optional): company-specific details
+  - policy_status: "collecting" while gathering, "ready" when user confirms
+
+  Set updates progressively as the user answers each step. Do NOT skip steps.
+  Use generate_policy operation ONLY when user explicitly confirms to generate.
+  Required before generation: policy_type + at least one location in policy_location_names.
+  If user provides all info at once (e.g. "draft a PTO policy for CA"), still confirm before generating.
 
 Mode selection:
 - mode=skill when user clearly asks for a supported action.
@@ -114,8 +141,8 @@ Output constraints:
 - JSON format:
 {{
   "mode": "skill|general|clarify|refuse",
-  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|none",
-  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|generate_handbook|none",
+  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|policy|none",
+  "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|generate_handbook|generate_policy|none",
   "confidence": 0.0,
   "updates": {{}},
   "missing_fields": [],
@@ -187,6 +214,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "onboarding"
     if any(k in current_state for k in ("presentation_title", "slides")):
         return "presentation"
+    if any(k.startswith("policy_") for k in current_state):
+        return "policy"
     return "chat"
 
 
@@ -410,9 +439,11 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields = PRESENTATION_FIELDS
         elif current_skill == "handbook":
             valid_fields = HANDBOOK_FIELDS
+        elif current_skill == "policy":
+            valid_fields = POLICY_FIELDS
         else:
             # No active skill yet — allow any skill to be initiated
-            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS
+            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS + POLICY_FIELDS
 
         system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
             today=date.today().isoformat(),

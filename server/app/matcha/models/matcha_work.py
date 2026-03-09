@@ -176,6 +176,19 @@ class PresentationDocument(BaseModel):
     generated_at: Optional[str] = None
 
 
+class PolicyDocument(BaseModel):
+    """Incremental policy draft state — builds turn by turn via conversation."""
+
+    policy_title: Optional[str] = None
+    policy_type: Optional[str] = None  # pto_sick_leave, meal_rest_breaks, overtime, etc.
+    policy_locations: Optional[list[str]] = None  # location IDs from compliance
+    policy_location_names: Optional[list[str]] = None  # display names (e.g. "San Francisco, CA")
+    policy_additional_context: Optional[str] = None
+    policy_content: Optional[str] = None  # the generated policy text (markdown)
+    policy_status: Optional[str] = None  # collecting, generating, created
+    policy_id: Optional[str] = None  # linked policy ID after save
+
+
 class CreateThreadRequest(BaseModel):
     title: Optional[str] = None
     initial_message: Optional[str] = None
