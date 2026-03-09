@@ -30,6 +30,7 @@ VALID_CATEGORIES = {
     "final_pay",
     "minor_work_permit",
     "scheduling_reporting",
+    "leave",
 }
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
 VALID_RATE_TYPES = {
@@ -63,6 +64,12 @@ _CATEGORY_ALIASES = {
     "reporting_time": "scheduling_reporting",
     "predictive_scheduling": "scheduling_reporting",
     "fair_workweek": "scheduling_reporting",
+    "leave_of_absence": "leave",
+    "family_leave": "leave",
+    "medical_leave": "leave",
+    "pfml": "leave",
+    "paid_family_leave": "leave",
+    "family_medical_leave": "leave",
 }
 
 _JURISDICTION_LEVEL_ALIASES = {
@@ -185,6 +192,37 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
         normalized["rate_type"] = _normalize_rate_type_value(normalized.get("rate_type")) or "general"
     else:
         normalized["rate_type"] = None
+
+    if normalized.get("category") == "leave":
+        meta = {}
+        for src_key, dest_key in [
+            ("paid", "paid"), ("max_weeks", "max_weeks"),
+            ("wage_replacement_pct", "wage_pct"), ("job_protection", "job_prot"),
+            ("employer_size_threshold", "emp_min"), ("employee_tenure_months", "tenure_mo"),
+            ("employee_hours_threshold", "hrs_min"),
+        ]:
+            val = normalized.pop(src_key, None)
+            if val is not None:
+                meta[dest_key] = val
+        if meta:
+            # Store structured metadata in description (TEXT, no length limit)
+            # current_value stays as a short human-readable summary
+            existing_desc = normalized.get("description") or ""
+            normalized["description"] = json.dumps(meta)
+            if not normalized.get("current_value"):
+                # Build a short summary for current_value (VARCHAR 100)
+                parts = []
+                if meta.get("max_weeks"):
+                    parts.append(f"{meta['max_weeks']} weeks")
+                if meta.get("wage_pct"):
+                    parts.append(f"{meta['wage_pct']}% pay")
+                if meta.get("job_prot"):
+                    parts.append("job protected")
+                if meta.get("paid"):
+                    parts.append("paid")
+                normalized["current_value"] = ", ".join(parts)[:100] if parts else None
+        if meta.get("max_weeks"):
+            normalized["numeric_value"] = meta["max_weeks"]
 
     rwp = normalized.get("requires_written_policy")
     if isinstance(rwp, str):
@@ -357,6 +395,24 @@ Always include the STATE baseline rules.
 If local fair-workweek/predictive-scheduling ordinances exist (and are allowed), include local overrides.
 Include advance-schedule notice windows, penalties for schedule changes, reporting/show-up pay rules, on-call restrictions, and spread-of-hours pay if applicable.
 If no specific scheduling/reporting-time law applies, explicitly say so.""",
+
+        "leave": """Research LEAVE OF ABSENCE programs and entitlements.
+Return EACH qualifying leave program as a SEPARATE requirement.
+Common programs: state paid family/medical leave (PFML), state disability insurance (SDI/TDI),
+state family leave acts, pregnancy disability leave.
+Do NOT include federal FMLA (handled separately).
+
+For EACH program, include these additional JSON fields:
+- "paid": true or false
+- "max_weeks": integer (maximum weeks of leave)
+- "wage_replacement_pct": number or null (e.g., 60 for 60%)
+- "job_protection": true or false
+- "employer_size_threshold": integer or null (minimum employees)
+- "employee_tenure_months": integer or null (minimum months employed)
+- "employee_hours_threshold": integer or null (minimum hours worked)
+
+Set numeric_value to max_weeks. Set current_value to a SHORT summary (under 80 chars) like "8 weeks, 60% pay, job protected".
+Set description to a longer explanation of the program if needed.""",
     }
 
     return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
@@ -385,7 +441,14 @@ Respond with JSON:
       "effective_date": "YYYY-MM-DD" or null,
       "source_url": "https://...",
       "source_name": "Source Name",
-      "requires_written_policy": true | false
+      "requires_written_policy": true | false,
+      "paid": <for leave only: true|false; else omit>,
+      "max_weeks": <for leave only: integer; else omit>,
+      "wage_replacement_pct": <for leave only: number or null; else omit>,
+      "job_protection": <for leave only: true|false; else omit>,
+      "employer_size_threshold": <for leave only: integer or null; else omit>,
+      "employee_tenure_months": <for leave only: integer or null; else omit>,
+      "employee_hours_threshold": <for leave only: integer or null; else omit>
     }}
   ]
 }}
@@ -624,6 +687,7 @@ class GeminiComplianceService:
             "final_pay",
             "minor_work_permit",
             "scheduling_reporting",
+            "leave",
         ]
         selected_categories: List[str] = []
         for category in categories or default_categories:

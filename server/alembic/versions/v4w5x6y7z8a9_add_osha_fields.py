@@ -15,17 +15,13 @@ depends_on = None
 
 
 def upgrade():
-    op.execute(
-        """
-        ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS osha_recordable BOOLEAN;
-        ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS osha_case_number VARCHAR(20);
-        ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS osha_classification VARCHAR(30);
-        ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS days_away_from_work INTEGER DEFAULT 0;
-        ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS days_restricted_duty INTEGER DEFAULT 0;
-        ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS date_of_death DATE;
-        ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS osha_form_301_data JSONB;
-        """
-    )
+    op.execute("ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS osha_recordable BOOLEAN")
+    op.execute("ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS osha_case_number VARCHAR(20)")
+    op.execute("ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS osha_classification VARCHAR(30)")
+    op.execute("ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS days_away_from_work INTEGER DEFAULT 0")
+    op.execute("ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS days_restricted_duty INTEGER DEFAULT 0")
+    op.execute("ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS date_of_death DATE")
+    op.execute("ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS osha_form_301_data JSONB")
 
     op.execute(
         """
@@ -61,15 +57,10 @@ def upgrade():
 
 def downgrade():
     op.execute("DROP TABLE IF EXISTS osha_annual_summaries")
-    op.execute(
-        """
-        ALTER TABLE ir_incidents
-            DROP COLUMN IF EXISTS osha_form_301_data,
-            DROP COLUMN IF EXISTS date_of_death,
-            DROP COLUMN IF EXISTS days_restricted_duty,
-            DROP COLUMN IF EXISTS days_away_from_work,
-            DROP COLUMN IF EXISTS osha_classification,
-            DROP COLUMN IF EXISTS osha_case_number,
-            DROP COLUMN IF EXISTS osha_recordable;
-        """
-    )
+    op.execute("ALTER TABLE ir_incidents DROP COLUMN IF EXISTS osha_form_301_data")
+    op.execute("ALTER TABLE ir_incidents DROP COLUMN IF EXISTS date_of_death")
+    op.execute("ALTER TABLE ir_incidents DROP COLUMN IF EXISTS days_restricted_duty")
+    op.execute("ALTER TABLE ir_incidents DROP COLUMN IF EXISTS days_away_from_work")
+    op.execute("ALTER TABLE ir_incidents DROP COLUMN IF EXISTS osha_classification")
+    op.execute("ALTER TABLE ir_incidents DROP COLUMN IF EXISTS osha_case_number")
+    op.execute("ALTER TABLE ir_incidents DROP COLUMN IF EXISTS osha_recordable")

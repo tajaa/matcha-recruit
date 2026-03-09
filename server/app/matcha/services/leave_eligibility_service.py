@@ -1,9 +1,10 @@
 """
 Leave Eligibility Service — checks FMLA and state leave program eligibility.
 
-Self-contained: reads from employees, employee_hours_log, leave_jurisdiction_rules.
-No imports from core compliance modules.
+Reads leave program data from jurisdiction_requirements (category='leave'),
+which is the unified compliance/jurisdictions system.
 """
+import json
 import logging
 from datetime import datetime, date, timedelta
 from uuid import UUID
@@ -84,10 +85,27 @@ class LeaveEligibilityService:
                 "company_employee_count": company_count,
             }
 
+    @staticmethod
+    def _parse_leave_meta(description: str | None, current_value: str | None = None) -> dict:
+        """Parse JSON metadata from jurisdiction_requirements.description.
+
+        Falls back to current_value for rows written before the column switch.
+        """
+        for field in (description, current_value):
+            if not field or not isinstance(field, str):
+                continue
+            try:
+                parsed = json.loads(field)
+                if isinstance(parsed, dict) and parsed:
+                    return parsed
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return {}
+
     async def check_state_programs(self, employee_id: UUID) -> dict:
         """
-        Look up employee.work_state in leave_jurisdiction_rules.
-        For each matching program, check employee against thresholds.
+        Look up employee.work_state in jurisdiction_requirements (category='leave').
+        Falls back to leave_jurisdiction_rules if no data in jurisdictions system.
         """
         async with get_connection() as conn:
             emp = await conn.fetchrow(
@@ -101,11 +119,15 @@ class LeaveEligibilityService:
             if not work_state:
                 return {"state": None, "programs": [], "message": "No work state on record"}
 
-            # Get all programs for this state
+            # Query jurisdiction_requirements for leave programs
             rules = await conn.fetch(
-                """SELECT * FROM leave_jurisdiction_rules
-                   WHERE state = $1
-                   ORDER BY leave_program""",
+                """SELECT jr.requirement_key, jr.title, jr.description,
+                          jr.current_value, jr.numeric_value, jr.source_url
+                   FROM jurisdiction_requirements jr
+                   JOIN jurisdictions j ON jr.jurisdiction_id = j.id
+                   WHERE j.state = $1 AND j.city = ''
+                     AND jr.category = 'leave'
+                   ORDER BY jr.requirement_key""",
                 work_state,
             )
 
@@ -138,51 +160,60 @@ class LeaveEligibilityService:
 
             programs = []
             for rule in rules:
+                meta = self._parse_leave_meta(rule["description"], rule["current_value"])
                 reasons = []
                 eligible = True
 
+                emp_min = meta.get("emp_min")
+                tenure_mo = meta.get("tenure_mo")
+                hrs_min = meta.get("hrs_min")
+
                 # Employer size threshold
-                if rule["employer_size_threshold"] and company_count < rule["employer_size_threshold"]:
+                if emp_min and company_count < emp_min:
                     eligible = False
                     reasons.append(
                         f"Employer has {company_count} employees "
-                        f"(minimum {rule['employer_size_threshold']})"
+                        f"(minimum {emp_min})"
                     )
 
                 # Tenure threshold
-                if rule["employee_tenure_months"]:
+                if tenure_mo:
                     if months_employed is None:
                         eligible = False
                         reasons.append("No start date on record")
-                    elif months_employed < rule["employee_tenure_months"]:
+                    elif months_employed < tenure_mo:
                         eligible = False
                         reasons.append(
                             f"{months_employed:.1f} months tenure "
-                            f"(minimum {rule['employee_tenure_months']})"
+                            f"(minimum {tenure_mo})"
                         )
 
                 # Hours threshold
-                if rule["employee_hours_threshold"]:
-                    if hours_worked < rule["employee_hours_threshold"]:
+                if hrs_min:
+                    if hours_worked < hrs_min:
                         eligible = False
                         reasons.append(
                             f"{hours_worked:.0f} hours worked "
-                            f"(minimum {rule['employee_hours_threshold']})"
+                            f"(minimum {hrs_min})"
                         )
 
                 if eligible:
                     reasons = ["Meets program requirements"]
 
+                paid = meta.get("paid", False)
+                max_weeks = meta.get("max_weeks") or (int(rule["numeric_value"]) if rule["numeric_value"] else None)
+                wage_pct = meta.get("wage_pct")
+
                 programs.append({
-                    "program": rule["leave_program"],
-                    "label": rule["program_label"],
+                    "program": rule["requirement_key"],
+                    "label": rule["title"],
                     "eligible": eligible,
-                    "paid": rule["paid"],
-                    "max_weeks": rule["max_weeks"],
-                    "wage_replacement_pct": float(rule["wage_replacement_pct"]) if rule["wage_replacement_pct"] else None,
-                    "job_protection": rule["job_protection"],
+                    "paid": paid,
+                    "max_weeks": max_weeks,
+                    "wage_replacement_pct": float(wage_pct) if wage_pct else None,
+                    "job_protection": meta.get("job_prot", False),
                     "reasons": reasons,
-                    "notes": rule["notes"],
+                    "notes": rule["description"],
                     "source_url": rule["source_url"],
                 })
 

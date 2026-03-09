@@ -1131,34 +1131,67 @@ export default function EmployeeDetail() {
                   </button>
                 ) : null}
 
-                {/* Eligibility Snapshot */}
+                {/* Eligibility Breakdown */}
                 {leaveEligibility && (
-                  <div className="space-y-1.5">
-                    <p className={`text-[9px] font-bold uppercase tracking-wider ${t.textFaint}`}>Eligibility</p>
+                  <div className="space-y-2">
+                    <p className={`text-[9px] font-bold uppercase tracking-wider ${t.textFaint}`}>
+                      Qualification
+                      {leaveEligibility.state_programs.state && (
+                        <span className={`ml-1.5 normal-case font-normal`}>· {leaveEligibility.state_programs.state}</span>
+                      )}
+                    </p>
+
                     {/* FMLA */}
                     {(() => {
                       const fmla = leaveEligibility.fmla;
-                      if (!fmla) return null;
+                      const eligible = fmla.eligible;
                       return (
-                        <div className="flex items-center justify-between">
-                          <span className={`text-xs ${t.textDim}`}>FMLA</span>
-                          <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${fmla.eligible ? (isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-900/30 text-emerald-400') : (isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-800 text-zinc-500')}`}>
-                            {fmla.eligible ? 'Eligible' : 'Not Eligible'}
-                          </span>
+                        <div className={`rounded-lg p-2.5 ${isLight ? (eligible ? 'bg-emerald-50 border border-emerald-200' : 'bg-stone-100 border border-stone-200') : (eligible ? 'bg-emerald-900/15 border border-emerald-600/20' : 'bg-zinc-900/50 border border-white/5')}`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-[10px] font-bold ${t.textMain}`}>FMLA</span>
+                            <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${eligible ? (isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-900/40 text-emerald-400') : (isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-800 text-zinc-500')}`}>
+                              {eligible ? 'Eligible' : 'Not Yet'}
+                            </span>
+                          </div>
+                          {eligible ? (
+                            <div className={`flex gap-3 text-[10px] ${t.textDim}`}>
+                              <span>12 wks unpaid</span>
+                              <span className={isLight ? 'text-emerald-700' : 'text-emerald-400'}>· Job protected</span>
+                            </div>
+                          ) : (
+                            <p className={`text-[10px] ${t.textFaint}`}>{fmla.reasons[0]}</p>
+                          )}
                         </div>
                       );
                     })()}
+
                     {/* State programs */}
-                    {(leaveEligibility.state_programs?.programs || []).map((prog) => (
-                      <div key={prog.program} className="flex items-center justify-between">
-                        <span className={`text-xs ${t.textDim} truncate mr-2`}>{prog.label}</span>
-                        <span className={`flex-shrink-0 px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${prog.eligible ? (isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-900/30 text-emerald-400') : (isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-800 text-zinc-500')}`}>
-                          {prog.eligible ? 'Eligible' : 'Not Yet'}
-                        </span>
+                    {(leaveEligibility.state_programs.programs || []).map((prog) => (
+                      <div key={prog.program} className={`rounded-lg p-2.5 ${isLight ? (prog.eligible ? 'bg-emerald-50 border border-emerald-200' : 'bg-stone-100 border border-stone-200') : (prog.eligible ? 'bg-emerald-900/15 border border-emerald-600/20' : 'bg-zinc-900/50 border border-white/5')}`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-[10px] font-bold ${t.textMain} leading-tight`}>{prog.label}</span>
+                          <span className={`ml-2 flex-shrink-0 px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${prog.eligible ? (isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-900/40 text-emerald-400') : (isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-800 text-zinc-500')}`}>
+                            {prog.eligible ? 'Eligible' : 'Not Yet'}
+                          </span>
+                        </div>
+                        {prog.eligible ? (
+                          <div className={`flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] ${t.textDim}`}>
+                            {prog.max_weeks && <span>{prog.max_weeks} wks</span>}
+                            <span>{prog.paid ? `Paid${prog.wage_replacement_pct ? ` (${prog.wage_replacement_pct}%)` : ''}` : 'Unpaid'}</span>
+                            {prog.job_protection && <span className={isLight ? 'text-emerald-700' : 'text-emerald-400'}>· Job protected</span>}
+                          </div>
+                        ) : (
+                          <p className={`text-[10px] ${t.textFaint}`}>{prog.reasons[0]}</p>
+                        )}
                       </div>
                     ))}
-                    {!leaveEligibility.state_programs?.programs?.length && (
-                      <p className={`text-xs ${t.textFaint}`}>No state programs for this work state</p>
+
+                    {!leaveEligibility.state_programs.programs?.length && (
+                      <p className={`text-[10px] ${t.textFaint}`}>
+                        {leaveEligibility.state_programs.state
+                          ? `No state programs found for ${leaveEligibility.state_programs.state}`
+                          : 'No work state on record — update to see state programs'}
+                      </p>
                     )}
                   </div>
                 )}

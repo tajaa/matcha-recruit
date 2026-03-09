@@ -68,6 +68,7 @@ REQUIRED_LABOR_CATEGORIES = {
     "final_pay",
     "minor_work_permit",
     "scheduling_reporting",
+    "leave",
 }
 
 _CATEGORY_ALIASES = {
@@ -90,6 +91,12 @@ _CATEGORY_ALIASES = {
     "reporting_time": "scheduling_reporting",
     "predictive_scheduling": "scheduling_reporting",
     "fair_workweek": "scheduling_reporting",
+    "leave_of_absence": "leave",
+    "family_leave": "leave",
+    "medical_leave": "leave",
+    "paid_leave": "leave",
+    "fmla": "leave",
+    "pfml": "leave",
 }
 
 

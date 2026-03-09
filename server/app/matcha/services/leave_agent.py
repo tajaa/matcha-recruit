@@ -848,19 +848,28 @@ class LeaveAgent:
             )
             prior_weeks = float(weeks_used_row["total_weeks"])
 
-            # Look up max job-protected weeks for qualifying programs
+            # Look up max job-protected weeks from jurisdiction_requirements
             max_protected = 12  # FMLA default
             if leave["work_state"]:
                 state_rules = await conn.fetch(
                     """
-                    SELECT max_weeks FROM leave_jurisdiction_rules
-                    WHERE state = $1 AND job_protection = true
+                    SELECT jr.current_value, jr.numeric_value
+                    FROM jurisdiction_requirements jr
+                    JOIN jurisdictions j ON jr.jurisdiction_id = j.id
+                    WHERE j.state = $1 AND j.city = ''
+                      AND jr.category = 'leave'
                     """,
                     leave["work_state"].upper(),
                 )
                 for rule in state_rules:
-                    if rule["max_weeks"] and rule["max_weeks"] > max_protected:
-                        max_protected = rule["max_weeks"]
+                    try:
+                        meta = json.loads(rule["current_value"]) if rule["current_value"] else {}
+                    except (json.JSONDecodeError, TypeError):
+                        meta = {}
+                    if meta.get("job_prot"):
+                        wks = meta.get("max_weeks") or (int(rule["numeric_value"]) if rule["numeric_value"] else 0)
+                        if wks > max_protected:
+                            max_protected = wks
 
             remaining_weeks = max(0, max_protected - prior_weeks)
 

@@ -2697,6 +2697,9 @@ async def init_db():
             ON CONFLICT (jurisdiction_id, requirement_key) DO NOTHING
         """)
 
+        # Leave backfill from leave_jurisdiction_rules is handled by Alembic migration
+        # y7z8a9b0c1d2_backfill_leave_jurisdiction_requirements.py
+
         # ===========================================
         # Employee Self-Service Portal Tables
         # ===========================================
