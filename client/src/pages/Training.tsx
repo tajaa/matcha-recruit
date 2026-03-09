@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { training } from '../api/client';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 import type {
   TrainingComplianceSummary,
   TrainingOverdueRecord,
@@ -467,7 +468,10 @@ export default function Training() {
       {/* Header */}
       <div className={`flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b ${t.border} pb-6`}>
         <div>
-          <h1 className={`text-4xl font-bold tracking-tighter uppercase ${t.textMain}`}>Training</h1>
+          <div className="flex items-center gap-3">
+            <h1 className={`text-4xl font-bold tracking-tighter uppercase ${t.textMain}`}>Training</h1>
+            <FeatureGuideTrigger guideId="training" />
+          </div>
           <p className={`text-xs mt-2 font-mono tracking-wide uppercase ${t.textMuted}`}>
             Training compliance and certification management
           </p>
@@ -498,11 +502,17 @@ export default function Training() {
       )}
 
       {/* Tabs */}
-      <div className={`flex gap-6 border-b ${t.border}`}>
+      <div data-tour="training-tabs" className={`flex gap-6 border-b ${t.border}`}>
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
+            data-tour={
+              tab.key === 'records' ? 'training-records-tab' :
+              tab.key === 'compliance' ? 'training-compliance-tab' :
+              tab.key === 'overdue' ? 'training-overdue-tab' :
+              undefined
+            }
             className={`inline-flex items-center gap-1.5 pb-3 text-xs uppercase tracking-wider transition-colors ${
               activeTab === tab.key ? t.tabActive : t.tabInactive
             }`}
@@ -526,6 +536,7 @@ export default function Training() {
               Active only
             </label>
             <button
+              data-tour="training-new-btn"
               onClick={() => {
                 setReqForm(EMPTY_REQ_FORM);
                 setModalError(null);
@@ -537,7 +548,7 @@ export default function Training() {
             </button>
           </div>
 
-          <div className={`${t.card} overflow-hidden`}>
+          <div data-tour="training-requirements-list" className={`${t.card} overflow-hidden`}>
             <table className="w-full text-sm">
               <thead>
                 <tr className={`text-left text-[10px] uppercase tracking-widest ${t.tableHead}`}>

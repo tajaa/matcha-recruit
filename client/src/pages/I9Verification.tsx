@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { i9 } from '../api/client';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 import type {
   I9Record,
   I9Status,
@@ -334,13 +335,14 @@ export default function I9Verification() {
     <div className={`min-h-screen ${t.pageBg}`}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-6">
         {/* Header */}
-        <div className={`flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b ${t.border} pb-6`}>
+        <div data-tour="i9-context" className={`flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b ${t.border} pb-6`}>
           <div>
             <div className="flex items-center gap-3">
               <FileCheck size={28} className={isLight ? 'text-zinc-900' : 'text-zinc-100'} />
               <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
                 I-9 Verification
               </h1>
+              <FeatureGuideTrigger guideId="i9-verification" />
             </div>
             <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>
               Employment eligibility verification tracking
@@ -360,6 +362,7 @@ export default function I9Verification() {
               <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
             </button>
             <button
+              data-tour="i9-new-btn"
               onClick={() => { setCreateError(null); setShowCreateModal(true); }}
               className={`inline-flex items-center gap-2 px-3 py-2 text-xs uppercase tracking-wider rounded-xl ${t.btnPrimary}`}
             >
@@ -384,11 +387,12 @@ export default function I9Verification() {
         )}
 
         {/* Tabs */}
-        <div className={`flex gap-6 border-b ${t.borderTab}`}>
+        <div data-tour="i9-tabs" className={`flex gap-6 border-b ${t.borderTab}`}>
           {tabs.map((tb) => (
             <button
               key={tb.key}
               onClick={() => setTab(tb.key)}
+              data-tour={tb.key === 'incomplete' ? 'i9-incomplete-tab' : undefined}
               className={`inline-flex items-center gap-2 pb-3 text-xs uppercase tracking-wider border-b-2 transition-colors ${
                 tab === tb.key ? t.tabActive : t.tabInactive
               }`}
@@ -732,7 +736,7 @@ function RecordsTab({
         <span className={`text-xs ${t.textMuted}`}>{records.length} record{records.length !== 1 ? 's' : ''}</span>
       </div>
 
-      <div className={`${t.card} overflow-hidden`}>
+      <div data-tour="i9-records-list" className={`${t.card} overflow-hidden`}>
         {records.length === 0 ? (
           <div className={`px-4 py-10 text-center ${t.textMuted} text-sm`}>No I-9 records found.</div>
         ) : (
@@ -1070,7 +1074,7 @@ function ComplianceTab({
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div data-tour="i9-compliance-stats" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {stats.map((stat) => (
           <div key={stat.label} className={`${t.statCard} p-5 space-y-3`}>
             <div className="flex items-center justify-between">

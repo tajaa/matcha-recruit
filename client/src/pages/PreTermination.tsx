@@ -31,6 +31,7 @@ import type {
   ClaimStatus,
 } from '../types';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 // ─── theme ────────────────────────────────────────────────────────────────────
 
@@ -531,6 +532,7 @@ export default function PreTermination() {
           </div>
         </div>
         <button
+          data-tour="pretermination-new-btn"
           onClick={() => {
             setShowDisciplineCreate(true);
             setError(null);
@@ -544,7 +546,7 @@ export default function PreTermination() {
       {loading ? renderLoading() : disciplineRecords.length === 0 ? (
         renderEmpty(disciplineSearch.trim() ? 'No discipline records found for this employee.' : 'Enter an employee ID to search for discipline records.')
       ) : (
-        <div className={`${t.card} overflow-hidden`}>
+        <div data-tour="pretermination-list" className={`${t.card} overflow-hidden`}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -564,7 +566,7 @@ export default function PreTermination() {
                     <td className={`px-4 py-3 font-mono text-xs ${t.textMain}`}>{rec.employee_id.slice(0, 8)}...</td>
                     <td className="px-4 py-3">{renderBadge(rec.discipline_type, typeBadge(rec.discipline_type, t))}</td>
                     <td className={`px-4 py-3 ${t.textMuted}`}>{rec.issued_date}</td>
-                    <td className="px-4 py-3">{renderBadge(rec.status, statusBadge(rec.status, t))}</td>
+                    <td className="px-4 py-3" data-tour="pretermination-status">{renderBadge(rec.status, statusBadge(rec.status, t))}</td>
                     <td className={`px-4 py-3 ${t.textMuted}`}>{rec.review_date || '--'}</td>
                     <td className={`px-4 py-3 max-w-[200px] ${t.textMuted}`}>{truncate(rec.description)}</td>
                     <td className="px-4 py-3 text-right">
@@ -833,11 +835,12 @@ export default function PreTermination() {
   return (
     <div className={`max-w-7xl mx-auto space-y-6 ${t.pageBg} min-h-screen p-6`}>
       {/* Header */}
-      <div className={`flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 pb-6 ${t.tabBorder}`}>
+      <div data-tour="pretermination-context" className={`flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 pb-6 ${t.tabBorder}`}>
         <div>
           <div className="flex items-center gap-3">
             <ShieldAlert size={28} className={t.textMain} />
             <h1 className={`text-4xl font-bold tracking-tighter uppercase ${t.textMain}`}>Pre-Termination</h1>
+            <FeatureGuideTrigger guideId="pre-termination" />
           </div>
           <p className={`text-xs mt-2 font-mono tracking-wide uppercase ${t.textMuted}`}>
             Progressive discipline, agency charges, and post-termination claims
@@ -861,7 +864,7 @@ export default function PreTermination() {
       )}
 
       {/* Tabs */}
-      <div className={`flex gap-6 ${t.tabBorder}`}>
+      <div data-tour="pretermination-tabs" className={`flex gap-6 ${t.tabBorder}`}>
         {TABS.map(({ key, label, icon: Icon }) => (
           <button
             key={key}

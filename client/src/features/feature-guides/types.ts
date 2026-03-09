@@ -47,4 +47,10 @@ export type GuideKey =
   | 'portal-documents'
   | 'portal-pto'
   | 'portal-leave'
-  | 'portal-mobility';
+  | 'portal-mobility'
+  | 'pre-termination'
+  | 'training'
+  | 'i9-verification'
+  | 'cobra'
+  | 'osha-log'
+  | 'separations';

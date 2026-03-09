@@ -272,6 +272,7 @@ export function IRList() {
           <div className="flex items-center gap-3">
             <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>Incident Management</h1>
             <FeatureGuideTrigger guideId="ir-list" />
+            <FeatureGuideTrigger guideId="osha-log" />
           </div>
           <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>{total} Records in Current View</p>
         </div>

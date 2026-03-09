@@ -21,6 +21,7 @@ import {
 
 import { separation } from '../api/client';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 import type {
   SeparationAgreement,
   SeparationAgreementCreate,
@@ -420,14 +421,17 @@ export default function SeparationAgreements() {
   const renderList = () => (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+      <div data-tour="separations-context" className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
         <div>
-          <h1 className={`text-3xl font-bold tracking-tight ${t.textMain}`}>Separation Agreements</h1>
+          <div className="flex items-center gap-3">
+            <h1 className={`text-3xl font-bold tracking-tight ${t.textMain}`}>Separation Agreements</h1>
+            <FeatureGuideTrigger guideId="separations" />
+          </div>
           <p className={`text-xs ${t.textMuted} mt-1 font-mono tracking-wide uppercase`}>
             ADEA / OWBPA compliance tracking
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div data-tour="separations-tabs" className="flex flex-wrap items-center gap-2">
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
@@ -446,6 +450,7 @@ export default function SeparationAgreements() {
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
           </button>
           <button
+            data-tour="separations-new-btn"
             onClick={() => {
               setCreateError(null);
               setShowCreateModal(true);
@@ -478,7 +483,7 @@ export default function SeparationAgreements() {
           <p className={`text-sm ${t.textMuted}`}>No separation agreements found.</p>
         </div>
       ) : (
-        <div className={`${t.card} overflow-hidden`}>
+        <div data-tour="separations-list" className={`${t.card} overflow-hidden`}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -543,7 +548,7 @@ export default function SeparationAgreements() {
     const isTerminal = ['revoked', 'expired', 'void'].includes(selected.status);
 
     return (
-      <div className={`${t.innerEl} p-4`}>
+      <div data-tour="separations-timeline" className={`${t.innerEl} p-4`}>
         <h3 className={`text-[10px] uppercase tracking-widest ${t.textMuted} mb-4`}>Lifecycle Progress</h3>
         {isTerminal ? (
           <div className="flex items-center gap-2">
@@ -650,7 +655,7 @@ export default function SeparationAgreements() {
     const considerationDays = selected.is_group_layoff ? 45 : 21;
 
     return (
-      <div className={`${t.infoBg} rounded-xl p-4`}>
+      <div data-tour="separations-adea" className={`${t.infoBg} rounded-xl p-4`}>
         <div className="flex items-start gap-3">
           <Scale size={18} className={`${t.infoIcon} shrink-0 mt-0.5`} />
           <div className="space-y-2">

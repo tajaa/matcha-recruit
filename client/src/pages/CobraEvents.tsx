@@ -20,6 +20,7 @@ import type {
   CobraStatus,
 } from '../types';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { FeatureGuideTrigger } from '../features/feature-guides';
 
 // ─── theme ────────────────────────────────────────────────────────────────────
 
@@ -402,9 +403,12 @@ export default function CobraEvents() {
   return (
     <div className={`max-w-7xl mx-auto space-y-6 ${t.pageBg} min-h-screen p-6`}>
       {/* header */}
-      <div className={`flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b ${t.border} pb-6`}>
+      <div data-tour="cobra-context" className={`flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b ${t.border} pb-6`}>
         <div>
-          <h1 className={`text-4xl font-bold tracking-tighter uppercase ${t.textMain}`}>COBRA Events</h1>
+          <div className="flex items-center gap-3">
+            <h1 className={`text-4xl font-bold tracking-tighter uppercase ${t.textMain}`}>COBRA Events</h1>
+            <FeatureGuideTrigger guideId="cobra" />
+          </div>
           <p className={`text-xs mt-2 font-mono tracking-wide uppercase ${t.textMuted}`}>
             Qualifying event tracking &amp; notice management
           </p>
@@ -418,6 +422,7 @@ export default function CobraEvents() {
             <RefreshCw size={14} className={refreshing ? 'animate-spin' : ''} /> Refresh
           </button>
           <button
+            data-tour="cobra-new-btn"
             onClick={() => { setCreateError(null); setShowCreateModal(true); }}
             className={`inline-flex items-center gap-2 px-3 py-2 text-xs uppercase tracking-wider ${t.btnPrimary}`}
           >
@@ -427,11 +432,12 @@ export default function CobraEvents() {
       </div>
 
       {/* tabs */}
-      <div className="flex items-center gap-1">
+      <div data-tour="cobra-tabs" className="flex items-center gap-1">
         {TABS.map((tab) => (
           <button
             key={tab.value}
             onClick={() => setActiveTab(tab.value)}
+            data-tour={tab.value === 'overdue' ? 'cobra-overdue-tab' : undefined}
             className={`px-4 py-2 text-xs uppercase tracking-wider font-medium border transition-colors ${
               activeTab === tab.value ? t.tabActive : t.tabInactive
             }`}
@@ -467,7 +473,7 @@ export default function CobraEvents() {
       {activeTab === 'dashboard' && (
         <div className="space-y-6">
           {/* stat cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div data-tour="cobra-stats" className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div className={`${t.card} p-5`}>
               <div className="flex items-center gap-3 mb-3">
                 <div className={`p-2 rounded-xl ${t.statBg}`}>
@@ -585,7 +591,7 @@ export default function CobraEvents() {
               <p className={`text-sm ${t.textMuted}`}>No COBRA events found.</p>
             </div>
           ) : (
-            <div className={`${t.card} overflow-hidden`}>
+            <div data-tour="cobra-events-list" className={`${t.card} overflow-hidden`}>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>

@@ -365,7 +365,7 @@ export function IRCreate() {
                 </div>
               </div>
             </div>
-            <label className={`flex items-center gap-2 text-xs ${th.textMuted} cursor-pointer`}>
+            <label data-tour="ir-osha-recordable" className={`flex items-center gap-2 text-xs ${th.textMuted} cursor-pointer`}>
               <input
                 type="checkbox"
                 checked={(categoryData.osha_recordable as boolean) || false}

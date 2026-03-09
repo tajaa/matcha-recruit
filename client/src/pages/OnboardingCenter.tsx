@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import { onboarding, provisioning } from '../api/client';
+import { onboarding, provisioning, getAccessToken } from '../api/client';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { Mail, CheckCircle, UserX, Clock, ChevronRight } from 'lucide-react';
 import type { GoogleWorkspaceConnectionStatus, OnboardingAnalytics, ProvisioningRunListItem, SlackConnectionStatus } from '../types';
-import Employees from './Employees';
+import { EmployeeIntake } from '../features/employee-intake';
 import OnboardingTemplates from './OnboardingTemplates';
 import OnboardingNotificationSettings from './OnboardingNotificationSettings';
 import OnboardingPriorities from './OnboardingPriorities';
@@ -163,6 +164,188 @@ function computeOnboardingCycleStep(
   return 1;
 }
 
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+interface RecentEmployee {
+  id: string;
+  first_name: string;
+  last_name: string;
+  work_email?: string | null;
+  email?: string;
+  user_id: string | null;
+  invitation_status: string | null;
+  termination_date: string | null;
+  created_at: string;
+}
+
+interface OnboardingProgressItem {
+  employee_id: string;
+  total: number;
+  completed: number;
+  pending: number;
+  has_onboarding: boolean;
+}
+
+function RecentHires({ refreshKey }: { refreshKey: number }) {
+  const isLight = useIsLightMode();
+  const t = isLight ? LT : DK;
+  const navigate = useNavigate();
+  const [employees, setEmployees] = useState<RecentEmployee[]>([]);
+  const [progress, setProgress] = useState<Record<string, OnboardingProgressItem>>({});
+  const [loading, setLoading] = useState(true);
+  const [invitingId, setInvitingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const token = getAccessToken();
+        const [empRes, progRes] = await Promise.all([
+          fetch(`${API_BASE}/employees`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_BASE}/employees/onboarding-progress`, { headers: { Authorization: `Bearer ${token}` } }),
+        ]);
+        if (!mounted) return;
+        if (empRes.ok) {
+          const all: RecentEmployee[] = await empRes.json();
+          const cutoff = new Date();
+          cutoff.setDate(cutoff.getDate() - 30);
+          setEmployees(all.filter(e => new Date(e.created_at) >= cutoff));
+        }
+        if (progRes.ok) {
+          setProgress(await progRes.json());
+        }
+      } catch {
+        // non-critical
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+    load();
+    return () => { mounted = false; };
+  }, [refreshKey]);
+
+  const handleInvite = async (id: string) => {
+    setInvitingId(id);
+    try {
+      const token = getAccessToken();
+      const res = await fetch(`${API_BASE}/employees/${id}/invite`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        setEmployees(prev => prev.map(e => e.id === id ? { ...e, invitation_status: 'pending' } : e));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setInvitingId(null);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className={`text-xs ${t.textMuted} uppercase tracking-wider animate-pulse py-6 text-center`}>
+        Loading recent hires...
+      </div>
+    );
+  }
+
+  if (employees.length === 0) {
+    return (
+      <div className={`${t.emptyBorder} rounded-2xl flex items-center justify-center py-12`}>
+        <p className={`${t.textMuted} text-xs font-mono uppercase tracking-wide`}>
+          No employees added in the last 30 days
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${isLight ? 'bg-stone-100 rounded-2xl' : 'bg-zinc-800 rounded-2xl'} overflow-hidden`}>
+      <div className={`px-5 py-3 ${isLight ? 'border-b border-stone-200' : 'border-b border-white/10'}`}>
+        <span className={`text-[10px] uppercase tracking-widest font-bold ${t.textMuted}`}>
+          Recent Hires ({employees.length})
+        </span>
+      </div>
+      <div className={`divide-y ${t.divide}`}>
+        {employees.map(emp => {
+          const prog = progress[emp.id];
+          const isActive = Boolean(emp.user_id);
+          const isTerminated = Boolean(emp.termination_date);
+          const isPending = emp.invitation_status === 'pending';
+          const canInvite = !isActive && !isTerminated;
+
+          return (
+            <div
+              key={emp.id}
+              onClick={() => navigate(`/app/matcha/employees/${emp.id}`)}
+              className={`flex items-center gap-4 px-5 py-3 cursor-pointer ${t.rowHover} transition-colors`}
+            >
+              {/* Name */}
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-bold ${t.textMain} truncate`}>
+                  {emp.first_name} {emp.last_name}
+                </p>
+                <p className={`text-[10px] ${t.textMuted} truncate`}>
+                  {emp.work_email || emp.email || '\u2014'}
+                </p>
+              </div>
+
+              {/* Onboarding progress */}
+              <div className="w-28 flex items-center gap-2">
+                {prog?.has_onboarding ? (
+                  <>
+                    <div className={`w-12 h-1.5 ${isLight ? 'bg-stone-300' : 'bg-zinc-700'} rounded-full overflow-hidden`}>
+                      <div
+                        className="h-full bg-emerald-500 rounded-full transition-all"
+                        style={{ width: `${(prog.completed / prog.total) * 100}%` }}
+                      />
+                    </div>
+                    <span className={`text-[10px] ${t.textMuted} font-mono`}>
+                      {prog.completed}/{prog.total}
+                    </span>
+                  </>
+                ) : (
+                  <span className={`text-[10px] ${t.textFaint} uppercase tracking-wider`}>No tasks</span>
+                )}
+              </div>
+
+              {/* Status / Invite */}
+              <div className="w-28 flex justify-end" onClick={e => e.stopPropagation()}>
+                {isTerminated ? (
+                  <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold ${isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-700 text-zinc-400'}`}>
+                    <UserX size={10} /> Terminated
+                  </span>
+                ) : isActive ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold bg-emerald-950/40 text-emerald-400 border border-emerald-500/30">
+                    <CheckCircle size={10} /> Active
+                  </span>
+                ) : isPending ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold bg-zinc-100 text-zinc-900 border border-zinc-300">
+                    <Clock size={10} /> Invited
+                  </span>
+                ) : canInvite ? (
+                  <button
+                    onClick={() => handleInvite(emp.id)}
+                    disabled={invitingId === emp.id}
+                    className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] uppercase tracking-wider font-bold transition-colors disabled:opacity-50 ${isLight ? 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800' : 'bg-zinc-100 text-zinc-900 hover:bg-white'}`}
+                  >
+                    <Mail size={10} />
+                    {invitingId === emp.id ? '...' : 'Send Invite'}
+                  </button>
+                ) : null}
+              </div>
+
+              <ChevronRight size={14} className={t.textFaint} />
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function OnboardingCenter() {
   const isLight = useIsLightMode();
   const t = isLight ? LT : DK;
@@ -186,6 +369,7 @@ export default function OnboardingCenter() {
   const [runsError, setRunsError] = useState('');
   const [runsProviderFilter, setRunsProviderFilter] = useState<string>('');
   const [runsStatusFilter, setRunsStatusFilter] = useState<string>('');
+  const [intakeRefreshKey, setIntakeRefreshKey] = useState(0);
 
   useEffect(() => {
     const tab = searchParams.get('tab');
@@ -468,7 +652,7 @@ export default function OnboardingCenter() {
         <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">
           {[
             { id: 'workspace', label: 'Workspace' },
-            { id: 'employees', label: 'New Hires' },
+            { id: 'employees', label: 'Add Employees' },
             { id: 'templates', label: 'Templates' },
             { id: 'priorities', label: 'Priorities' },
             { id: 'notifications', label: 'Notifications' },
@@ -614,7 +798,8 @@ export default function OnboardingCenter() {
 
         {activeTab === 'employees' && (
           <div className="space-y-6">
-            <Employees mode="onboarding" />
+            <EmployeeIntake onCreated={() => setIntakeRefreshKey(k => k + 1)} />
+            <RecentHires refreshKey={intakeRefreshKey} />
           </div>
         )}
 

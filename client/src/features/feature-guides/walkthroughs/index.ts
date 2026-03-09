@@ -27,6 +27,12 @@ import {
   internalMobilityWalkthrough,
   brokerClientsWalkthrough,
   brokerReportingWalkthrough,
+  preTerminationWalkthrough,
+  trainingWalkthrough,
+  i9VerificationWalkthrough,
+  cobraWalkthrough,
+  oshaLogWalkthrough,
+  separationsWalkthrough,
 } from './admin';
 import {
   portalOnboardingWalkthrough,
@@ -67,4 +73,10 @@ export const WALKTHROUGH_CONFIGS: Record<GuideKey, WalkthroughConfig> = {
   'portal-pto': portalPTOWalkthrough,
   'portal-leave': portalLeaveWalkthrough,
   'portal-mobility': portalMobilityWalkthrough,
+  'pre-termination': preTerminationWalkthrough,
+  training: trainingWalkthrough,
+  'i9-verification': i9VerificationWalkthrough,
+  cobra: cobraWalkthrough,
+  'osha-log': oshaLogWalkthrough,
+  separations: separationsWalkthrough,
 };
