@@ -5526,7 +5526,7 @@ async def get_research_queue():
                 FROM business_locations bl
                 WHERE bl.jurisdiction_id = j.id
             ) lc ON true
-            WHERE j.level = 'city'
+            WHERE j.city IS NOT NULL AND j.city != ''
             ORDER BY
                 COALESCE(jrc.cnt, 0) ASC,
                 COALESCE(lc.location_count, 0) DESC,
