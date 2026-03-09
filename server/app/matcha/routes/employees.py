@@ -482,10 +482,9 @@ async def _auto_send_invitation(
 
 async def _refresh_risk_assessment(company_id: UUID) -> None:
     """Background task: recompute risk assessment snapshot after a wage change."""
+    # Pass 1: save updated dimensions immediately so violations reflect right away
     try:
         result = await compute_risk_assessment(company_id)
-        from ...config import get_settings
-        consultation = await generate_recommendations(result, get_settings())
         from dataclasses import asdict as _asdict
         dims_json = json.dumps(
             {k: _asdict(v) for k, v in result.dimensions.items()},
@@ -495,31 +494,47 @@ async def _refresh_risk_assessment(company_id: UUID) -> None:
             await conn.execute(
                 """
                 INSERT INTO risk_assessment_snapshots
-                    (company_id, overall_score, overall_band, dimensions, report,
-                     recommendations, weights, computed_at, computed_by)
-                VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7::jsonb, $8, NULL)
+                    (company_id, overall_score, overall_band, dimensions, weights, computed_at, computed_by)
+                VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, $6, NULL)
                 ON CONFLICT (company_id) DO UPDATE SET
-                    overall_score   = EXCLUDED.overall_score,
-                    overall_band    = EXCLUDED.overall_band,
-                    dimensions      = EXCLUDED.dimensions,
-                    report          = EXCLUDED.report,
-                    recommendations = EXCLUDED.recommendations,
-                    weights         = EXCLUDED.weights,
-                    computed_at     = EXCLUDED.computed_at,
-                    computed_by     = NULL
+                    overall_score = EXCLUDED.overall_score,
+                    overall_band  = EXCLUDED.overall_band,
+                    dimensions    = EXCLUDED.dimensions,
+                    weights       = EXCLUDED.weights,
+                    computed_at   = EXCLUDED.computed_at,
+                    computed_by   = NULL
                 """,
                 company_id,
                 result.overall_score,
                 result.overall_band,
                 dims_json,
-                consultation.get("report"),
-                json.dumps(consultation.get("recommendations", []) or [], default=str),
                 json.dumps(DEFAULT_WEIGHTS),
                 result.computed_at,
             )
-        logger.info("Risk assessment refreshed for company %s after wage change", company_id)
+        logger.info("Risk assessment dimensions refreshed for company %s", company_id)
     except Exception:
         logger.exception("Background risk assessment refresh failed for company %s", company_id)
+        return
+
+    # Pass 2: update recommendations (best-effort, won't block violation updates)
+    try:
+        from ...config import get_settings
+        consultation = await generate_recommendations(result, get_settings())
+        async with get_connection() as conn:
+            await conn.execute(
+                """
+                UPDATE risk_assessment_snapshots SET
+                    report          = $2,
+                    recommendations = $3::jsonb
+                WHERE company_id = $1
+                """,
+                company_id,
+                consultation.get("report"),
+                json.dumps(consultation.get("recommendations", []) or [], default=str),
+            )
+        logger.info("Risk assessment recommendations updated for company %s", company_id)
+    except Exception:
+        logger.exception("Background risk assessment recommendations failed for company %s (dimensions already saved)", company_id)
 
 
 async def _run_provisioning_and_notify(
