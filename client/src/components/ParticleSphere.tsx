@@ -43,11 +43,11 @@ const createCityLabel = (text: string) => {
   if (!ctx) return null;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = '600 48px "Plus Jakarta Sans", "Inter", sans-serif';
+  ctx.font = '400 48px "Plus Jakarta Sans", "Inter", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(255, 171, 107, 0.95)';
-  ctx.shadowColor = 'rgba(255, 108, 24, 0.55)';
+  ctx.fillStyle = 'rgba(234, 88, 12, 0.95)';
+  ctx.shadowColor = 'rgba(124, 45, 18, 0.4)';
   ctx.shadowBlur = 12;
   ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 
