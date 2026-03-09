@@ -30,6 +30,7 @@ from ..services.onboarding_orchestrator import (
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
+from ..services.risk_assessment_service import compute_risk_assessment, generate_recommendations, DEFAULT_WEIGHTS
 
 logger = logging.getLogger(__name__)
 
@@ -477,6 +478,48 @@ async def _auto_send_invitation(
         await send_single_invitation(employee_id, org_id, invited_by)
     except Exception:
         logger.exception("Auto-invite background task failed for employee %s", employee_id)
+
+
+async def _refresh_risk_assessment(company_id: UUID) -> None:
+    """Background task: recompute risk assessment snapshot after a wage change."""
+    try:
+        result = await compute_risk_assessment(company_id)
+        from ...config import get_settings
+        consultation = await generate_recommendations(result, get_settings())
+        from dataclasses import asdict as _asdict
+        dims_json = json.dumps(
+            {k: _asdict(v) for k, v in result.dimensions.items()},
+            default=str,
+        )
+        async with get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO risk_assessment_snapshots
+                    (company_id, overall_score, overall_band, dimensions, report,
+                     recommendations, weights, computed_at, computed_by)
+                VALUES ($1, $2, $3, $4::jsonb, $5, $6::jsonb, $7::jsonb, $8, NULL)
+                ON CONFLICT (company_id) DO UPDATE SET
+                    overall_score   = EXCLUDED.overall_score,
+                    overall_band    = EXCLUDED.overall_band,
+                    dimensions      = EXCLUDED.dimensions,
+                    report          = EXCLUDED.report,
+                    recommendations = EXCLUDED.recommendations,
+                    weights         = EXCLUDED.weights,
+                    computed_at     = EXCLUDED.computed_at,
+                    computed_by     = NULL
+                """,
+                company_id,
+                result.overall_score,
+                result.overall_band,
+                dims_json,
+                consultation.get("report"),
+                json.dumps(consultation.get("recommendations", []) or [], default=str),
+                json.dumps(DEFAULT_WEIGHTS),
+                result.computed_at,
+            )
+        logger.info("Risk assessment refreshed for company %s after wage change", company_id)
+    except Exception:
+        logger.exception("Background risk assessment refresh failed for company %s", company_id)
 
 
 async def _run_provisioning_and_notify(
@@ -1268,6 +1311,12 @@ async def update_employee(
                 work_city=row["work_city"] if compensation_fields_available else None,
                 background_tasks=background_tasks,
             )
+
+        # Refresh risk assessment snapshot when wage data changes
+        if compensation_fields_available and (
+            request.pay_rate is not None or request.pay_classification is not None
+        ):
+            background_tasks.add_task(_refresh_risk_assessment, company_id)
 
         # Get manager name
         manager_name = None
