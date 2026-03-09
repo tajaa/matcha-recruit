@@ -1,6 +1,6 @@
 export type MWThreadStatus = 'active' | 'finalized' | 'archived';
 export type MWMessageRole = 'user' | 'assistant' | 'system';
-export type MWTaskType = 'offer_letter' | 'review' | 'workbook' | 'onboarding' | 'presentation' | 'handbook' | 'chat';
+export type MWTaskType = 'offer_letter' | 'review' | 'workbook' | 'onboarding' | 'presentation' | 'handbook' | 'policy' | 'chat';
 
 export interface MWPresentationSlide {
   title: string;
@@ -164,6 +164,15 @@ export interface MWDocumentState {
   handbook_error?: string | null;
   handbook_strength_score?: number | null;
   handbook_strength_label?: string | null;
+  // Policy fields
+  policy_title?: string | null;
+  policy_type?: string | null;
+  policy_locations?: string[] | null;
+  policy_location_names?: string[] | null;
+  policy_additional_context?: string | null;
+  policy_content?: string | null;
+  policy_status?: string | null;
+  policy_id?: string | null;
 }
 
 export interface MWThreadDetail {

@@ -355,11 +355,11 @@ function PolicyPreview({ state }: { state: MWDocumentState }) {
           <div className="flex items-center gap-2 mt-1.5">
             {policyType && (
               <span className="text-[11px] font-medium text-zinc-300 light:text-zinc-600 px-2 py-0.5 bg-zinc-800 light:bg-zinc-200/60">
-                {policyType.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+                {policyType.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
               </span>
             )}
             <span className={`text-[11px] font-medium px-2 py-0.5 ${statusColor}`}>
-              {status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+              {status.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
             </span>
           </div>
         </div>
@@ -462,7 +462,7 @@ function HandbookPreview({ state }: { state: MWDocumentState }) {
               </span>
             )}
             <span className={`text-[11px] font-medium px-2 py-0.5 ${statusColor}`}>
-              {status.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
+              {status.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
             </span>
           </div>
         </div>
@@ -1975,7 +1975,7 @@ export default function MatchaWorkThread() {
                   }}
                 />
                 <button
-                  onClick={handleSend}
+                  onClick={() => handleSend()}
                   disabled={inputDisabled || !input.trim()}
                   className="w-10 h-10 flex items-center justify-center bg-matcha-600 hover:bg-matcha-700 light:bg-black light:hover:bg-black/80 light:shadow-md disabled:opacity-40 transition-colors flex-shrink-0 rounded-sm"
                 >
