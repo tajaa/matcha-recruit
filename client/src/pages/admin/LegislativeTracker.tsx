@@ -42,11 +42,11 @@ const STATE_OPTIONS = [
 type SortKey = 'probability' | 'state' | 'status' | 'last_action_date';
 
 function probabilityColor(p: number): string {
-  if (p >= 0.8) return 'text-emerald-700 bg-emerald-50 border-emerald-200';
-  if (p >= 0.6) return 'text-orange-700 bg-orange-50 border-orange-200';
-  if (p >= 0.4) return 'text-amber-700 bg-amber-50 border-amber-200';
-  if (p >= 0.2) return 'text-blue-700 bg-blue-50 border-blue-200';
-  return 'text-zinc-600 bg-zinc-50 border-zinc-200';
+  if (p >= 0.8) return 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
+  if (p >= 0.6) return 'text-orange-400 bg-orange-500/10 border-orange-500/20';
+  if (p >= 0.4) return 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+  if (p >= 0.2) return 'text-blue-400 bg-blue-500/10 border-blue-500/20';
+  return 'text-zinc-400 bg-zinc-500/10 border-zinc-500/20';
 }
 
 function probabilityBarColor(p: number): string {
@@ -58,12 +58,12 @@ function probabilityBarColor(p: number): string {
 }
 
 function statusColor(status: number): string {
-  if (status === 4) return 'text-emerald-700 bg-emerald-50';
-  if (status === 5) return 'text-red-700 bg-red-50';
-  if (status === 6) return 'text-zinc-500 bg-zinc-100';
-  if (status === 3) return 'text-blue-700 bg-blue-50';
-  if (status === 2) return 'text-violet-700 bg-violet-50';
-  return 'text-zinc-600 bg-zinc-100';
+  if (status === 4) return 'text-emerald-400 bg-emerald-500/10';
+  if (status === 5) return 'text-red-400 bg-red-500/10';
+  if (status === 6) return 'text-zinc-500 bg-zinc-500/10';
+  if (status === 3) return 'text-blue-400 bg-blue-500/10';
+  if (status === 2) return 'text-violet-400 bg-violet-500/10';
+  return 'text-zinc-400 bg-zinc-500/10';
 }
 
 function SourceIcon({ source }: { source: TrackedBill['probability_source'] }) {
@@ -95,11 +95,11 @@ function BillRow({ bill }: { bill: TrackedBill }) {
   return (
     <>
       <tr
-        className="border-b border-zinc-100 hover:bg-zinc-50 cursor-pointer"
+        className="border-b border-white/5 hover:bg-white/5 cursor-pointer"
         onClick={() => setExpanded(!expanded)}
       >
         <td className="px-4 py-3">
-          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-zinc-100 text-zinc-700">
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-zinc-800 text-zinc-300">
             {bill.state}
           </span>
         </td>
@@ -108,7 +108,7 @@ function BillRow({ bill }: { bill: TrackedBill }) {
             href={bill.url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-xs font-mono text-blue-600 hover:underline flex items-center gap-1"
+            className="text-xs font-mono text-blue-400 hover:underline flex items-center gap-1"
             onClick={(e) => e.stopPropagation()}
           >
             {bill.bill_number}
@@ -116,10 +116,10 @@ function BillRow({ bill }: { bill: TrackedBill }) {
           </a>
         </td>
         <td className="px-4 py-3 max-w-xs">
-          <p className="text-sm text-zinc-800 line-clamp-2">{bill.title}</p>
+          <p className="text-sm text-zinc-300 line-clamp-2">{bill.title}</p>
         </td>
         <td className="px-4 py-3">
-          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-800 text-zinc-300 border border-white/10">
             {bill.category}
           </span>
         </td>
@@ -130,7 +130,7 @@ function BillRow({ bill }: { bill: TrackedBill }) {
         </td>
         <td className="px-4 py-3">
           <div className="flex items-center gap-2">
-            <div className="w-16 bg-zinc-200 rounded-full h-1.5">
+            <div className="w-16 bg-zinc-800 rounded-full h-1.5">
               <div
                 className={`h-1.5 rounded-full ${probabilityBarColor(bill.probability)}`}
                 style={{ width: `${pct}%` }}
@@ -144,7 +144,7 @@ function BillRow({ bill }: { bill: TrackedBill }) {
         </td>
         <td className="px-4 py-3">
           <div className="text-xs text-zinc-500">
-            <div className="font-medium text-zinc-600">{bill.last_action_date}</div>
+            <div className="font-medium text-zinc-400">{bill.last_action_date}</div>
             <div className="line-clamp-1 mt-0.5">{bill.last_action}</div>
           </div>
         </td>
@@ -157,38 +157,38 @@ function BillRow({ bill }: { bill: TrackedBill }) {
         </td>
       </tr>
       {expanded && (
-        <tr className="bg-zinc-50 border-b border-zinc-100">
+        <tr className="bg-zinc-900/50 border-b border-white/5">
           <td colSpan={8} className="px-6 py-4">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
               {bill.description && (
                 <div>
-                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-1">Description</div>
-                  <p className="text-zinc-700">{bill.description}</p>
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-1">Description</div>
+                  <p className="text-zinc-300">{bill.description}</p>
                 </div>
               )}
               {bill.sponsors && bill.sponsors.length > 0 && (
                 <div>
-                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-1">
+                  <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-1">
                     Sponsors ({bill.sponsors.length})
                   </div>
                   <ul className="space-y-1">
                     {bill.sponsors.slice(0, 5).map((s, i) => (
-                      <li key={i} className="text-zinc-700 flex items-center gap-1.5">
-                        <span className={`inline-block w-4 h-4 rounded-full text-[10px] font-bold flex items-center justify-center ${s.party === 'D' ? 'bg-blue-100 text-blue-700' : s.party === 'R' ? 'bg-red-100 text-red-700' : 'bg-zinc-100 text-zinc-600'}`}>
+                      <li key={i} className="text-zinc-300 flex items-center gap-1.5">
+                        <span className={`inline-block w-4 h-4 rounded-full text-[10px] font-bold flex items-center justify-center ${s.party === 'D' ? 'bg-blue-500/20 text-blue-400' : s.party === 'R' ? 'bg-red-500/20 text-red-400' : 'bg-zinc-700 text-zinc-400'}`}>
                           {s.party || '?'}
                         </span>
                         {s.name}
-                        {s.role && <span className="text-zinc-400 text-xs">({s.role})</span>}
+                        {s.role && <span className="text-zinc-500 text-xs">({s.role})</span>}
                       </li>
                     ))}
                     {bill.sponsors.length > 5 && (
-                      <li className="text-zinc-400 text-xs">+{bill.sponsors.length - 5} more</li>
+                      <li className="text-zinc-500 text-xs">+{bill.sponsors.length - 5} more</li>
                     )}
                   </ul>
                 </div>
               )}
               <div>
-                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-1">Probability</div>
+                <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-1">Probability</div>
                 <div className="flex items-center gap-2">
                   <span className={`text-sm font-semibold px-2 py-0.5 rounded border ${probabilityColor(bill.probability)}`}>
                     {Math.round(bill.probability * 100)}%
@@ -196,14 +196,14 @@ function BillRow({ bill }: { bill: TrackedBill }) {
                   <span className="text-zinc-500 text-xs capitalize">{bill.probability_source}</span>
                 </div>
                 {bill.probability_reasoning && (
-                  <p className="mt-1 text-zinc-600 text-xs">{bill.probability_reasoning}</p>
+                  <p className="mt-1 text-zinc-400 text-xs">{bill.probability_reasoning}</p>
                 )}
                 {bill.polymarket_url && (
                   <a
                     href={bill.polymarket_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="mt-1 flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    className="mt-1 flex items-center gap-1 text-xs text-blue-400 hover:underline"
                   >
                     View on Polymarket
                     <ExternalLink className="w-3 h-3" />
@@ -288,7 +288,7 @@ export default function LegislativeTracker() {
   const SortButton = ({ label, sKey }: { label: string; sKey: SortKey }) => (
     <button
       onClick={() => handleSort(sKey)}
-      className="flex items-center gap-1 text-xs font-semibold text-zinc-500 uppercase tracking-wide hover:text-zinc-800"
+      className="flex items-center gap-1 text-xs font-semibold text-zinc-500 uppercase tracking-widest hover:text-zinc-200"
     >
       {label}
       {sortKey === sKey ? (
@@ -304,11 +304,11 @@ export default function LegislativeTracker() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-100">
-            <Scale className="w-5 h-5 text-indigo-600" />
+          <div className="p-2.5 rounded-xl bg-zinc-800 border border-zinc-700/50">
+            <Scale className="w-5 h-5 text-zinc-400" />
           </div>
           <div>
-            <h1 className="text-xl font-semibold text-zinc-900">Legislative Tracker</h1>
+            <h1 className="text-xl font-semibold text-white">Legislative Tracker</h1>
             <p className="text-sm text-zinc-500 mt-0.5">
               Pending HR bills across all 50 states + Congress with passage probability
             </p>
@@ -317,7 +317,7 @@ export default function LegislativeTracker() {
         <button
           onClick={runScan}
           disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white text-black text-sm font-medium hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           <TrendingUp className="w-4 h-4" />
           {loading ? 'Scanning…' : 'Run Scan'}
@@ -325,10 +325,10 @@ export default function LegislativeTracker() {
       </div>
 
       {/* Filter bar */}
-      <div className="bg-white border border-zinc-200 rounded-xl p-4 mb-6">
+      <div className="bg-zinc-900/30 border border-white/10 rounded-xl p-4 mb-6">
         <div className="flex flex-col gap-4">
           <div>
-            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-2">Keywords</div>
+            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-2">Keywords</div>
             <div className="flex flex-wrap gap-2">
               {DEFAULT_KEYWORDS.map((kw) => (
                 <button
@@ -336,8 +336,8 @@ export default function LegislativeTracker() {
                   onClick={() => toggleKeyword(kw)}
                   className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                     activeKeywords.has(kw)
-                      ? 'bg-indigo-600 text-white border-indigo-600'
-                      : 'bg-white text-zinc-600 border-zinc-300 hover:border-zinc-400'
+                      ? 'bg-white text-black border-white'
+                      : 'bg-zinc-900 text-zinc-400 border-zinc-700/50 hover:border-zinc-500'
                   }`}
                 >
                   {kw}
@@ -347,11 +347,11 @@ export default function LegislativeTracker() {
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3">
             <div>
-              <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wide mb-2">State Filter</div>
+              <div className="text-xs font-semibold text-zinc-500 uppercase tracking-widest mb-2">State Filter</div>
               <select
                 value={selectedStates}
                 onChange={(e) => setSelectedStates(e.target.value)}
-                className="px-3 py-1.5 rounded-lg border border-zinc-300 text-sm text-zinc-700 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                className="px-3 py-1.5 rounded-lg border border-zinc-700 text-sm text-zinc-300 bg-zinc-900 focus:outline-none focus:border-zinc-500"
               >
                 {STATE_OPTIONS.map((opt) => (
                   <option key={opt.value} value={opt.value}>
@@ -377,7 +377,7 @@ export default function LegislativeTracker() {
 
       {/* Error */}
       {error && (
-        <div className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl p-4 mb-6 text-sm text-red-700">
+        <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/20 rounded-xl p-4 mb-6 text-sm text-red-400">
           <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
           <span>{error}</span>
         </div>
@@ -385,14 +385,14 @@ export default function LegislativeTracker() {
 
       {/* Loading */}
       {loading && (
-        <div className="bg-white border border-zinc-200 rounded-xl p-8 text-center">
-          <div className="inline-flex items-center gap-3 text-zinc-500">
-            <div className="w-5 h-5 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+        <div className="bg-zinc-900/30 border border-white/10 rounded-xl p-8 text-center">
+          <div className="inline-flex items-center gap-3 text-zinc-400">
+            <div className="w-5 h-5 border-2 border-zinc-400 border-t-transparent rounded-full animate-spin" />
             <span className="text-sm">
               Scanning {selectedStates === 'ALL' ? '51 jurisdictions' : selectedStates} for {activeKeywords.size} keyword{activeKeywords.size !== 1 ? 's' : ''}…
             </span>
           </div>
-          <p className="text-xs text-zinc-400 mt-2">Searching via Gemini — may take 15–30 seconds</p>
+          <p className="text-xs text-zinc-500 mt-2">Searching via Gemini — may take 15–30 seconds</p>
         </div>
       )}
 
@@ -400,35 +400,35 @@ export default function LegislativeTracker() {
       {result && !loading && (
         <>
           <div className="flex items-center justify-between mb-3">
-            <p className="text-sm text-zinc-600">
-              <span className="font-semibold text-zinc-900">{result.total}</span> bills found
+            <p className="text-sm text-zinc-400">
+              <span className="font-semibold text-zinc-200">{result.total}</span> bills found
               {' · '}
-              <span className="text-blue-600">{result.polymarket_matches} Polymarket</span>
+              <span className="text-blue-400">{result.polymarket_matches} Polymarket</span>
               {' · '}
-              <span className="text-violet-600">{result.gemini_estimates} Gemini</span>
+              <span className="text-violet-400">{result.gemini_estimates} Gemini</span>
               {' · '}
-              <span className="text-zinc-400">{result.scan_duration_seconds}s</span>
+              <span className="text-zinc-500">{result.scan_duration_seconds}s</span>
             </p>
           </div>
 
           {result.total === 0 ? (
-            <div className="bg-white border border-zinc-200 rounded-xl p-12 text-center">
-              <Scale className="w-10 h-10 text-zinc-300 mx-auto mb-3" />
-              <p className="text-zinc-500 font-medium">No bills found</p>
-              <p className="text-sm text-zinc-400 mt-1">Try adding more keywords or selecting different states.</p>
+            <div className="bg-zinc-900/30 border border-white/10 rounded-xl p-12 text-center">
+              <Scale className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
+              <p className="text-zinc-400 font-medium">No bills found</p>
+              <p className="text-sm text-zinc-600 mt-1">Try adding more keywords or selecting different states.</p>
             </div>
           ) : (
-            <div className="bg-white border border-zinc-200 rounded-xl overflow-hidden">
+            <div className="bg-zinc-900/30 border border-white/10 rounded-xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-left">
-                  <thead className="bg-zinc-50 border-b border-zinc-200">
+                  <thead className="bg-zinc-950 border-b border-white/10">
                     <tr>
                       <th className="px-4 py-3">
                         <SortButton label="State" sKey="state" />
                       </th>
-                      <th className="px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wide">Bill #</th>
-                      <th className="px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wide">Title</th>
-                      <th className="px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wide">Category</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-widest">Bill #</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-widest">Title</th>
+                      <th className="px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-widest">Category</th>
                       <th className="px-4 py-3">
                         <SortButton label="Status" sKey="status" />
                       </th>
@@ -455,10 +455,10 @@ export default function LegislativeTracker() {
 
       {/* Initial empty state */}
       {!result && !loading && !error && (
-        <div className="bg-white border border-zinc-200 rounded-xl p-12 text-center">
-          <Scale className="w-10 h-10 text-zinc-300 mx-auto mb-3" />
-          <p className="text-zinc-500 font-medium">Ready to scan</p>
-          <p className="text-sm text-zinc-400 mt-1">
+        <div className="bg-zinc-900/30 border border-white/10 rounded-xl p-12 text-center">
+          <Scale className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
+          <p className="text-zinc-400 font-medium">Ready to scan</p>
+          <p className="text-sm text-zinc-600 mt-1">
             Select keywords and states above, then click <strong>Run Scan</strong>.
           </p>
         </div>

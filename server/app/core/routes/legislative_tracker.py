@@ -1,5 +1,6 @@
 """Legislative tracker routes — admin-only, stateless live API calls via Gemini grounding."""
 
+import logging
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,6 +10,8 @@ from ..services.legislative_tracker import (
     scan_bills,
     ALL_STATES,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -39,4 +42,8 @@ async def scan_bills_endpoint(
             if not state_list:
                 raise HTTPException(status_code=400, detail="No valid state codes provided")
 
-    return await scan_bills(keywords=kw_list, states=state_list)
+    try:
+        return await scan_bills(keywords=kw_list, states=state_list)
+    except Exception as e:
+        logger.error(f"Legislative scan failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Scan failed: {str(e)}")

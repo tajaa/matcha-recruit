@@ -178,7 +178,6 @@ Include up to 6 real bills per keyword. Only include bills you can verify exist 
                 config=types.GenerateContentConfig(
                     tools=[types.Tool(google_search=types.GoogleSearch())],
                     temperature=0.1,
-                    response_modalities=["TEXT"],
                 ),
             )
             return _parse_gemini_json(response.text or "")
