@@ -598,6 +598,17 @@ const navSections: NavSection[] = [
           </svg>
         ),
       },
+      {
+        path: '/app/admin/legislative-tracker',
+        label: 'Bill Tracker',
+        roles: ['admin'],
+        helpText: 'Track pending HR/employment legislation and passage probabilities across all states.',
+        icon: (
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 6l9-3 9 3M3 6v12l9 3 9-3V6M12 3v18M3 10h4m10 0h4M3 14h4m10 0h4" />
+          </svg>
+        ),
+      },
     ],
   },
 

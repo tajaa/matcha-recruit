@@ -19,6 +19,7 @@ from .leads_agent import router as leads_agent_router
 from .posters import router as posters_router
 from .hr_news import router as hr_news_router
 from .admin_handbook_references import router as admin_handbook_references_router
+from .legislative_tracker import router as legislative_tracker_router
 from ...matcha.dependencies import require_feature
 
 # Create main core router
@@ -46,6 +47,7 @@ core_router.include_router(leads_agent_router, prefix="/leads-agent", tags=["lea
 core_router.include_router(posters_router, prefix="/compliance/posters", tags=["compliance-posters"],
                            dependencies=[Depends(require_feature("compliance"))])
 core_router.include_router(hr_news_router, prefix="/admin/news", tags=["hr-news"])
+core_router.include_router(legislative_tracker_router, prefix="/admin/legislative-tracker", tags=["legislative-tracker"])
 
 # Export individual routers for backwards compatibility
 __all__ = [
@@ -67,4 +69,5 @@ __all__ = [
     "leads_agent_router",
     "posters_router",
     "hr_news_router",
+    "legislative_tracker_router",
 ]

@@ -3667,6 +3667,49 @@ export const adminNews = {
     request<HRNewsRefreshResponse>('/admin/news/refresh', { method: 'POST' }),
 };
 
+// Legislative Tracker API
+export interface TrackedBill {
+  bill_id: number;
+  state: string;
+  bill_number: string;
+  title: string;
+  description: string;
+  status: number;
+  status_label: string;
+  last_action: string;
+  last_action_date: string;
+  url: string;
+  category: string;
+  sponsors: { name: string; party: string; role: string }[];
+  probability: number;
+  probability_source: 'polymarket' | 'gemini' | 'heuristic';
+  probability_reasoning?: string;
+  polymarket_url?: string;
+  polymarket_volume?: number;
+}
+
+export interface LegislativeScanResponse {
+  bills: TrackedBill[];
+  total: number;
+  keywords_searched: string[];
+  states_searched: string[];
+  scan_duration_seconds: number;
+  polymarket_matches: number;
+  gemini_estimates: number;
+}
+
+export const adminLegislativeTracker = {
+  scan: (params?: { keywords?: string; states?: string }): Promise<LegislativeScanResponse> => {
+    const sp = new URLSearchParams();
+    if (params?.keywords) sp.append('keywords', params.keywords);
+    if (params?.states) sp.append('states', params.states);
+    const q = sp.toString();
+    return request<LegislativeScanResponse>(`/admin/legislative-tracker/scan${q ? `?${q}` : ''}`);
+  },
+  getBill: (billId: number): Promise<TrackedBill & { history: unknown[]; votes: unknown[] }> =>
+    request(`/admin/legislative-tracker/bill/${billId}`),
+};
+
 // Matcha Work API (chat-driven offer letter generation)
 import type {
   MWElement,
@@ -4053,6 +4096,7 @@ export const api = {
   posters,
   internalMobilityAdmin,
   adminNews,
+  adminLegislativeTracker,
   riskAssessment,
 };
 

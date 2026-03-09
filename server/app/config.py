@@ -74,6 +74,9 @@ class Settings:
     gemini_hourly_limit: int = 50
     gemini_daily_limit: int = 50
 
+    # Legislative Tracker
+    legiscan_api_key: Optional[str] = None
+
     # Stripe (Matcha Work billing)
     stripe_secret_key: Optional[str] = None
     stripe_webhook_secret: Optional[str] = None
@@ -163,6 +166,7 @@ def load_settings() -> Settings:
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),
         gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "50")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "50")),
+        legiscan_api_key=os.getenv("LEGISCAN_API_KEY"),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),
         stripe_webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET"),
         stripe_success_url=os.getenv(

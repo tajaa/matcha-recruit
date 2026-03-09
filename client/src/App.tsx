@@ -67,6 +67,7 @@ const Jurisdictions = lazy(() => import('./pages/admin/Jurisdictions'));
 const JurisdictionData = lazy(() => import('./pages/admin/JurisdictionData'));
 const PosterOrders = lazy(() => import('./pages/admin/PosterOrders'));
 const HRNews = lazy(() => import('./pages/admin/HRNews'));
+const LegislativeTracker = lazy(() => import('./pages/admin/LegislativeTracker'));
 const IndustryHandbooks = lazy(() => import('./pages/admin/IndustryHandbooks'));
 const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
 const BulkImport = lazy(() => import('./pages/BulkImport'));
@@ -751,6 +752,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <HRNews />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="admin/legislative-tracker"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <LegislativeTracker />
                   </ProtectedRoute>
                 }
               />
