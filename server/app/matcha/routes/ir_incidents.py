@@ -1891,7 +1891,7 @@ async def analyze_root_cause(
                 generated_at=result["generated_at"],
                 from_cache=True,
             )
-            yield _sse({"type": "cached", "message": "Using cached analysis result", "result": rc.model_dump()})
+            yield _sse({"type": "cached", "message": "Using cached analysis result", "result": rc.model_dump(mode='json')})
             yield "data: [DONE]\n\n"
             return
 
@@ -1926,7 +1926,7 @@ async def analyze_root_cause(
                     from_cache=True,
                     cache_reason=str(e),
                 )
-                yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rc.model_dump()})
+                yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rc.model_dump(mode='json')})
                 yield "data: [DONE]\n\n"
                 return
             logger.error(f"AI analysis failed for incident {incident_id}: {e}")
@@ -1966,7 +1966,7 @@ async def analyze_root_cause(
             reasoning=result["reasoning"],
             generated_at=result["generated_at"],
         )
-        yield _sse({"type": "complete", "result": rc.model_dump()})
+        yield _sse({"type": "complete", "result": rc.model_dump(mode='json')})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -2042,7 +2042,7 @@ async def analyze_recommendations(
                 generated_at=result["generated_at"],
                 from_cache=True,
             )
-            yield _sse({"type": "cached", "message": "Using cached analysis result", "result": rec.model_dump()})
+            yield _sse({"type": "cached", "message": "Using cached analysis result", "result": rec.model_dump(mode='json')})
             yield "data: [DONE]\n\n"
             return
 
@@ -2076,7 +2076,7 @@ async def analyze_recommendations(
                     from_cache=True,
                     cache_reason=str(e),
                 )
-                yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rec.model_dump()})
+                yield _sse({"type": "cached", "message": f"AI failed, using stale cache: {e}", "result": rec.model_dump(mode='json')})
                 yield "data: [DONE]\n\n"
                 return
             logger.error(f"AI analysis failed for incident {incident_id}: {e}")
@@ -2114,7 +2114,7 @@ async def analyze_recommendations(
             summary=result["summary"],
             generated_at=result["generated_at"],
         )
-        yield _sse({"type": "complete", "result": rec.model_dump()})
+        yield _sse({"type": "complete", "result": rec.model_dump(mode='json')})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
@@ -2155,7 +2155,7 @@ async def analyze_similar_incidents(
             if "precedents" in result:
                 result["from_cache"] = True
                 pa = PrecedentAnalysis(**result)
-                yield _sse({"type": "cached", "message": "Using cached precedent analysis", "result": pa.model_dump()})
+                yield _sse({"type": "cached", "message": "Using cached precedent analysis", "result": pa.model_dump(mode='json')})
                 yield "data: [DONE]\n\n"
                 return
 
@@ -2203,7 +2203,7 @@ async def analyze_similar_incidents(
             )
 
         pa = PrecedentAnalysis(**result)
-        yield _sse({"type": "complete", "result": pa.model_dump()})
+        yield _sse({"type": "complete", "result": pa.model_dump(mode='json')})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
