@@ -8,6 +8,10 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "internal_mobility": False,
     "matcha_work": False,
     "risk_assessment": True,
+    "training": False,
+    "i9": False,
+    "cobra": False,
+    "separation_agreements": False,
 }
 
 

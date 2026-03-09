@@ -779,3 +779,22 @@ async def update_post_term_claim(
             *values,
         )
         return _to_claim_response(row)
+
+
+@router.delete("/claims/{claim_id}")
+async def delete_post_term_claim(
+    claim_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Delete a post-termination claim record."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "DELETE FROM post_termination_claims WHERE id = $1 AND company_id = $2 RETURNING id",
+            claim_id,
+            company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Post-termination claim not found")
+        return {"message": "Claim deleted", "id": str(row["id"])}

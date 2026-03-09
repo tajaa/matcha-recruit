@@ -314,24 +314,35 @@ async def bulk_assign(
         if requirement["frequency_months"]:
             due_date = assigned_date + timedelta(days=requirement["frequency_months"] * 30)
 
-        count = 0
-        for emp in employees:
-            await conn.execute(
-                """
-                INSERT INTO training_records
-                    (company_id, employee_id, requirement_id, title, training_type,
-                     assigned_date, due_date)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                """,
-                company_id,
-                emp["id"],
-                requirement["id"],
-                requirement["title"],
-                requirement["training_type"],
-                assigned_date,
-                due_date,
-            )
-            count += 1
+        # Build batch VALUES and use ON CONFLICT to skip existing active assignments
+        values_parts = []
+        params = [
+            company_id,
+            requirement["id"],
+            requirement["title"],
+            requirement["training_type"],
+            assigned_date,
+            due_date,
+        ]
+        base_idx = len(params) + 1
+        for i, emp in enumerate(employees):
+            values_parts.append(f"($1, ${base_idx + i}, $2, $3, $4, $5, $6)")
+            params.append(emp["id"])
+
+        result = await conn.execute(
+            f"""
+            INSERT INTO training_records
+                (company_id, employee_id, requirement_id, title, training_type,
+                 assigned_date, due_date)
+            VALUES {', '.join(values_parts)}
+            ON CONFLICT (employee_id, requirement_id)
+                WHERE status IN ('assigned', 'in_progress')
+            DO NOTHING
+            """,
+            *params,
+        )
+        # asyncpg returns "INSERT 0 N" where N is rows inserted
+        count = int(result.split()[-1]) if result else 0
 
         return {"assigned_count": count, "requirement_id": str(body.requirement_id)}
 

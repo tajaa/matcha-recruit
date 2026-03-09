@@ -4411,6 +4411,11 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_training_records_due_date
             ON training_records(due_date)
         """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_training_records_active_assignment
+            ON training_records(employee_id, requirement_id)
+            WHERE status IN ('assigned', 'in_progress')
+        """)
 
         # -- I-9 Employment Eligibility Records --
         await conn.execute("""

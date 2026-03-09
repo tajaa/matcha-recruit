@@ -9,6 +9,8 @@ from datetime import date, datetime, timedelta
 from typing import Optional, List
 from uuid import UUID
 
+from dateutil.relativedelta import relativedelta
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -113,7 +115,7 @@ def _compute_deadlines(event_type: str, event_date: date) -> dict:
     else:
         continuation_months = 18
 
-    continuation_end_date = event_date + timedelta(days=continuation_months * 30)
+    continuation_end_date = event_date + relativedelta(months=continuation_months)
 
     return {
         "employer_notice_deadline": employer_notice_deadline,

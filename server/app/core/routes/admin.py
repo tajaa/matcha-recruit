@@ -192,7 +192,8 @@ KNOWN_FEATURES = {
     "offer_letters", "offer_letters_plus", "policies", "handbooks", "compliance", "compliance_plus",
     "employees", "vibe_checks", "enps", "performance_reviews",
     "er_copilot", "incidents", "time_off", "accommodations", "interview_prep",
-    "internal_mobility", "matcha_work",
+    "internal_mobility", "matcha_work", "risk_assessment",
+    "training", "i9", "cobra", "separation_agreements",
 }
 
 

@@ -54,6 +54,10 @@ TEST_ACCOUNT_FEATURES = {
     "time_off": True,
     "accommodations": True,
     "internal_mobility": True,
+    "training": True,
+    "i9": True,
+    "cobra": True,
+    "separation_agreements": True,
 }
 
 BROKER_BRANDING_KEY_RE = re.compile(r"^[a-z0-9-]{2,120}$")

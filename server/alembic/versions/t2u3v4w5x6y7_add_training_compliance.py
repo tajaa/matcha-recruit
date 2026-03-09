@@ -62,6 +62,11 @@ def upgrade():
     op.execute("CREATE INDEX IF NOT EXISTS idx_training_records_status ON training_records(status)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_training_records_due_date ON training_records(due_date)")
     op.execute("CREATE INDEX IF NOT EXISTS idx_training_requirements_company ON training_requirements(company_id)")
+    op.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_training_records_active_assignment
+        ON training_records(employee_id, requirement_id)
+        WHERE status IN ('assigned', 'in_progress')
+    """)
 
 
 def downgrade():
