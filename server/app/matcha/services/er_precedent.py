@@ -542,7 +542,26 @@ async def find_similar_cases_stream(case_id: str, conn, case_row=None):
                     data = json.loads(data)
                 except (json.JSONDecodeError, TypeError):
                     data = {}
-            summary = data.get("summary") or data.get("text") or str(data)[:200] if data else ""
+            if data:
+                summary = (
+                    data.get("summary")
+                    or data.get("text")
+                    or data.get("timeline_summary")
+                    or ""
+                )
+                if not summary:
+                    parts = []
+                    if isinstance(data.get("analysis"), dict) and data["analysis"].get("summary"):
+                        parts.append(data["analysis"]["summary"])
+                    if isinstance(data.get("discrepancies"), list) and data["discrepancies"]:
+                        parts.append(f"{len(data['discrepancies'])} discrepancies identified")
+                    if isinstance(data.get("violations"), list) and data["violations"]:
+                        parts.append(f"{len(data['violations'])} policy violations found")
+                    if isinstance(data.get("events"), list) and data["events"]:
+                        parts.append(f"Timeline with {len(data['events'])} events")
+                    summary = ". ".join(parts) if parts else ""
+            else:
+                summary = ""
             analysis_lookup[cid] = summary
 
     current["analysis_summary"] = analysis_lookup.get(str(current["id"]))
