@@ -307,7 +307,7 @@ async def bulk_assign(
         )
 
         if not employees:
-            return {"assigned_count": 0, "message": "No active employees found"}
+            return {"assigned_count": 0, "requirement_id": str(body.requirement_id), "message": "No active employees found"}
 
         assigned_date = date.today()
         due_date = None

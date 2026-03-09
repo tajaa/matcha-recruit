@@ -205,7 +205,7 @@ export default function PreTermination() {
     expected_improvement: '',
     review_date: '',
   });
-  const [disciplineEditForm, setDisciplineEditForm] = useState<DisciplineUpdateRequest & { discipline_type?: DisciplineType }>({});
+  const [disciplineEditForm, setDisciplineEditForm] = useState<DisciplineUpdateRequest>({});
 
   // ── Charges state ─────────────────────────────────────────────────────────
   const [charges, setCharges] = useState<AgencyCharge[]>([]);
@@ -261,24 +261,9 @@ export default function PreTermination() {
     }
   }, [disciplineSearch]);
 
-  const loadCharges = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Agency charges don't have a company-wide endpoint, so we load per-employee
-      // For now, load all company claims and show charges tab as employee-searchable
-      // The API has getEmployeeCharges, so we show a search similar to discipline
-      setCharges([]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load agency charges');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
   const [chargeSearch, setChargeSearch] = useState('');
 
-  const loadChargesByEmployee = useCallback(async () => {
+  const loadCharges = useCallback(async () => {
     const trimmed = chargeSearch.trim();
     if (!trimmed) {
       setCharges([]);
@@ -315,10 +300,7 @@ export default function PreTermination() {
     if (activeTab === 'claims') {
       void loadClaims();
     }
-    if (activeTab === 'charges') {
-      void loadCharges();
-    }
-  }, [activeTab, loadClaims, loadCharges]);
+  }, [activeTab, loadClaims]);
 
   // ── discipline CRUD ───────────────────────────────────────────────────────
 
@@ -397,7 +379,7 @@ export default function PreTermination() {
       setShowChargeCreate(false);
       setChargeForm({ employee_id: '', charge_type: 'eeoc', filing_date: todayISO(), charge_number: '', agency_name: '', description: '' });
       setSuccessMessage('Agency charge created.');
-      if (chargeSearch.trim()) await loadChargesByEmployee();
+      if (chargeSearch.trim()) await loadCharges();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create agency charge');
     } finally {
@@ -420,7 +402,7 @@ export default function PreTermination() {
       await preTermination.updateCharge(editingCharge.id, body);
       setEditingCharge(null);
       setSuccessMessage('Agency charge updated.');
-      if (chargeSearch.trim()) await loadChargesByEmployee();
+      if (chargeSearch.trim()) await loadCharges();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update agency charge');
     } finally {
@@ -435,7 +417,7 @@ export default function PreTermination() {
     try {
       await preTermination.deleteCharge(id);
       setSuccessMessage('Agency charge deleted.');
-      if (chargeSearch.trim()) await loadChargesByEmployee();
+      if (chargeSearch.trim()) await loadCharges();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete agency charge');
     } finally {
@@ -482,6 +464,21 @@ export default function PreTermination() {
       await loadClaims();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update claim');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteClaim = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this claim?')) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await preTermination.deleteClaim(id);
+      setSuccessMessage('Claim deleted.');
+      await loadClaims();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to delete claim');
     } finally {
       setSaving(false);
     }
@@ -618,12 +615,12 @@ export default function PreTermination() {
             <input
               value={chargeSearch}
               onChange={(e) => setChargeSearch(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && loadChargesByEmployee()}
+              onKeyDown={(e) => e.key === 'Enter' && loadCharges()}
               placeholder="Enter employee ID to search..."
               className={`flex-1 px-3 py-2 text-sm ${t.input}`}
             />
             <button
-              onClick={loadChargesByEmployee}
+              onClick={loadCharges}
               disabled={!chargeSearch.trim() || loading}
               className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs uppercase tracking-wider ${t.btnPrimary} disabled:opacity-50`}
             >
@@ -772,6 +769,13 @@ export default function PreTermination() {
                         title="Edit"
                       >
                         <Save size={14} />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteClaim(claim.id)}
+                        className={`p-1.5 text-xs ${t.btnDanger}`}
+                        title="Delete"
+                      >
+                        <Trash2 size={14} />
                       </button>
                     </td>
                   </tr>

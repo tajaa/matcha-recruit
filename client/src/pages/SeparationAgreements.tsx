@@ -271,8 +271,7 @@ export default function SeparationAgreements() {
 
   useEffect(() => {
     loadAgreements();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  }, [statusFilter, loadAgreements]);
 
   useEffect(() => {
     if (!selectedId) return;
@@ -1112,6 +1111,13 @@ export default function SeparationAgreements() {
               {saving ? 'Saving...' : 'Save Changes'}
             </button>
           </div>
+          {error && (
+            <div className="px-5 pb-5">
+              <div className="bg-red-500/10 border border-red-500/30 text-red-400 text-xs px-3 py-2 rounded-xl">
+                {error}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );

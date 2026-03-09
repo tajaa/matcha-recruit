@@ -252,11 +252,7 @@ export default function I9Verification() {
     else if (tab === 'expiring') void loadExpiring();
     else if (tab === 'incomplete') void loadIncomplete();
     else if (tab === 'compliance') void loadCompliance();
-  }, [tab, loadRecords, loadExpiring, loadIncomplete, loadCompliance]);
-
-  useEffect(() => {
-    if (tab === 'records') void loadRecords();
-  }, [statusFilter, loadRecords, tab]);
+  }, [tab, statusFilter, loadRecords, loadExpiring, loadIncomplete, loadCompliance]);
 
   useEffect(() => {
     if (successMessage) {
@@ -809,6 +805,8 @@ function ExpiringTab({
     const n = parseInt(inputVal, 10);
     if (!isNaN(n) && n > 0) {
       setDays(n);
+    } else {
+      setInputVal(String(days));
     }
   };
 

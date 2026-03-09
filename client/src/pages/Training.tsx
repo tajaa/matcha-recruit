@@ -254,8 +254,7 @@ export default function Training() {
     else if (activeTab === 'records') loadRecords();
     else if (activeTab === 'compliance') loadCompliance();
     else if (activeTab === 'overdue') loadOverdue();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, showActiveOnly, recordStatusFilter, recordOverdueFilter]);
+  }, [activeTab, showActiveOnly, recordStatusFilter, recordOverdueFilter, loadRequirements, loadRecords, loadCompliance, loadOverdue]);
 
   const handleRefresh = () => {
     if (activeTab === 'requirements') loadRequirements(true);
@@ -711,7 +710,7 @@ export default function Training() {
                         </span>
                       </td>
                       <td className={`px-4 py-3 ${t.textMuted}`}>
-                        {new Date(record.assigned_date).toLocaleDateString()}
+                        {record.assigned_date ? new Date(record.assigned_date).toLocaleDateString() : '--'}
                       </td>
                       <td className={`px-4 py-3 ${t.textMuted}`}>
                         {record.due_date ? new Date(record.due_date).toLocaleDateString() : '--'}

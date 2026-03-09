@@ -259,9 +259,23 @@ export default function CobraEvents() {
     [loadEvents, loadDashboard, loadOverdue],
   );
 
+  // Initial load — run once on mount
+  const [initialized, setInitialized] = useState(false);
   useEffect(() => {
-    loadAll();
-  }, [loadAll]);
+    if (!initialized) {
+      setInitialized(true);
+      loadAll();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Re-fetch events when filters change (after initial load)
+  useEffect(() => {
+    if (initialized) {
+      loadEvents();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter, eventTypeFilter]);
 
   // clear success messages after 4 seconds
   useEffect(() => {
@@ -913,6 +927,7 @@ export default function CobraEvents() {
                 <p className={`mb-1 ${t.label}`}>Notes</p>
                 <textarea
                   rows={3}
+                  key={selectedEvent.id}
                   defaultValue={selectedEvent.notes ?? ''}
                   onBlur={(e) => {
                     if (e.target.value !== (selectedEvent.notes ?? '')) {

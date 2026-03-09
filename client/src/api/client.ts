@@ -4175,6 +4175,9 @@ export const preTermination = {
   getCompanyClaims: (): Promise<PostTermClaim[]> =>
     request<PostTermClaim[]>('/pre-termination/claims/company'),
 
+  deleteClaim: (claimId: string): Promise<void> =>
+    request<void>(`/pre-termination/claims/${claimId}`, { method: 'DELETE' }),
+
   // Analytics
   getAnalytics: (period?: string): Promise<PreTermAnalytics> =>
     request<PreTermAnalytics>(`/employees/pre-termination-checks/analytics${period ? `?period=${period}` : ''}`),
