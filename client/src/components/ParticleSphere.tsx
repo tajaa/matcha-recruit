@@ -37,13 +37,13 @@ const latLonToVector3 = (lat: number, lon: number, radius: number) => {
 
 const createCityLabel = (text: string) => {
   const canvas = document.createElement('canvas');
-  canvas.width = 320;
-  canvas.height = 96;
+  canvas.width = 480;
+  canvas.height = 128;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = '500 24px "Plus Jakarta Sans", "Inter", sans-serif';
+  ctx.font = '600 48px "Plus Jakarta Sans", "Inter", sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(255, 171, 107, 0.95)';
@@ -65,7 +65,7 @@ const createCityLabel = (text: string) => {
   });
 
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(0.36, 0.11, 1);
+  sprite.scale.set(0.72, 0.22, 1);
   return { sprite, material, texture };
 };
 
