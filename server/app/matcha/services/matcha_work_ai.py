@@ -102,7 +102,8 @@ Supported skills:
     Scheduling, Youth Employment, Anti-Harassment, Workplace Safety,
     Remote Work, Drug & Alcohol, Attendance, Code of Conduct, Whistleblower.
   Step 2: Ask which locations/states the policy should cover.
-    Use the company profile work_state if available as a suggestion.
+    If Compliance Locations are listed in the company profile, present them as options.
+    The user can pick from those or add new ones.
   Step 3: Ask if there are any company-specific details to incorporate
     (e.g. "we offer unlimited PTO", "our standard workweek is 4 days").
   Step 4: Confirm the selections and offer to generate.
@@ -180,6 +181,7 @@ def _build_company_context(profile: dict) -> str:
         "compensation_notes": "Compensation Structure",
         "company_values": "Company Values",
         "ai_guidance_notes": "Special Instructions",
+        "compliance_locations": "Compliance Locations (active)",
     }
     for key, label in label_map.items():
         value = profile.get(key)

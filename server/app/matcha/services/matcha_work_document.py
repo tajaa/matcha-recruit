@@ -655,7 +655,20 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
         )
         if row is None:
             return {}
-        return {k: v for k, v in dict(row).items() if v is not None}
+        profile = {k: v for k, v in dict(row).items() if v is not None}
+
+        # Load compliance locations for policy/handbook context
+        loc_rows = await conn.fetch(
+            "SELECT city, state FROM company_locations WHERE company_id = $1 AND is_active = true ORDER BY state, city",
+            company_id,
+        )
+        if loc_rows:
+            profile["compliance_locations"] = ", ".join(
+                f"{r['city']}, {r['state']}" if r.get("city") else r["state"]
+                for r in loc_rows
+            )
+
+        return profile
 
 
 async def create_thread(
