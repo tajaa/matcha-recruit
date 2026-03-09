@@ -657,7 +657,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
             return {}
         profile = {k: v for k, v in dict(row).items() if v is not None}
 
-        # Load compliance locations for policy/handbook context
+        # Load compliance locations and jurisdiction requirements summary
         loc_rows = await conn.fetch(
             "SELECT city, state FROM company_locations WHERE company_id = $1 AND is_active = true ORDER BY state, city",
             company_id,
@@ -667,6 +667,48 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
                 f"{r['city']}, {r['state']}" if r.get("city") else r["state"]
                 for r in loc_rows
             )
+
+            # Build jurisdiction requirements summary grouped by category
+            seen_states = set()
+            req_by_category: dict[str, list[str]] = {}
+            for loc in loc_rows:
+                state = loc["state"]
+                city = loc.get("city")
+
+                # Find jurisdiction — try city-level first, then state-level
+                j_row = None
+                if city:
+                    j_row = await conn.fetchrow(
+                        "SELECT id FROM jurisdictions WHERE state = $1 AND city = $2",
+                        state, city,
+                    )
+                if not j_row:
+                    if state in seen_states:
+                        continue  # already have state-level data
+                    j_row = await conn.fetchrow(
+                        "SELECT id FROM jurisdictions WHERE state = $1 AND (city IS NULL OR city = '')",
+                        state,
+                    )
+                if not j_row:
+                    continue
+                seen_states.add(state)
+
+                reqs = await conn.fetch(
+                    "SELECT category, jurisdiction_name, title, current_value FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                    j_row["id"],
+                )
+                for req in reqs:
+                    cat = req["category"]
+                    jname = req["jurisdiction_name"]
+                    val = req["current_value"] or req["title"]
+                    entry = f"{jname}: {val}"
+                    req_by_category.setdefault(cat, []).append(entry)
+
+            if req_by_category:
+                lines = []
+                for cat, entries in sorted(req_by_category.items()):
+                    lines.append(f"  {cat}: {'; '.join(entries)}")
+                profile["jurisdiction_requirements_summary"] = "\n".join(lines)
 
         return profile
 

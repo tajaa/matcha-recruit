@@ -101,12 +101,20 @@ Supported skills:
     PTO & Sick Leave, Meal & Rest Breaks, Overtime & Hours, Pay Practices,
     Scheduling, Youth Employment, Anti-Harassment, Workplace Safety,
     Remote Work, Drug & Alcohol, Attendance, Code of Conduct, Whistleblower.
+    If Jurisdiction Requirements are in the company profile, note which categories
+    have cross-state differences (e.g. "Your CA and NY locations have different sick leave
+    minimums — a PTO policy would be a good fit").
   Step 2: Ask which locations/states the policy should cover.
     If Compliance Locations are listed in the company profile, present them as options.
     The user can pick from those or add new ones.
   Step 3: Ask if there are any company-specific details to incorporate
     (e.g. "we offer unlimited PTO", "our standard workweek is 4 days").
-  Step 4: Confirm the selections and offer to generate.
+    Reference the jurisdiction data to flag potential conflicts — e.g. "Note: CA mandates
+    24h/year paid sick leave and NY mandates 40h/year, so unlimited PTO covers both."
+    Highlight where requirements are uniform vs. where they diverge.
+  Step 4: Confirm the selections and offer to generate. Summarize key jurisdiction
+    differences that will appear in the policy (e.g. "The policy will include
+    CA-specific meal break rules and NY-specific scheduling requirements").
 
   Fields collected through conversation:
   - policy_type (string): pto_sick_leave, meal_rest_breaks, overtime, pay_practices,
@@ -182,6 +190,7 @@ def _build_company_context(profile: dict) -> str:
         "company_values": "Company Values",
         "ai_guidance_notes": "Special Instructions",
         "compliance_locations": "Compliance Locations (active)",
+        "jurisdiction_requirements_summary": "Jurisdiction Requirements by Category",
     }
     for key, label in label_map.items():
         value = profile.get(key)
