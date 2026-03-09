@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock, Play, ShieldAlert } from 'lucide-react';
+import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock, Play, ShieldAlert, TrendingUp, TrendingDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList, AreaChart, Area, Line, ReferenceArea } from 'recharts';
 import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser, RiskHistoryEntry, PreTermAnalytics } from '../types';
 import { riskAssessment, erCopilot, companies as companiesApi, preTermination, ApiRequestError } from '../api/client';
@@ -552,20 +552,38 @@ function formatShortDate(dateStr: string): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-function TrendTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ dataKey: string; value: number; color: string }>; label?: string }) {
+function TrendTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ dataKey: string; value: number; color: string; payload?: Record<string, unknown> }>; label?: string }) {
   if (!active || !payload || payload.length === 0) return null;
+  const dataPoint = payload[0]?.payload;
+  const delta = typeof dataPoint?.delta === 'number' ? dataPoint.delta as number : 0;
+  const source = typeof dataPoint?.source === 'string' ? dataPoint.source as string : null;
   return (
-    <div className="bg-zinc-900 border border-white/10 px-4 py-3 shadow-xl text-xs">
-      <div className="text-zinc-500 font-mono text-[9px] uppercase tracking-widest mb-2">{label}</div>
-      {payload.map((entry) => (
+    <div className="bg-zinc-900 border border-white/10 px-4 py-3 shadow-xl text-xs rounded-lg">
+      <div className="flex items-center gap-2 mb-2">
+        <div className="text-zinc-500 font-mono text-[9px] uppercase tracking-widest">{label}</div>
+        {source && (
+          <span className="text-[8px] font-mono uppercase tracking-wider text-zinc-600 bg-white/5 px-1.5 py-0.5 rounded">
+            {source.replace('_', ' ')}
+          </span>
+        )}
+      </div>
+      {payload.filter(e => e.dataKey !== 'delta' && e.dataKey !== 'source').map((entry) => (
         <div key={entry.dataKey} className="flex items-center justify-between gap-6">
           <span className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full" style={{ backgroundColor: entry.color }} />
-            <span className="text-zinc-400 capitalize">{entry.dataKey.replace('_', ' ')}</span>
+            <span className="text-zinc-400 capitalize">{entry.dataKey.replace(/_/g, ' ')}</span>
           </span>
-          <span className="font-mono text-zinc-200">{entry.value}</span>
+          <span className="font-mono text-zinc-200">{Math.round(entry.value)}</span>
         </div>
       ))}
+      {delta !== 0 && (
+        <div className={`flex items-center gap-1.5 mt-2 pt-2 border-t border-white/5 font-mono text-[10px] ${
+          delta > 0 ? 'text-red-400' : 'text-emerald-400'
+        }`}>
+          {delta > 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+          <span>{delta > 0 ? '+' : ''}{delta} from previous</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -601,14 +619,21 @@ function RiskTrendChart({ companyId }: { companyId?: string }) {
     });
   };
 
-  const chartData = history
+  const sortedHistory = history
     .slice()
-    .sort((a, b) => new Date(a.computed_at).getTime() - new Date(b.computed_at).getTime())
-    .map(entry => ({
+    .sort((a, b) => new Date(a.computed_at).getTime() - new Date(b.computed_at).getTime());
+
+  const chartData = sortedHistory.map((entry, i) => {
+    const prev = i > 0 ? sortedHistory[i - 1] : null;
+    const delta = prev ? Math.round(entry.overall_score - prev.overall_score) : 0;
+    return {
       date: formatShortDate(entry.computed_at),
       overall_score: entry.overall_score,
+      delta,
+      source: entry.source,
       ...entry.dimensions,
-    }));
+    };
+  });
 
   return (
     <div>
@@ -669,8 +694,22 @@ function RiskTrendChart({ companyId }: { companyId?: string }) {
             })}
           </div>
 
-          <ResponsiveContainer width="100%" height={280}>
-            <AreaChart data={chartData} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+          {/* Change-point legend */}
+          {chartData.some(d => d.delta !== 0) && (
+            <div className="flex items-center gap-4 mb-3 ml-8">
+              <span className="flex items-center gap-1.5 text-[9px] text-zinc-500 font-mono uppercase tracking-widest">
+                <span className="w-2.5 h-2.5 rounded-full bg-red-500/60 ring-2 ring-red-500/20" />
+                Risk increased
+              </span>
+              <span className="flex items-center gap-1.5 text-[9px] text-zinc-500 font-mono uppercase tracking-widest">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/60 ring-2 ring-emerald-500/20" />
+                Risk decreased
+              </span>
+            </div>
+          )}
+
+          <ResponsiveContainer width="100%" height={300}>
+            <AreaChart data={chartData} margin={{ top: 24, right: 16, bottom: 0, left: 0 }}>
               {/* Risk zone reference bands */}
               <ReferenceArea y1={0} y2={25} fill="#10b981" fillOpacity={0.04} />
               <ReferenceArea y1={25} y2={50} fill="#f59e0b" fillOpacity={0.04} />
@@ -699,8 +738,49 @@ function RiskTrendChart({ companyId }: { companyId?: string }) {
                 stroke="#e4e4e7"
                 strokeWidth={2}
                 fill="url(#overallGradient)"
-                dot={{ r: 3, fill: '#e4e4e7', stroke: '#18181b', strokeWidth: 2 }}
-                activeDot={{ r: 5, fill: '#e4e4e7', stroke: '#18181b', strokeWidth: 2 }}
+                dot={(props: Record<string, unknown>) => {
+                  const { cx, cy, index } = props as { cx: number; cy: number; index: number };
+                  const d = chartData[index];
+                  if (!d) return <circle key={index} cx={cx} cy={cy} r={3} fill="#e4e4e7" stroke="#18181b" strokeWidth={2} />;
+                  const delta = d.delta;
+                  const absDelta = Math.abs(delta);
+
+                  if (absDelta < 2) {
+                    return <circle key={index} cx={cx} cy={cy} r={3} fill="#e4e4e7" stroke="#18181b" strokeWidth={2} />;
+                  }
+
+                  const isUp = delta > 0;
+                  const dotColor = isUp ? '#ef4444' : '#10b981';
+                  const ringColor = isUp ? 'rgba(239,68,68,0.2)' : 'rgba(16,185,129,0.2)';
+                  const r = Math.min(4 + absDelta * 0.15, 7);
+
+                  return (
+                    <g key={index}>
+                      {/* Outer pulse ring for significant changes */}
+                      {absDelta >= 5 && (
+                        <circle cx={cx} cy={cy} r={r + 4} fill="none" stroke={ringColor} strokeWidth={2}>
+                          <animate attributeName="r" from={String(r + 2)} to={String(r + 8)} dur="2s" repeatCount="indefinite" />
+                          <animate attributeName="opacity" from="0.6" to="0" dur="2s" repeatCount="indefinite" />
+                        </circle>
+                      )}
+                      {/* Main dot */}
+                      <circle cx={cx} cy={cy} r={r} fill={dotColor} stroke="#18181b" strokeWidth={2} />
+                      {/* Delta label */}
+                      <text
+                        x={cx}
+                        y={cy - r - 6}
+                        textAnchor="middle"
+                        fill={dotColor}
+                        fontSize={9}
+                        fontFamily="monospace"
+                        fontWeight="bold"
+                      >
+                        {isUp ? `+${delta}` : `${delta}`}
+                      </text>
+                    </g>
+                  );
+                }}
+                activeDot={{ r: 6, fill: '#e4e4e7', stroke: '#18181b', strokeWidth: 2 }}
                 name="Overall"
               />
 
