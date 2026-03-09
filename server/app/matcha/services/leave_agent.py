@@ -756,6 +756,143 @@ class LeaveAgent:
             )
             return {"status": "ok", "rtw_tasks_created": created, "notifications_sent": sent}
 
+    async def on_leave_extended(self, leave_request_id: UUID | str) -> dict:
+        """Notify HR admins and employee when a leave is extended with a new return date."""
+        leave_request_id = _normalize_uuid(leave_request_id)
+        async with get_connection() as conn:
+            leave = await conn.fetchrow(
+                """
+                SELECT lr.id, lr.org_id, lr.employee_id, lr.leave_type, lr.status,
+                       lr.start_date, lr.end_date, lr.expected_return_date,
+                       e.first_name, e.last_name, e.email,
+                       c.name AS company_name
+                FROM leave_requests lr
+                JOIN employees e ON e.id = lr.employee_id
+                LEFT JOIN companies c ON c.id = lr.org_id
+                WHERE lr.id = $1
+                """,
+                leave_request_id,
+            )
+            if not leave:
+                return {"status": "not_found"}
+
+            employee_name = f"{leave['first_name']} {leave['last_name']}".strip()
+            company_name = leave["company_name"] or "Your company"
+            new_end_date = leave["expected_return_date"] or leave["end_date"]
+
+            # Upsert return_date deadline
+            await conn.execute(
+                """
+                INSERT INTO leave_deadlines
+                    (leave_request_id, org_id, deadline_type, due_date, status, escalation_level)
+                VALUES ($1, $2, 'return_date', $3, 'pending', 0)
+                ON CONFLICT (leave_request_id, deadline_type)
+                DO UPDATE SET due_date = EXCLUDED.due_date, status = 'pending',
+                              escalation_level = 0, updated_at = NOW()
+                """,
+                leave_request_id, leave["org_id"], new_end_date,
+            )
+
+            admin_contacts = await self._get_company_admin_contacts(conn, leave["org_id"])
+
+        recipients = list(admin_contacts)
+        if leave["email"]:
+            # Add employee if not already in admin list
+            if not any(r["email"] == leave["email"] for r in recipients):
+                recipients.append({"email": leave["email"], "name": employee_name})
+
+        sent = await self._send_leave_notifications(
+            recipients,
+            company_name=company_name,
+            employee_name=employee_name,
+            leave_type=leave["leave_type"],
+            event_type="extended",
+            leave_id=leave["id"],
+            start_date=leave["start_date"],
+            end_date=new_end_date,
+        )
+        return {"status": "ok", "notifications_sent": sent}
+
+    async def on_return_declined(self, leave_request_id: UUID | str, new_leave_id: UUID | str | None = None) -> dict:
+        """Notify HR when employee is not returning — shows remaining job protection weeks."""
+        leave_request_id = _normalize_uuid(leave_request_id)
+        async with get_connection() as conn:
+            leave = await conn.fetchrow(
+                """
+                SELECT lr.id, lr.org_id, lr.employee_id, lr.leave_type,
+                       lr.start_date, lr.end_date, lr.expected_return_date,
+                       e.first_name, e.last_name, e.email, e.work_state,
+                       c.name AS company_name
+                FROM leave_requests lr
+                JOIN employees e ON e.id = lr.employee_id
+                LEFT JOIN companies c ON c.id = lr.org_id
+                WHERE lr.id = $1
+                """,
+                leave_request_id,
+            )
+            if not leave:
+                return {"status": "not_found"}
+
+            # Calculate total weeks used across consecutive leaves
+            weeks_used_row = await conn.fetchrow(
+                """
+                SELECT COALESCE(SUM(
+                    EXTRACT(EPOCH FROM (COALESCE(end_date, expected_return_date, CURRENT_DATE) - start_date)) / 604800
+                ), 0) AS total_weeks
+                FROM leave_requests
+                WHERE employee_id = $1
+                  AND status IN ('approved', 'active', 'completed')
+                  AND id != $2
+                """,
+                leave["employee_id"], leave_request_id,
+            )
+            prior_weeks = float(weeks_used_row["total_weeks"])
+
+            # Look up max job-protected weeks for qualifying programs
+            max_protected = 12  # FMLA default
+            if leave["work_state"]:
+                state_rules = await conn.fetch(
+                    """
+                    SELECT max_weeks FROM leave_jurisdiction_rules
+                    WHERE state = $1 AND job_protection = true
+                    """,
+                    leave["work_state"].upper(),
+                )
+                for rule in state_rules:
+                    if rule["max_weeks"] and rule["max_weeks"] > max_protected:
+                        max_protected = rule["max_weeks"]
+
+            remaining_weeks = max(0, max_protected - prior_weeks)
+
+            admin_contacts = await self._get_company_admin_contacts(conn, leave["org_id"])
+
+        employee_name = f"{leave['first_name']} {leave['last_name']}".strip()
+        company_name = leave["company_name"] or "Your company"
+
+        details = (
+            f"Employee is not returning as scheduled. "
+            f"Estimated {remaining_weeks:.1f} weeks of job protection remaining "
+            f"(max {max_protected} weeks, ~{prior_weeks:.1f} weeks used). "
+            + (f"New leave ID: {new_leave_id}" if new_leave_id else "No new leave created.")
+        )
+
+        sent = await self._send_leave_notifications(
+            admin_contacts,
+            company_name=company_name,
+            employee_name=employee_name,
+            leave_type=leave["leave_type"],
+            event_type="return_declined",
+            leave_id=leave["id"],
+            start_date=leave["start_date"],
+            end_date=leave["end_date"],
+        )
+        return {
+            "status": "ok",
+            "notifications_sent": sent,
+            "remaining_protected_weeks": remaining_weeks,
+            "details": details,
+        }
+
     async def run_scheduled_orchestration(self, max_per_cycle: int = 20) -> dict:
         """Run periodic leave/accommodation orchestration checks."""
         async with get_connection() as conn:

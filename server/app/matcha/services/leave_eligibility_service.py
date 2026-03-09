@@ -200,3 +200,49 @@ class LeaveEligibilityService:
             "state_programs": state,
             "checked_at": datetime.utcnow().isoformat(),
         }
+
+    async def get_job_protection_summary(self, employee_id: UUID) -> dict:
+        """
+        Returns remaining job-protected weeks for an employee across all qualifying programs,
+        accounting for leave already taken.
+        """
+        summary = await self.get_eligibility_summary(employee_id)
+
+        fmla_protected = 12 if summary["fmla"]["eligible"] else 0
+
+        state_protected = 0
+        qualifying_state_programs = []
+        for prog in summary["state_programs"].get("programs", []):
+            if prog["eligible"] and prog["job_protection"] and prog.get("max_weeks"):
+                state_protected = max(state_protected, prog["max_weeks"])
+                qualifying_state_programs.append(prog["program"])
+
+        total_protected = fmla_protected + state_protected
+
+        # Calculate weeks already used from approved/active/completed leaves
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT COALESCE(SUM(
+                    EXTRACT(EPOCH FROM (
+                        COALESCE(actual_return_date, end_date, expected_return_date, CURRENT_DATE) - start_date
+                    )) / 604800
+                ), 0) AS weeks_used
+                FROM leave_requests
+                WHERE employee_id = $1
+                  AND status IN ('approved', 'active', 'completed')
+                """,
+                employee_id,
+            )
+            weeks_used = float(row["weeks_used"])
+
+        remaining = max(0.0, total_protected - weeks_used)
+
+        return {
+            "fmla_protected_weeks": fmla_protected,
+            "state_protected_weeks": state_protected,
+            "total_protected_weeks": total_protected,
+            "weeks_used": round(weeks_used, 1),
+            "weeks_remaining": round(remaining, 1),
+            "qualifying_state_programs": qualifying_state_programs,
+        }

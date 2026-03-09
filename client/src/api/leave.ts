@@ -89,12 +89,31 @@ export interface LeaveRequestCreate {
 }
 
 export interface LeaveActionRequest {
-  action: 'approve' | 'deny' | 'activate' | 'complete';
+  action: 'approve' | 'deny' | 'activate' | 'complete' | 'extend';
   denial_reason?: string;
   end_date?: string;
   expected_return_date?: string;
   actual_return_date?: string;
   hours_approved?: number;
+  notes?: string;
+}
+
+export interface PlaceOnLeavePayload {
+  leave_type: LeaveType;
+  start_date: string;
+  end_date?: string;
+  expected_return_date?: string;
+  reason?: string;
+  notes?: string;
+}
+
+export interface ReturnCheckinPayload {
+  returning: boolean;
+  action?: 'extend' | 'new_leave';
+  new_end_date?: string;
+  new_expected_return_date?: string;
+  new_leave_type?: LeaveType;
+  new_start_date?: string;
   notes?: string;
 }
 
@@ -161,6 +180,32 @@ export const leaveApi = {
   assignReturnToWorkTasks: (employeeId: string, leaveId: string) =>
     requestWithAuth<Record<string, unknown>[]>(`/api/employees/${employeeId}/onboarding/assign-rtw/${leaveId}`, {
       method: 'POST',
+    }),
+
+  getEmployeeEligibility: (employeeId: string) =>
+    requestWithAuth<Record<string, unknown>>(`/api/employees/${employeeId}/leave/eligibility`),
+
+  getEmployeeLeaveHistory: (employeeId: string, status?: string) => {
+    const query = status ? `?status=${encodeURIComponent(status)}` : '';
+    return requestWithAuth<LeaveRequestAdmin[]>(`/api/employees/leave/employees/${employeeId}/requests${query}`);
+  },
+
+  placeOnLeave: (employeeId: string, payload: PlaceOnLeavePayload) =>
+    requestWithAuth<{ leave_id: string; employment_status: string }>(`/api/employees/${employeeId}/leave/place`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  returnCheckin: (leaveId: string, payload: ReturnCheckinPayload) =>
+    requestWithAuth<Record<string, unknown>>(`/api/employees/leave/requests/${leaveId}/return-checkin`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  extendLeave: (leaveId: string, payload: { end_date: string; expected_return_date?: string; notes?: string }) =>
+    requestWithAuth<{ message: string; status: string }>(`/api/employees/leave/requests/${leaveId}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'extend', ...payload }),
     }),
 
   getMyRequests: (status?: string) => {

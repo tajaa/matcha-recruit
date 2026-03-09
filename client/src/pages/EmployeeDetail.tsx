@@ -4,10 +4,12 @@ import { getAccessToken, provisioning, employees as employeesApi } from '../api/
 import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioningStatus, ProvisioningRunStatus, EmployeeIncidentItem } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { leaveApi, LEAVE_TYPES } from '../api/leave';
+import type { LeaveRequestAdmin } from '../api/leave';
 import {
   ArrowLeft, Mail, Phone, MapPin, Calendar, Users, CheckCircle, Clock, FileText,
   Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw,
-  Pencil, DollarSign, Briefcase, Save, ChevronRight
+  Pencil, DollarSign, Briefcase, Save, ChevronRight, Shield
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -67,6 +69,8 @@ interface Employee {
   job_title: string | null;
   department: string | null;
   emergency_contact: object | null;
+  employment_status: string | null;
+  status_reason: string | null;
   created_at: string;
 }
 
@@ -118,6 +122,34 @@ interface OnboardingTemplate {
   is_active: boolean;
 }
 
+interface LeaveProgram {
+  program: string;
+  label: string;
+  eligible: boolean;
+  paid: boolean;
+  max_weeks: number | null;
+  wage_replacement_pct: number | null;
+  job_protection: boolean;
+  reasons: string[];
+  notes: string | null;
+}
+
+interface LeaveProtection {
+  fmla_protected_weeks: number;
+  state_protected_weeks: number;
+  total_protected_weeks: number;
+  weeks_used: number;
+  weeks_remaining: number;
+  qualifying_state_programs: string[];
+}
+
+interface LeaveEligibilityData {
+  fmla: { eligible: boolean; reasons: string[]; months_employed: number | null; hours_worked_12mo: number; company_employee_count: number };
+  state_programs: { state: string | null; programs: LeaveProgram[]; message?: string };
+  checked_at: string;
+  protection: LeaveProtection;
+}
+
 const CATEGORIES = [
   { value: 'documents', label: 'Documents', icon: FileText, color: 'text-blue-400', bgColor: 'bg-blue-500/10' },
   { value: 'equipment', label: 'Equipment', icon: Laptop, color: 'text-purple-400', bgColor: 'bg-purple-500/10' },
@@ -166,6 +198,35 @@ export default function EmployeeDetail() {
   const [directReports, setDirectReports] = useState<EmployeeListItem[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [incidents, setIncidents] = useState<EmployeeIncidentItem[]>([]);
+
+  // Leave state
+  const [leaveEligibility, setLeaveEligibility] = useState<LeaveEligibilityData | null>(null);
+  const [leaveHistory, setLeaveHistory] = useState<LeaveRequestAdmin[]>([]);
+  const [leaveLoading, setLeaveLoading] = useState(false);
+  const [showPlaceOnLeaveModal, setShowPlaceOnLeaveModal] = useState(false);
+  const [showExtendLeaveModal, setShowExtendLeaveModal] = useState(false);
+  const [showReturnCheckinModal, setShowReturnCheckinModal] = useState(false);
+  const [leaveActionLoading, setLeaveActionLoading] = useState(false);
+  const [placeOnLeaveForm, setPlaceOnLeaveForm] = useState({
+    leave_type: 'medical' as typeof LEAVE_TYPES[number],
+    start_date: '',
+    end_date: '',
+    expected_return_date: '',
+    reason: '',
+  });
+  const [extendLeaveForm, setExtendLeaveForm] = useState({
+    end_date: '',
+    expected_return_date: '',
+    notes: '',
+  });
+  const [returnCheckinForm, setReturnCheckinForm] = useState({
+    returning: true,
+    action: 'extend' as 'extend' | 'new_leave',
+    new_end_date: '',
+    new_expected_return_date: '',
+    new_leave_type: 'medical' as typeof LEAVE_TYPES[number],
+    notes: '',
+  });
 
   const startEditing = () => {
     if (!employee) return;
@@ -367,6 +428,111 @@ export default function EmployeeDetail() {
     employeesApi.getIncidents(employeeId).then(setIncidents).catch(() => setIncidents([]));
   }, [employeeId]);
 
+  // Fetch leave data
+  const fetchLeaveData = async () => {
+    if (!employeeId) return;
+    setLeaveLoading(true);
+    try {
+      const [eligibility, history] = await Promise.all([
+        leaveApi.getEmployeeEligibility(employeeId),
+        leaveApi.getEmployeeLeaveHistory(employeeId),
+      ]);
+      setLeaveEligibility(eligibility as unknown as LeaveEligibilityData);
+      setLeaveHistory(history);
+    } catch {
+      // non-critical
+    } finally {
+      setLeaveLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLeaveData();
+  }, [employeeId]);
+
+  const activeLeaverequest = leaveHistory.find(
+    (l) => l.status === 'active' || l.status === 'approved',
+  );
+
+  const handlePlaceOnLeave = async () => {
+    if (!employeeId || !placeOnLeaveForm.start_date) return;
+    setLeaveActionLoading(true);
+    try {
+      await leaveApi.placeOnLeave(employeeId, {
+        leave_type: placeOnLeaveForm.leave_type,
+        start_date: placeOnLeaveForm.start_date,
+        end_date: placeOnLeaveForm.end_date || undefined,
+        expected_return_date: placeOnLeaveForm.expected_return_date || undefined,
+        reason: placeOnLeaveForm.reason || undefined,
+      });
+      setShowPlaceOnLeaveModal(false);
+      setPlaceOnLeaveForm({ leave_type: 'medical', start_date: '', end_date: '', expected_return_date: '', reason: '' });
+      await Promise.all([fetchEmployee(), fetchLeaveData()]);
+      setStatusMessage('Employee placed on leave.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to place on leave');
+    } finally {
+      setLeaveActionLoading(false);
+    }
+  };
+
+  const handleExtendLeave = async () => {
+    if (!activeLeaverequest || !extendLeaveForm.end_date) return;
+    setLeaveActionLoading(true);
+    try {
+      await leaveApi.extendLeave(activeLeaverequest.id, {
+        end_date: extendLeaveForm.end_date,
+        expected_return_date: extendLeaveForm.expected_return_date || undefined,
+        notes: extendLeaveForm.notes || undefined,
+      });
+      setShowExtendLeaveModal(false);
+      setExtendLeaveForm({ end_date: '', expected_return_date: '', notes: '' });
+      await fetchLeaveData();
+      setStatusMessage('Leave extended.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to extend leave');
+    } finally {
+      setLeaveActionLoading(false);
+    }
+  };
+
+  const handleReturnCheckin = async () => {
+    if (!activeLeaverequest) return;
+    setLeaveActionLoading(true);
+    try {
+      await leaveApi.returnCheckin(activeLeaverequest.id, {
+        returning: returnCheckinForm.returning,
+        action: returnCheckinForm.returning ? undefined : returnCheckinForm.action,
+        new_end_date: returnCheckinForm.new_end_date || undefined,
+        new_expected_return_date: returnCheckinForm.new_expected_return_date || undefined,
+        new_leave_type: returnCheckinForm.returning ? undefined : returnCheckinForm.new_leave_type,
+        notes: returnCheckinForm.notes || undefined,
+      });
+      setShowReturnCheckinModal(false);
+      setReturnCheckinForm({ returning: true, action: 'extend', new_end_date: '', new_expected_return_date: '', new_leave_type: 'medical', notes: '' });
+      await Promise.all([fetchEmployee(), fetchLeaveData()]);
+      setStatusMessage(returnCheckinForm.returning ? 'Employee marked as returned.' : 'Leave updated.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to process check-in');
+    } finally {
+      setLeaveActionLoading(false);
+    }
+  };
+
+  const handleMarkLeaveComplete = async () => {
+    if (!activeLeaverequest) return;
+    setLeaveActionLoading(true);
+    try {
+      await leaveApi.updateAdminRequest(activeLeaverequest.id, { action: 'complete' });
+      await Promise.all([fetchEmployee(), fetchLeaveData()]);
+      setStatusMessage('Leave marked as complete.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to complete leave');
+    } finally {
+      setLeaveActionLoading(false);
+    }
+  };
+
   const handleAssignAll = async () => {
     if (!employeeId) return;
     setAssigningAll(true);
@@ -560,6 +726,10 @@ export default function EmployeeDetail() {
           {employee.termination_date ? (
             <span className={`px-3 py-1 ${isLight ? 'bg-stone-200 text-stone-600 border border-stone-300' : 'bg-zinc-800 text-zinc-400 border border-zinc-700'} text-[10px] font-bold uppercase tracking-wider rounded`}>
               Terminated
+            </span>
+          ) : employee.employment_status === 'on_leave' ? (
+            <span className={`px-3 py-1 ${isLight ? 'bg-blue-50 text-blue-700 border border-blue-300' : 'bg-blue-900/30 text-blue-400 border border-blue-500/20'} text-[10px] font-bold uppercase tracking-wider rounded`}>
+              On Leave
             </span>
           ) : employee.user_id ? (
             <span className={`px-3 py-1 ${isLight ? 'bg-emerald-50 text-emerald-700 border border-emerald-300' : 'bg-emerald-900/30 text-emerald-400 border border-emerald-500/20'} text-[10px] font-bold uppercase tracking-wider rounded`}>
@@ -892,6 +1062,137 @@ export default function EmployeeDetail() {
             )}
           </div>
           )}
+
+          {/* Leave of Absence */}
+          <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
+            <div className="flex items-center gap-2">
+              <Shield size={14} className={t.textMuted} />
+              <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Leave of Absence</h2>
+            </div>
+
+            {leaveLoading ? (
+              <p className={`text-xs ${t.textFaint} font-mono uppercase animate-pulse`}>Loading...</p>
+            ) : (
+              <>
+                {/* Current Leave Status */}
+                {employee.employment_status === 'on_leave' && activeLeaverequest ? (
+                  <div className={`p-3 rounded-xl ${isLight ? 'bg-blue-50 border border-blue-200' : 'bg-blue-900/20 border border-blue-500/20'}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${isLight ? 'text-blue-700' : 'text-blue-400'}`}>
+                        Active Leave
+                      </span>
+                      <span className={`text-[10px] font-mono ${isLight ? 'text-blue-600' : 'text-blue-300'}`}>
+                        {activeLeaverequest.leave_type.replace(/_/g, ' ').toUpperCase()}
+                      </span>
+                    </div>
+                    <p className={`text-xs ${isLight ? 'text-blue-800' : 'text-blue-200'} mb-1`}>
+                      {activeLeaverequest.start_date} → {activeLeaverequest.end_date || 'Open-ended'}
+                    </p>
+                    {activeLeaverequest.expected_return_date && (
+                      <p className={`text-[10px] ${isLight ? 'text-blue-600' : 'text-blue-400'}`}>
+                        Expected return: {activeLeaverequest.expected_return_date}
+                      </p>
+                    )}
+                    {leaveEligibility?.protection && (
+                      <p className={`text-[10px] mt-1 ${isLight ? 'text-blue-600' : 'text-blue-400'}`}>
+                        <Shield size={10} className="inline mr-1" />
+                        {leaveEligibility.protection.weeks_remaining?.toFixed(1)} protected weeks remaining
+                      </p>
+                    )}
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      <button
+                        onClick={() => setShowExtendLeaveModal(true)}
+                        className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded ${isLight ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-blue-900/40 text-blue-300 hover:bg-blue-900/60'} transition-colors`}
+                      >
+                        Extend
+                      </button>
+                      <button
+                        onClick={() => setShowReturnCheckinModal(true)}
+                        className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded ${isLight ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 'bg-blue-900/40 text-blue-300 hover:bg-blue-900/60'} transition-colors`}
+                      >
+                        Return Check-in
+                      </button>
+                      <button
+                        onClick={handleMarkLeaveComplete}
+                        disabled={leaveActionLoading}
+                        className={`px-3 py-1 text-[10px] font-bold uppercase tracking-wider rounded ${isLight ? 'bg-stone-200 text-stone-600 hover:bg-stone-300' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'} disabled:opacity-50 transition-colors`}
+                      >
+                        Mark Complete
+                      </button>
+                    </div>
+                  </div>
+                ) : !employee.termination_date ? (
+                  <button
+                    onClick={() => setShowPlaceOnLeaveModal(true)}
+                    className={`flex items-center gap-2 px-3 py-2 w-full text-left text-[10px] font-bold uppercase tracking-wider rounded-xl border border-dashed ${t.border} ${t.textMuted} hover:${t.textMain} transition-colors`}
+                  >
+                    <Plus size={12} />
+                    Place on Leave
+                  </button>
+                ) : null}
+
+                {/* Eligibility Snapshot */}
+                {leaveEligibility && (
+                  <div className="space-y-1.5">
+                    <p className={`text-[9px] font-bold uppercase tracking-wider ${t.textFaint}`}>Eligibility</p>
+                    {/* FMLA */}
+                    {(() => {
+                      const fmla = leaveEligibility.fmla;
+                      if (!fmla) return null;
+                      return (
+                        <div className="flex items-center justify-between">
+                          <span className={`text-xs ${t.textDim}`}>FMLA</span>
+                          <span className={`px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${fmla.eligible ? (isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-900/30 text-emerald-400') : (isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-800 text-zinc-500')}`}>
+                            {fmla.eligible ? 'Eligible' : 'Not Eligible'}
+                          </span>
+                        </div>
+                      );
+                    })()}
+                    {/* State programs */}
+                    {(leaveEligibility.state_programs?.programs || []).map((prog) => (
+                      <div key={prog.program} className="flex items-center justify-between">
+                        <span className={`text-xs ${t.textDim} truncate mr-2`}>{prog.label}</span>
+                        <span className={`flex-shrink-0 px-1.5 py-0.5 text-[9px] font-bold uppercase rounded ${prog.eligible ? (isLight ? 'bg-emerald-100 text-emerald-700' : 'bg-emerald-900/30 text-emerald-400') : (isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-800 text-zinc-500')}`}>
+                          {prog.eligible ? 'Eligible' : 'Not Yet'}
+                        </span>
+                      </div>
+                    ))}
+                    {!leaveEligibility.state_programs?.programs?.length && (
+                      <p className={`text-xs ${t.textFaint}`}>No state programs for this work state</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Leave History */}
+                {leaveHistory.length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className={`text-[9px] font-bold uppercase tracking-wider ${t.textFaint}`}>History</p>
+                    {leaveHistory.slice(0, 5).map((leave) => {
+                      const statusColors: Record<string, string> = {
+                        approved: isLight ? 'text-emerald-700' : 'text-emerald-400',
+                        active: isLight ? 'text-blue-700' : 'text-blue-400',
+                        completed: isLight ? 'text-stone-500' : 'text-zinc-500',
+                        denied: isLight ? 'text-red-600' : 'text-red-400',
+                        cancelled: isLight ? 'text-stone-400' : 'text-zinc-600',
+                        requested: isLight ? 'text-amber-700' : 'text-amber-400',
+                      };
+                      return (
+                        <div key={leave.id} className={`flex items-center justify-between text-xs`}>
+                          <div className="flex-1 min-w-0 mr-2">
+                            <span className={t.textDim}>{leave.leave_type.replace(/_/g, ' ')}</span>
+                            <span className={`ml-1.5 text-[10px] ${t.textFaint} font-mono`}>{leave.start_date}</span>
+                          </div>
+                          <span className={`text-[9px] font-bold uppercase ${statusColors[leave.status] || t.textFaint}`}>
+                            {leave.status}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
 
           <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
             <div className="flex items-center justify-between gap-2">
@@ -1234,6 +1535,191 @@ export default function EmployeeDetail() {
           )}
         </div>
       </div>
+
+      {/* Place on Leave Modal */}
+      {showPlaceOnLeaveModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowPlaceOnLeaveModal(false)}>
+          <div className={`w-full max-w-md ${t.modalBg} shadow-2xl overflow-hidden`} onClick={(e) => e.stopPropagation()}>
+            <div className={`flex items-center justify-between p-6 border-b ${t.border}`}>
+              <h3 className={`text-lg font-bold ${t.textMain} uppercase tracking-tight`}>Place on Leave</h3>
+              <button onClick={() => setShowPlaceOnLeaveModal(false)} className={`${t.textMuted} hover:${t.textMain} transition-colors`}><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Leave Type</label>
+                <select
+                  value={placeOnLeaveForm.leave_type}
+                  onChange={(e) => setPlaceOnLeaveForm({ ...placeOnLeaveForm, leave_type: e.target.value as typeof LEAVE_TYPES[number] })}
+                  className={`w-full mt-1 px-3 py-2 ${t.inputCls}`}
+                >
+                  {LEAVE_TYPES.map((lt) => (
+                    <option key={lt} value={lt}>{lt.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Start Date</label>
+                <input type="date" value={placeOnLeaveForm.start_date} onChange={(e) => setPlaceOnLeaveForm({ ...placeOnLeaveForm, start_date: e.target.value })} className={`w-full mt-1 px-3 py-2 ${t.inputCls}`} />
+              </div>
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>End Date (optional)</label>
+                <input type="date" value={placeOnLeaveForm.end_date} onChange={(e) => setPlaceOnLeaveForm({ ...placeOnLeaveForm, end_date: e.target.value })} className={`w-full mt-1 px-3 py-2 ${t.inputCls}`} />
+              </div>
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Expected Return Date (optional)</label>
+                <input type="date" value={placeOnLeaveForm.expected_return_date} onChange={(e) => setPlaceOnLeaveForm({ ...placeOnLeaveForm, expected_return_date: e.target.value })} className={`w-full mt-1 px-3 py-2 ${t.inputCls}`} />
+              </div>
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Reason (optional)</label>
+                <textarea value={placeOnLeaveForm.reason} onChange={(e) => setPlaceOnLeaveForm({ ...placeOnLeaveForm, reason: e.target.value })} rows={2} className={`w-full mt-1 px-3 py-2 ${t.inputCls} resize-none`} />
+              </div>
+            </div>
+            <div className={`p-6 border-t ${t.border} flex justify-end gap-3`}>
+              <button onClick={() => setShowPlaceOnLeaveModal(false)} className={`px-4 py-2 ${t.textMuted} hover:${t.textMain} text-[10px] font-bold uppercase tracking-wider`}>Cancel</button>
+              <button
+                onClick={handlePlaceOnLeave}
+                disabled={leaveActionLoading || !placeOnLeaveForm.start_date}
+                className={`px-6 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50`}
+              >
+                {leaveActionLoading ? 'Placing...' : 'Place on Leave'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Extend Leave Modal */}
+      {showExtendLeaveModal && activeLeaverequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowExtendLeaveModal(false)}>
+          <div className={`w-full max-w-md ${t.modalBg} shadow-2xl overflow-hidden`} onClick={(e) => e.stopPropagation()}>
+            <div className={`flex items-center justify-between p-6 border-b ${t.border}`}>
+              <h3 className={`text-lg font-bold ${t.textMain} uppercase tracking-tight`}>Extend Leave</h3>
+              <button onClick={() => setShowExtendLeaveModal(false)} className={`${t.textMuted} hover:${t.textMain} transition-colors`}><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>New End Date</label>
+                <input type="date" value={extendLeaveForm.end_date} onChange={(e) => setExtendLeaveForm({ ...extendLeaveForm, end_date: e.target.value })} className={`w-full mt-1 px-3 py-2 ${t.inputCls}`} />
+              </div>
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>New Expected Return Date (optional)</label>
+                <input type="date" value={extendLeaveForm.expected_return_date} onChange={(e) => setExtendLeaveForm({ ...extendLeaveForm, expected_return_date: e.target.value })} className={`w-full mt-1 px-3 py-2 ${t.inputCls}`} />
+              </div>
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Notes (optional)</label>
+                <textarea value={extendLeaveForm.notes} onChange={(e) => setExtendLeaveForm({ ...extendLeaveForm, notes: e.target.value })} rows={2} className={`w-full mt-1 px-3 py-2 ${t.inputCls} resize-none`} />
+              </div>
+            </div>
+            <div className={`p-6 border-t ${t.border} flex justify-end gap-3`}>
+              <button onClick={() => setShowExtendLeaveModal(false)} className={`px-4 py-2 ${t.textMuted} hover:${t.textMain} text-[10px] font-bold uppercase tracking-wider`}>Cancel</button>
+              <button
+                onClick={handleExtendLeave}
+                disabled={leaveActionLoading || !extendLeaveForm.end_date}
+                className={`px-6 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50`}
+              >
+                {leaveActionLoading ? 'Extending...' : 'Extend Leave'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Return Check-in Modal */}
+      {showReturnCheckinModal && activeLeaverequest && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowReturnCheckinModal(false)}>
+          <div className={`w-full max-w-md ${t.modalBg} shadow-2xl overflow-hidden`} onClick={(e) => e.stopPropagation()}>
+            <div className={`flex items-center justify-between p-6 border-b ${t.border}`}>
+              <h3 className={`text-lg font-bold ${t.textMain} uppercase tracking-tight`}>Return Check-in</h3>
+              <button onClick={() => setShowReturnCheckinModal(false)} className={`${t.textMuted} hover:${t.textMain} transition-colors`}><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className={`text-sm ${t.textDim}`}>
+                Is <span className={t.textMain}>{employee.first_name}</span> returning
+                {activeLeaverequest.expected_return_date ? ` on ${activeLeaverequest.expected_return_date}` : ' as scheduled'}?
+              </p>
+              {leaveEligibility?.protection && (
+                <div className={`p-3 rounded-lg ${isLight ? 'bg-blue-50 border border-blue-200' : 'bg-blue-900/20 border border-blue-500/20'}`}>
+                  <p className={`text-[10px] ${isLight ? 'text-blue-700' : 'text-blue-400'}`}>
+                    <Shield size={10} className="inline mr-1" />
+                    {leaveEligibility.protection.weeks_remaining?.toFixed(1)} protected weeks remaining
+                  </p>
+                </div>
+              )}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setReturnCheckinForm({ ...returnCheckinForm, returning: true })}
+                  className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl border transition-colors ${returnCheckinForm.returning ? (isLight ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-emerald-900/30 border-emerald-500/40 text-emerald-400') : `${t.border} ${t.textMuted}`}`}
+                >
+                  Yes, Returning
+                </button>
+                <button
+                  onClick={() => setReturnCheckinForm({ ...returnCheckinForm, returning: false })}
+                  className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl border transition-colors ${!returnCheckinForm.returning ? (isLight ? 'bg-amber-100 border-amber-400 text-amber-700' : 'bg-amber-900/30 border-amber-500/40 text-amber-400') : `${t.border} ${t.textMuted}`}`}
+                >
+                  Not Returning
+                </button>
+              </div>
+              {!returnCheckinForm.returning && (
+                <>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setReturnCheckinForm({ ...returnCheckinForm, action: 'extend' })}
+                      className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl border transition-colors ${returnCheckinForm.action === 'extend' ? (isLight ? 'bg-blue-100 border-blue-400 text-blue-700' : 'bg-blue-900/30 border-blue-500/40 text-blue-400') : `${t.border} ${t.textMuted}`}`}
+                    >
+                      Extend Leave
+                    </button>
+                    <button
+                      onClick={() => setReturnCheckinForm({ ...returnCheckinForm, action: 'new_leave' })}
+                      className={`flex-1 py-2 text-[10px] font-bold uppercase tracking-wider rounded-xl border transition-colors ${returnCheckinForm.action === 'new_leave' ? (isLight ? 'bg-blue-100 border-blue-400 text-blue-700' : 'bg-blue-900/30 border-blue-500/40 text-blue-400') : `${t.border} ${t.textMuted}`}`}
+                    >
+                      New Leave
+                    </button>
+                  </div>
+                  {returnCheckinForm.action === 'new_leave' && (
+                    <div>
+                      <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>New Leave Type</label>
+                      <select
+                        value={returnCheckinForm.new_leave_type}
+                        onChange={(e) => setReturnCheckinForm({ ...returnCheckinForm, new_leave_type: e.target.value as typeof LEAVE_TYPES[number] })}
+                        className={`w-full mt-1 px-3 py-2 ${t.inputCls}`}
+                      >
+                        {LEAVE_TYPES.map((lt) => (
+                          <option key={lt} value={lt}>{lt.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>
+                      {returnCheckinForm.action === 'extend' ? 'New End Date' : 'New Start Date'}
+                    </label>
+                    <input
+                      type="date"
+                      value={returnCheckinForm.new_end_date}
+                      onChange={(e) => setReturnCheckinForm({ ...returnCheckinForm, new_end_date: e.target.value })}
+                      className={`w-full mt-1 px-3 py-2 ${t.inputCls}`}
+                    />
+                  </div>
+                </>
+              )}
+              <div>
+                <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Notes (optional)</label>
+                <textarea value={returnCheckinForm.notes} onChange={(e) => setReturnCheckinForm({ ...returnCheckinForm, notes: e.target.value })} rows={2} className={`w-full mt-1 px-3 py-2 ${t.inputCls} resize-none`} />
+              </div>
+            </div>
+            <div className={`p-6 border-t ${t.border} flex justify-end gap-3`}>
+              <button onClick={() => setShowReturnCheckinModal(false)} className={`px-4 py-2 ${t.textMuted} hover:${t.textMain} text-[10px] font-bold uppercase tracking-wider`}>Cancel</button>
+              <button
+                onClick={handleReturnCheckin}
+                disabled={leaveActionLoading}
+                className={`px-6 py-2 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-wider rounded-xl disabled:opacity-50`}
+              >
+                {leaveActionLoading ? 'Processing...' : 'Confirm'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Assign Tasks Modal */}
       {showAssignModal && (

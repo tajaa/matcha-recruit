@@ -3656,8 +3656,184 @@ async def handle_leave_request(
             background_tasks.add_task(get_leave_agent().on_leave_status_changed, leave_id, "completed")
             return {"message": "Leave completed", "status": "completed"}
 
+        elif request.action == "extend":
+            if current_status not in ("active", "approved"):
+                raise HTTPException(status_code=400, detail="Can only extend active or approved leave requests")
+            if not request.end_date:
+                raise HTTPException(status_code=400, detail="end_date is required for extend action")
+
+            sets = ["end_date = $2", "updated_at = NOW()"]
+            params = [leave_id, request.end_date]
+            idx = 3
+
+            if request.expected_return_date:
+                sets.append(f"expected_return_date = ${idx}")
+                params.append(request.expected_return_date)
+                idx += 1
+            if request.notes:
+                sets.append(f"notes = ${idx}")
+                params.append(request.notes)
+                idx += 1
+
+            await conn.execute(
+                f"UPDATE leave_requests SET {', '.join(sets)} WHERE id = $1",
+                *params,
+            )
+            background_tasks.add_task(get_leave_agent().on_leave_extended, leave_id)
+            return {"message": "Leave extended", "status": current_status}
+
         else:
             raise HTTPException(status_code=400, detail=f"Invalid action: {request.action}")
+
+
+@leave_admin_router.get("/employees/{employee_id}/requests", response_model=List[LeaveRequestAdminResponse])
+async def list_employee_leave_requests(
+    employee_id: UUID,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List all leave requests for a specific employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify employee belongs to this company
+        emp = await conn.fetchval(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id,
+        )
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        conditions = ["lr.employee_id = $1", "lr.org_id = $2"]
+        params: list = [employee_id, company_id]
+        idx = 3
+
+        if status_filter:
+            conditions.append(f"lr.status = ${idx}")
+            params.append(status_filter)
+
+        where = " AND ".join(conditions)
+        rows = await conn.fetch(
+            f"""SELECT lr.*, e.first_name || ' ' || e.last_name AS employee_name
+                FROM leave_requests lr
+                JOIN employees e ON lr.employee_id = e.id
+                WHERE {where}
+                ORDER BY lr.created_at DESC""",
+            *params,
+        )
+        return [LeaveRequestAdminResponse(**dict(r)) for r in rows]
+
+
+class ReturnCheckinRequest(BaseModel):
+    returning: bool
+    action: Optional[str] = None  # 'extend' or 'new_leave'
+    new_end_date: Optional[date] = None
+    new_expected_return_date: Optional[date] = None
+    new_leave_type: Optional[str] = None
+    new_start_date: Optional[date] = None
+    notes: Optional[str] = None
+
+
+@leave_admin_router.post("/requests/{leave_id}/return-checkin")
+async def return_checkin(
+    leave_id: UUID,
+    request: ReturnCheckinRequest,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Process a return-to-work check-in: returning, extending, or starting a new leave."""
+    from ..services.leave_agent import get_leave_agent
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        leave = await conn.fetchrow(
+            "SELECT id, employee_id, org_id, status, leave_type, start_date FROM leave_requests WHERE id = $1 AND org_id = $2",
+            leave_id, company_id,
+        )
+        if not leave:
+            raise HTTPException(status_code=404, detail="Leave request not found")
+        if leave["status"] not in ("active", "approved"):
+            raise HTTPException(status_code=400, detail="Return check-in only applies to active or approved leave")
+
+        if request.returning:
+            # Mark leave completed and update employment_status
+            await conn.execute(
+                """UPDATE leave_requests
+                   SET status = 'completed', actual_return_date = CURRENT_DATE, updated_at = NOW()
+                   WHERE id = $1""",
+                leave_id,
+            )
+            await conn.execute(
+                """UPDATE employees
+                   SET employment_status = 'active', status_changed_at = NOW(),
+                       status_reason = 'Returned from leave', updated_at = NOW()
+                   WHERE id = $1""",
+                leave["employee_id"],
+            )
+            background_tasks.add_task(get_leave_agent().on_leave_status_changed, leave_id, "completed")
+            return {"message": "Leave completed, employee marked as returned", "status": "completed"}
+
+        # Not returning
+        if request.action == "extend":
+            if not request.new_end_date:
+                raise HTTPException(status_code=400, detail="new_end_date is required for extend action")
+
+            sets = ["end_date = $2", "updated_at = NOW()"]
+            params: list = [leave_id, request.new_end_date]
+            idx = 3
+            if request.new_expected_return_date:
+                sets.append(f"expected_return_date = ${idx}")
+                params.append(request.new_expected_return_date)
+                idx += 1
+            if request.notes:
+                sets.append(f"notes = ${idx}")
+                params.append(request.notes)
+
+            await conn.execute(
+                f"UPDATE leave_requests SET {', '.join(sets)} WHERE id = $1",
+                *params,
+            )
+            background_tasks.add_task(get_leave_agent().on_leave_extended, leave_id)
+            return {"message": "Leave extended", "status": leave["status"]}
+
+        elif request.action == "new_leave":
+            if not request.new_leave_type:
+                raise HTTPException(status_code=400, detail="new_leave_type is required for new_leave action")
+
+            start = request.new_start_date or date.today()
+
+            # Complete current leave
+            await conn.execute(
+                """UPDATE leave_requests
+                   SET status = 'completed', actual_return_date = $2, updated_at = NOW()
+                   WHERE id = $1""",
+                leave_id, date.today(),
+            )
+
+            # Create new auto-approved leave
+            new_leave_row = await conn.fetchrow(
+                """INSERT INTO leave_requests
+                       (employee_id, org_id, leave_type, start_date, end_date, expected_return_date,
+                        reason, notes, status, reviewed_by, reviewed_at, intermittent)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'approved', $9, NOW(), false)
+                   RETURNING id""",
+                leave["employee_id"], company_id, request.new_leave_type,
+                start, request.new_end_date, request.new_expected_return_date,
+                request.notes, request.notes, current_user.id,
+            )
+            new_leave_id = new_leave_row["id"]
+
+            background_tasks.add_task(get_leave_agent().on_return_declined, leave_id, new_leave_id)
+            background_tasks.add_task(get_leave_agent().on_leave_request_approved, new_leave_id)
+            return {
+                "message": "Current leave completed, new leave created",
+                "completed_leave_id": str(leave_id),
+                "new_leave_id": str(new_leave_id),
+            }
+
+        else:
+            raise HTTPException(status_code=400, detail="action must be 'extend' or 'new_leave' when not returning")
 
 
 @leave_admin_router.get("/requests/{leave_id}/eligibility",
@@ -3844,6 +4020,90 @@ async def create_leave_notice(
                 status_code=500,
                 detail="Failed to generate leave notice. Please try again.",
             )
+
+
+# ---------------------------------------------------------------------------
+# Employee-level Leave endpoints (on main router)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{employee_id}/leave/eligibility")
+async def get_employee_leave_eligibility(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get FMLA + state program eligibility for an employee with job protection summary."""
+    from ..services.leave_eligibility_service import LeaveEligibilityService
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        emp = await conn.fetchval(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id,
+        )
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+    service = LeaveEligibilityService()
+    summary = await service.get_eligibility_summary(employee_id)
+    protection = await service.get_job_protection_summary(employee_id)
+
+    return {**summary, "protection": protection}
+
+
+class PlaceOnLeaveRequest(BaseModel):
+    leave_type: str
+    start_date: date
+    end_date: Optional[date] = None
+    expected_return_date: Optional[date] = None
+    reason: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@router.post("/{employee_id}/leave/place")
+async def place_employee_on_leave(
+    employee_id: UUID,
+    body: PlaceOnLeaveRequest,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Place an employee on leave directly (admin action, auto-approved). Updates employment_status."""
+    from ..services.leave_agent import get_leave_agent
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        emp = await conn.fetchval(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id,
+        )
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        leave_row = await conn.fetchrow(
+            """INSERT INTO leave_requests
+                   (employee_id, org_id, leave_type, start_date, end_date, expected_return_date,
+                    reason, notes, status, reviewed_by, reviewed_at, intermittent)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'approved', $9, NOW(), false)
+               RETURNING id""",
+            employee_id, company_id, body.leave_type, body.start_date,
+            body.end_date, body.expected_return_date,
+            body.reason, body.notes, current_user.id,
+        )
+        leave_id = leave_row["id"]
+
+        await conn.execute(
+            """UPDATE employees
+               SET employment_status = 'on_leave', status_changed_at = NOW(),
+                   status_reason = $1, updated_at = NOW()
+               WHERE id = $2""",
+            body.reason or "Placed on leave by admin",
+            employee_id,
+        )
+
+    background_tasks.add_task(get_leave_agent().on_leave_request_approved, leave_id)
+    return {"leave_id": str(leave_id), "employment_status": "on_leave"}
 
 
 # ---------------------------------------------------------------------------
