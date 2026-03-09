@@ -89,6 +89,11 @@ const OnboardingTemplates = lazy(() => import('./pages/OnboardingTemplates'));
 const PTOManagement = lazy(() => import('./pages/PTOManagement'));
 const LeaveManagement = lazy(() => import('./pages/LeaveManagement'));
 const Accommodations = lazy(() => import('./pages/Accommodations'));
+const Training = lazy(() => import('./pages/Training'));
+const I9Verification = lazy(() => import('./pages/I9Verification'));
+const CobraEvents = lazy(() => import('./pages/CobraEvents'));
+const SeparationAgreements = lazy(() => import('./pages/SeparationAgreements'));
+const PreTermination = lazy(() => import('./pages/PreTermination'));
 const AcceptInvitation = lazy(() => import('./pages/AcceptInvitation'));
 
 // Employee Portal Pages
@@ -507,6 +512,46 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="accommodations">
                     <Accommodations />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/training"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="training">
+                    <Training />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/i9"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="i9">
+                    <I9Verification />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/cobra"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="cobra">
+                    <CobraEvents />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/separations"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="separation_agreements">
+                    <SeparationAgreements />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="matcha/pre-termination"
+                element={
+                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="employees">
+                    <PreTermination />
                   </ProtectedRoute>
                 }
               />

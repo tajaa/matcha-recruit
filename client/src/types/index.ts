@@ -3115,3 +3115,312 @@ export interface RiskHistoryEntry {
   computed_at: string;
   source: 'scheduled' | 'manual';
 }
+
+// ---------------------------------------------------------------------------
+// Training Compliance
+// ---------------------------------------------------------------------------
+
+export type TrainingType = 'harassment_prevention' | 'safety' | 'food_handler' | 'osha' | 'custom';
+export type TrainingRecordStatus = 'assigned' | 'in_progress' | 'completed' | 'expired' | 'waived';
+
+export interface TrainingRequirement {
+  id: string;
+  company_id: string;
+  title: string;
+  description: string | null;
+  training_type: TrainingType;
+  jurisdiction: string | null;
+  frequency_months: number | null;
+  applies_to: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrainingRequirementCreate {
+  title: string;
+  description?: string;
+  training_type: TrainingType;
+  jurisdiction?: string;
+  frequency_months?: number;
+  applies_to?: string;
+}
+
+export interface TrainingRequirementUpdate {
+  title?: string;
+  description?: string;
+  training_type?: string;
+  jurisdiction?: string;
+  frequency_months?: number;
+  applies_to?: string;
+  is_active?: boolean;
+}
+
+export interface TrainingRecord {
+  id: string;
+  company_id: string;
+  employee_id: string;
+  requirement_id: string | null;
+  title: string;
+  training_type: TrainingType;
+  status: TrainingRecordStatus;
+  assigned_date: string;
+  due_date: string | null;
+  completed_date: string | null;
+  expiration_date: string | null;
+  provider: string | null;
+  certificate_number: string | null;
+  score: number | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TrainingRecordCreate {
+  employee_id: string;
+  requirement_id?: string;
+  title: string;
+  training_type: TrainingType;
+  due_date?: string;
+  provider?: string;
+  notes?: string;
+}
+
+export interface TrainingRecordUpdate {
+  status?: TrainingRecordStatus;
+  completed_date?: string;
+  expiration_date?: string;
+  provider?: string;
+  certificate_number?: string;
+  score?: number;
+  notes?: string;
+}
+
+export interface TrainingComplianceSummary {
+  requirement_id: string;
+  title: string;
+  training_type: string;
+  jurisdiction: string | null;
+  frequency_months: number | null;
+  total_assigned: number;
+  completed: number;
+  overdue: number;
+}
+
+export interface TrainingOverdueRecord {
+  record_id: string;
+  training_title: string;
+  training_type: string;
+  due_date: string;
+  assigned_date: string;
+  status: string;
+  employee_id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+}
+
+// ---------------------------------------------------------------------------
+// I-9 Employment Eligibility
+// ---------------------------------------------------------------------------
+
+export type I9Status = 'pending_section1' | 'pending_section2' | 'complete' | 'reverification_needed' | 'reverified';
+export type I9ListUsed = 'list_a' | 'list_b_c';
+
+export interface I9Record {
+  id: string;
+  company_id: string;
+  employee_id: string;
+  status: I9Status;
+  section1_completed_date: string | null;
+  section2_completed_date: string | null;
+  document_title: string | null;
+  list_used: I9ListUsed | null;
+  document_number: string | null;
+  issuing_authority: string | null;
+  expiration_date: string | null;
+  reverification_date: string | null;
+  reverification_document: string | null;
+  reverification_expiration: string | null;
+  everify_case_number: string | null;
+  everify_status: string | null;
+  notes: string | null;
+  first_name?: string;
+  last_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface I9CreateRequest {
+  employee_id: string;
+  notes?: string;
+}
+
+export interface I9UpdateRequest {
+  status?: I9Status;
+  section1_completed_date?: string;
+  section2_completed_date?: string;
+  document_title?: string;
+  list_used?: I9ListUsed;
+  document_number?: string;
+  issuing_authority?: string;
+  expiration_date?: string;
+  reverification_date?: string;
+  reverification_document?: string;
+  reverification_expiration?: string;
+  everify_case_number?: string;
+  everify_status?: string;
+  notes?: string;
+}
+
+export interface I9ComplianceSummary {
+  total_employees: number;
+  complete_count: number;
+  incomplete_count: number;
+  expiring_soon_count: number;
+  overdue_count: number;
+  completion_rate: number;
+}
+
+export interface I9IncompleteResponse {
+  no_record: Array<{ id: string; first_name: string; last_name: string; email: string }>;
+  incomplete: I9Record[];
+}
+
+// ---------------------------------------------------------------------------
+// COBRA Qualifying Events
+// ---------------------------------------------------------------------------
+
+export type CobraEventType = 'termination' | 'reduction_in_hours' | 'divorce' | 'dependent_aging_out' | 'medicare_enrollment' | 'employee_death';
+export type CobraStatus = 'pending_notice' | 'notice_sent' | 'election_pending' | 'elected' | 'waived' | 'expired' | 'terminated';
+
+export interface CobraEvent {
+  id: string;
+  company_id: string;
+  employee_id: string;
+  event_type: CobraEventType;
+  event_date: string;
+  employer_notice_deadline: string;
+  administrator_notice_deadline: string;
+  election_deadline: string;
+  continuation_months: number;
+  continuation_end_date: string;
+  beneficiary_count: number;
+  status: CobraStatus;
+  employer_notice_sent: boolean;
+  employer_notice_sent_date: string | null;
+  administrator_notified: boolean;
+  administrator_notified_date: string | null;
+  election_received: boolean;
+  election_received_date: string | null;
+  notes: string | null;
+  offboarding_case_id: string | null;
+  // joined fields
+  employee_first_name?: string;
+  employee_last_name?: string;
+  employee_email?: string;
+  days_overdue?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CobraEventCreate {
+  employee_id: string;
+  event_type: CobraEventType;
+  event_date: string;
+  beneficiary_count?: number;
+  notes?: string;
+  offboarding_case_id?: string;
+}
+
+export interface CobraEventUpdate {
+  employer_notice_sent?: boolean;
+  employer_notice_sent_date?: string;
+  administrator_notified?: boolean;
+  administrator_notified_date?: string;
+  election_received?: boolean;
+  election_received_date?: string;
+  status?: CobraStatus;
+  beneficiary_count?: number;
+  notes?: string;
+}
+
+export interface CobraDashboard {
+  pending_notices: number;
+  overdue_count: number;
+  upcoming_deadlines: CobraEvent[];
+  total_active: number;
+}
+
+// ---------------------------------------------------------------------------
+// Separation Agreements
+// ---------------------------------------------------------------------------
+
+export type SeparationStatus = 'draft' | 'presented' | 'consideration_period' | 'signed' | 'revoked' | 'effective' | 'expired' | 'void';
+
+export interface SeparationAgreement {
+  id: string;
+  company_id: string;
+  employee_id: string;
+  offboarding_case_id: string | null;
+  pre_term_check_id: string | null;
+  status: SeparationStatus;
+  severance_amount: number | null;
+  severance_weeks: number | null;
+  severance_description: string | null;
+  additional_terms: Record<string, unknown> | null;
+  employee_age_at_separation: number | null;
+  is_adea_applicable: boolean;
+  is_group_layoff: boolean;
+  consideration_period_days: number | null;
+  revocation_period_days?: number;
+  decisional_unit: string | null;
+  group_disclosure: unknown[] | null;
+  presented_date: string | null;
+  consideration_deadline: string | null;
+  signed_date: string | null;
+  revocation_deadline: string | null;
+  effective_date: string | null;
+  revoked_date: string | null;
+  notes: string | null;
+  created_by: string | null;
+  employee_name?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SeparationAgreementCreate {
+  employee_id: string;
+  offboarding_case_id?: string;
+  pre_term_check_id?: string;
+  severance_amount?: number;
+  severance_weeks?: number;
+  severance_description?: string;
+  additional_terms?: Record<string, unknown>;
+  employee_age_at_separation?: number;
+  is_group_layoff?: boolean;
+  decisional_unit?: string;
+  group_disclosure?: unknown[];
+  notes?: string;
+}
+
+export interface SeparationAgreementUpdate {
+  severance_amount?: number;
+  severance_weeks?: number;
+  severance_description?: string;
+  additional_terms?: Record<string, unknown>;
+  notes?: string;
+}
+
+export interface SeparationStatusInfo {
+  status: SeparationStatus;
+  is_adea_applicable: boolean;
+  presented_date: string | null;
+  consideration_deadline: string | null;
+  days_remaining_consideration: number | null;
+  signed_date: string | null;
+  revocation_deadline: string | null;
+  days_remaining_revocation: number | null;
+  effective_date: string | null;
+  is_effective: boolean;
+}

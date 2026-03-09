@@ -185,6 +185,31 @@ import type {
   PostTermClaimCreateRequest,
   PostTermClaimUpdateRequest,
   PreTermAnalytics,
+  // Training
+  TrainingRequirement,
+  TrainingRequirementCreate,
+  TrainingRequirementUpdate,
+  TrainingRecord,
+  TrainingRecordCreate,
+  TrainingRecordUpdate,
+  TrainingComplianceSummary,
+  TrainingOverdueRecord,
+  // I-9
+  I9Record,
+  I9CreateRequest,
+  I9UpdateRequest,
+  I9ComplianceSummary,
+  I9IncompleteResponse,
+  // COBRA
+  CobraEvent,
+  CobraEventCreate,
+  CobraEventUpdate,
+  CobraDashboard,
+  // Separation
+  SeparationAgreement,
+  SeparationAgreementCreate,
+  SeparationAgreementUpdate,
+  SeparationStatusInfo,
   } from '../types';
 import type {
   Lead,
@@ -4153,4 +4178,145 @@ export const preTermination = {
   // Analytics
   getAnalytics: (period?: string): Promise<PreTermAnalytics> =>
     request<PreTermAnalytics>(`/employees/pre-termination-checks/analytics${period ? `?period=${period}` : ''}`),
+};
+
+// ---------------------------------------------------------------------------
+// Training Compliance
+// ---------------------------------------------------------------------------
+
+export const training = {
+  // Requirements
+  listRequirements: (isActive = true): Promise<TrainingRequirement[]> =>
+    request<TrainingRequirement[]>(`/training/requirements?is_active=${isActive}`),
+
+  createRequirement: (body: TrainingRequirementCreate): Promise<TrainingRequirement> =>
+    request<TrainingRequirement>('/training/requirements', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateRequirement: (id: string, body: TrainingRequirementUpdate): Promise<TrainingRequirement> =>
+    request<TrainingRequirement>(`/training/requirements/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  deleteRequirement: (id: string): Promise<{ status: string; requirement_id: string }> =>
+    request<{ status: string; requirement_id: string }>(`/training/requirements/${id}`, { method: 'DELETE' }),
+
+  // Records
+  listRecords: (params?: { employee_id?: string; status?: string; overdue?: boolean }): Promise<TrainingRecord[]> => {
+    const q = new URLSearchParams();
+    if (params?.employee_id) q.set('employee_id', params.employee_id);
+    if (params?.status) q.set('status', params.status);
+    if (params?.overdue) q.set('overdue', 'true');
+    const qs = q.toString();
+    return request<TrainingRecord[]>(`/training/records${qs ? `?${qs}` : ''}`);
+  },
+
+  createRecord: (body: TrainingRecordCreate): Promise<TrainingRecord> =>
+    request<TrainingRecord>('/training/records', { method: 'POST', body: JSON.stringify(body) }),
+
+  updateRecord: (id: string, body: TrainingRecordUpdate): Promise<TrainingRecord> =>
+    request<TrainingRecord>(`/training/records/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  bulkAssign: (requirementId: string): Promise<{ assigned_count: number; requirement_id: string }> =>
+    request<{ assigned_count: number; requirement_id: string }>('/training/records/bulk-assign', { method: 'POST', body: JSON.stringify({ requirement_id: requirementId }) }),
+
+  // Dashboards
+  getCompliance: (): Promise<TrainingComplianceSummary[]> =>
+    request<TrainingComplianceSummary[]>('/training/compliance'),
+
+  getOverdue: (): Promise<TrainingOverdueRecord[]> =>
+    request<TrainingOverdueRecord[]>('/training/overdue'),
+};
+
+// ---------------------------------------------------------------------------
+// I-9 Employment Eligibility
+// ---------------------------------------------------------------------------
+
+export const i9 = {
+  create: (body: I9CreateRequest): Promise<I9Record> =>
+    request<I9Record>('/i9', { method: 'POST', body: JSON.stringify(body) }),
+
+  list: (params?: { status?: string; expiring_within_days?: number }): Promise<I9Record[]> => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.expiring_within_days) q.set('expiring_within_days', String(params.expiring_within_days));
+    const qs = q.toString();
+    return request<I9Record[]>(`/i9${qs ? `?${qs}` : ''}`);
+  },
+
+  get: (employeeId: string): Promise<I9Record> =>
+    request<I9Record>(`/i9/${employeeId}`),
+
+  update: (recordId: string, body: I9UpdateRequest): Promise<I9Record> =>
+    request<I9Record>(`/i9/${recordId}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  getExpiring: (days = 90): Promise<I9Record[]> =>
+    request<I9Record[]>(`/i9/expiring?days=${days}`),
+
+  getIncomplete: (): Promise<I9IncompleteResponse> =>
+    request<I9IncompleteResponse>('/i9/incomplete'),
+
+  getComplianceSummary: (): Promise<I9ComplianceSummary> =>
+    request<I9ComplianceSummary>('/i9/compliance-summary'),
+};
+
+// ---------------------------------------------------------------------------
+// COBRA Qualifying Events
+// ---------------------------------------------------------------------------
+
+export const cobra = {
+  listEvents: (params?: { status?: string; overdue?: boolean }): Promise<CobraEvent[]> => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.overdue) q.set('overdue', 'true');
+    const qs = q.toString();
+    return request<CobraEvent[]>(`/cobra/events${qs ? `?${qs}` : ''}`);
+  },
+
+  createEvent: (body: CobraEventCreate): Promise<CobraEvent> =>
+    request<CobraEvent>('/cobra/events', { method: 'POST', body: JSON.stringify(body) }),
+
+  getEvent: (id: string): Promise<CobraEvent> =>
+    request<CobraEvent>(`/cobra/events/${id}`),
+
+  updateEvent: (id: string, body: CobraEventUpdate): Promise<CobraEvent> =>
+    request<CobraEvent>(`/cobra/events/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  getOverdue: (): Promise<CobraEvent[]> =>
+    request<CobraEvent[]>('/cobra/overdue'),
+
+  getDashboard: (): Promise<CobraDashboard> =>
+    request<CobraDashboard>('/cobra/dashboard'),
+};
+
+// ---------------------------------------------------------------------------
+// Separation Agreements
+// ---------------------------------------------------------------------------
+
+export const separation = {
+  list: (params?: { status?: string; employee_id?: string }): Promise<SeparationAgreement[]> => {
+    const q = new URLSearchParams();
+    if (params?.status) q.set('status', params.status);
+    if (params?.employee_id) q.set('employee_id', params.employee_id);
+    const qs = q.toString();
+    return request<SeparationAgreement[]>(`/separation-agreements${qs ? `?${qs}` : ''}`);
+  },
+
+  create: (body: SeparationAgreementCreate): Promise<SeparationAgreement> =>
+    request<SeparationAgreement>('/separation-agreements', { method: 'POST', body: JSON.stringify(body) }),
+
+  get: (id: string): Promise<SeparationAgreement> =>
+    request<SeparationAgreement>(`/separation-agreements/${id}`),
+
+  update: (id: string, body: SeparationAgreementUpdate): Promise<SeparationAgreement> =>
+    request<SeparationAgreement>(`/separation-agreements/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+
+  present: (id: string): Promise<SeparationAgreement> =>
+    request<SeparationAgreement>(`/separation-agreements/${id}/present`, { method: 'PUT' }),
+
+  sign: (id: string): Promise<SeparationAgreement> =>
+    request<SeparationAgreement>(`/separation-agreements/${id}/sign`, { method: 'PUT' }),
+
+  revoke: (id: string): Promise<SeparationAgreement> =>
+    request<SeparationAgreement>(`/separation-agreements/${id}/revoke`, { method: 'PUT' }),
+
+  getStatus: (id: string): Promise<SeparationStatusInfo> =>
+    request<SeparationStatusInfo>(`/separation-agreements/${id}/status`),
 };
