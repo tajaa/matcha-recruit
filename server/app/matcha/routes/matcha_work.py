@@ -814,7 +814,7 @@ async def _apply_ai_updates_and_operations(
                     else:
                         await doc_svc.apply_update(thread_id, {"policy_status": "generating"})
 
-                        # Resolve location names to location IDs from company_locations
+                        # Resolve location names to location IDs from business_locations
                         location_ids: list[str] = []
                         async with get_connection() as conn:
                             for loc_name in location_names:
@@ -822,7 +822,7 @@ async def _apply_ai_updates_and_operations(
                                 if len(parts) == 2:
                                     city, state = parts[0], parts[1]
                                     row = await conn.fetchrow(
-                                        "SELECT id FROM company_locations WHERE company_id = $1 AND city ILIKE $2 AND state ILIKE $3",
+                                        "SELECT id FROM business_locations WHERE company_id = $1 AND city ILIKE $2 AND state ILIKE $3",
                                         str(company_id), city, state,
                                     )
                                     if row:

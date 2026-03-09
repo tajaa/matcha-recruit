@@ -659,7 +659,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
 
         # Load compliance locations and jurisdiction requirements summary
         loc_rows = await conn.fetch(
-            "SELECT city, state FROM company_locations WHERE company_id = $1 AND is_active = true ORDER BY state, city",
+            "SELECT city, state FROM business_locations WHERE company_id = $1 AND is_active = true ORDER BY state, city",
             company_id,
         )
         if loc_rows:

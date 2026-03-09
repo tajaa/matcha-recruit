@@ -93,13 +93,13 @@ async def generate_policy_draft_stream(
         if request.location_ids:
             location_ids = [UUID(lid) for lid in request.location_ids]
             locations = await conn.fetch(
-                "SELECT id, city, state, county FROM company_locations WHERE company_id = $1 AND id = ANY($2)",
+                "SELECT id, city, state, county FROM business_locations WHERE company_id = $1 AND id = ANY($2)",
                 UUID(company_id),
                 location_ids,
             )
         else:
             locations = await conn.fetch(
-                "SELECT id, city, state, county FROM company_locations WHERE company_id = $1 AND is_active = true",
+                "SELECT id, city, state, county FROM business_locations WHERE company_id = $1 AND is_active = true",
                 UUID(company_id),
             )
 
