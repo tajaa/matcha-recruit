@@ -2718,10 +2718,15 @@ async def ensure_location_for_employee(
             )
 
         if background_tasks is not None:
-            background_tasks.add_task(
-                run_compliance_check_background, location_id, company_id,
-                check_type="auto_derive", allow_live_research=True,
-            )
+            async def _safe_compliance_bg(lid=location_id, cid=company_id):
+                try:
+                    await run_compliance_check_background(
+                        lid, cid, check_type="auto_derive", allow_live_research=True,
+                    )
+                except Exception:
+                    import traceback
+                    print(f"[Compliance] Background compliance check failed for location {lid}: {traceback.format_exc()}")
+            background_tasks.add_task(_safe_compliance_bg)
     else:
         # 4c. Unknown jurisdiction → queue for admin review, do NOT trigger check
         await conn.execute(

@@ -534,6 +534,8 @@ async def _run_provisioning_and_notify(
     run_slack: bool,
 ) -> None:
     """Run provisioning for Google Workspace and/or Slack, then send a combined welcome email."""
+    logger.info("[Provisioning] Starting for employee %s (%s) — google=%s, slack=%s",
+                employee_id, work_email, run_google, run_slack)
     google_result: dict | None = None
     slack_result: dict | None = None
 
@@ -545,6 +547,8 @@ async def _run_provisioning_and_notify(
                 triggered_by=triggered_by,
                 trigger_source="employee_create",
             )
+            logger.info("[Provisioning] Google Workspace result for %s: status=%s",
+                        work_email, google_result.get("status") if google_result else "None")
         except Exception:
             logger.exception(
                 "Failed Google Workspace auto-provisioning for employee %s in company %s",
@@ -560,6 +564,8 @@ async def _run_provisioning_and_notify(
                 triggered_by=triggered_by,
                 trigger_source="employee_create",
             )
+            logger.info("[Provisioning] Slack result for %s: status=%s",
+                        work_email, slack_result.get("status") if slack_result else "None")
         except Exception:
             logger.exception(
                 "Failed Slack auto-provisioning for employee %s in company %s",
@@ -567,6 +573,7 @@ async def _run_provisioning_and_notify(
                 company_id,
             )
 
+    logger.info("[Provisioning] Sending welcome email to %s (personal_email=%s)", work_email, personal_email)
     await _send_provisioning_email(
         company_id=company_id,
         personal_email=personal_email,
@@ -575,6 +582,7 @@ async def _run_provisioning_and_notify(
         google_result=google_result,
         slack_result=slack_result,
     )
+    logger.info("[Provisioning] Complete for %s", work_email)
 
 
 async def _send_provisioning_email(
@@ -1627,6 +1635,9 @@ async def bulk_upload_employees_csv(
     errors = []
     employee_ids = []
 
+    logger.info("[BulkUpload] Starting bulk CSV upload for company %s by user %s (send_invitations=%s)",
+                company_id, current_user.id, send_invitations)
+
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
 
@@ -1656,6 +1667,9 @@ async def bulk_upload_employees_csv(
                     )
         except Exception:
             logger.exception("Unable to evaluate integration connection statuses for company %s", company_id)
+
+        logger.info("[BulkUpload] Integration flags: google_auto_provision=%s, slack_auto_provision=%s",
+                    google_workspace_auto_provision, slack_auto_provision)
 
         for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 to account for header
             try:
@@ -1806,6 +1820,7 @@ async def bulk_upload_employees_csv(
 
                 employee_ids.append(employee['id'])
                 created += 1
+                logger.info("[BulkUpload] Row %d: created employee %s (%s)", row_num, employee['id'], email)
 
                 await _sync_employee_location_for_compliance(
                     conn,
@@ -1820,6 +1835,8 @@ async def bulk_upload_employees_csv(
                 run_google = google_workspace_auto_provision
                 run_slack = slack_auto_provision
                 if run_google or run_slack:
+                    logger.info("[BulkUpload] Row %d: scheduling provisioning for %s (google=%s, slack=%s)",
+                                row_num, email, run_google, run_slack)
                     background_tasks.add_task(
                         _run_provisioning_and_notify,
                         company_id=company_id,
@@ -1831,10 +1848,14 @@ async def bulk_upload_employees_csv(
                         run_google=run_google,
                         run_slack=run_slack,
                     )
+                else:
+                    logger.info("[BulkUpload] Row %d: no integrations enabled, skipping provisioning for %s",
+                                row_num, email)
 
                 # Send invitation if requested
                 if send_invitations:
                     try:
+                        logger.info("[BulkUpload] Row %d: sending invitation to %s", row_num, email)
                         await send_single_invitation(
                             employee['id'],
                             company_id,
@@ -1844,6 +1865,7 @@ async def bulk_upload_employees_csv(
                         )
                         await asyncio.sleep(0.15)  # rate-limit guard for MailerSend
                     except Exception as e:
+                        logger.warning("[BulkUpload] Row %d: invitation failed for %s: %s", row_num, email, e)
                         # Log error but don't fail the employee creation
                         errors.append({
                             "row": row_num,
@@ -1862,6 +1884,9 @@ async def bulk_upload_employees_csv(
     # Check if there were any rows
     if created == 0 and failed == 0:
         raise HTTPException(status_code=400, detail="No data rows found in CSV")
+
+    logger.info("[BulkUpload] Complete: %d created, %d failed, %d errors, %d background tasks queued",
+                created, failed, len(errors), len(background_tasks.tasks) if hasattr(background_tasks, 'tasks') else -1)
 
     return BulkEmployeeCSVUpload(
         total_rows=created + failed,
