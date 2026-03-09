@@ -37,19 +37,22 @@ const latLonToVector3 = (lat: number, lon: number, radius: number) => {
 
 const createCityLabel = (text: string) => {
   const canvas = document.createElement('canvas');
-  canvas.width = 480;
-  canvas.height = 128;
+  canvas.width = 600;
+  canvas.height = 160;
   const ctx = canvas.getContext('2d');
   if (!ctx) return null;
 
+  // Add spaces between characters for better readability and style
+  const spacedText = text.split('').join(' ').toUpperCase();
+
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = '400 48px "Plus Jakarta Sans", "Inter", sans-serif';
+  ctx.font = '400 42px "Space Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(234, 88, 12, 0.95)';
   ctx.shadowColor = 'rgba(124, 45, 18, 0.4)';
   ctx.shadowBlur = 12;
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+  ctx.fillText(spacedText, canvas.width / 2, canvas.height / 2);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.minFilter = THREE.LinearFilter;
@@ -65,7 +68,7 @@ const createCityLabel = (text: string) => {
   });
 
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(0.72, 0.22, 1);
+  sprite.scale.set(0.9, 0.24, 1);
   return { sprite, material, texture };
 };
 
@@ -248,7 +251,7 @@ export function ParticleSphere({
       cityMarkers.forEach((city, index) => {
         const normal = latLonToVector3(city.lat, city.lon, 1).normalize();
         const markerPosition = normal.clone().multiplyScalar(1.03);
-        const labelAnchor = normal.clone().multiplyScalar(1.18);
+        const labelAnchor = normal.clone().multiplyScalar(1.35);
 
         const dotMaterial = new THREE.MeshBasicMaterial({
           color: 0xff6f1f,
@@ -270,7 +273,7 @@ export function ParticleSphere({
 
         const lineGeometry = new THREE.BufferGeometry().setFromPoints([
           normal.clone().multiplyScalar(1.06),
-          normal.clone().multiplyScalar(1.13)
+          normal.clone().multiplyScalar(1.25)
         ]);
         const lineMaterial = new THREE.LineBasicMaterial({
           color: 0xff9b57,
