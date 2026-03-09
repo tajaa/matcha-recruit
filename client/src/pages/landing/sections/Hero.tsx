@@ -162,7 +162,7 @@ export const Hero = () => {
 
           <m.div variants={itemVariants} className="space-y-10 mt-10">
             <p
-              className="text-zinc-300 text-2xl md:text-3xl lg:text-4xl font-light leading-relaxed max-w-lg"
+              className="text-zinc-300 text-xl md:text-2xl lg:text-3xl font-light leading-relaxed max-w-lg"
               style={{ fontFamily: fonts.sans }}
             >
               Increase your signal to noise ratio.
