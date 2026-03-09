@@ -1534,33 +1534,106 @@ def _select_latest_effective_date(requirements: list[dict[str, Any]]) -> Optiona
     return latest_effective
 
 
+def _find_missing_state_topics(
+    industry_key: str,
+    states: list[str],
+    state_requirement_map: dict[str, list[dict[str, Any]]],
+) -> dict[str, list[str]]:
+    """Return {state_code: [missing_category, ...]} for mandatory hospitality topics."""
+    if industry_key not in STRICT_TEMPLATE_INDUSTRIES:
+        return {}
+    missing: dict[str, list[str]] = {}
+    for state in states:
+        requirements = state_requirement_map.get(state, [])
+        state_missing = [
+            topic for topic in MANDATORY_STATE_TOPIC_RULES
+            if not _requirements_cover_topic(requirements, topic)
+        ]
+        if state_missing:
+            missing[state] = state_missing
+    return missing
+
+
 def _validate_required_state_coverage(
     industry_key: str,
     states: list[str],
     state_requirement_map: dict[str, list[dict[str, Any]]],
+    *,
+    allow_fallback: bool = False,
 ) -> None:
-    if industry_key not in STRICT_TEMPLATE_INDUSTRIES:
+    missing = _find_missing_state_topics(industry_key, states, state_requirement_map)
+    if not missing:
         return
 
-    missing_by_state: list[str] = []
-    for state in states:
-        requirements = state_requirement_map.get(state, [])
-        missing_topics = [
-            MANDATORY_STATE_TOPIC_LABELS[topic]
-            for topic in MANDATORY_STATE_TOPIC_RULES.keys()
-            if not _requirements_cover_topic(requirements, topic)
-        ]
-        if missing_topics:
-            missing_by_state.append(
-                f"{STATE_NAMES.get(state, state)} ({', '.join(missing_topics)})"
-            )
+    parts = [
+        f"{STATE_NAMES.get(st, st)} ({', '.join(MANDATORY_STATE_TOPIC_LABELS[t] for t in topics)})"
+        for st, topics in missing.items()
+    ]
+    if allow_fallback:
+        logger.warning("Handbook proceeding with fallback for: %s", "; ".join(parts))
+        return
 
-    if missing_by_state:
-        raise ValueError(
-            "Missing required state boilerplate coverage for hospitality handbook generation: "
-            f"{'; '.join(missing_by_state)}. "
-            "Run compliance refresh for the selected jurisdictions and complete legal review before creating this handbook."
-        )
+    raise ValueError(
+        "Missing required state boilerplate coverage for hospitality handbook generation: "
+        f"{'; '.join(parts)}. "
+        "Run compliance refresh for the selected jurisdictions and complete legal review before creating this handbook."
+    )
+
+
+async def _auto_research_missing_handbook_topics(
+    missing_by_state: dict[str, list[str]],
+) -> None:
+    """Use Gemini + Google Search grounding to fill jurisdiction_requirements gaps."""
+    from .compliance_service import (
+        _refresh_repository_missing_categories,
+        _load_jurisdiction_requirements,
+        _jurisdiction_row_to_dict,
+    )
+    from .gemini_compliance import get_gemini_compliance_service
+
+    service = get_gemini_compliance_service()
+
+    for state, missing_topics in missing_by_state.items():
+        async with get_connection() as conn:
+            j_row = await conn.fetchrow(
+                "SELECT id FROM jurisdictions WHERE city = '' AND state = $1", state,
+            )
+            if not j_row:
+                await conn.execute(
+                    "INSERT INTO jurisdictions (city, state) VALUES ('', $1) "
+                    "ON CONFLICT (city, state) DO NOTHING", state,
+                )
+                j_row = await conn.fetchrow(
+                    "SELECT id FROM jurisdictions WHERE city = '' AND state = $1", state,
+                )
+            if not j_row:
+                logger.warning("Could not resolve jurisdiction for state %s", state)
+                continue
+            jurisdiction_id = j_row["id"]
+
+            existing_rows = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+            current_requirements = [_jurisdiction_row_to_dict(r) for r in existing_rows]
+
+            logger.info(
+                "Auto-researching %d missing handbook topics for %s: %s",
+                len(missing_topics), state, ", ".join(missing_topics),
+            )
+            try:
+                await asyncio.wait_for(
+                    _refresh_repository_missing_categories(
+                        conn, service,
+                        jurisdiction_id=jurisdiction_id,
+                        city="", state=state, county=None,
+                        has_local_ordinance=None,
+                        current_requirements=current_requirements,
+                        missing_categories=missing_topics,
+                    ),
+                    timeout=30.0,
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Auto-research timed out for %s", state)
+            except Exception as exc:
+                logger.warning("Auto-research failed for %s: %s", state, exc)
 
 
 def _build_template_sections(
@@ -1571,9 +1644,10 @@ def _build_template_sections(
     industry_key: str = "general",
     state_requirement_map: Optional[dict[str, list[dict[str, Any]]]] = None,
     guided_answers: Optional[dict[str, str]] = None,
+    allow_fallback: bool = False,
 ) -> list[dict[str, Any]]:
     unique_states, selected_cities_by_state, _ = _collect_state_city_scope(scopes)
-    _validate_required_state_coverage(industry_key, unique_states, state_requirement_map or {})
+    _validate_required_state_coverage(industry_key, unique_states, state_requirement_map or {}, allow_fallback=allow_fallback)
     base_sections = _build_core_sections(profile, mode, unique_states)
     state_sections = _build_state_sections(
         unique_states,
@@ -2605,6 +2679,25 @@ class HandbookService:
         profile_row: Optional[CompanyHandbookProfileResponse] = None
         _validate_handbook_file_reference(data.file_url)
 
+        # Pre-flight: auto-research missing jurisdiction data for hospitality handbooks
+        auto_researched = False
+        if data.source_type == "template":
+            async with get_connection() as pre_conn:
+                company_industry = await pre_conn.fetchval(
+                    "SELECT industry FROM companies WHERE id = $1", company_id,
+                )
+                industry_key = _normalize_industry(data.industry, company_industry)
+                if industry_key in STRICT_TEMPLATE_INDUSTRIES:
+                    pre_map = await _fetch_state_requirements(
+                        pre_conn, normalized_scopes, written_policy_only=True,
+                    )
+                    unique_states, _, _ = _collect_state_city_scope(normalized_scopes)
+                    missing = _find_missing_state_topics(industry_key, unique_states, pre_map)
+                    if missing:
+                        logger.info("Auto-researching missing handbook topics: %s", missing)
+                        await _auto_research_missing_handbook_topics(missing)
+                        auto_researched = True
+
         try:
             async with get_connection() as conn:
                 async with conn.transaction():
@@ -2679,6 +2772,7 @@ class HandbookService:
                             industry_key=industry_key,
                             state_requirement_map=state_requirement_map,
                             guided_answers=guided_answers,
+                            allow_fallback=auto_researched,
                         )
                     else:
                         sections = [
