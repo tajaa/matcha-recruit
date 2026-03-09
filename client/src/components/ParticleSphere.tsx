@@ -46,7 +46,7 @@ const createCityLabel = (text: string) => {
   const spacedText = text.split('').join(' ').toUpperCase();
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.font = '400 42px "Space Mono", monospace';
+  ctx.font = '400 32px "Space Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'rgba(234, 88, 12, 0.95)';
@@ -68,7 +68,7 @@ const createCityLabel = (text: string) => {
   });
 
   const sprite = new THREE.Sprite(material);
-  sprite.scale.set(0.9, 0.24, 1);
+  sprite.scale.set(0.68, 0.18, 1);
   return { sprite, material, texture };
 };
 
