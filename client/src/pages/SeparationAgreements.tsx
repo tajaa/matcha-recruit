@@ -15,7 +15,6 @@ import {
   RefreshCw,
   Scale,
   Shield,
-  Users,
   X,
   XCircle,
 } from 'lucide-react';
@@ -556,8 +555,8 @@ export default function SeparationAgreements() {
         ) : (
           <div className="flex items-center gap-0">
             {LIFECYCLE_STEPS.map((step, idx) => {
-              let stepCls = t.stepInactive;
-              let lineCls = t.stepLine;
+              let stepCls: string = t.stepInactive;
+              let lineCls: string = t.stepLine;
 
               if (idx < currentIdx) {
                 stepCls = t.stepCompleted;

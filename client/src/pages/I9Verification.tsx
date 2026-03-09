@@ -708,7 +708,7 @@ function RecordsTab({
   setStatusFilter,
   onRowClick,
 }: {
-  t: typeof LT;
+  t: typeof LT | typeof DK;
   isLight: boolean;
   records: I9Record[];
   statusFilter: string;
@@ -791,7 +791,7 @@ function ExpiringTab({
   loading,
   onReload,
 }: {
-  t: typeof LT;
+  t: typeof LT | typeof DK;
   isLight: boolean;
   records: I9Record[];
   days: number;
@@ -905,7 +905,7 @@ function IncompleteTab({
   data,
   loading,
 }: {
-  t: typeof LT;
+  t: typeof LT | typeof DK;
   isLight: boolean;
   data: I9IncompleteResponse | null;
   loading: boolean;
@@ -1002,7 +1002,7 @@ function ComplianceTab({
   data,
   loading,
 }: {
-  t: typeof LT;
+  t: typeof LT | typeof DK;
   isLight: boolean;
   data: I9ComplianceSummary | null;
   loading: boolean;
