@@ -21,7 +21,7 @@ from uuid import UUID
 
 from io import BytesIO
 
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, UploadFile, File, Form, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -492,6 +492,7 @@ async def update_case(
     case_id: UUID,
     case: ERCaseUpdate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Update a case."""
@@ -589,6 +590,11 @@ async def update_case(
             case.model_dump(mode="json", exclude_none=True),
             request.client.host if request.client else None,
         )
+
+        # Refresh risk assessment snapshot so closed cases drop off action items
+        if case.status in ("closed", "resolved") and row["company_id"]:
+            from .employees import _refresh_risk_assessment
+            background_tasks.add_task(_refresh_risk_assessment, row["company_id"])
 
         return ERCaseResponse(
             id=row["id"],
