@@ -1582,12 +1582,22 @@ def _validate_required_state_coverage(
 
 async def _auto_research_missing_handbook_topics(
     missing_by_state: dict[str, list[str]],
+    company_id: Optional[UUID] = None,
 ) -> None:
-    """Use Gemini + Google Search grounding to fill jurisdiction_requirements gaps."""
+    """Use Gemini + Google Search grounding to fill jurisdiction_requirements gaps.
+
+    Only fills gaps for jurisdictions that already have data (partial coverage).
+    Jurisdictions with no existing data are skipped — they require a full
+    admin-initiated compliance refresh.
+
+    If company_id is provided, also syncs the newly researched requirements
+    to the company's business locations in that jurisdiction.
+    """
     from .compliance_service import (
         _refresh_repository_missing_categories,
         _load_jurisdiction_requirements,
         _jurisdiction_row_to_dict,
+        _sync_requirements_to_location,
     )
     from .gemini_compliance import get_gemini_compliance_service
 
@@ -1599,19 +1609,20 @@ async def _auto_research_missing_handbook_topics(
                 "SELECT id FROM jurisdictions WHERE city = '' AND state = $1", state,
             )
             if not j_row:
-                await conn.execute(
-                    "INSERT INTO jurisdictions (city, state) VALUES ('', $1) "
-                    "ON CONFLICT (city, state) DO NOTHING", state,
+                logger.info(
+                    "Skipping auto-research for %s: no state-level jurisdiction exists (requires full refresh)",
+                    state,
                 )
-                j_row = await conn.fetchrow(
-                    "SELECT id FROM jurisdictions WHERE city = '' AND state = $1", state,
-                )
-            if not j_row:
-                logger.warning("Could not resolve jurisdiction for state %s", state)
                 continue
             jurisdiction_id = j_row["id"]
 
             existing_rows = await _load_jurisdiction_requirements(conn, jurisdiction_id)
+            if not existing_rows:
+                logger.info(
+                    "Skipping auto-research for %s: jurisdiction has no existing data (requires full refresh)",
+                    state,
+                )
+                continue
             current_requirements = [_jurisdiction_row_to_dict(r) for r in existing_rows]
 
             logger.info(
@@ -1619,7 +1630,7 @@ async def _auto_research_missing_handbook_topics(
                 len(missing_topics), state, ", ".join(missing_topics),
             )
             try:
-                await asyncio.wait_for(
+                merged = await asyncio.wait_for(
                     _refresh_repository_missing_categories(
                         conn, service,
                         jurisdiction_id=jurisdiction_id,
@@ -1628,12 +1639,43 @@ async def _auto_research_missing_handbook_topics(
                         current_requirements=current_requirements,
                         missing_categories=missing_topics,
                     ),
-                    timeout=30.0,
+                    timeout=90.0,
                 )
             except asyncio.TimeoutError:
                 logger.warning("Auto-research timed out for %s", state)
+                continue
             except Exception as exc:
-                logger.warning("Auto-research failed for %s: %s", state, exc)
+                logger.warning("Auto-research failed for %s: %s", state, exc, exc_info=True)
+                continue
+
+            # Sync newly researched requirements to the company's locations
+            if company_id and merged:
+                try:
+                    locations = await conn.fetch(
+                        """
+                        SELECT bl.id
+                        FROM business_locations bl
+                        JOIN jurisdictions j ON bl.jurisdiction_id = j.id
+                        WHERE bl.company_id = $1
+                          AND j.state = $2
+                          AND bl.is_active = true
+                        """,
+                        company_id, state,
+                    )
+                    for loc in locations:
+                        sync_result = await _sync_requirements_to_location(
+                            conn, loc["id"], company_id, merged,
+                            create_alerts=False,
+                        )
+                        logger.info(
+                            "Synced auto-researched requirements to location %s: %s",
+                            loc["id"], sync_result,
+                        )
+                except Exception as sync_exc:
+                    logger.warning(
+                        "Failed to sync auto-researched data to company locations for %s: %s",
+                        state, sync_exc, exc_info=True,
+                    )
 
 
 def _build_template_sections(
@@ -2695,7 +2737,7 @@ class HandbookService:
                     missing = _find_missing_state_topics(industry_key, unique_states, pre_map)
                     if missing:
                         logger.info("Auto-researching missing handbook topics: %s", missing)
-                        await _auto_research_missing_handbook_topics(missing)
+                        await _auto_research_missing_handbook_topics(missing, company_id=company_id)
                         auto_researched = True
 
         try:
