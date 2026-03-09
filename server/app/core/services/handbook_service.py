@@ -1333,7 +1333,7 @@ async def _fetch_state_requirements(
             include_written_policy_filter = False
 
     written_policy_clause = (
-        "\n              AND ($4::boolean IS FALSE OR jr.requires_written_policy IS NOT false)"
+        "\n              AND ($4::boolean IS FALSE OR jr.requires_written_policy IS NOT false OR jr.category = ANY($2::varchar[]))"
         if include_written_policy_filter
         else ""
     )
