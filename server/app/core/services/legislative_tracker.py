@@ -1,7 +1,9 @@
-"""Legislative tracker service — LegiScan + Polymarket + Gemini, no DB."""
+"""Legislative tracker service — Gemini grounding + Polymarket, no DB."""
 
 import asyncio
+import hashlib
 import json
+import re
 import time
 from typing import Any, Optional
 
@@ -9,10 +11,22 @@ import httpx
 
 from ...config import get_settings
 
-LEGISCAN_BASE = "https://api.legiscan.com/"
 POLYMARKET_SEARCH = "https://gamma-api.polymarket.com/public-search"
 
-# LegiScan status integer → label
+# Gemini string status → int (for frontend sorting/coloring)
+GEMINI_STATUS_MAP = {
+    "Introduced": 1,
+    "In Committee": 1,
+    "Passed Committee": 2,
+    "Passed One Chamber": 2,
+    "Passed Both Chambers": 3,
+    "Enrolled": 3,
+    "Signed": 4,
+    "Passed": 4,
+    "Vetoed": 5,
+    "Failed": 6,
+}
+
 STATUS_LABELS = {
     0: "N/A",
     1: "Introduced",
@@ -23,7 +37,20 @@ STATUS_LABELS = {
     6: "Failed",
 }
 
-# Default keywords to search when none provided
+# Stage heuristic by status string
+STATUS_HEURISTIC = {
+    "Introduced": 0.07,
+    "In Committee": 0.15,
+    "Passed Committee": 0.25,
+    "Passed One Chamber": 0.45,
+    "Passed Both Chambers": 0.82,
+    "Enrolled": 0.75,
+    "Signed": 0.97,
+    "Passed": 0.88,
+    "Vetoed": 0.02,
+    "Failed": 0.02,
+}
+
 HR_KEYWORDS = [
     "minimum wage",
     "paid leave",
@@ -37,7 +64,6 @@ HR_KEYWORDS = [
     "equal pay",
 ]
 
-# All 50 states + Congress
 ALL_STATES = [
     "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
     "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
@@ -47,7 +73,6 @@ ALL_STATES = [
     "US",
 ]
 
-# HR category mapping: title keyword fragments → category name
 CATEGORY_MAP = [
     (["minimum wage", "min wage", "tipped wage"], "Minimum Wage"),
     (["overtime", "over time", "ot pay"], "Overtime"),
@@ -64,8 +89,8 @@ CATEGORY_MAP = [
 REQUEST_TIMEOUT = 15.0
 
 
-def _categorize_bill(title: str, description: str = "") -> str:
-    text = (title + " " + description).lower()
+def _categorize_bill(title: str, category_hint: str = "") -> str:
+    text = (title + " " + category_hint).lower()
     for keywords, category in CATEGORY_MAP:
         for kw in keywords:
             if kw in text:
@@ -73,101 +98,146 @@ def _categorize_bill(title: str, description: str = "") -> str:
     return "Other"
 
 
-def _stage_heuristic(status: int) -> float:
-    """Return a rough passage probability based on LegiScan status code."""
-    if status == 4:
-        return 0.88
-    if status == 5:
-        return 0.02
-    if status == 6:
-        return 0.02
-    if status == 3:
-        return 0.75
-    if status == 2:
-        return 0.45
-    if status == 1:
-        return 0.07
-    return 0.05
+def _bill_id_from_key(state: str, bill_number: str) -> int:
+    """Generate a stable integer ID from state + bill number."""
+    key = f"{state}-{bill_number}".encode()
+    return int(hashlib.md5(key).hexdigest()[:8], 16)
 
 
-async def _legiscan_request(op: str, params: dict, client: httpx.AsyncClient) -> dict:
-    settings = get_settings()
-    api_key = settings.legiscan_api_key
-    if not api_key:
-        raise ValueError("LEGISCAN_API_KEY not configured")
-
-    query = {"key": api_key, "op": op, **params}
-    response = await client.get(LEGISCAN_BASE, params=query, timeout=REQUEST_TIMEOUT)
-    response.raise_for_status()
-    data = response.json()
-    if data.get("status") == "ERROR":
-        raise ValueError(f"LegiScan error: {data.get('alert', {}).get('message', 'unknown')}")
-    return data
+def _stage_heuristic(status_label: str) -> float:
+    return STATUS_HEURISTIC.get(status_label, 0.07)
 
 
-async def search_legiscan_bills(
+def _parse_gemini_json(text: str) -> list:
+    """Extract a JSON array from Gemini response text."""
+    text = text.strip()
+    # Strip markdown fences
+    text = re.sub(r"```(?:json)?\n?", "", text).strip().rstrip("`").strip()
+    # Find outermost array
+    start = text.find("[")
+    end = text.rfind("]") + 1
+    if start >= 0 and end > start:
+        try:
+            return json.loads(text[start:end])
+        except json.JSONDecodeError:
+            pass
+    return []
+
+
+async def search_bills_via_gemini_grounding(
     keywords: list[str],
     states: list[str],
-    client: httpx.AsyncClient,
 ) -> list[dict]:
-    """Search LegiScan for bills matching each keyword in each state."""
-    seen: set[int] = set()
-    bills: list[dict] = []
+    """
+    Use Gemini with Google Search grounding to find pending HR/employment bills.
+    Batches keywords to minimize API calls (3 keywords per call).
+    """
+    from google.genai import types
+    from .gemini_compliance import get_gemini_compliance_service
 
-    async def _search(keyword: str, state: str) -> list[dict]:
+    gemini = get_gemini_compliance_service()
+    if not gemini._has_api_key():
+        print("[LegTracker] No Gemini API key — cannot search bills")
+        return []
+
+    is_all_states = len(states) >= 40
+    state_context = (
+        "across all 50 US states and the US Congress"
+        if is_all_states
+        else f"in {', '.join(states)}"
+    )
+    state_set = set(states)
+
+    # Batch keywords: 3 per Gemini call
+    batches = [keywords[i:i+3] for i in range(0, len(keywords), 3)]
+
+    async def _search_batch(kw_batch: list[str]) -> list[dict]:
+        prompt = f"""Use Google Search to find currently PENDING or recently introduced legislative bills related to: {', '.join(kw_batch)}.
+
+Scope: {state_context}, 2024-2025 legislative sessions.
+
+Return ONLY a valid JSON array (no markdown, no explanation). Each element:
+{{
+  "state": "2-letter state code or US for federal",
+  "bill_number": "e.g. SB 123 or H.R. 456",
+  "title": "full official bill title",
+  "description": "1-2 sentence plain-english summary",
+  "status": "exactly one of: Introduced, In Committee, Passed Committee, Passed One Chamber, Passed Both Chambers, Signed, Vetoed, Failed",
+  "last_action": "most recent action taken",
+  "last_action_date": "YYYY-MM-DD or best approximation",
+  "url": "direct link to bill text or state legislature page",
+  "category": "best matching topic from: {', '.join(kw_batch)}"
+}}
+
+Include up to 6 real bills per keyword. Only include bills you can verify exist via search."""
+
         try:
-            data = await _legiscan_request(
-                "getSearch",
-                {"state": state, "query": keyword, "year": "2"},
-                client,
+            response = await gemini.client.aio.models.generate_content(
+                model=get_settings().analysis_model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    temperature=0.1,
+                    response_modalities=["TEXT"],
+                ),
             )
-            results = data.get("searchresult", {})
-            found = []
-            for key, val in results.items():
-                if key == "summary":
-                    continue
-                if isinstance(val, dict) and "bill_id" in val:
-                    found.append(val)
-            return found
+            return _parse_gemini_json(response.text or "")
         except Exception as e:
-            print(f"[LegTracker] getSearch {state}/{keyword}: {e}")
+            print(f"[LegTracker] Gemini grounding batch {kw_batch}: {e}")
             return []
 
-    tasks = [
-        _search(kw, state)
-        for kw in keywords
-        for state in states
-    ]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*[_search_batch(b) for b in batches])
 
-    for batch in results:
-        for bill in batch:
-            bid = bill.get("bill_id")
-            if bid and bid not in seen:
-                seen.add(bid)
+    seen: set[str] = set()
+    bills: list[dict] = []
+    for batch_result in results:
+        for bill in batch_result:
+            if not isinstance(bill, dict):
+                continue
+            state = (bill.get("state") or "").upper().strip()
+            bill_number = (bill.get("bill_number") or "").strip()
+            if not state or not bill_number:
+                continue
+            # Filter to requested states (skip when searching all)
+            if not is_all_states and state not in state_set and state != "US":
+                continue
+            key = f"{state}-{bill_number}"
+            if key not in seen:
+                seen.add(key)
                 bills.append(bill)
 
     return bills
 
 
-async def get_legiscan_bill_detail(bill_id: int, client: httpx.AsyncClient) -> Optional[dict]:
-    """Fetch full bill detail from LegiScan."""
-    try:
-        data = await _legiscan_request("getBill", {"id": bill_id}, client)
-        return data.get("bill")
-    except Exception as e:
-        print(f"[LegTracker] getBill {bill_id}: {e}")
-        return None
+def _build_bill_from_gemini(raw: dict) -> dict:
+    state = (raw.get("state") or "").upper().strip()
+    bill_number = (raw.get("bill_number") or "").strip()
+    title = raw.get("title") or ""
+    status_str = raw.get("status") or "Introduced"
+    category_hint = raw.get("category") or ""
+
+    return {
+        "bill_id": _bill_id_from_key(state, bill_number),
+        "state": state,
+        "bill_number": bill_number,
+        "title": title,
+        "description": raw.get("description") or "",
+        "status": GEMINI_STATUS_MAP.get(status_str, 1),
+        "status_label": status_str,
+        "last_action": raw.get("last_action") or "",
+        "last_action_date": raw.get("last_action_date") or "",
+        "url": raw.get("url") or "",
+        "category": _categorize_bill(title, category_hint) if not category_hint else category_hint,
+        "sponsors": [],
+    }
 
 
 async def search_polymarket_match(bill_title: str, client: httpx.AsyncClient) -> Optional[dict]:
-    """Search Polymarket for a market matching this bill."""
-    # Use 3-5 key words from the title
+    """Search Polymarket for a prediction market matching this bill."""
     words = [w for w in bill_title.lower().split() if len(w) > 3][:5]
     query = " ".join(words[:4])
     if not query:
         return None
-
     try:
         resp = await client.get(
             POLYMARKET_SEARCH,
@@ -176,8 +246,7 @@ async def search_polymarket_match(bill_title: str, client: httpx.AsyncClient) ->
         )
         resp.raise_for_status()
         data = resp.json()
-        events = data.get("events", [])
-        for event in events:
+        for event in data.get("events", []):
             for market in event.get("markets", []):
                 outcomes = market.get("outcomes", [])
                 prices = market.get("outcomePrices", [])
@@ -199,7 +268,7 @@ async def search_polymarket_match(bill_title: str, client: httpx.AsyncClient) ->
 
 
 async def estimate_probability_gemini(bill: dict) -> Optional[dict]:
-    """Use Gemini to estimate passage probability for a bill."""
+    """Use Gemini to estimate passage probability for a bill without a Polymarket match."""
     try:
         from google.genai import types
         from .gemini_compliance import get_gemini_compliance_service
@@ -207,92 +276,34 @@ async def estimate_probability_gemini(bill: dict) -> Optional[dict]:
         if not gemini._has_api_key():
             return None
 
-        status = bill.get("status", 0)
-        state = bill.get("state", "Unknown")
-        title = bill.get("title", "")
-        description = bill.get("description", "")
-        sponsors = bill.get("sponsors", [])
-        sponsor_count = len(sponsors)
-        parties = {s.get("party", "") for s in sponsors if s.get("party")}
+        prompt = f"""You are a legislative analyst estimating passage probability.
 
-        prompt = f"""You are a legislative analyst estimating the probability that a bill will pass.
+Bill: {bill.get('title', '')}
+State: {bill.get('state', '')}
+Description: {bill.get('description', '')[:400]}
+Current status: {bill.get('status_label', 'Introduced')}
 
-Bill: {title}
-State: {state}
-Description: {description[:500] if description else 'N/A'}
-Legislative stage: {STATUS_LABELS.get(status, 'Unknown')} (status code {status})
-Sponsor count: {sponsor_count}
-Sponsor parties: {', '.join(parties) if parties else 'Unknown'}
+Estimate the probability (0.0 to 1.0) this bill passes into law this session.
+Consider: legislative stage, political context, typical passage rates for this bill type.
 
-Based on the legislative stage, bipartisan support, sponsor count, and general political context for {state}, estimate the probability (0.0 to 1.0) that this bill will be passed into law this session.
-
-Respond in JSON: {{"probability": 0.XX, "reasoning": "brief 1-2 sentence explanation"}}"""
+Respond in JSON only: {{"probability": 0.XX, "reasoning": "1-2 sentence explanation"}}"""
 
         response = await gemini.client.aio.models.generate_content(
-            model="gemini-3-flash-preview",
+            model=get_settings().analysis_model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.1,
                 response_modalities=["TEXT"],
             ),
         )
-        text = response.text.strip()
-        # Strip markdown fences if present
-        if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+        text = (response.text or "").strip()
+        text = re.sub(r"```(?:json)?\n?", "", text).strip().rstrip("`")
         result = json.loads(text)
-        prob = float(result.get("probability", 0.1))
-        prob = max(0.0, min(1.0, prob))
-        return {
-            "probability": prob,
-            "reasoning": result.get("reasoning", ""),
-        }
+        prob = max(0.0, min(1.0, float(result.get("probability", 0.1))))
+        return {"probability": prob, "reasoning": result.get("reasoning", "")}
     except Exception as e:
-        print(f"[LegTracker] Gemini estimate failed: {e}")
+        print(f"[LegTracker] Gemini probability estimate: {e}")
         return None
-
-
-def _build_bill_summary(search_result: dict, detail: Optional[dict]) -> dict:
-    """Merge search result + detail into a unified bill dict."""
-    bill_id = search_result.get("bill_id", 0)
-    status = search_result.get("status", 0)
-    title = search_result.get("title", "")
-
-    sponsors = []
-    history = []
-    votes = []
-
-    if detail:
-        for s in detail.get("sponsors", []):
-            sponsors.append({
-                "name": s.get("name", ""),
-                "party": s.get("party", ""),
-                "role": s.get("role", ""),
-            })
-        history = detail.get("history", [])
-        votes = detail.get("votes", [])
-        # Use detail title if available
-        if detail.get("title"):
-            title = detail["title"]
-
-    return {
-        "bill_id": bill_id,
-        "state": search_result.get("state", ""),
-        "bill_number": search_result.get("bill_number", ""),
-        "title": title,
-        "description": search_result.get("description", ""),
-        "status": status,
-        "status_label": STATUS_LABELS.get(status, "Unknown"),
-        "last_action": search_result.get("last_action", ""),
-        "last_action_date": search_result.get("last_action_date", ""),
-        "url": search_result.get("url", ""),
-        "category": _categorize_bill(title, search_result.get("description", "")),
-        "sponsors": sponsors,
-        "history": history,
-        "votes": votes,
-    }
 
 
 async def scan_bills(
@@ -300,89 +311,69 @@ async def scan_bills(
     states: Optional[list[str]] = None,
 ) -> dict:
     """
-    Main orchestrator: search LegiScan → detail → Polymarket → Gemini.
-    Returns unified bill list with probabilities.
+    Main orchestrator: Gemini grounding search → Polymarket match → Gemini probability estimate.
+    Returns unified bill list with probabilities. No database, all live.
     """
     start = time.monotonic()
     kw_list = keywords or HR_KEYWORDS
     state_list = states or ALL_STATES
 
+    # Step 1: Find bills via Gemini grounding
+    raw_bills = await search_bills_via_gemini_grounding(kw_list, state_list)
+
+    if not raw_bills:
+        return {
+            "bills": [],
+            "total": 0,
+            "keywords_searched": kw_list,
+            "states_searched": state_list,
+            "scan_duration_seconds": round(time.monotonic() - start, 1),
+            "polymarket_matches": 0,
+            "gemini_estimates": 0,
+        }
+
     async with httpx.AsyncClient() as client:
-        # Step 1: Search for bills
-        search_results = await search_legiscan_bills(kw_list, state_list, client)
-
-        if not search_results:
-            return {
-                "bills": [],
-                "total": 0,
-                "keywords_searched": kw_list,
-                "states_searched": state_list,
-                "scan_duration_seconds": round(time.monotonic() - start, 1),
-                "polymarket_matches": 0,
-                "gemini_estimates": 0,
-            }
-
-        # Step 2: Fetch details in batches (limit to top 50 to avoid rate limits)
-        top_results = search_results[:50]
-        detail_tasks = [
-            get_legiscan_bill_detail(r["bill_id"], client)
-            for r in top_results
-        ]
-        details = await asyncio.gather(*detail_tasks)
-
-        # Step 3: Polymarket match (parallel)
-        poly_tasks = [
-            search_polymarket_match(r.get("title", ""), client)
-            for r in top_results
-        ]
+        # Step 2: Polymarket matching (parallel)
+        poly_tasks = [search_polymarket_match(r.get("title", ""), client) for r in raw_bills]
         poly_results = await asyncio.gather(*poly_tasks)
 
-        # Step 4: Build summaries + assign probabilities
-        bills = []
-        polymarket_matches = 0
-        gemini_estimates = 0
-        gemini_tasks = []
-        gemini_indices = []
+    # Step 3: Build bills + assign heuristic probabilities
+    bills = []
+    needs_gemini: list[int] = []
 
-        for i, (search_r, detail, poly) in enumerate(zip(top_results, details, poly_results)):
-            bill = _build_bill_summary(search_r, detail)
+    for i, (raw, poly) in enumerate(zip(raw_bills, poly_results)):
+        bill = _build_bill_from_gemini(raw)
+        if poly:
+            bill["probability"] = poly["probability"]
+            bill["probability_source"] = "polymarket"
+            bill["polymarket_url"] = poly["url"]
+            bill["polymarket_volume"] = poly["volume"]
+        else:
+            bill["probability"] = _stage_heuristic(bill["status_label"])
+            bill["probability_source"] = "heuristic"
+            needs_gemini.append(i)
+        bills.append(bill)
 
-            if poly:
-                bill["probability"] = poly["probability"]
-                bill["probability_source"] = "polymarket"
-                bill["polymarket_url"] = poly["url"]
-                bill["polymarket_volume"] = poly["volume"]
-                polymarket_matches += 1
-                bills.append(bill)
-            else:
-                bill["probability"] = _stage_heuristic(bill["status"])
-                bill["probability_source"] = "heuristic"
-                bills.append(bill)
-                # Queue for Gemini estimate
-                gemini_tasks.append(estimate_probability_gemini(bill))
-                gemini_indices.append(i)
+    # Step 4: Gemini probability estimates for up to 15 bills (parallel)
+    gemini_estimates = 0
+    if needs_gemini:
+        capped = needs_gemini[:15]
+        gemini_results = await asyncio.gather(*[estimate_probability_gemini(bills[i]) for i in capped])
+        for idx, g in zip(capped, gemini_results):
+            if g:
+                bills[idx]["probability"] = g["probability"]
+                bills[idx]["probability_source"] = "gemini"
+                bills[idx]["probability_reasoning"] = g["reasoning"]
+                gemini_estimates += 1
 
-        # Step 5: Gemini estimates for bills without Polymarket (batch, capped at 20)
-        if gemini_tasks:
-            capped = gemini_tasks[:20]
-            capped_indices = gemini_indices[:20]
-            gemini_results = await asyncio.gather(*capped)
-            for task_i, gemini_res in zip(capped_indices, gemini_results):
-                if gemini_res:
-                    bill = bills[task_i]
-                    bill["probability"] = gemini_res["probability"]
-                    bill["probability_source"] = "gemini"
-                    bill["probability_reasoning"] = gemini_res["reasoning"]
-                    gemini_estimates += 1
-
-    duration = round(time.monotonic() - start, 1)
+    polymarket_matches = sum(1 for b in bills if b.get("probability_source") == "polymarket")
 
     return {
         "bills": bills,
         "total": len(bills),
         "keywords_searched": kw_list,
         "states_searched": state_list,
-        "scan_duration_seconds": duration,
+        "scan_duration_seconds": round(time.monotonic() - start, 1),
         "polymarket_matches": polymarket_matches,
         "gemini_estimates": gemini_estimates,
     }

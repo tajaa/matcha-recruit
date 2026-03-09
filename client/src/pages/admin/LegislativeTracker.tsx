@@ -392,7 +392,7 @@ export default function LegislativeTracker() {
               Scanning {selectedStates === 'ALL' ? '51 jurisdictions' : selectedStates} for {activeKeywords.size} keyword{activeKeywords.size !== 1 ? 's' : ''}…
             </span>
           </div>
-          <p className="text-xs text-zinc-400 mt-2">This may take 15–30 seconds</p>
+          <p className="text-xs text-zinc-400 mt-2">Searching via Gemini — may take 15–30 seconds</p>
         </div>
       )}
 
