@@ -49,7 +49,7 @@ export const Compliance = () => {
                   Stop finding out about law changes from your lawyer.
                 </span>
                 <h2
-                  className="text-5xl md:text-7xl font-bold tracking-tighter leading-[0.9]"
+                  className="text-4xl md:text-6xl font-bold tracking-tighter leading-[0.9]"
                   style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
                 >
                   EVERY LOCATION. <br />

@@ -148,14 +148,14 @@ export const Hero = () => {
           
           <m.h1 variants={itemVariants} className="mt-10 leading-[0.9] tracking-[-0.04em] mix-blend-lighten max-w-2xl">
             <span
-              className="block text-[3rem] md:text-[5rem] lg:text-[6.5rem] font-bold uppercase text-white"
+              className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] font-bold uppercase text-white"
               style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
             >
               Workforce
             </span>
             <GlitchText
               text="Intelligence."
-              className="block text-[3.5rem] md:text-[6rem] lg:text-[7.5rem] italic font-light text-amber-700"
+              className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-amber-700"
               style={{ fontFamily: fonts.serif }}
             />
           </m.h1>

@@ -130,7 +130,7 @@ export const ERCopilot = forwardRef<HTMLDivElement>((_, ref) => {
 
           <m.h2
             variants={featureVariants}
-            className="text-6xl md:text-8xl font-bold tracking-tighter leading-[0.85]"
+            className="text-4xl md:text-6xl font-bold tracking-tighter leading-[0.85]"
             style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
           >
             ER <br />
