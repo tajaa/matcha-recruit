@@ -139,14 +139,14 @@ ADDENDUM_KEYWORD_PATTERNS = (
 STRICT_TEMPLATE_INDUSTRIES = {"hospitality"}
 
 MANDATORY_STATE_TOPIC_RULES: dict[str, tuple[str, ...]] = {
-    "minimum_wage": ("minimum_wage", "minimum wage", "wage floor"),
-    "overtime": ("overtime", "ot", "time and a half"),
-    "pay_frequency": ("pay_frequency", "pay frequency", "payday", "pay period"),
-    "sick_leave": ("sick_leave", "paid sick", "sick leave"),
-    "meal_breaks": ("meal_break", "meal period", "rest break", "meal and rest"),
-    "final_pay": ("final_pay", "final pay", "final paycheck", "separation pay"),
-    "minor_work_permit": ("minor_work_permit", "minor work", "youth employment", "child labor"),
-    "scheduling_reporting": ("scheduling_reporting", "predictive scheduling", "fair workweek", "reporting time"),
+    "minimum_wage": ("minimum_wage", "minimum wage", "wage floor", "min wage", "hourly wage", "wage and hour"),
+    "overtime": ("overtime", "ot", "time and a half", "overtime pay", "hours worked", "weekly hours"),
+    "pay_frequency": ("pay_frequency", "pay frequency", "payday", "pay period", "wage payment", "pay schedule"),
+    "sick_leave": ("sick_leave", "paid sick", "sick leave", "sick time", "pto", "paid time off", "earned sick"),
+    "meal_breaks": ("meal_break", "meal period", "rest break", "meal and rest", "break period", "rest period", "meal break"),
+    "final_pay": ("final_pay", "final pay", "final paycheck", "separation pay", "final wage", "last paycheck", "termination pay"),
+    "minor_work_permit": ("minor_work_permit", "minor work", "youth employment", "child labor", "work permit", "working minor"),
+    "scheduling_reporting": ("scheduling_reporting", "predictive scheduling", "fair workweek", "reporting time", "scheduling", "work schedule", "shift scheduling"),
 }
 
 MANDATORY_STATE_TOPIC_LABELS: dict[str, str] = {

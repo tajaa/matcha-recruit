@@ -1,10 +1,13 @@
 """Email service using MailerSend."""
 import html
 import httpx
+import logging
 from datetime import date, datetime
 from typing import Optional
 
 from ...config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class EmailService:
@@ -36,7 +39,7 @@ class EmailService:
         {"filename": "...", "content": "<base64>", "disposition": "attachment"}
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         payload = {
@@ -71,14 +74,17 @@ class EmailService:
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent email to {to_email}")
+                    logger.info("Sent email to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning(
+                        "Failed to send email to %s: %s - %s",
+                        to_email, response.status_code, response.text[:200],
+                    )
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending email to %s", to_email)
             return False
 
     async def send_outreach_email(
@@ -97,7 +103,7 @@ class EmailService:
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -207,14 +213,14 @@ This link is unique to you and will expire in 14 days.
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent outreach email to {to_email}")
+                    logger.info("Sent outreach email to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_screening_invite_email(
@@ -236,7 +242,7 @@ This link is unique to you and will expire in 14 days.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -349,14 +355,14 @@ You'll need to log in or create an account to access the interview.
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent screening invite to {to_email}")
+                    logger.info("Sent screening invite to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_contact_form_email(
@@ -371,7 +377,7 @@ You'll need to log in or create an account to access the interview.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         contact_email = self.settings.contact_email
@@ -474,14 +480,14 @@ Sent from Matcha Recruit contact form
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent contact form email from {sender_email}")
+                    logger.info("Sent contact form email from %s", sender_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send contact form: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send contact form: %s - %s", response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending contact form: {e}")
+            logger.exception("Error sending contact form")
             return False
 
     async def send_policy_signature_email(
@@ -499,7 +505,7 @@ Sent from Matcha Recruit contact form
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -611,14 +617,14 @@ If you have questions, please contact your administrator.
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent policy signature email to {to_email}")
+                    logger.info("Sent policy signature email to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_broker_client_setup_invitation_email(
@@ -632,7 +638,7 @@ If you have questions, please contact your administrator.
     ) -> bool:
         """Send a broker client onboarding invitation email."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         expires_text = (
@@ -729,14 +735,14 @@ This invitation expires on {expires_text}.
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent broker client invite to {to_email}")
+                    logger.info("Sent broker client invite to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_broker_welcome_email(
@@ -749,7 +755,7 @@ This invitation expires on {expires_text}.
     ) -> bool:
         """Send a welcome email to a newly created broker owner with their login credentials."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -853,7 +859,7 @@ For security, please change your password after your first login.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -973,14 +979,14 @@ If you weren't expecting this invitation, please contact your HR administrator.
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent employee invitation to {to_email}")
+                    logger.info("Sent employee invitation to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
 
@@ -997,7 +1003,7 @@ If you weren't expecting this invitation, please contact your HR administrator.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping employee welcome email")
+            logger.warning("MailerSend not configured, skipping employee welcome email")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1169,14 +1175,14 @@ Questions? Contact your HR administrator.
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent employee welcome email to {to_email}")
+                    logger.info("Sent employee welcome email to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send welcome email to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send welcome email to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending welcome email to {to_email}: {e}")
+            logger.exception("Error sending welcome email to %s", to_email)
             return False
 
     async def send_task_reminder(
@@ -1190,7 +1196,7 @@ Questions? Contact your HR administrator.
     ) -> bool:
         """Send a standard onboarding task reminder email."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping onboarding reminder email")
+            logger.warning("MailerSend not configured, skipping onboarding reminder email")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1271,12 +1277,12 @@ Open onboarding portal: {portal_url}
                     timeout=30.0,
                 )
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent onboarding reminder to {to_email}")
+                    logger.info("Sent onboarding reminder to %s", to_email)
                     return True
-                print(f"[Email] Failed onboarding reminder to {to_email}: {response.status_code} - {response.text}")
+                logger.warning("Failed onboarding reminder to %s: %s - %s", to_email, response.status_code, response.text[:200])
                 return False
         except Exception as e:
-            print(f"[Email] Error sending onboarding reminder to {to_email}: {e}")
+            logger.exception("Error sending onboarding reminder to %s", to_email)
             return False
 
     async def send_task_completion_notification(
@@ -1289,7 +1295,7 @@ Open onboarding portal: {portal_url}
     ) -> bool:
         """Send a notification email when an onboarding task is completed."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping task completion notification")
+            logger.warning("MailerSend not configured, skipping task completion notification")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1369,12 +1375,12 @@ View onboarding dashboard: {portal_url}
                     timeout=30.0,
                 )
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent task completion notification to {to_email}")
+                    logger.info("Sent task completion notification to %s", to_email)
                     return True
-                print(f"[Email] Failed task completion notification to {to_email}: {response.status_code} - {response.text}")
+                logger.warning("Failed task completion notification to %s: %s - %s", to_email, response.status_code, response.text[:200])
                 return False
         except Exception as e:
-            print(f"[Email] Error sending task completion notification to {to_email}: {e}")
+            logger.exception("Error sending task completion notification to %s", to_email)
             return False
 
     async def send_task_escalation(
@@ -1390,7 +1396,7 @@ View onboarding dashboard: {portal_url}
     ) -> bool:
         """Send an onboarding escalation email for overdue tasks."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping onboarding escalation email")
+            logger.warning("MailerSend not configured, skipping onboarding escalation email")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1474,12 +1480,12 @@ Review onboarding status: {portal_url}
                     timeout=30.0,
                 )
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent onboarding escalation to {to_email}")
+                    logger.info("Sent onboarding escalation to %s", to_email)
                     return True
-                print(f"[Email] Failed onboarding escalation to {to_email}: {response.status_code} - {response.text}")
+                logger.warning("Failed onboarding escalation to %s: %s - %s", to_email, response.status_code, response.text[:200])
                 return False
         except Exception as e:
-            print(f"[Email] Error sending onboarding escalation to {to_email}: {e}")
+            logger.exception("Error sending onboarding escalation to %s", to_email)
             return False
 
     async def send_manager_onboarding_summary(
@@ -1491,7 +1497,7 @@ Review onboarding status: {portal_url}
     ) -> bool:
         """Send a weekly manager summary of onboarding items."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping manager onboarding summary email")
+            logger.warning("MailerSend not configured, skipping manager onboarding summary email")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1569,12 +1575,12 @@ Open onboarding dashboard: {portal_url}
                     timeout=30.0,
                 )
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent manager onboarding summary to {to_email}")
+                    logger.info("Sent manager onboarding summary to %s", to_email)
                     return True
-                print(f"[Email] Failed manager onboarding summary to {to_email}: {response.status_code} - {response.text}")
+                logger.warning("Failed manager onboarding summary to %s: %s - %s", to_email, response.status_code, response.text[:200])
                 return False
         except Exception as e:
-            print(f"[Email] Error sending manager onboarding summary to {to_email}: {e}")
+            logger.exception("Error sending manager onboarding summary to %s", to_email)
             return False
 
 
@@ -1592,7 +1598,7 @@ Open onboarding dashboard: {portal_url}
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1701,14 +1707,14 @@ Thank you for helping us build a better workplace!
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent eNPS survey invite to {to_email}")
+                    logger.info("Sent eNPS survey invite to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_compliance_change_notification_email(
@@ -1722,7 +1728,7 @@ Thank you for helping us build a better workplace!
     ) -> bool:
         """Send a general compliance change notification to a business admin."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1834,14 +1840,14 @@ Please log in and review the Compliance tab to see what changed:
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent compliance change notification to {to_email}")
+                    logger.info("Sent compliance change notification to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_compliance_action_reminder(
@@ -1856,7 +1862,7 @@ Please log in and review the Compliance tab to see what changed:
     ) -> bool:
         """Send a compliance action reminder to the assigned owner."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping compliance action reminder")
+            logger.warning("MailerSend not configured, skipping compliance action reminder")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1944,7 +1950,7 @@ Sent by Matcha on behalf of {company_name}"""
     ) -> bool:
         """Send incident lifecycle notifications to a company admin/client."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -2076,14 +2082,14 @@ Open incident:
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent IR notification to {to_email}")
+                    logger.info("Sent IR notification to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_leave_request_notification_email(
@@ -2102,7 +2108,7 @@ Open incident:
     ) -> bool:
         """Send lifecycle notifications for leave requests and deadlines."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -2236,14 +2242,14 @@ Date Range: {date_range}
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent leave notification to {to_email}")
+                    logger.info("Sent leave notification to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_accommodation_notification_email(
@@ -2258,7 +2264,7 @@ Date Range: {date_range}
     ) -> bool:
         """Send lifecycle notifications for accommodation cases."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -2376,14 +2382,14 @@ Employee: {employee_line}
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent accommodation notification to {to_email}")
+                    logger.info("Sent accommodation notification to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
 
@@ -2398,7 +2404,7 @@ Employee: {employee_line}
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         html_content = f"""
@@ -2499,14 +2505,14 @@ In the meantime, you can log in to see your pending status. If you have any ques
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent business registration pending email to {to_email}")
+                    logger.info("Sent business registration pending email to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_business_approved_email(
@@ -2520,7 +2526,7 @@ In the meantime, you can log in to see your pending status. If you have any ques
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -2631,14 +2637,14 @@ Welcome to Matcha! We're excited to have you on board.
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent business approved email to {to_email}")
+                    logger.info("Sent business approved email to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_candidate_reach_out_email(
@@ -2656,7 +2662,7 @@ Welcome to Matcha! We're excited to have you on board.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         # Wrap the plain-text body in a simple HTML email
@@ -2719,14 +2725,14 @@ Welcome to Matcha! We're excited to have you on board.
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent reach-out email to {to_email}")
+                    logger.info("Sent reach-out email to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
     async def send_business_rejected_email(
@@ -2741,7 +2747,7 @@ Welcome to Matcha! We're excited to have you on board.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         html_content = f"""
@@ -2836,14 +2842,14 @@ If you believe this was a mistake or have additional information to provide, ple
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent business rejected email to {to_email}")
+                    logger.info("Sent business rejected email to %s", to_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {to_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {to_email}: {e}")
+            logger.exception("Error sending to %s", to_email)
             return False
 
 
@@ -2862,7 +2868,7 @@ If you believe this was a mistake or have additional information to provide, ple
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         html_content = f"""
@@ -2951,14 +2957,14 @@ Thank you for going through our process — we were impressed by your background
                 )
 
                 if response.status_code in (200, 201, 202):
-                    print(f"[Email] Sent admin interview invitation to {candidate_email}")
+                    logger.info("Sent admin interview invitation to %s", candidate_email)
                     return True
                 else:
-                    print(f"[Email] Failed to send to {candidate_email}: {response.status_code} - {response.text}")
+                    logger.warning("Failed to send to %s: %s - %s", candidate_email, response.status_code, response.text[:200])
                     return False
 
         except Exception as e:
-            print(f"[Email] Error sending to {candidate_email}: {e}")
+            logger.exception("Error sending to %s", candidate_email)
             return False
 
 
@@ -2978,7 +2984,7 @@ Thank you for going through our process — we were impressed by your background
         temporary password, and Slack invite info.
         """
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping provisioning welcome email")
+            logger.warning("MailerSend not configured, skipping provisioning welcome email")
             return False
 
         # Build credential sections
@@ -3099,7 +3105,7 @@ If you have any questions about getting started, reach out to your manager or HR
     ) -> bool:
         """Send a handbook freshness alert to a business admin."""
         if not self.is_configured():
-            print("[Email] MailerSend not configured, skipping email send")
+            logger.warning("MailerSend not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url

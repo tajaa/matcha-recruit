@@ -351,18 +351,23 @@ async def send_single_invitation(
     employee_id: UUID,
     org_id: UUID,
     invited_by: UUID,
-    conn=None
+    conn=None,
+    raise_on_email_failure: bool = True,
 ) -> dict:
     """
     Shared function to send invitation to a single employee.
     Used by both individual invite endpoint and bulk invite endpoint.
 
+    Args:
+        raise_on_email_failure: If False, keep invitation pending when email
+            fails instead of cancelling it (used by bulk flows so admins can resend).
+
     Returns: {"invitation_id": UUID, "token": str, "expires_at": datetime}
     """
     if conn is None:
         async with get_connection() as own_conn:
-            return await _send_invitation_with_conn(employee_id, org_id, invited_by, own_conn)
-    return await _send_invitation_with_conn(employee_id, org_id, invited_by, conn)
+            return await _send_invitation_with_conn(employee_id, org_id, invited_by, own_conn, raise_on_email_failure=raise_on_email_failure)
+    return await _send_invitation_with_conn(employee_id, org_id, invited_by, conn, raise_on_email_failure=raise_on_email_failure)
 
 
 async def _send_invitation_with_conn(
@@ -370,6 +375,7 @@ async def _send_invitation_with_conn(
     org_id: UUID,
     invited_by: UUID,
     conn,
+    raise_on_email_failure: bool = True,
 ) -> dict:
     async with conn.transaction():
         # Lock the employee row to serialize concurrent invite/resend calls so
@@ -430,17 +436,28 @@ async def _send_invitation_with_conn(
         expires_at=expires_at,
     )
     if not sent:
-        logger.warning(
-            "Employee invitation email failed for employee %s in company %s; cancelling invitation %s",
-            employee_id,
-            org_id,
-            invitation["id"],
-        )
-        await conn.execute(
-            "UPDATE employee_invitations SET status = 'cancelled' WHERE id = $1",
-            invitation["id"],
-        )
-        raise HTTPException(status_code=503, detail=INVITATION_SEND_FAILED_DETAIL)
+        if raise_on_email_failure:
+            logger.warning(
+                "Employee invitation email failed for employee %s in company %s; cancelling invitation %s",
+                employee_id,
+                org_id,
+                invitation["id"],
+            )
+            await conn.execute(
+                "UPDATE employee_invitations SET status = 'cancelled' WHERE id = $1",
+                invitation["id"],
+            )
+            raise HTTPException(status_code=503, detail=INVITATION_SEND_FAILED_DETAIL)
+        else:
+            # Bulk mode: keep invitation pending so admin can resend later,
+            # but raise so the caller records an error row for this employee.
+            logger.warning(
+                "Employee invitation email failed for employee %s in company %s; invitation %s kept pending for retry",
+                employee_id,
+                org_id,
+                invitation["id"],
+            )
+            raise RuntimeError(INVITATION_SEND_FAILED_DETAIL)
 
     return {
         "invitation_id": invitation["id"],
@@ -1773,8 +1790,10 @@ async def bulk_upload_employees_csv(
                             employee['id'],
                             company_id,
                             current_user.id,
-                            conn
+                            conn,
+                            raise_on_email_failure=False,
                         )
+                        await asyncio.sleep(0.15)  # rate-limit guard for MailerSend
                     except Exception as e:
                         # Log error but don't fail the employee creation
                         errors.append({
@@ -1836,7 +1855,7 @@ async def send_bulk_invitations(
             # Process batch
             for employee_id in batch:
                 try:
-                    await send_single_invitation(employee_id, company_id, current_user.id, conn)
+                    await send_single_invitation(employee_id, company_id, current_user.id, conn, raise_on_email_failure=False)
                     sent += 1
                 except Exception as e:
                     failed += 1
@@ -1903,7 +1922,7 @@ async def invite_all_uninvited(
 
             for employee_id in batch:
                 try:
-                    await send_single_invitation(employee_id, company_id, current_user.id, conn)
+                    await send_single_invitation(employee_id, company_id, current_user.id, conn, raise_on_email_failure=False)
                     sent += 1
                 except Exception as e:
                     failed += 1
