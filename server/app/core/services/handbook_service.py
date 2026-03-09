@@ -1405,7 +1405,11 @@ async def _fetch_state_requirements(
             if not _city_matches_scope(row.get("jurisdiction_name") or "", selected_city_tokens):
                 continue
         if len(by_state.setdefault(state, [])) >= 36:
-            continue
+            # Still collect rows whose category matches a mandatory topic so
+            # the hospitality-industry validator can see all 8 required topics.
+            cat = (row.get("category") or "").strip().lower()
+            if cat not in MANDATORY_STATE_TOPIC_RULES:
+                continue
 
         dedupe_key = (
             row.get("category"),

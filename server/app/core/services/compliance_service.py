@@ -1146,6 +1146,7 @@ async def _fill_from_state_fallback(
             if note not in desc:
                 r["description"] = desc + note
 
+        _normalize_requirement_categories(state_researched)
         # Cache to state jurisdiction additively (don't delete existing state rows)
         state_jid = await _get_state_jurisdiction_id(conn, jurisdiction_id)
         if state_jid:
