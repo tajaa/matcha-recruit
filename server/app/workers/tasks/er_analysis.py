@@ -22,6 +22,13 @@ from ..utils import get_db_connection
 logger = logging.getLogger(__name__)
 
 
+def _ensure_dict(value) -> dict:
+    """Ensure a JSONB value is a dict (asyncpg sometimes returns JSON strings)."""
+    if isinstance(value, str):
+        return json.loads(value)
+    return value if isinstance(value, dict) else {}
+
+
 def _safe_publish_progress(**kwargs) -> None:
     """Publish progress, ignoring errors when Redis is unavailable."""
     try:
@@ -763,21 +770,21 @@ async def _generate_summary_report(case_id: str, generated_by: str) -> dict[str,
             case_id,
         )
         if timeline_row:
-            timeline = timeline_row["analysis_data"]
+            timeline = _ensure_dict(timeline_row["analysis_data"])
 
         disc_row = await conn.fetchrow(
             "SELECT analysis_data FROM er_case_analysis WHERE case_id = $1 AND analysis_type = 'discrepancies'",
             case_id,
         )
         if disc_row:
-            discrepancies = disc_row["analysis_data"]
+            discrepancies = _ensure_dict(disc_row["analysis_data"])
 
         policy_row = await conn.fetchrow(
             "SELECT analysis_data FROM er_case_analysis WHERE case_id = $1 AND analysis_type = 'policy_check'",
             case_id,
         )
         if policy_row:
-            policy_analysis = policy_row["analysis_data"]
+            policy_analysis = _ensure_dict(policy_row["analysis_data"])
 
         # Generate report (using sync version in async context via run_in_executor)
         import asyncio
@@ -869,7 +876,7 @@ async def _generate_determination_letter(
         )
         findings = ""
         if summary_row and summary_row["analysis_data"]:
-            findings = summary_row["analysis_data"].get("content", "")[:2000]  # Limit length
+            findings = _ensure_dict(summary_row["analysis_data"]).get("content", "")[:2000]  # Limit length
 
         # Generate letter
         import asyncio
