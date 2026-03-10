@@ -206,7 +206,7 @@ export function ParticleSphere({
     sphereGroup.add(particles);
 
     // Add wireframe sphere for structure hint
-    const wireGeometry = new THREE.SphereGeometry(1.17, 64, 64);
+    const wireGeometry = new THREE.SphereGeometry(1.3, 64, 64);
     const wireMaterial = new THREE.MeshBasicMaterial({
       color: 0x3f3f46, // zinc-700
       wireframe: true,
@@ -217,7 +217,7 @@ export function ParticleSphere({
     sphereGroup.add(wireSphere);
 
     // Add a second, smaller internal wireframe to "fill up" the internal space
-    const innerWireGeometry = new THREE.SphereGeometry(0.85, 32, 32);
+    const innerWireGeometry = new THREE.SphereGeometry(1.1, 32, 32);
     const innerWireMaterial = new THREE.MeshBasicMaterial({
       color: 0x52525b, // zinc-600
       wireframe: true,
