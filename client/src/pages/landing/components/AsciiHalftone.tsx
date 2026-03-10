@@ -128,8 +128,8 @@ export const AsciiHalftone = () => {
       ref={parentRef}
       className="absolute inset-0 overflow-hidden z-0 pointer-events-none"
       style={{
-        maskImage: 'linear-gradient(to right, black 45%, transparent 62%)',
-        WebkitMaskImage: 'linear-gradient(to right, black 45%, transparent 62%)',
+        maskImage: 'linear-gradient(to right, black 45%, rgba(0,0,0,0.3) 62%, rgba(0,0,0,0.3) 100%)',
+        WebkitMaskImage: 'linear-gradient(to right, black 45%, rgba(0,0,0,0.3) 62%, rgba(0,0,0,0.3) 100%)',
       }}
     >
       <canvas ref={canvasRef} className="w-full h-full" />
