@@ -149,17 +149,17 @@ export const Hero = ({ onContactClick }: HeroProps) => {
             />
           </m.div>
           
-          <div className="mt-10 rounded-xl backdrop-blur-sm bg-white/[0.01] px-6 py-5 -mx-6 w-fit">
+          <div className="mt-10 rounded-xl backdrop-blur-sm px-6 py-5 -mx-6 w-fit shadow-[0_8px_32px_rgba(0,0,0,0.08)]">
             <m.h1 variants={itemVariants} className="leading-[0.9] tracking-[-0.04em] mix-blend-darken max-w-2xl">
               <span
-                className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] font-bold uppercase text-zinc-900"
+                className="block text-[1.875rem] md:text-[3rem] lg:text-[3.75rem] font-bold uppercase text-zinc-900"
                 style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
               >
                 Workforce
               </span>
               <GlitchText
                 text="Intelligence."
-                className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-amber-600"
+                className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] italic font-light text-zinc-700"
                 style={{
                   fontFamily: fonts.serif,
                 }}
