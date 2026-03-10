@@ -82,8 +82,8 @@ function GlitchText({ text, className, style }: { text: string; className?: stri
       className={className}
       style={{
         ...style,
-        textShadow: isGlitching ? '3px 0 #ff003c, -3px 0 #00fff9' : 'none',
-        color: isGlitching ? '#4ADE80' : undefined,
+        textShadow: isGlitching ? '3px 0 #9ca3af, -3px 0 #d1d5db' : 'none',
+        color: isGlitching ? '#6b7280' : undefined,
         transition: 'color 0.05s, text-shadow 0.05s',
       }}
     >
@@ -121,11 +121,11 @@ export const Hero = () => {
       animate="visible"
       className="hero-trigger relative min-h-[90vh] flex flex-col justify-center px-6 md:px-16 lg:px-32 overflow-hidden"
     >
-      {/* Atmosphere Layer - Minimalist Grayscale */}
+      {/* Atmosphere Layer - Minimalist Light Grayscale */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-[#0A0E0C]" />
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] rounded-full mix-blend-screen" style={{ background: "radial-gradient(circle, rgba(255,255,255,0.02) 0%, transparent 70%)" }} />
-        <div className="absolute top-0 left-0 w-full h-full opacity-[0.03] pointer-events-none bg-[url('/textures/asfalt-light.png')]" />
+        <div className="absolute inset-0 bg-[#f4f4f5]" />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] rounded-full mix-blend-multiply" style={{ background: "radial-gradient(circle, rgba(0,0,0,0.03) 0%, transparent 70%)" }} />
+        <div className="absolute top-0 left-0 w-full h-full opacity-[0.06] pointer-events-none bg-[url('/textures/asfalt-light.png')]" />
       </div>
 
       <AsciiHalftone />
@@ -134,7 +134,7 @@ export const Hero = () => {
         <div className="flex flex-col items-start relative z-10 py-20">
           <m.div variants={itemVariants} className="flex items-center gap-4">
             <TelemetryBadge text="System Core // Offline Mode" active={false} />
-            <div className="h-px w-8 bg-white/5" />
+            <div className="h-px w-8 bg-black/10" />
             <TechnicalSpecs 
               title="Architecture"
               specs={[
@@ -146,23 +146,26 @@ export const Hero = () => {
             />
           </m.div>
           
-          <m.h1 variants={itemVariants} className="mt-10 leading-[0.9] tracking-[-0.04em] mix-blend-lighten max-w-2xl">
+          <m.h1 variants={itemVariants} className="mt-10 leading-[0.9] tracking-[-0.04em] mix-blend-darken max-w-2xl">
             <span
-              className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] font-bold uppercase text-white"
+              className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] font-bold uppercase text-zinc-900"
               style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
             >
               Workforce
             </span>
             <GlitchText
               text="Intelligence."
-              className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-amber-700"
-              style={{ fontFamily: fonts.serif }}
+              className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-amber-600"
+              style={{ 
+                fontFamily: fonts.serif,
+                WebkitTextStroke: '1px white'
+              }}
             />
           </m.h1>
 
           <m.div variants={itemVariants} className="space-y-10 mt-10">
             <p
-              className="text-zinc-300 text-xl md:text-2xl lg:text-3xl font-light leading-relaxed max-w-lg"
+              className="text-zinc-800 text-xl md:text-2xl lg:text-3xl font-semibold leading-relaxed max-w-lg"
               style={{ fontFamily: fonts.sans }}
             >
               Increase your signal to noise ratio.
@@ -171,11 +174,11 @@ export const Hero = () => {
             <div className="flex flex-wrap gap-6 pt-2">
               <Link
                 to="/register"
-                className="group relative px-10 py-4 bg-white text-black text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden"
+                className="group relative px-10 py-4 bg-zinc-900 text-white text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden border border-zinc-900"
               >
-                <span className="relative z-10">Initialize Account</span>
+                <span className="relative z-10 group-hover:text-black transition-colors duration-500">Initialize Account</span>
                 <m.div 
-                  className="absolute inset-0 bg-zinc-200 translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
+                  className="absolute inset-0 bg-white translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
                 />
               </Link>
             </div>
@@ -190,14 +193,14 @@ export const Hero = () => {
         >
           <Suspense
             fallback={
-              <div className="text-white/20 font-mono text-[8px] uppercase tracking-[0.4em] animate-pulse">
+              <div className="text-black/30 font-mono text-[8px] uppercase tracking-[0.4em] animate-pulse">
                 Booting Neural Sphere...
               </div>
             }
           >
-            <div className="absolute inset-0 rounded-full mix-blend-screen pointer-events-none transition-colors duration-1000" style={{ background: "radial-gradient(circle, rgba(255,255,255,0.03) 0%, transparent 70%)" }} />
+            <div className="absolute inset-0 rounded-full mix-blend-multiply pointer-events-none transition-colors duration-1000" style={{ background: "radial-gradient(circle, rgba(0,0,0,0.04) 0%, transparent 70%)" }} />
             <ParticleSphere
-              className="w-full h-full scale-100 lg:scale-110 opacity-80"
+              className="w-full h-full scale-90 lg:scale-100 opacity-80"
               showCityMarkers
             />
           </Suspense>

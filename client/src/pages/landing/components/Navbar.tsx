@@ -14,7 +14,7 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
       <div
         className={`w-full pointer-events-auto flex items-center justify-between px-6 py-3 transition-all duration-500 border-b ${
           scrolled
-            ? "bg-[#0A0E0C]/90 backdrop-blur-xl border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.5)]"
+            ? "bg-white/90 backdrop-blur-xl border-black/10 shadow-[0_4px_30px_rgba(0,0,0,0.05)]"
             : "bg-transparent border-transparent"
         }`}
       >
@@ -22,49 +22,49 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
           <Link to="/" className="flex items-center gap-4 group">
             {/* Minimalist Geometric Logo */}
             <div className="relative w-8 h-8 flex items-center justify-center">
-               <div className="absolute inset-0 border border-white/30 rotate-45 group-hover:rotate-90 group-hover:border-white transition-all duration-500" />
-               <div className="w-1.5 h-1.5 bg-white" />
+               <div className="absolute inset-0 border border-black/30 rotate-45 group-hover:rotate-90 group-hover:border-black transition-all duration-500" />
+               <div className="w-1.5 h-1.5 bg-black" />
             </div>
-            <span className="font-mono text-xl font-bold tracking-[0.3em] uppercase text-white">
+            <span 
+              className="font-mono text-3xl font-bold tracking-[0.3em] uppercase text-emerald-400"
+              style={{ WebkitTextStroke: '1px black' }}
+            >
               Matcha
             </span>
           </Link>
           
-          <div className="hidden lg:flex items-center gap-4 pl-8 border-l border-white/10 h-6">
-            <div className="w-2 h-2 bg-white/80 animate-pulse" />
+          <div className="hidden lg:flex items-center gap-4 pl-8 border-l border-black/10 h-6">
+            <div className="w-2 h-2 bg-black/80 animate-pulse" />
             <span className="text-sm font-mono uppercase tracking-[0.3em] text-zinc-500">
-              Active Module // <span className="text-white">{activeSection}</span>
+              Active Module // <span className="text-black">{activeSection}</span>
             </span>
           </div>
         </div>
         
         <div className="hidden md:flex items-center gap-10">
-          <div className="flex gap-10 text-base font-mono uppercase tracking-[0.2em] text-zinc-500">
+          <div className="flex gap-10 text-base font-mono uppercase tracking-[0.2em] text-zinc-800">
             <button
               onClick={() => scrollTo(manifestoRef)}
-              className="hover:text-white transition-colors uppercase tracking-[0.2em]"
+              className="hover:text-black transition-colors uppercase tracking-[0.2em]"
             >
               System
             </button>
             <button
               onClick={onPricingClick}
-              className="hover:text-white transition-colors uppercase tracking-[0.2em]"
+              className="hover:text-black transition-colors uppercase tracking-[0.2em]"
             >
               Pricing
             </button>
           </div>
           
-          <div className="w-px h-6 bg-white/10" />
+          <div className="w-px h-6 bg-black/10" />
           
           <Link
             to="/login"
-            className="group relative px-8 py-3 bg-white/5 border border-white/10 text-base font-mono uppercase tracking-[0.2em] text-white hover:border-white/30 transition-all duration-300 overflow-hidden"
+            className="group relative px-8 py-3 bg-black/5 border border-black/10 text-base font-mono uppercase tracking-[0.2em] text-black hover:border-black/30 transition-all duration-300 overflow-hidden"
           >
-            <span className="relative z-10 font-bold">Login</span>
-            <div className="absolute inset-0 bg-white translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
-            <span className="absolute inset-0 flex items-center justify-center text-black font-bold translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out z-20">
-              Login
-            </span>
+            <span className="relative z-10 font-bold group-hover:text-white transition-colors duration-300">Login</span>
+            <div className="absolute inset-0 bg-black translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out" />
           </Link>
         </div>
       </div>
