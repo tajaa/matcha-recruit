@@ -1,5 +1,4 @@
 import { lazy, Suspense, useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
 import { m, type Variants } from "framer-motion";
 import { TelemetryBadge } from "../components/TelemetryBadge";
 import { TechnicalSpecs } from "../components/TechnicalSpecs";

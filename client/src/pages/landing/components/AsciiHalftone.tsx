@@ -102,7 +102,7 @@ export const AsciiHalftone = () => {
         }
       }
 
-      time += 0.15;
+      time += 0.10;
       animId = requestAnimationFrame(draw);
     }
 
