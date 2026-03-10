@@ -26,7 +26,7 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
                <div className="w-1.5 h-1.5 bg-black" />
             </div>
             <span 
-              className="font-mono text-2xl font-bold tracking-[0.3em] uppercase text-emerald-100"
+              className="font-mono text-2xl font-bold tracking-[0.3em] uppercase text-zinc-300"
               style={{ WebkitTextStroke: '2px black' }}
             >
               Matcha
