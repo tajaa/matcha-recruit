@@ -70,6 +70,9 @@ class Settings:
     celery_broker_url: Optional[str] = None  # Falls back to redis_url
     celery_result_backend: Optional[str] = None  # Falls back to redis_url
 
+    # Compliance
+    compliance_emails_enabled: bool = True
+
     # Gemini API Rate Limits
     gemini_hourly_limit: int = 50
     gemini_daily_limit: int = 50
@@ -161,6 +164,7 @@ def load_settings() -> Settings:
         redis_url=os.getenv("REDIS_URL", "redis://localhost:6379/0"),
         celery_broker_url=os.getenv("CELERY_BROKER_URL"),
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),
+        compliance_emails_enabled=os.getenv("COMPLIANCE_EMAILS_ENABLED", "true").lower() in ("true", "1", "yes"),
         gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "50")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "50")),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),

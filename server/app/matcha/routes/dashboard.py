@@ -307,12 +307,15 @@ _CLIENT_NOTIFICATION_SUBQUERIES: list[str] = [
             NULL AS severity, status, created_at
        FROM handbooks
        WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'""",
-    # Compliance alerts
+    # Compliance alerts — only material changes with sufficient confidence
     """SELECT id::text, 'compliance_alert' AS type,
             title, message AS subtitle,
             severity, status, created_at
        FROM compliance_alerts
-       WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'""",
+       WHERE company_id = $1
+         AND created_at > NOW() - INTERVAL '30 days'
+         AND alert_type = 'change'
+         AND COALESCE(confidence_score, 1.0) >= 0.6""",
 ]
 
 

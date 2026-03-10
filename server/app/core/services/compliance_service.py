@@ -2270,81 +2270,84 @@ async def _create_alert(
     )
 
     # Best-effort email notification for every newly created alert.
-    try:
-        from .email import get_email_service
+    # Gated by COMPLIANCE_EMAILS_ENABLED env var (defaults to true).
+    from ...config import get_settings as _get_settings
+    if _get_settings().compliance_emails_enabled:
+        try:
+            from .email import get_email_service
 
-        email_service = get_email_service()
-        if email_service.is_configured():
-            company_name = (
-                await conn.fetchval(
-                    "SELECT name FROM companies WHERE id = $1",
+            email_service = get_email_service()
+            if email_service.is_configured():
+                company_name = (
+                    await conn.fetchval(
+                        "SELECT name FROM companies WHERE id = $1",
+                        company_id,
+                    )
+                    or "Your company"
+                )
+
+                location_row = await conn.fetchrow(
+                    "SELECT name, city, state FROM business_locations WHERE id = $1",
+                    location_id,
+                )
+                if location_row:
+                    location_name = (
+                        location_row["name"]
+                        or f"{location_row['city']}, {location_row['state']}"
+                    )
+                else:
+                    location_name = "your location"
+
+                contact_rows = await conn.fetch(
+                    """
+                    SELECT DISTINCT
+                        u.email,
+                        COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
+                    FROM clients c
+                    JOIN users u ON u.id = c.user_id
+                    WHERE c.company_id = $1
+                      AND u.is_active = true
+                      AND u.email IS NOT NULL
+                    ORDER BY u.email
+                    """,
                     company_id,
                 )
-                or "Your company"
-            )
 
-            location_row = await conn.fetchrow(
-                "SELECT name, city, state FROM business_locations WHERE id = $1",
-                location_id,
-            )
-            if location_row:
-                location_name = (
-                    location_row["name"]
-                    or f"{location_row['city']}, {location_row['state']}"
-                )
-            else:
-                location_name = "your location"
-
-            contact_rows = await conn.fetch(
-                """
-                SELECT DISTINCT
-                    u.email,
-                    COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
-                FROM clients c
-                JOIN users u ON u.id = c.user_id
-                WHERE c.company_id = $1
-                  AND u.is_active = true
-                  AND u.email IS NOT NULL
-                ORDER BY u.email
-                """,
-                company_id,
-            )
-
-            contacts = [
-                {"email": row["email"], "name": row["name"] or row["email"]}
-                for row in contact_rows
-            ]
-            if contacts:
-                jurisdictions: list[str] = []
-                if metadata and isinstance(metadata, dict):
-                    if metadata.get("jurisdiction_name"):
-                        jurisdictions.append(str(metadata["jurisdiction_name"]))
-                    elif metadata.get("jurisdiction_id"):
-                        jurisdiction_row = await conn.fetchrow(
-                            "SELECT city, state FROM jurisdictions WHERE id = $1",
-                            metadata["jurisdiction_id"],
-                        )
-                        if jurisdiction_row:
-                            jurisdictions.append(
-                                f"{jurisdiction_row['city']}, {jurisdiction_row['state']}"
-                            )
-
-                send_tasks = [
-                    email_service.send_compliance_change_notification_email(
-                        to_email=contact["email"],
-                        to_name=contact.get("name"),
-                        company_name=company_name,
-                        location_name=location_name,
-                        changed_requirements_count=1,
-                        jurisdictions=jurisdictions or None,
-                    )
-                    for contact in contacts
+                contacts = [
+                    {"email": row["email"], "name": row["name"] or row["email"]}
+                    for row in contact_rows
                 ]
-                await asyncio.gather(*send_tasks, return_exceptions=True)
-    except Exception as email_error:
-        print(
-            f"[Compliance] Failed to send alert notification email for alert {alert_id}: {email_error}"
-        )
+                if contacts:
+                    jurisdictions: list[str] = []
+                    if metadata and isinstance(metadata, dict):
+                        if metadata.get("jurisdiction_name"):
+                            jurisdictions.append(str(metadata["jurisdiction_name"]))
+                        elif metadata.get("jurisdiction_id"):
+                            jurisdiction_row = await conn.fetchrow(
+                                "SELECT city, state FROM jurisdictions WHERE id = $1",
+                                metadata["jurisdiction_id"],
+                            )
+                            if jurisdiction_row:
+                                jurisdictions.append(
+                                    f"{jurisdiction_row['city']}, {jurisdiction_row['state']}"
+                                )
+
+                    send_tasks = [
+                        email_service.send_compliance_change_notification_email(
+                            to_email=contact["email"],
+                            to_name=contact.get("name"),
+                            company_name=company_name,
+                            location_name=location_name,
+                            changed_requirements_count=1,
+                            jurisdictions=jurisdictions or None,
+                        )
+                        for contact in contacts
+                    ]
+                    await asyncio.gather(*send_tasks, return_exceptions=True)
+        except Exception as email_error:
+            print(
+                f"[Compliance] Failed to send alert notification email for alert {alert_id}: {email_error}"
+            )
 
     return alert_id
 
@@ -2355,6 +2358,10 @@ def _record_change_notification_item(
     change_info: dict,
 ):
     """Capture lightweight change details for post-check admin email notifications."""
+    print(
+        f"[Compliance] MATERIAL CHANGE: {req.get('title')} | "
+        f"{change_info.get('old_value')} → {change_info.get('new_value')}"
+    )
     change_items.append(
         {
             "title": req.get("title") or "",
@@ -4093,14 +4100,16 @@ async def run_compliance_check_stream(
             )
             raise
 
-    try:
-        await _notify_company_admins_of_compliance_changes(
-            company_id=company_id,
-            location=location,
-            change_items=change_email_items,
-        )
-    except Exception as e:
-        print(f"[Compliance] Error notifying admins about compliance changes: {e}")
+    from ...config import get_settings as _get_settings
+    if _get_settings().compliance_emails_enabled:
+        try:
+            await _notify_company_admins_of_compliance_changes(
+                company_id=company_id,
+                location=location,
+                change_items=change_email_items,
+            )
+        except Exception as e:
+            print(f"[Compliance] Error notifying admins about compliance changes: {e}")
 
     yield {
         "type": "completed",
@@ -6228,14 +6237,16 @@ async def run_compliance_check_background(
             )
             raise
 
-    try:
-        await _notify_company_admins_of_compliance_changes(
-            company_id=company_id,
-            location=location,
-            change_items=change_email_items,
-        )
-    except Exception as e:
-        print(f"[Compliance] Error notifying admins about compliance changes: {e}")
+    from ...config import get_settings as _get_settings
+    if _get_settings().compliance_emails_enabled:
+        try:
+            await _notify_company_admins_of_compliance_changes(
+                company_id=company_id,
+                location=location,
+                change_items=change_email_items,
+            )
+        except Exception as e:
+            print(f"[Compliance] Error notifying admins about compliance changes: {e}")
 
     return {"new": new_count, "updated": updated_count, "alerts": alert_count}
 
