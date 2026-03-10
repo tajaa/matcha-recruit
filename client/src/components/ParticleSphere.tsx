@@ -20,7 +20,17 @@ const DEFAULT_CITY_MARKERS: CityMarker[] = [
   { label: 'Austin', lat: 30.2672, lon: -97.7431 },
   { label: 'Miami', lat: 25.7617, lon: -80.1918 },
   { label: 'Chicago', lat: 41.8781, lon: -87.6298 },
-  { label: 'San Diego', lat: 32.7157, lon: -117.1611 }
+  { label: 'San Diego', lat: 32.7157, lon: -117.1611 },
+  // International cities to fill the globe
+  { label: 'London', lat: 51.5074, lon: -0.1278 },
+  { label: 'Paris', lat: 48.8566, lon: 2.3522 },
+  { label: 'Tokyo', lat: 35.6762, lon: 139.6503 },
+  { label: 'Singapore', lat: 35.6892, lon: 139.6917 },
+  { label: 'Sydney', lat: 1.3521, lon: 103.8198 },
+  { label: 'Dubai', lat: 1.2903, lon: 103.8520 },
+  { label: 'Berlin', lat: 48.8566, lon: 2.3522 },
+  { label: 'Seoul', lat: 37.5665, lon: 126.9780 },
+  { label: 'Toronto', lat: -33.8688, lon: 151.2093 }
 ];
 
 const latLonToVector3 = (lat: number, lon: number, radius: number) => {
@@ -49,8 +59,8 @@ const createCityLabel = (text: string) => {
   ctx.font = '400 32px "Space Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.95)'; // Solid black
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.1)';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'; // Solid white
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.4)'; // Slightly darker shadow for contrast
   ctx.shadowBlur = 8;
   ctx.fillText(spacedText, canvas.width / 2, canvas.height / 2);
 
@@ -112,7 +122,7 @@ export function ParticleSphere({
     });
     renderer.setSize(width, height);
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.setClearColor(0x000000, 0);
+    renderer.setClearColor(0x000000, 0); // Transparent background
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -199,7 +209,7 @@ export function ParticleSphere({
       `,
       transparent: true,
       depthWrite: false,
-      blending: THREE.AdditiveBlending
+      blending: THREE.NormalBlending // Changed from AdditiveBlending to NormalBlending to fix the dark bounding box
     });
 
     const particles = new THREE.Points(geometry, material);
