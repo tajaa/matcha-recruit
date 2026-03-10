@@ -965,7 +965,7 @@ function MessageBubble({ msg }: { msg: MWMessage }) {
 // Simple thread cache — avoids re-fetching when switching between threads
 type ThreadCacheEntry = {
   thread: MWThreadDetail;
-  versions: MWDocumentVersion[];
+  versions?: MWDocumentVersion[];
   pdfUrl: string | null;
   ts: number;
 };
@@ -1015,6 +1015,14 @@ function setThreadCacheEntry(scope: string | null, threadId: string, entry: Thre
   }
 }
 
+function mergeThreadCacheEntry(scope: string | null, threadId: string, patch: Partial<ThreadCacheEntry>): void {
+  const cache = getThreadCache(scope);
+  if (!cache) return;
+  const existing = cache.get(threadId);
+  if (!existing) return;
+  cache.set(threadId, { ...existing, ...patch, ts: Date.now() });
+}
+
 function invalidateThreadCacheEntry(scope: string | null, threadId: string): void {
   getThreadCache(scope)?.delete(threadId);
 }
@@ -1041,6 +1049,8 @@ export default function MatchaWorkThread() {
   const [thread, setThread] = useState<MWThreadDetail | null>(null);
   const [messages, setMessages] = useState<MWMessage[]>([]);
   const [versions, setVersions] = useState<MWDocumentVersion[]>([]);
+  const [versionsLoaded, setVersionsLoaded] = useState(false);
+  const [loadingVersions, setLoadingVersions] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfBlobUrl, setPdfBlobUrl] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('chat');
@@ -1082,11 +1092,37 @@ export default function MatchaWorkThread() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, []);
 
+  const loadVersions = useCallback(async (force = false) => {
+    if (!threadId || loadingVersions) return;
+
+    const cached = getThreadCache(cacheScope)?.get(threadId);
+    if (!force && cached?.versions) {
+      setVersions(cached.versions);
+      setVersionsLoaded(true);
+      return;
+    }
+
+    try {
+      setLoadingVersions(true);
+      const verData = await matchaWork.getVersions(threadId);
+      setVersions(verData);
+      setVersionsLoaded(true);
+      mergeThreadCacheEntry(cacheScope, threadId, { versions: verData });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load versions');
+    } finally {
+      setLoadingVersions(false);
+    }
+  }, [cacheScope, loadingVersions, threadId]);
+
   const loadThread = useCallback(async () => {
     if (!threadId) return;
     try {
       setTokenUsage(null);
       setError(null);
+      setVersions([]);
+      setVersionsLoaded(false);
+      setPdfUrl(null);
       const scopedThreadCache = getThreadCache(cacheScope);
 
       // Serve from cache instantly if available
@@ -1094,7 +1130,8 @@ export default function MatchaWorkThread() {
       if (cached && Date.now() - cached.ts < THREAD_CACHE_TTL) {
         setThread(cached.thread);
         setMessages(cached.thread.messages);
-        setVersions(cached.versions);
+        setVersions(cached.versions || []);
+        setVersionsLoaded(Boolean(cached.versions));
         setPdfUrl(cached.pdfUrl);
         setLoading(false);
         // Open preview panel if cached thread has content
@@ -1124,25 +1161,24 @@ export default function MatchaWorkThread() {
         });
       }
 
-      // Fetch thread + versions (these are per-thread, always refresh)
-      const [threadData, verData] = await Promise.all([
-        matchaWork.getThread(threadId),
-        matchaWork.getVersions(threadId),
-      ]);
-      let pdfUrlResult: string | null = null;
-      if (threadData.task_type === 'offer_letter' && threadData.version > 0) {
-        const pdfData = await matchaWork.getPdf(threadId);
-        pdfUrlResult = pdfData.pdf_url;
-      }
+      // Fetch thread first so the main UI can render before optional secondary data.
+      const threadData = await matchaWork.getThread(threadId);
+      const canReuseCachedVersions = Boolean(cached?.versions && cached.thread.version === threadData.version);
+      const canReuseCachedPdf = Boolean(cached?.pdfUrl && cached.thread.version === threadData.version);
+      const pdfUrlResult: string | null = canReuseCachedPdf ? cached?.pdfUrl || null : null;
 
       setThread(threadData);
       setMessages(threadData.messages);
-      setVersions(verData);
+      setVersions(canReuseCachedVersions ? cached?.versions || [] : []);
+      setVersionsLoaded(canReuseCachedVersions);
       setPdfUrl(pdfUrlResult);
 
       // Auto-open preview panel if thread already has content
       const st = threadData.current_state || {};
-      const threadHasContent = hasAnyPreviewState(st, pdfUrlResult);
+      const threadHasContent = hasAnyPreviewState(
+        st,
+        pdfUrlResult || (threadData.task_type === 'offer_letter' && threadData.version > 0 ? '__pending__' : null)
+      );
       if (threadHasContent) {
         setPreviewPanelOpen(true);
       }
@@ -1150,10 +1186,19 @@ export default function MatchaWorkThread() {
       // Update cache
       setThreadCacheEntry(cacheScope, threadId, {
         thread: threadData,
-        versions: verData,
+        versions: canReuseCachedVersions ? cached?.versions : undefined,
         pdfUrl: pdfUrlResult,
         ts: Date.now(),
       });
+
+      if (threadData.task_type === 'offer_letter' && threadData.version > 0 && !canReuseCachedPdf) {
+        void matchaWork.getPdf(threadId)
+          .then((pdfData) => {
+            setPdfUrl(pdfData.pdf_url);
+            mergeThreadCacheEntry(cacheScope, threadId, { pdfUrl: pdfData.pdf_url });
+          })
+          .catch(() => {});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load thread');
     } finally {
@@ -1176,9 +1221,14 @@ export default function MatchaWorkThread() {
     scrollToBottom();
   }, [messages, scrollToBottom]);
 
+  useEffect(() => {
+    if (!showVersions || versionsLoaded || loadingVersions) return;
+    void loadVersions();
+  }, [loadVersions, loadingVersions, showVersions, versionsLoaded]);
+
   // Load PDF as blob URL to avoid cross-origin iframe restrictions
   useEffect(() => {
-    if (!pdfUrl) {
+    if (!pdfUrl || !previewPanelOpen) {
       setPdfBlobUrl(null);
       return;
     }
@@ -1205,7 +1255,7 @@ export default function MatchaWorkThread() {
       revoked = true;
       if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
-  }, [pdfUrl, threadId]);
+  }, [pdfUrl, previewPanelOpen, threadId]);
 
   const handleToggleModel = async () => {
     const next = matchaWorkModelMode === 'light' ? 'heavy' : 'light';
@@ -1349,9 +1399,8 @@ export default function MatchaWorkThread() {
         setError('Failed to send message');
       }
 
-      if (shouldRefreshVersions) {
-        const verData = await matchaWork.getVersions(threadId);
-        setVersions(verData);
+      if (shouldRefreshVersions && versionsLoaded) {
+        void loadVersions(true);
       }
     } catch (err) {
       if (err instanceof ApiRequestError && err.status === 402) {
@@ -1415,8 +1464,11 @@ export default function MatchaWorkThread() {
         setThread((prev) => prev ? { ...prev, current_state: resp.current_state, version: resp.version, ...(resp.task_type ? { task_type: resp.task_type } : {}) } : prev);
       }
       if (resp.pdf_url) setPdfUrl(resp.pdf_url);
-      const verData = await matchaWork.getVersions(threadId);
-      setVersions(verData);
+      if (versionsLoaded) {
+        void loadVersions(true);
+      } else {
+        setVersionsLoaded(false);
+      }
       setShowVersions(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to revert');
@@ -1599,7 +1651,7 @@ export default function MatchaWorkThread() {
       messages.length === 0 &&
       Object.keys(thread.current_state || {}).length === 0
     : false;
-  const hasOfferLetterPreviewContent = Boolean(pdfUrl);
+  const hasOfferLetterPreviewContent = Boolean(pdfUrl || (isOfferLetter && thread?.version && thread.version > 0));
   const hasPresentationPreviewContent = Boolean(
     hasPresentationState(thread?.current_state)
   );
@@ -2065,7 +2117,7 @@ export default function MatchaWorkThread() {
           <div className="flex items-center justify-between px-4 py-2 border-b border-white/10 flex-shrink-0">
             <div className="flex items-center gap-2">
               <button
-                onClick={() => setShowVersions(!showVersions)}
+                onClick={() => setShowVersions((prev) => !prev)}
                 className="flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
               >
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -2109,7 +2161,9 @@ export default function MatchaWorkThread() {
           {/* Version list dropdown */}
           {showVersions && (
             <div className="border-b border-white/10 bg-zinc-950 max-h-48 overflow-y-auto">
-              {versions.length === 0 ? (
+              {loadingVersions ? (
+                <div className="px-4 py-3 text-xs text-zinc-500">Loading versions...</div>
+              ) : versions.length === 0 ? (
                 <div className="px-4 py-3 text-xs text-zinc-500">No versions yet</div>
               ) : (
                 versions.map((ver) => (
@@ -2157,7 +2211,7 @@ export default function MatchaWorkThread() {
                     </svg>
                   </div>
                   <p className="text-sm text-zinc-500 light:text-zinc-500">
-                    Preview will appear here as you add details
+                    {pdfUrl ? 'Loading preview...' : 'Preview will appear here as you add details'}
                   </p>
                 </div>
               )
