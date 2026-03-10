@@ -142,7 +142,7 @@ export function ParticleSphere({
 
     // Create particle sphere geometry
     const isMobile = window.innerWidth < 768;
-    const particleCount = isMobile ? 1000 : 2500;
+    const particleCount = isMobile ? 400 : 800; // Drastically reduced from 1000/2500
     const positions = new Float32Array(particleCount * 3);
     const colors = new Float32Array(particleCount * 3);
     const sizes = new Float32Array(particleCount);
@@ -174,8 +174,8 @@ export function ParticleSphere({
       colors[i * 3 + 1] = particleColor.g;
       colors[i * 3 + 2] = particleColor.b;
 
-      // Vary sizes
-      sizes[i] = 2 + Math.random() * 3;
+      // Vary sizes (make particles smaller to avoid clouding)
+      sizes[i] = 1 + Math.random() * 1.5;
     }
 
     const geometry = new THREE.BufferGeometry();
@@ -204,7 +204,7 @@ export function ParticleSphere({
           vAlpha = pulse;
 
           vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * (200.0 / -mvPosition.z);
+          gl_PointSize = size * (200.0 / -mvPosition.z) * pixelRatio;
           gl_Position = projectionMatrix * mvPosition;
         }
       `,
@@ -213,17 +213,18 @@ export function ParticleSphere({
         varying float vAlpha;
 
         void main() {
-          // Circular particle with soft edge
+          // Sharper circular particle
           float dist = length(gl_PointCoord - vec2(0.5));
           if (dist > 0.5) discard;
 
-          float alpha = smoothstep(0.5, 0.1, dist) * vAlpha;
+          // Less smoothstep bleed to prevent 'cloud' buildup
+          float alpha = smoothstep(0.5, 0.35, dist) * vAlpha * 0.8;
           gl_FragColor = vec4(vColor, alpha);
         }
       `,
       transparent: true,
       depthWrite: false,
-      blending: THREE.NormalBlending // Changed from AdditiveBlending to NormalBlending to fix the dark bounding box
+      blending: THREE.NormalBlending
     });
 
     const particles = new THREE.Points(geometry, material);
@@ -239,29 +240,6 @@ export function ParticleSphere({
     });
     const wireSphere = new THREE.Mesh(wireGeometry, wireMaterial);
     sphereGroup.add(wireSphere);
-
-    // Add a second, smaller internal wireframe to "fill up" the internal space
-    const innerWireGeometry = new THREE.SphereGeometry(1.1, 32, 32);
-    const innerWireMaterial = new THREE.MeshBasicMaterial({
-      color: 0x52525b, // zinc-600
-      wireframe: true,
-      transparent: true,
-      opacity: 0.1
-    });
-    const innerWireSphere = new THREE.Mesh(innerWireGeometry, innerWireMaterial);
-    sphereGroup.add(innerWireSphere);
-
-    // Add glow ring around equator
-    const ringGeometry = new THREE.RingGeometry(1.35, 1.38, 64);
-    const ringMaterial = new THREE.MeshBasicMaterial({
-      color: 0x71717a, // zinc-500
-      transparent: true,
-      opacity: 0.1,
-      side: THREE.DoubleSide
-    });
-    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-    ring.rotation.x = Math.PI / 2;
-    scene.add(ring);
 
     const markersGroup = new THREE.Group();
     sphereGroup.add(markersGroup);
@@ -363,8 +341,6 @@ export function ParticleSphere({
       sphereGroup.rotation.y += 0.001;
       sphereGroup.rotation.x = initialRotationX + Math.sin(time * 0.2) * 0.05;
 
-      ring.rotation.z += 0.0005;
-
       markerInstances.forEach((marker, index) => {
         marker.pulse.scale.setScalar(1 + Math.sin(time * 2.2 + index) * 0.18);
 
@@ -424,8 +400,6 @@ export function ParticleSphere({
       material.dispose();
       wireGeometry.dispose();
       wireMaterial.dispose();
-      ringGeometry.dispose();
-      ringMaterial.dispose();
       markerDotGeometry.dispose();
       markerPulseGeometry.dispose();
       markerInstances.forEach((marker) => {
@@ -459,11 +433,6 @@ export function ParticleSphere({
           <div className="absolute -bottom-6 -left-6 w-3 h-3 border-b border-l border-zinc-500/40" />
           <div className="absolute -bottom-6 -right-6 w-3 h-3 border-b border-r border-zinc-500/40" />
         </div>
-      </div>
-
-      {/* Glow effect behind sphere */}
-      <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-[60%] h-[60%] rounded-full bg-matcha-500/10 blur-[60px]" />
       </div>
     </div>
   );

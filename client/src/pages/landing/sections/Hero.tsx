@@ -204,7 +204,6 @@ export const Hero = ({ onContactClick }: HeroProps) => {
               </div>
             }
           >
-            <div className="absolute inset-0 rounded-full mix-blend-multiply pointer-events-none transition-colors duration-1000" style={{ background: "radial-gradient(circle, rgba(0,0,0,0.04) 0%, transparent 70%)" }} />
             <ParticleSphere
               className="w-full h-full scale-90 lg:scale-100 opacity-80"
               showCityMarkers
