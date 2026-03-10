@@ -43,6 +43,15 @@ VALID_CATEGORIES = {
     "state_licensing",
     "emergency_preparedness",
 }
+# Healthcare categories are researched via a background Celery worker, so they
+# should NOT be included in the default sweep when categories=None.
+_HEALTHCARE_ONLY_CATEGORIES = {
+    "hipaa_privacy", "billing_integrity", "clinical_safety",
+    "healthcare_workforce", "corporate_integrity", "research_consent",
+    "state_licensing", "emergency_preparedness",
+}
+DEFAULT_RESEARCH_CATEGORIES = sorted(VALID_CATEGORIES - _HEALTHCARE_ONLY_CATEGORIES)
+
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
 VALID_RATE_TYPES = {
     "general",
@@ -840,14 +849,13 @@ class GeminiComplianceService:
         if corrections_context:
             context_section += f"\n\n{corrections_context}"
 
-        default_categories = sorted(VALID_CATEGORIES)
         selected_categories: List[str] = []
-        for category in categories or default_categories:
+        for category in categories or DEFAULT_RESEARCH_CATEGORIES:
             normalized = _normalize_category_value(category)
             if normalized and normalized not in selected_categories:
                 selected_categories.append(normalized)
         if not selected_categories:
-            selected_categories = default_categories
+            selected_categories = list(DEFAULT_RESEARCH_CATEGORIES)
 
         search_strategy = build_search_strategy_prompt(state, selected_categories)
         if search_strategy:

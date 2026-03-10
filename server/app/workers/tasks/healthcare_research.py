@@ -77,6 +77,7 @@ async def _run_healthcare_research(jurisdiction_id: str) -> dict:
 
         service = get_gemini_compliance_service()
         total_new = 0
+        failed_categories = []
 
         # Research each category sequentially for maximum accuracy
         for idx, category in enumerate(missing):
@@ -117,10 +118,23 @@ async def _run_healthcare_research(jurisdiction_id: str) -> dict:
                     print(f"[Healthcare Research]   -> No results for {category}")
 
             except Exception as e:
+                failed_categories.append(category)
                 print(f"[Healthcare Research]   -> Error researching {category}: {e}")
 
-        print(f"[Healthcare Research] Complete for {location_name}: {total_new} total requirements")
-        return {"new": total_new, "location": location_name, "categories": missing}
+        print(f"[Healthcare Research] Complete for {location_name}: {total_new} new, {len(failed_categories)} failed")
+
+        if failed_categories and total_new == 0:
+            # Every category failed — raise so Celery retries the whole task
+            raise RuntimeError(
+                f"All healthcare categories failed for {location_name}: {', '.join(failed_categories)}"
+            )
+
+        return {
+            "new": total_new,
+            "location": location_name,
+            "categories": missing,
+            "failed": failed_categories,
+        }
 
     finally:
         await conn.close()

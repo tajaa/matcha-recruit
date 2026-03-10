@@ -4134,6 +4134,27 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                 ),
             }
 
+        # Dispatch healthcare research to background worker
+        try:
+            from ..services.compliance_service import HEALTHCARE_CATEGORIES
+            from app.workers.tasks.healthcare_research import run_healthcare_research
+            # Check if healthcare categories are already present
+            hc_existing = await conn.fetch(
+                "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1 AND category = ANY($2::text[])",
+                canonical_jurisdiction_id,
+                sorted(HEALTHCARE_CATEGORIES),
+            )
+            hc_present = {r["category"] for r in hc_existing}
+            hc_missing = HEALTHCARE_CATEGORIES - hc_present
+            if hc_missing:
+                run_healthcare_research.delay(str(canonical_jurisdiction_id))
+                yield {
+                    "type": "repository_refresh",
+                    "message": f"Healthcare compliance research queued in background ({len(hc_missing)} categories).",
+                }
+        except Exception as exc:
+            logger.warning("Could not queue healthcare research: %s", exc)
+
         yield {
             "type": "completed",
             "location": location_label,
