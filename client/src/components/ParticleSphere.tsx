@@ -122,9 +122,10 @@ export function ParticleSphere({
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     camera.position.z = 2.5;
     const sphereGroup = new THREE.Group();
-    // Pre-rotate to show a good spread of global cities initially (facing roughly the Atlantic/Europe/Americas spread)
-    sphereGroup.rotation.y = THREE.MathUtils.degToRad(30);
-    sphereGroup.rotation.x = THREE.MathUtils.degToRad(15);
+    // Pre-rotate to show a dense cluster of cities immediately (Americas + Europe)
+    const initialRotationX = THREE.MathUtils.degToRad(15);
+    sphereGroup.rotation.y = THREE.MathUtils.degToRad(70);
+    sphereGroup.rotation.x = initialRotationX;
     scene.add(sphereGroup);
 
     // Renderer
@@ -358,9 +359,9 @@ export function ParticleSphere({
       if (!isVisible.current) return;
       time += 0.01;
 
-      // Slow rotation
+      // Slow rotation relative to the initial starting angle
       sphereGroup.rotation.y += 0.001;
-      sphereGroup.rotation.x = Math.sin(time * 0.2) * 0.1;
+      sphereGroup.rotation.x = initialRotationX + Math.sin(time * 0.2) * 0.05;
 
       ring.rotation.z += 0.0005;
 
