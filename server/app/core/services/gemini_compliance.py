@@ -109,14 +109,21 @@ _CATEGORY_ALIASES = {
     "hipaa_security": "hipaa_privacy",
     "hitech": "hipaa_privacy",
     "phi": "hipaa_privacy",
+    "42_cfr_part_2": "hipaa_privacy",
+    "part_2": "hipaa_privacy",
+    "substance_use_records": "hipaa_privacy",
     "false_claims": "billing_integrity",
     "anti_kickback": "billing_integrity",
     "stark_law": "billing_integrity",
     "medicare_billing": "billing_integrity",
+    "mhpaea": "billing_integrity",
+    "mental_health_parity": "billing_integrity",
     "joint_commission": "clinical_safety",
     "cms_conditions": "clinical_safety",
     "infection_control": "clinical_safety",
     "bloodborne_pathogens": "clinical_safety",
+    "medical_waste": "clinical_safety",
+    "epa_medical_waste": "clinical_safety",
     "credentialing": "healthcare_workforce",
     "oig_exclusion": "healthcare_workforce",
     "mandatory_reporter": "healthcare_workforce",
@@ -126,7 +133,12 @@ _CATEGORY_ALIASES = {
     "gcp": "research_consent",
     "facility_licensure": "state_licensing",
     "telehealth": "state_licensing",
+    "abortion": "state_licensing",
+    "dobbs": "state_licensing",
+    "ada_accessibility": "state_licensing",
     "emtala": "emergency_preparedness",
+    "nfpa": "emergency_preparedness",
+    "life_safety_code": "emergency_preparedness",
 }
 
 _JURISDICTION_LEVEL_ALIASES = {
@@ -520,8 +532,11 @@ Set current_value to a SHORT summary (under 80 chars).""",
         "hipaa_privacy": """Research HIPAA PRIVACY AND SECURITY requirements as they apply in this jurisdiction.
 Cover: HIPAA Privacy Rule (45 CFR Part 164 Subpart E), HIPAA Security Rule (45 CFR Part 164 Subpart C),
 HITECH Act breach notification requirements (timing, state AG notification),
+42 CFR Part 2 requirements for substance use disorder records where applicable,
 and any STATE health privacy laws that EXCEED federal HIPAA protections
 (e.g., CA CMIA, TX HB 300, NY SHIELD Act health data provisions).
+Include stricter consent, redisclosure, segregation, and patient-access rules for Part 2 records
+when they go beyond standard HIPAA handling.
 Include state-specific breach notification timelines if shorter than HIPAA's 60-day window.
 Include penalties for non-compliance at both federal and state levels.
 Set current_value to a SHORT summary (under 80 chars).""",
@@ -529,7 +544,9 @@ Set current_value to a SHORT summary (under 80 chars).""",
         "billing_integrity": """Research BILLING AND FINANCIAL INTEGRITY requirements for healthcare entities in this jurisdiction.
 Cover: Federal False Claims Act (31 U.S.C. §§ 3729–3733), Anti-Kickback Statute (42 U.S.C. § 1320a-7b),
 Physician Self-Referral Law (Stark Law, 42 U.S.C. § 1395nn), Medicare/Medicaid billing requirements,
-and any STATE false claims acts, anti-kickback laws, or fee-splitting prohibitions.
+Mental Health Parity and Addiction Equity Act (MHPAEA) obligations as enforced through payer coverage,
+utilization management, medical necessity, and reimbursement rules,
+and any STATE false claims acts, anti-kickback laws, parity laws, or fee-splitting prohibitions.
 Include state-specific billing fraud statutes and qui tam provisions.
 Set current_value to a SHORT summary (under 80 chars).""",
 
@@ -537,6 +554,7 @@ Set current_value to a SHORT summary (under 80 chars).""",
 Cover: CMS Conditions of Participation (42 CFR Parts 482-485), Joint Commission accreditation standards,
 medication management and DEA controlled substance requirements,
 OSHA Bloodborne Pathogens Standard (29 CFR 1910.1030), infection control and prevention requirements,
+EPA and STATE medical waste disposal / regulated medical waste handling requirements,
 and any STATE patient safety reporting requirements (e.g., adverse event reporting, sentinel events).
 Include state health department inspection and survey requirements.
 Set current_value to a SHORT summary (under 80 chars).""",
@@ -570,6 +588,8 @@ Set current_value to a SHORT summary (under 80 chars).""",
 Cover: facility licensure requirements (hospitals, clinics, ASCs, nursing facilities),
 provider licensing and renewal requirements (physicians, nurses, allied health),
 telehealth and cross-state practice regulations (interstate compacts like IMLC, NLC),
+post-Dobbs abortion-service restrictions or protections that affect providers or facilities,
+ADA physical accessibility and plant/facility standards enforced through health facility rules,
 and any recent changes to scope-of-practice laws (e.g., NP independent practice authority).
 Include state health department facility licensing categories and renewal timelines.
 Set current_value to a SHORT summary (under 80 chars).""",
@@ -577,6 +597,7 @@ Set current_value to a SHORT summary (under 80 chars).""",
         "emergency_preparedness": """Research EMERGENCY PREPAREDNESS requirements for healthcare facilities in this jurisdiction.
 Cover: EMTALA (Emergency Medical Treatment and Labor Act, 42 U.S.C. § 1395dd) — screening, stabilization, and transfer requirements;
 CMS Emergency Preparedness Rule (42 CFR § 482.15) — emergency plan, communication plan, policies/procedures, training/testing;
+NFPA fire and life safety code requirements adopted through CMS, accrediting bodies, or STATE health/facility regulators;
 and any STATE-specific emergency preparedness requirements for healthcare facilities.
 Include penalties for EMTALA violations and state emergency management mandates.
 Set current_value to a SHORT summary (under 80 chars).""",

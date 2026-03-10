@@ -122,6 +122,97 @@ _INDUSTRY_ALIASES: Dict[str, str] = {
     "fast_food": "fast food",
 }
 
+
+def _resolve_industry(raw: Optional[str]) -> str:
+    """Resolve a free-text industry string to a canonical industry name."""
+    if not raw:
+        return ""
+
+    normalized = raw.lower().strip()
+    canonical = _INDUSTRY_ALIASES.get(normalized)
+    if canonical:
+        return canonical
+
+    for alias_key, alias_val in _INDUSTRY_ALIASES.items():
+        if alias_key in normalized or normalized in alias_key:
+            return alias_val
+
+    return ""
+
+
+async def _get_company_canonical_industry(
+    conn, company_id: UUID
+) -> Optional[str]:
+    """Return the canonical industry key for a company, if resolvable."""
+    raw = await conn.fetchval("SELECT industry FROM companies WHERE id = $1", company_id)
+    canonical = _resolve_industry(raw)
+    return canonical or None
+
+
+_HEALTHCARE_TEXT_MARKERS = (
+    "healthcare worker",
+    "health care worker",
+    "healthcare employee",
+    "health care employee",
+    "hospital employee",
+    "hospital worker",
+    "hospital staff",
+    "health facility",
+    "medical facility",
+    "medical office",
+    "nursing facility",
+    "patient care staff",
+    "registered nurse",
+    "licensed vocational nurse",
+    "licensed practical nurse",
+)
+
+
+def _looks_healthcare_specific(req: Dict[str, Any]) -> bool:
+    """Infer healthcare-only labor rows that were saved without industry tags."""
+    haystack = " ".join(
+        str(req.get(field) or "")
+        for field in ("title", "description", "current_value", "source_name")
+    ).lower()
+    if not haystack:
+        return False
+
+    if any(marker in haystack for marker in _HEALTHCARE_TEXT_MARKERS):
+        return True
+
+    if " sb 525" in f" {haystack}" or "mandatory overtime for nurses" in haystack:
+        return True
+
+    return False
+
+
+def _requirement_applicable_industries(req: Dict[str, Any]) -> set[str]:
+    """Return canonical industries a requirement applies to."""
+    raw_industries = req.get("applicable_industries")
+    if isinstance(raw_industries, str):
+        raw_industries = [raw_industries]
+
+    normalized = set()
+    for industry in raw_industries or []:
+        canonical = _resolve_industry(str(industry))
+        normalized.add(canonical or str(industry).strip().lower())
+
+    if normalized:
+        return normalized
+
+    # Older healthcare rows may have missed the explicit tag. Infer them here
+    # so retail/company syncs still drop those rows on the next resync/read.
+    category = _normalize_category(req.get("category"))
+    rate_type = _normalize_rate_type(req.get("rate_type"))
+    if (
+        category in HEALTHCARE_CATEGORIES
+        or rate_type == "healthcare"
+        or _looks_healthcare_specific(req)
+    ):
+        return {"healthcare"}
+
+    return set()
+
 # Industry-specific context strings injected into Gemini research prompts.
 _INDUSTRY_RESEARCH_CONTEXT: Dict[str, str] = {
     "healthcare": (
@@ -152,20 +243,7 @@ async def _get_industry_profile(
     Returns a dict with focused_categories, rate_types, category_order,
     category_evidence, and industry_context (prompt string), or None.
     """
-    row = await conn.fetchrow(
-        "SELECT industry FROM companies WHERE id = $1", company_id
-    )
-    if not row or not row["industry"]:
-        return None
-
-    raw = row["industry"].lower().strip()
-    canonical = _INDUSTRY_ALIASES.get(raw)
-    if not canonical:
-        # Try substring match against alias keys
-        for alias_key, alias_val in _INDUSTRY_ALIASES.items():
-            if alias_key in raw or raw in alias_key:
-                canonical = alias_val
-                break
+    canonical = await _get_company_canonical_industry(conn, company_id)
     if not canonical:
         return None
 
@@ -179,6 +257,7 @@ async def _get_industry_profile(
     return {
         "id": str(profile_row["id"]),
         "name": profile_row["name"],
+        "canonical_industry": canonical,
         "focused_categories": profile_row["focused_categories"] or [],
         "rate_types": profile_row["rate_types"] or [],
         "category_order": profile_row["category_order"] or [],
@@ -1220,6 +1299,136 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
         )
 
 
+async def _research_healthcare_requirements_for_jurisdiction(
+    conn,
+    jurisdiction_id: UUID,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> Dict[str, Any]:
+    """Research missing healthcare-only categories inline for a jurisdiction."""
+    from .gemini_compliance import get_gemini_compliance_service
+    from .jurisdiction_context import get_known_sources, build_context_prompt
+
+    j = await conn.fetchrow(
+        "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
+        jurisdiction_id,
+    )
+    if not j:
+        return {"error": "Jurisdiction not found", "new": 0, "categories": [], "failed": []}
+
+    city = j["city"]
+    state = j["state"]
+    county = j.get("county")
+    location_name = f"{city}, {state}"
+
+    has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
+    known_sources = await get_known_sources(conn, jurisdiction_id)
+    source_context = build_context_prompt(known_sources)
+    corrections = await get_recent_corrections(jurisdiction_id)
+    corrections_context = format_corrections_for_prompt(corrections)
+
+    try:
+        preemption_rows = await conn.fetch(
+            "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+            state.upper(),
+        )
+        preemption_rules = {
+            row["category"]: row["allows_local_override"] for row in preemption_rows
+        }
+    except Exception:
+        preemption_rules = {}
+
+    existing = await conn.fetch(
+        "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+        jurisdiction_id,
+    )
+    existing_cats = {r["category"] for r in existing}
+    missing = sorted(cat for cat in HEALTHCARE_CATEGORIES if cat not in existing_cats)
+
+    if not missing:
+        print(f"[Healthcare Research] All healthcare categories already present for {location_name}")
+        return {
+            "new": 0,
+            "location": location_name,
+            "categories": [],
+            "failed": [],
+            "requirements": [],
+            "skipped": True,
+        }
+
+    print(
+        f"[Healthcare Research] Researching {len(missing)} healthcare categories "
+        f"for {location_name}: {', '.join(missing)}"
+    )
+
+    service = get_gemini_compliance_service()
+    total_new = 0
+    failed_categories: List[str] = []
+    added_requirements: List[Dict[str, Any]] = []
+
+    for idx, category in enumerate(missing, start=1):
+        print(
+            f"[Healthcare Research] [{idx}/{len(missing)}] Researching {category} "
+            f"for {location_name}..."
+        )
+        if progress_callback:
+            progress_callback(
+                idx,
+                len(missing),
+                f"Researching {category.replace('_', ' ')} for {location_name}...",
+            )
+
+        try:
+            reqs = await service.research_location_compliance(
+                city=city,
+                state=state,
+                county=county,
+                categories=[category],
+                source_context=source_context,
+                corrections_context=corrections_context,
+                preemption_rules=preemption_rules,
+                has_local_ordinance=has_local_ordinance,
+            )
+            reqs = reqs or []
+
+            for req in reqs:
+                _clamp_varchar_fields(req)
+                if not req.get("applicable_industries"):
+                    req["applicable_industries"] = ["healthcare"]
+
+            if reqs:
+                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                total_new += len(reqs)
+                added_requirements.extend(reqs)
+                print(
+                    f"[Healthcare Research]   -> {len(reqs)} requirements saved "
+                    f"for {category}"
+                )
+            else:
+                print(f"[Healthcare Research]   -> No results for {category}")
+        except Exception as e:
+            failed_categories.append(category)
+            print(f"[Healthcare Research]   -> Error researching {category}: {e}")
+
+    print(
+        f"[Healthcare Research] Complete for {location_name}: {total_new} new, "
+        f"{len(failed_categories)} failed"
+    )
+
+    if failed_categories and total_new == 0:
+        raise RuntimeError(
+            f"All healthcare categories failed for {location_name}: "
+            f"{', '.join(failed_categories)}"
+        )
+
+    return {
+        "new": total_new,
+        "location": location_name,
+        "categories": missing,
+        "failed": failed_categories,
+        "requirements": added_requirements,
+    }
+
+
 async def _fill_from_state_fallback(
     conn,
     service,
@@ -1554,18 +1763,17 @@ async def _filter_requirements_for_company(
     conn, company_id: UUID, requirements: List[Dict]
 ) -> List[Dict]:
     """Filter out industry-specific requirements that don't apply to this company."""
-    if not any(r.get("applicable_industries") for r in requirements):
+    if not any(_requirement_applicable_industries(r) for r in requirements):
         return requirements
 
-    profile = await _get_industry_profile(conn, company_id)
-    company_industry = profile["name"].lower() if profile else None
+    company_industry = await _get_company_canonical_industry(conn, company_id)
 
     filtered = []
     for req in requirements:
-        industries = req.get("applicable_industries")
+        industries = _requirement_applicable_industries(req)
         if not industries:
             filtered.append(req)
-        elif company_industry and company_industry in [i.lower() for i in industries]:
+        elif company_industry and company_industry in industries:
             filtered.append(req)
     return filtered
 
@@ -2869,10 +3077,10 @@ async def ensure_location_for_employee(
             if not has_local_ordinance and display_city:
                 req_dicts = _filter_city_level_requirements(req_dicts, norm_state)
             _normalize_requirement_categories(req_dicts)
+            req_dicts = await _filter_requirements_for_company(conn, company_id, req_dicts)
             req_dicts = await _filter_with_preemption(conn, req_dicts, norm_state)
             for req in req_dicts:
                 _clamp_varchar_fields(req)
-            req_dicts = await _filter_requirements_for_company(conn, company_id, req_dicts)
             await _sync_requirements_to_location(
                 conn, location_id, company_id, req_dicts, create_alerts=False,
             )
@@ -2990,6 +3198,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             if not has_local_ordinance:
                 req_dicts = _filter_city_level_requirements(req_dicts, data.state)
             _normalize_requirement_categories(req_dicts)
+            req_dicts = await _filter_requirements_for_company(conn, company_id, req_dicts)
             req_dicts = await _filter_with_preemption(conn, req_dicts, data.state)
             for req in req_dicts:
                 _clamp_varchar_fields(req)
@@ -3003,7 +3212,6 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
 
         if req_dicts:
             # Clone requirements to location — no alerts for initial clone
-            req_dicts = await _filter_requirements_for_company(conn, company_id, req_dicts)
             await _sync_requirements_to_location(
                 conn,
                 location_id,
@@ -3555,6 +3763,9 @@ async def run_compliance_check_stream(
 
             # Normalize and filter (with preemption awareness)
             _normalize_requirement_categories(requirements)
+            requirements = await _filter_requirements_for_company(
+                conn, company_id, requirements
+            )
             requirements = await _filter_with_preemption(
                 conn, requirements, location.state
             )
@@ -3602,7 +3813,6 @@ async def run_compliance_check_stream(
             # Sync requirements to location (change detection, alerts, history)
             # Only create alerts for fresh Gemini data — repository data is cached
             # and shouldn't re-alert on every check.
-            requirements = await _filter_requirements_for_company(conn, company_id, requirements)
             sync_result = await _sync_requirements_to_location(
                 conn,
                 location_id,
@@ -3915,7 +4125,7 @@ async def get_location_counts(location_id: UUID) -> dict:
 
     async with get_connection() as conn:
         loc = await conn.fetchrow(
-            """SELECT bl.state, jr.has_local_ordinance
+            """SELECT bl.state, bl.company_id, jr.has_local_ordinance
                FROM business_locations bl
                LEFT JOIN jurisdiction_reference jr
                  ON LOWER(bl.city) = jr.city AND UPPER(bl.state) = jr.state
@@ -3923,6 +4133,7 @@ async def get_location_counts(location_id: UUID) -> dict:
             location_id,
         )
         state = (loc["state"] if loc else None) or ""
+        company_id = loc["company_id"] if loc else None
         has_local_ordinance = loc["has_local_ordinance"] if loc else None
 
         rows = await conn.fetch(
@@ -3933,6 +4144,10 @@ async def get_location_counts(location_id: UUID) -> dict:
         if has_local_ordinance is False:
             req_dicts = _filter_city_level_requirements(req_dicts, state)
         _normalize_requirement_categories(req_dicts)
+        if company_id:
+            req_dicts = await _filter_requirements_for_company(
+                conn, company_id, req_dicts
+            )
         filtered = (
             await _filter_with_preemption(conn, req_dicts, state)
             if state
@@ -4349,6 +4564,9 @@ async def get_location_requirements(
         if has_local_ordinance is False:
             row_dicts = _filter_city_level_requirements(row_dicts, state)
         _normalize_requirement_categories(row_dicts)
+        row_dicts = await _filter_requirements_for_company(
+            conn, company_id, row_dicts
+        )
         filtered = await _filter_with_preemption(conn, row_dicts, state)
 
         # Enrich with employee impact data
@@ -4371,6 +4589,8 @@ async def get_location_requirements(
                 id=str(row["id"]),
                 category=row["category"],
                 rate_type=row.get("rate_type"),
+                applicable_industries=sorted(_requirement_applicable_industries(row))
+                or None,
                 jurisdiction_level=row["jurisdiction_level"],
                 jurisdiction_name=row["jurisdiction_name"],
                 title=row["title"],
@@ -4750,6 +4970,9 @@ async def get_compliance_summary(company_id: UUID) -> ComplianceSummary:
             if loc.get("has_local_ordinance") is False:
                 req_dicts = _filter_city_level_requirements(req_dicts, loc["state"])
             _normalize_requirement_categories(req_dicts)
+            req_dicts = await _filter_requirements_for_company(
+                conn, loc["company_id"], req_dicts
+            )
             filtered_reqs = await _filter_with_preemption(conn, req_dicts, loc["state"])
             total_requirements += len(filtered_reqs)
 
@@ -5805,6 +6028,9 @@ async def run_compliance_check_background(
                         r["description"] = desc + note
 
             _normalize_requirement_categories(requirements)
+            requirements = await _filter_requirements_for_company(
+                conn, company_id, requirements
+            )
             requirements = await _filter_with_preemption(
                 conn, requirements, location.state
             )
@@ -5845,7 +6071,6 @@ async def run_compliance_check_background(
                             )
 
             # Sync to location
-            requirements = await _filter_requirements_for_company(conn, company_id, requirements)
             sync_result = await _sync_requirements_to_location(
                 conn,
                 location_id,
@@ -6192,18 +6417,29 @@ async def research_jurisdiction_repo_only(
                     "message": f"Industry-specific research failed for {canonical}: {e}",
                 }
 
-        # --- Dispatch healthcare research to background worker ---
+        # --- Healthcare-specific research phase ---
         try:
-            from ...workers.tasks.healthcare_research import run_healthcare_research
-            run_healthcare_research.delay(str(jurisdiction_id))
             yield {
                 "type": "repository_refresh",
-                "message": f"Healthcare compliance research queued in background for {location_name}.",
+                "message": f"Researching healthcare-specific compliance for {location_name}...",
+            }
+            healthcare_result = await _research_healthcare_requirements_for_jurisdiction(
+                conn, jurisdiction_id
+            )
+            added_healthcare = healthcare_result.get("requirements") or []
+            if added_healthcare:
+                updated_requirements = updated_requirements + added_healthcare
+            yield {
+                "type": "repository_refresh",
+                "message": (
+                    f"Healthcare research completed for {location_name}: "
+                    f"{healthcare_result.get('new', 0)} requirement(s) added."
+                ),
             }
         except Exception as e:
             yield {
                 "type": "warning",
-                "message": f"Could not queue healthcare research (worker may be offline): {e}",
+                "message": f"Healthcare-specific research failed for {location_name}: {e}",
             }
 
         yield {

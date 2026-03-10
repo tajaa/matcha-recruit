@@ -3330,7 +3330,10 @@ def _legislation_confidence(item: dict[str, Any]) -> float:
     return max(parsed, _source_confidence(item.get("source_url"), item.get("source_name")))
 
 
-async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerator[dict[str, Any], None]:
+async def _run_jurisdiction_check_events(
+    jurisdiction_id: UUID,
+    inline_healthcare_research: bool = False,
+) -> AsyncGenerator[dict[str, Any], None]:
     from ..services.gemini_compliance import get_gemini_compliance_service
     from ..services.compliance_service import (
         _upsert_jurisdiction_requirements,
@@ -3339,6 +3342,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         _normalize_requirement_categories,
         _filter_city_level_requirements,
         _filter_with_preemption,
+        _filter_requirements_for_company,
         _sync_requirements_to_location,
         _create_alert,
         score_verification_confidence,
@@ -3348,6 +3352,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         _missing_required_categories,
         _lookup_has_local_ordinance,
         _refresh_repository_missing_categories,
+        _research_healthcare_requirements_for_jurisdiction,
     )
     from ..models.compliance import VerificationResult
 
@@ -3920,11 +3925,16 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
             yield {"type": "syncing", "message": f"Syncing to {len(linked_locations)} location(s)..."}
             for loc in linked_locations:
                 try:
+                    location_requirements = await _filter_requirements_for_company(
+                        conn,
+                        loc["company_id"],
+                        requirements,
+                    )
                     sync_result = await _sync_requirements_to_location(
                         conn,
                         loc["id"],
                         loc["company_id"],
-                        requirements,
+                        location_requirements,
                         create_alerts=True,
                     )
                     total_alerts += sync_result["alerts"]
@@ -4134,26 +4144,81 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                 ),
             }
 
-        # Dispatch healthcare research to background worker
-        try:
-            from ..services.compliance_service import HEALTHCARE_CATEGORIES
-            from app.workers.tasks.healthcare_research import run_healthcare_research
-            # Check if healthcare categories are already present
-            hc_existing = await conn.fetch(
-                "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1 AND category = ANY($2::text[])",
-                canonical_jurisdiction_id,
-                sorted(HEALTHCARE_CATEGORIES),
-            )
-            hc_present = {r["category"] for r in hc_existing}
-            hc_missing = HEALTHCARE_CATEGORIES - hc_present
-            if hc_missing:
-                run_healthcare_research.delay(str(canonical_jurisdiction_id))
+        if inline_healthcare_research:
+            try:
                 yield {
                     "type": "repository_refresh",
-                    "message": f"Healthcare compliance research queued in background ({len(hc_missing)} categories).",
+                    "message": f"Researching healthcare-specific compliance for {location_label}...",
                 }
-        except Exception as exc:
-            logger.warning("Could not queue healthcare research: %s", exc)
+                healthcare_result = await _research_healthcare_requirements_for_jurisdiction(
+                    conn, canonical_jurisdiction_id
+                )
+                if healthcare_result.get("new", 0):
+                    rows = await conn.fetch(
+                        "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                        canonical_jurisdiction_id,
+                    )
+                    requirements = [
+                        _jurisdiction_row_to_dict(dict(row)) for row in rows
+                    ]
+                    requirements = await _prepare_requirements_for_sync(requirements)
+                    new_count = len(requirements)
+                    if linked_locations:
+                        yield {
+                            "type": "syncing",
+                            "message": (
+                                f"Syncing healthcare-specific updates to "
+                                f"{len(linked_locations)} location(s)..."
+                            ),
+                        }
+                        for loc in linked_locations:
+                            location_requirements = await _filter_requirements_for_company(
+                                conn,
+                                loc["company_id"],
+                                requirements,
+                            )
+                            sync_result = await _sync_requirements_to_location(
+                                conn,
+                                loc["id"],
+                                loc["company_id"],
+                                location_requirements,
+                                create_alerts=True,
+                            )
+                            total_alerts += sync_result["alerts"]
+                            total_updated += sync_result["updated"]
+                yield {
+                    "type": "repository_refresh",
+                    "message": (
+                        f"Healthcare research completed for {location_label}: "
+                        f"{healthcare_result.get('new', 0)} requirement(s) added."
+                    ),
+                }
+            except Exception as exc:
+                logger.warning("Healthcare inline research failed: %s", exc)
+                yield {
+                    "type": "warning",
+                    "message": f"Healthcare-specific research failed: {exc}",
+                }
+        else:
+            # Keep top-metro batch fast by queuing healthcare-only work.
+            try:
+                from ..services.compliance_service import HEALTHCARE_CATEGORIES
+                from app.workers.tasks.healthcare_research import run_healthcare_research
+                hc_existing = await conn.fetch(
+                    "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1 AND category = ANY($2::text[])",
+                    canonical_jurisdiction_id,
+                    sorted(HEALTHCARE_CATEGORIES),
+                )
+                hc_present = {r["category"] for r in hc_existing}
+                hc_missing = HEALTHCARE_CATEGORIES - hc_present
+                if hc_missing:
+                    run_healthcare_research.delay(str(canonical_jurisdiction_id))
+                    yield {
+                        "type": "repository_refresh",
+                        "message": f"Healthcare compliance research queued in background ({len(hc_missing)} categories).",
+                    }
+            except Exception as exc:
+                logger.warning("Could not queue healthcare research: %s", exc)
 
         yield {
             "type": "completed",
@@ -4328,7 +4393,10 @@ async def check_jurisdiction(jurisdiction_id: UUID):
 
     async def event_stream():
         try:
-            async for event in _run_jurisdiction_check_events(jurisdiction_id):
+            async for event in _run_jurisdiction_check_events(
+                jurisdiction_id,
+                inline_healthcare_research=True,
+            ):
                 if event.get("type") == "heartbeat":
                     yield ": heartbeat\n\n"
                 else:

@@ -52,6 +52,7 @@ export interface ComplianceRequirement {
     id: string;
     category: string;
     rate_type: string | null;
+    applicable_industries?: string[] | null;
     jurisdiction_level: string;
     jurisdiction_name: string;
     title: string;

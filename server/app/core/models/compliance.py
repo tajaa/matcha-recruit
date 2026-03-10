@@ -162,6 +162,7 @@ class RequirementResponse(BaseModel):
     id: str
     category: str
     rate_type: Optional[str] = None
+    applicable_industries: Optional[List[str]] = None
     jurisdiction_level: str
     jurisdiction_name: str
     title: str

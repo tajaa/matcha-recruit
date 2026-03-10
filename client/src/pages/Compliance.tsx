@@ -1393,6 +1393,11 @@ export function Compliance() {
                                                                                                     {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
                                                                                                 </span>
                                                                                             )}
+                                                                                            {req.applicable_industries?.includes('healthcare') && (
+                                                                                                <span className="px-1.5 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-[8px] uppercase tracking-widest text-cyan-300 font-bold rounded-xs">
+                                                                                                    Medical
+                                                                                                </span>
+                                                                                            )}
                                                                                             {(req.affected_employee_count ?? 0) > 0 && (
                                                                                                 <span className="px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 text-[8px] uppercase tracking-widest text-violet-400 font-bold rounded-xs">
                                                                                                     {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}

@@ -57,15 +57,15 @@ CATEGORY_SEARCH_STRATEGIES = {
         "preferred_source_types": [".gov", "state civil rights commission", "state human rights"],
     },
     "hipaa_privacy": {
-        "search_guidance": "Check HHS.gov for HIPAA Privacy/Security Rules and HITECH breach notification. Search state attorney general for state health privacy laws exceeding HIPAA.",
+        "search_guidance": "Check HHS.gov and SAMHSA for HIPAA Privacy/Security Rules, HITECH breach notification, and 42 CFR Part 2 substance use disorder record rules. Search state attorney general and state health agencies for state health privacy laws exceeding HIPAA.",
         "preferred_source_types": [".gov", "hhs.gov", "state attorney general"],
     },
     "billing_integrity": {
-        "search_guidance": "Check OIG.hhs.gov for Anti-Kickback Statute and False Claims Act guidance. Search CMS.gov for Medicare/Medicaid billing requirements and Stark Law.",
+        "search_guidance": "Check OIG.hhs.gov for Anti-Kickback Statute and False Claims Act guidance. Search CMS.gov for Medicare/Medicaid billing requirements and Stark Law. Check DOL/EBSA, CMS, and state insurance regulators for MHPAEA mental health parity enforcement.",
         "preferred_source_types": [".gov", "oig.hhs.gov", "cms.gov"],
     },
     "clinical_safety": {
-        "search_guidance": "Check CMS.gov for Conditions of Participation. Search OSHA for bloodborne pathogens (29 CFR 1910.1030). Check Joint Commission standards and state health department for infection control.",
+        "search_guidance": "Check CMS.gov for Conditions of Participation. Search OSHA for bloodborne pathogens (29 CFR 1910.1030). Check EPA and state environmental agencies for medical waste disposal rules. Check Joint Commission standards and state health department for infection control and patient safety.",
         "preferred_source_types": [".gov", "cms.gov", "osha.gov", "jointcommission.org"],
     },
     "healthcare_workforce": {
@@ -81,11 +81,11 @@ CATEGORY_SEARCH_STRATEGIES = {
         "preferred_source_types": [".gov", "hhs.gov", "fda.gov"],
     },
     "state_licensing": {
-        "search_guidance": "Check state health department for facility licensure requirements. Search state medical/nursing boards for provider licensing. Check state telehealth practice laws.",
+        "search_guidance": "Check state health department for facility licensure requirements, plant/accessibility standards, and post-Dobbs provider/facility abortion rules. Search state medical/nursing boards for provider licensing. Check state telehealth practice laws.",
         "preferred_source_types": [".gov", "state health department", "state medical board"],
     },
     "emergency_preparedness": {
-        "search_guidance": "Check CMS.gov for EMTALA requirements and emergency preparedness rule. Search state health department for emergency management requirements.",
+        "search_guidance": "Check CMS.gov for EMTALA requirements and emergency preparedness rule. Search CMS/state health department survey guidance for NFPA fire and life safety adoption. Search state health department for emergency management requirements.",
         "preferred_source_types": [".gov", "cms.gov", "state health department"],
     },
 }
