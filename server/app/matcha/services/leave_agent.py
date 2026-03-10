@@ -837,7 +837,7 @@ class LeaveAgent:
             weeks_used_row = await conn.fetchrow(
                 """
                 SELECT COALESCE(SUM(
-                    EXTRACT(EPOCH FROM (COALESCE(end_date, expected_return_date, CURRENT_DATE) - start_date)) / 604800
+                    (COALESCE(end_date, expected_return_date, CURRENT_DATE) - start_date) / 7.0
                 ), 0) AS total_weeks
                 FROM leave_requests
                 WHERE employee_id = $1

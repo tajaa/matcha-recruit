@@ -255,9 +255,7 @@ class LeaveEligibilityService:
             row = await conn.fetchrow(
                 """
                 SELECT COALESCE(SUM(
-                    EXTRACT(EPOCH FROM (
-                        COALESCE(actual_return_date, end_date, expected_return_date, CURRENT_DATE) - start_date
-                    )) / 604800
+                    (COALESCE(actual_return_date, end_date, expected_return_date, CURRENT_DATE) - start_date) / 7.0
                 ), 0) AS weeks_used
                 FROM leave_requests
                 WHERE employee_id = $1
