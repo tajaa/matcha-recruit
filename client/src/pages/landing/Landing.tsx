@@ -100,7 +100,7 @@ export function Landing() {
           onClose={() => setIsPricingModalOpen(false)}
         />
 
-        <Hero />
+        <Hero onContactClick={() => setIsPricingModalOpen(true)} />
 
         <Compliance />
 

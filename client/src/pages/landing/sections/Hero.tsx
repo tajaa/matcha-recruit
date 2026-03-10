@@ -92,7 +92,11 @@ function GlitchText({ text, className, style }: { text: string; className?: stri
   );
 }
 
-export const Hero = () => {
+interface HeroProps {
+  onContactClick?: () => void;
+}
+
+export const Hero = ({ onContactClick }: HeroProps) => {
   const containerVariants: Variants = {
     hidden: { opacity: 0 },
     visible: {
@@ -175,15 +179,15 @@ export const Hero = () => {
             </p>
             
             <div className="flex flex-wrap gap-6 pt-2">
-              <Link
-                to="/register"
+              <button
+                onClick={onContactClick}
                 className="group relative px-10 py-4 bg-zinc-900 text-white text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden border border-zinc-900"
               >
                 <span className="relative z-10 group-hover:text-black transition-colors duration-500">Initialize Account</span>
                 <m.div 
                   className="absolute inset-0 bg-white translate-y-full group-hover:translate-y-0 transition-transform duration-500 ease-[0.16,1,0.3,1]"
                 />
-              </Link>
+              </button>
             </div>
           </m.div>
         </div>
