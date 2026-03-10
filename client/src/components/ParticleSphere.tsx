@@ -14,23 +14,35 @@ interface ParticleSphereProps {
 }
 
 const DEFAULT_CITY_MARKERS: CityMarker[] = [
+  // North America
   { label: 'LA', lat: 34.0522, lon: -118.2437 },
   { label: 'SF', lat: 37.7749, lon: -122.4194 },
   { label: 'NY', lat: 40.7128, lon: -74.0060 },
   { label: 'Austin', lat: 30.2672, lon: -97.7431 },
   { label: 'Miami', lat: 25.7617, lon: -80.1918 },
   { label: 'Chicago', lat: 41.8781, lon: -87.6298 },
-  { label: 'San Diego', lat: 32.7157, lon: -117.1611 },
-  // International cities to fill the globe
+  { label: 'Toronto', lat: 43.6510, lon: -79.3470 },
+  // Latin America
+  { label: 'Mexico City', lat: 19.4326, lon: -99.1332 },
+  { label: 'Bogota', lat: 4.7110, lon: -74.0721 },
+  { label: 'Sao Paulo', lat: -23.5505, lon: -46.6333 },
+  { label: 'Buenos Aires', lat: -34.6037, lon: -58.3816 },
+  { label: 'Lima', lat: -12.0464, lon: -77.0428 },
+  // Europe
   { label: 'London', lat: 51.5074, lon: -0.1278 },
   { label: 'Paris', lat: 48.8566, lon: 2.3522 },
+  { label: 'Berlin', lat: 52.5200, lon: 13.4050 },
+  // Africa
+  { label: 'Lagos', lat: 6.5244, lon: 3.3792 },
+  { label: 'Nairobi', lat: -1.2921, lon: 36.8219 },
+  { label: 'Cape Town', lat: -33.9249, lon: 18.4241 },
+  // Asia / Middle East / Oceania
+  { label: 'Dubai', lat: 25.2048, lon: 55.2708 },
+  { label: 'Mumbai', lat: 19.0760, lon: 72.8777 },
   { label: 'Tokyo', lat: 35.6762, lon: 139.6503 },
-  { label: 'Singapore', lat: 35.6892, lon: 139.6917 },
-  { label: 'Sydney', lat: 1.3521, lon: 103.8198 },
-  { label: 'Dubai', lat: 1.2903, lon: 103.8520 },
-  { label: 'Berlin', lat: 48.8566, lon: 2.3522 },
+  { label: 'Singapore', lat: 1.3521, lon: 103.8198 },
   { label: 'Seoul', lat: 37.5665, lon: 126.9780 },
-  { label: 'Toronto', lat: -33.8688, lon: 151.2093 }
+  { label: 'Sydney', lat: -33.8688, lon: 151.2093 }
 ];
 
 const latLonToVector3 = (lat: number, lon: number, radius: number) => {
@@ -110,8 +122,9 @@ export function ParticleSphere({
     const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
     camera.position.z = 2.5;
     const sphereGroup = new THREE.Group();
-    // Pre-rotate so US cities (avg lon ≈ -100°) face the camera (+Z axis)
-    sphereGroup.rotation.y = THREE.MathUtils.degToRad(100);
+    // Pre-rotate to show a good spread of global cities initially (facing roughly the Atlantic/Europe/Americas spread)
+    sphereGroup.rotation.y = THREE.MathUtils.degToRad(30);
+    sphereGroup.rotation.x = THREE.MathUtils.degToRad(15);
     scene.add(sphereGroup);
 
     // Renderer
