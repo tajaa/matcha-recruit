@@ -140,95 +140,6 @@ export function ParticleSphere({
     container.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
-    // Create particle sphere geometry
-    const isMobile = window.innerWidth < 768;
-    const particleCount = isMobile ? 400 : 800; // Drastically reduced from 1000/2500
-    const positions = new Float32Array(particleCount * 3);
-    const colors = new Float32Array(particleCount * 3);
-    const sizes = new Float32Array(particleCount);
-
-    // Grayscale color variations
-    const baseColor = new THREE.Color(0x71717a); // zinc-500
-    const darkColor = new THREE.Color(0x3f3f46); // zinc-700
-    const lightColor = new THREE.Color(0xa1a1aa); // zinc-400
-
-    for (let i = 0; i < particleCount; i++) {
-      // Fibonacci sphere distribution for even spacing
-      const phi = Math.acos(1 - 2 * (i + 0.5) / particleCount);
-      const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
-
-      const radius = 1.15;
-      positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
-      positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
-      positions[i * 3 + 2] = radius * Math.cos(phi);
-
-      // Vary colors slightly
-      const colorMix = Math.random();
-      const particleColor = colorMix < 0.33
-        ? baseColor
-        : colorMix < 0.66
-          ? darkColor
-          : lightColor;
-
-      colors[i * 3] = particleColor.r;
-      colors[i * 3 + 1] = particleColor.g;
-      colors[i * 3 + 2] = particleColor.b;
-
-      // Vary sizes (make particles smaller to avoid clouding)
-      sizes[i] = 1 + Math.random() * 1.5;
-    }
-
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-
-    // Custom shader material for glowing particles
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        pixelRatio: { value: renderer.getPixelRatio() }
-      },
-      vertexShader: `
-        attribute float size;
-        attribute vec3 color;
-        varying vec3 vColor;
-        varying float vAlpha;
-        uniform float time;
-
-        void main() {
-          vColor = color;
-
-          // Subtle pulsing based on position
-          float pulse = sin(time * 0.5 + position.x * 2.0 + position.y * 2.0) * 0.15 + 0.85;
-          vAlpha = pulse;
-
-          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = size * (200.0 / -mvPosition.z) * pixelRatio;
-          gl_Position = projectionMatrix * mvPosition;
-        }
-      `,
-      fragmentShader: `
-        varying vec3 vColor;
-        varying float vAlpha;
-
-        void main() {
-          // Sharper circular particle
-          float dist = length(gl_PointCoord - vec2(0.5));
-          if (dist > 0.5) discard;
-
-          // Less smoothstep bleed to prevent 'cloud' buildup
-          float alpha = smoothstep(0.5, 0.35, dist) * vAlpha * 0.8;
-          gl_FragColor = vec4(vColor, alpha);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.NormalBlending
-    });
-
-    const particles = new THREE.Points(geometry, material);
-    sphereGroup.add(particles);
 
     // Add wireframe sphere for structure hint
     const wireGeometry = new THREE.SphereGeometry(1.3, 64, 64);
@@ -363,8 +274,6 @@ export function ParticleSphere({
         }
       });
 
-      material.uniforms.time.value = time;
-
       renderer.render(scene, camera);
     };
 
@@ -396,8 +305,6 @@ export function ParticleSphere({
         rendererRef.current.dispose();
       }
 
-      geometry.dispose();
-      material.dispose();
       wireGeometry.dispose();
       wireMaterial.dispose();
       markerDotGeometry.dispose();
