@@ -71,8 +71,8 @@ const createCityLabel = (text: string) => {
   ctx.font = '400 32px "Space Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'; // Solid white
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.4)'; // Slightly darker shadow for contrast
+  ctx.fillStyle = '#09090b'; // zinc-950
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
   ctx.shadowBlur = 8;
   ctx.fillText(spacedText, canvas.width / 2, canvas.height / 2);
 
@@ -267,7 +267,7 @@ export function ParticleSphere({
         const labelAnchor = normal.clone().multiplyScalar(1.45);
 
         const dotMaterial = new THREE.MeshBasicMaterial({
-          color: 0x3f3f46, // zinc-700
+          color: new THREE.Color('#b45309'), // amber-700
           transparent: true,
           opacity: 0.9
         });
@@ -276,7 +276,7 @@ export function ParticleSphere({
         markersGroup.add(dot);
 
         const pulseMaterial = new THREE.MeshBasicMaterial({
-          color: 0xa1a1aa, // zinc-400
+          color: new THREE.Color('#d97706'), // amber-600
           transparent: true,
           opacity: 0.22
         });

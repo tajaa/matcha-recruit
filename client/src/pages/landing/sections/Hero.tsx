@@ -158,21 +158,18 @@ export const Hero = ({ onContactClick }: HeroProps) => {
             </span>
             <GlitchText
               text="Intelligence."
-              className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-amber-500"
-              style={{ 
+              className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-black"
+              style={{
                 fontFamily: fonts.serif,
-                WebkitTextStroke: '2px black'
+                WebkitTextStroke: '2px white'
               }}
             />
           </m.h1>
 
           <m.div variants={itemVariants} className="space-y-10 mt-10">
             <p
-              className="text-zinc-900 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap bg-white/50 backdrop-blur-sm px-4 py-2 border border-white/10 shadow-sm"
-              style={{ 
-                fontFamily: fonts.sans,
-                WebkitTextStroke: '0.4px white'
-              }}
+              className="text-zinc-900 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap"
+              style={{ fontFamily: fonts.sans }}
             >
               Increase your signal to noise ratio.
             </p>

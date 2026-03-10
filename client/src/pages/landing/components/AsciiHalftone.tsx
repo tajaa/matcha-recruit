@@ -95,14 +95,13 @@ export const AsciiHalftone = () => {
           const char = chars[charIdx];
           if (char === " ") continue;
 
-          const alpha = 0.08 + intensity * 0.35;
-          const v = 110 + intensity * 40;
-          ctx!.fillStyle = `rgba(${v}, ${v}, ${v}, ${alpha})`;
+          const alpha = 0.12 + intensity * 0.45;
+          ctx!.fillStyle = `rgba(0, 0, 0, ${alpha})`;
           ctx!.fillText(char, x + CELL / 2, y + CELL / 2);
         }
       }
 
-      time += 0.10;
+      time += 0.05;
       animId = requestAnimationFrame(draw);
     }
 
@@ -128,6 +127,10 @@ export const AsciiHalftone = () => {
     <div
       ref={parentRef}
       className="absolute inset-0 overflow-hidden z-0 pointer-events-none"
+      style={{
+        maskImage: 'linear-gradient(to right, black 45%, transparent 62%)',
+        WebkitMaskImage: 'linear-gradient(to right, black 45%, transparent 62%)',
+      }}
     >
       <canvas ref={canvasRef} className="w-full h-full" />
     </div>
