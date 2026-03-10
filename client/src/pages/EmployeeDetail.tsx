@@ -428,19 +428,26 @@ export default function EmployeeDetail() {
     employeesApi.getIncidents(employeeId).then(setIncidents).catch(() => setIncidents([]));
   }, [employeeId]);
 
-  // Fetch leave data
+  // Fetch leave data — eligibility and history are independent so one
+  // failing (e.g. 'time_off' feature not enabled) doesn't block the other.
   const fetchLeaveData = async () => {
     if (!employeeId) return;
     setLeaveLoading(true);
     try {
-      const [eligibility, history] = await Promise.all([
+      const [eligibility, history] = await Promise.allSettled([
         leaveApi.getEmployeeEligibility(employeeId),
         leaveApi.getEmployeeLeaveHistory(employeeId),
       ]);
-      setLeaveEligibility(eligibility as unknown as LeaveEligibilityData);
-      setLeaveHistory(history);
-    } catch {
-      // non-critical
+      if (eligibility.status === 'fulfilled') {
+        setLeaveEligibility(eligibility.value as unknown as LeaveEligibilityData);
+      } else {
+        console.error('Failed to fetch leave eligibility:', eligibility.reason);
+      }
+      if (history.status === 'fulfilled') {
+        setLeaveHistory(history.value);
+      } else {
+        console.error('Failed to fetch leave history:', history.reason);
+      }
     } finally {
       setLeaveLoading(false);
     }

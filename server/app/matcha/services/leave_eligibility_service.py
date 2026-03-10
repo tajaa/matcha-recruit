@@ -13,6 +13,9 @@ from ...database import get_connection
 
 logger = logging.getLogger(__name__)
 
+# Whether the leave data backfill has been verified this process lifetime
+_leave_data_checked = False
+
 
 class LeaveEligibilityService:
     """Checks employee eligibility for federal and state leave programs."""
@@ -49,14 +52,18 @@ class LeaveEligibilityService:
 
             # Hours check (last 12 months)
             twelve_months_ago = today - timedelta(days=365)
-            hours_row = await conn.fetchrow(
-                """SELECT COALESCE(SUM(hours_worked), 0) AS total_hours
-                   FROM employee_hours_log
-                   WHERE employee_id = $1
-                     AND period_start >= $2""",
-                employee_id, twelve_months_ago,
-            )
-            hours_worked_12mo = float(hours_row["total_hours"])
+            try:
+                hours_row = await conn.fetchrow(
+                    """SELECT COALESCE(SUM(hours_worked), 0) AS total_hours
+                       FROM employee_hours_log
+                       WHERE employee_id = $1
+                         AND period_start >= $2""",
+                    employee_id, twelve_months_ago,
+                )
+                hours_worked_12mo = float(hours_row["total_hours"])
+            except Exception:
+                logger.warning("employee_hours_log query failed for %s — defaulting to 0 hours", employee_id)
+                hours_worked_12mo = 0.0
             if hours_worked_12mo < 1250:
                 reasons.append(
                     f"Less than 1,250 hours in past 12 months ({hours_worked_12mo:.0f} hours)"
@@ -143,14 +150,18 @@ class LeaveEligibilityService:
                 months_employed = delta.days / 30.44
 
             twelve_months_ago = today - timedelta(days=365)
-            hours_row = await conn.fetchrow(
-                """SELECT COALESCE(SUM(hours_worked), 0) AS total_hours
-                   FROM employee_hours_log
-                   WHERE employee_id = $1
-                     AND period_start >= $2""",
-                employee_id, twelve_months_ago,
-            )
-            hours_worked = float(hours_row["total_hours"])
+            try:
+                hours_row = await conn.fetchrow(
+                    """SELECT COALESCE(SUM(hours_worked), 0) AS total_hours
+                       FROM employee_hours_log
+                       WHERE employee_id = $1
+                         AND period_start >= $2""",
+                    employee_id, twelve_months_ago,
+                )
+                hours_worked = float(hours_row["total_hours"])
+            except Exception:
+                logger.warning("employee_hours_log query failed for %s — defaulting to 0 hours", employee_id)
+                hours_worked = 0.0
 
             company_count = await conn.fetchval(
                 """SELECT COUNT(*) FROM employees
@@ -219,10 +230,90 @@ class LeaveEligibilityService:
 
             return {"state": work_state, "programs": programs}
 
+    @staticmethod
+    async def ensure_leave_data():
+        """Lazily backfill leave data from leave_jurisdiction_rules into
+        jurisdiction_requirements if no leave rows exist yet.  Runs once per
+        process lifetime."""
+        global _leave_data_checked
+        if _leave_data_checked:
+            return
+        _leave_data_checked = True
+
+        try:
+            async with get_connection() as conn:
+                has_leave = await conn.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM jurisdiction_requirements WHERE category = 'leave')"
+                )
+                if has_leave:
+                    return
+
+                # Check if source table exists
+                has_source = await conn.fetchval(
+                    "SELECT to_regclass('public.leave_jurisdiction_rules') IS NOT NULL"
+                )
+                if not has_source:
+                    logger.info("No leave_jurisdiction_rules table — skipping backfill")
+                    return
+
+                # Ensure state-level jurisdiction rows exist
+                await conn.execute("""
+                    INSERT INTO jurisdictions (city, state)
+                    SELECT DISTINCT '', UPPER(ljr.state)
+                    FROM leave_jurisdiction_rules ljr
+                    WHERE ljr.state != 'US'
+                    ON CONFLICT (city, state) DO NOTHING
+                """)
+
+                await conn.execute("""
+                    INSERT INTO jurisdiction_requirements
+                        (jurisdiction_id, requirement_key, category,
+                         jurisdiction_level, jurisdiction_name,
+                         title, description, current_value, numeric_value,
+                         source_url, last_verified_at)
+                    SELECT
+                        j.id,
+                        ljr.leave_program,
+                        'leave',
+                        CASE WHEN ljr.state = 'US' THEN 'federal' ELSE 'state' END,
+                        CASE WHEN ljr.state = 'US' THEN 'Federal' ELSE ljr.state END,
+                        ljr.program_label,
+                        json_build_object(
+                            'paid', ljr.paid,
+                            'max_weeks', ljr.max_weeks,
+                            'wage_pct', ljr.wage_replacement_pct,
+                            'job_prot', ljr.job_protection,
+                            'emp_min', ljr.employer_size_threshold,
+                            'tenure_mo', ljr.employee_tenure_months,
+                            'hrs_min', ljr.employee_hours_threshold
+                        )::TEXT,
+                        LEFT(
+                            CONCAT_WS(', ',
+                                CASE WHEN ljr.max_weeks IS NOT NULL
+                                     THEN ljr.max_weeks || ' weeks' END,
+                                CASE WHEN ljr.wage_replacement_pct IS NOT NULL
+                                     THEN ljr.wage_replacement_pct || '% pay' END,
+                                CASE WHEN ljr.job_protection THEN 'job protected' END,
+                                CASE WHEN ljr.paid THEN 'paid' END
+                            ), 100
+                        ),
+                        ljr.max_weeks,
+                        ljr.source_url,
+                        COALESCE(ljr.last_verified_at, NOW())
+                    FROM leave_jurisdiction_rules ljr
+                    JOIN jurisdictions j ON j.state = UPPER(ljr.state) AND j.city = ''
+                    WHERE ljr.state != 'US'
+                    ON CONFLICT (jurisdiction_id, requirement_key) DO NOTHING
+                """)
+                logger.info("Backfilled leave data from leave_jurisdiction_rules → jurisdiction_requirements")
+        except Exception:
+            logger.exception("Failed to ensure leave data — eligibility may be incomplete")
+
     async def get_eligibility_summary(self, employee_id: UUID) -> dict:
         """
         Combines FMLA + state programs into one response.
         """
+        await self.ensure_leave_data()
         fmla = await self.check_fmla_eligibility(employee_id)
         state = await self.check_state_programs(employee_id)
 

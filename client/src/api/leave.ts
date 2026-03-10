@@ -187,7 +187,7 @@ export const leaveApi = {
 
   getEmployeeLeaveHistory: (employeeId: string, status?: string) => {
     const query = status ? `?status=${encodeURIComponent(status)}` : '';
-    return requestWithAuth<LeaveRequestAdmin[]>(`/api/employees/leave/employees/${employeeId}/requests${query}`);
+    return requestWithAuth<LeaveRequestAdmin[]>(`/api/employees/leave/${employeeId}/requests${query}`);
   },
 
   placeOnLeave: (employeeId: string, payload: PlaceOnLeavePayload) =>

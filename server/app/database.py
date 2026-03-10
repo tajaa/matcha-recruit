@@ -2697,6 +2697,29 @@ async def init_db():
             ON CONFLICT (jurisdiction_id, requirement_key) DO NOTHING
         """)
 
+        # Employee hours log (needed by leave eligibility checks)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS employee_hours_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                org_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                period_start DATE NOT NULL,
+                period_end DATE NOT NULL,
+                hours_worked DECIMAL(8,2) NOT NULL,
+                source VARCHAR(30) DEFAULT 'manual',
+                created_at TIMESTAMP DEFAULT NOW(),
+                CONSTRAINT check_hours_source CHECK (
+                    source IN ('manual', 'payroll_import', 'time_clock')
+                ),
+                CONSTRAINT uq_hours_log_employee_period
+                    UNIQUE(employee_id, period_start, period_end)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_employee_hours_log_employee_id
+                ON employee_hours_log(employee_id)
+        """)
+
         # Leave backfill from leave_jurisdiction_rules is handled by Alembic migration
         # y7z8a9b0c1d2_backfill_leave_jurisdiction_requirements.py
 
