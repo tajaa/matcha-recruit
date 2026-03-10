@@ -21,6 +21,14 @@ class ComplianceCategory(str, Enum):
     leave = "leave"
     workplace_safety = "workplace_safety"
     anti_discrimination = "anti_discrimination"
+    hipaa_privacy = "hipaa_privacy"
+    billing_integrity = "billing_integrity"
+    clinical_safety = "clinical_safety"
+    healthcare_workforce = "healthcare_workforce"
+    corporate_integrity = "corporate_integrity"
+    research_consent = "research_consent"
+    state_licensing = "state_licensing"
+    emergency_preparedness = "emergency_preparedness"
 
 
 class JurisdictionLevel(str, Enum):

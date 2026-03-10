@@ -56,6 +56,38 @@ CATEGORY_SEARCH_STRATEGIES = {
         "search_guidance": "Check state civil rights commission/human rights agency. Look for protected classes beyond federal, training mandates, and pay equity laws.",
         "preferred_source_types": [".gov", "state civil rights commission", "state human rights"],
     },
+    "hipaa_privacy": {
+        "search_guidance": "Check HHS.gov for HIPAA Privacy/Security Rules and HITECH breach notification. Search state attorney general for state health privacy laws exceeding HIPAA.",
+        "preferred_source_types": [".gov", "hhs.gov", "state attorney general"],
+    },
+    "billing_integrity": {
+        "search_guidance": "Check OIG.hhs.gov for Anti-Kickback Statute and False Claims Act guidance. Search CMS.gov for Medicare/Medicaid billing requirements and Stark Law.",
+        "preferred_source_types": [".gov", "oig.hhs.gov", "cms.gov"],
+    },
+    "clinical_safety": {
+        "search_guidance": "Check CMS.gov for Conditions of Participation. Search OSHA for bloodborne pathogens (29 CFR 1910.1030). Check Joint Commission standards and state health department for infection control.",
+        "preferred_source_types": [".gov", "cms.gov", "osha.gov", "jointcommission.org"],
+    },
+    "healthcare_workforce": {
+        "search_guidance": "Check state medical/nursing board for credentialing and scope of practice. Search OIG exclusion list (LEIE). Check state mandatory reporter laws.",
+        "preferred_source_types": [".gov", "state medical board", "oig.hhs.gov"],
+    },
+    "corporate_integrity": {
+        "search_guidance": "Check OIG.hhs.gov for compliance program guidance and corporate integrity agreements. Search for state whistleblower/qui tam protections.",
+        "preferred_source_types": [".gov", "oig.hhs.gov", "state attorney general"],
+    },
+    "research_consent": {
+        "search_guidance": "Check HHS.gov OHRP for IRB oversight and Common Rule. Search FDA.gov for investigational regs and 21 CFR Part 11. Check state informed consent laws.",
+        "preferred_source_types": [".gov", "hhs.gov", "fda.gov"],
+    },
+    "state_licensing": {
+        "search_guidance": "Check state health department for facility licensure requirements. Search state medical/nursing boards for provider licensing. Check state telehealth practice laws.",
+        "preferred_source_types": [".gov", "state health department", "state medical board"],
+    },
+    "emergency_preparedness": {
+        "search_guidance": "Check CMS.gov for EMTALA requirements and emergency preparedness rule. Search state health department for emergency management requirements.",
+        "preferred_source_types": [".gov", "cms.gov", "state health department"],
+    },
 }
 
 # States with well-structured government data portals

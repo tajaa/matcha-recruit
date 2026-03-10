@@ -34,6 +34,14 @@ VALID_CATEGORIES = {
     "workplace_safety",
     "workers_comp",
     "anti_discrimination",
+    "hipaa_privacy",
+    "billing_integrity",
+    "clinical_safety",
+    "healthcare_workforce",
+    "corporate_integrity",
+    "research_consent",
+    "state_licensing",
+    "emergency_preparedness",
 }
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
 VALID_RATE_TYPES = {
@@ -87,6 +95,29 @@ _CATEGORY_ALIASES = {
     "pay_equity": "anti_discrimination",
     "ada": "anti_discrimination",
     "ada_accommodations": "anti_discrimination",
+    # Healthcare categories
+    "hipaa": "hipaa_privacy",
+    "hipaa_security": "hipaa_privacy",
+    "hitech": "hipaa_privacy",
+    "phi": "hipaa_privacy",
+    "false_claims": "billing_integrity",
+    "anti_kickback": "billing_integrity",
+    "stark_law": "billing_integrity",
+    "medicare_billing": "billing_integrity",
+    "joint_commission": "clinical_safety",
+    "cms_conditions": "clinical_safety",
+    "infection_control": "clinical_safety",
+    "bloodborne_pathogens": "clinical_safety",
+    "credentialing": "healthcare_workforce",
+    "oig_exclusion": "healthcare_workforce",
+    "mandatory_reporter": "healthcare_workforce",
+    "oig_compliance": "corporate_integrity",
+    "qui_tam": "corporate_integrity",
+    "irb": "research_consent",
+    "gcp": "research_consent",
+    "facility_licensure": "state_licensing",
+    "telehealth": "state_licensing",
+    "emtala": "emergency_preparedness",
 }
 
 _JURISDICTION_LEVEL_ALIASES = {
@@ -237,6 +268,26 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
             # Preserve original description — do NOT overwrite with JSON meta
         if meta.get("max_weeks"):
             normalized["numeric_value"] = meta["max_weeks"]
+
+    # Auto-tag healthcare categories with applicable_industries
+    _HEALTHCARE_CATEGORIES = {
+        "hipaa_privacy", "billing_integrity", "clinical_safety",
+        "healthcare_workforce", "corporate_integrity", "research_consent",
+        "state_licensing", "emergency_preparedness",
+    }
+    if normalized.get("category") in _HEALTHCARE_CATEGORIES:
+        if not normalized.get("applicable_industries"):
+            normalized["applicable_industries"] = ["healthcare"]
+
+    # Clamp numeric_value to fit DECIMAL(10,4) — max absolute value 999999.9999
+    nv = normalized.get("numeric_value")
+    if nv is not None:
+        try:
+            nv = float(nv)
+            if abs(nv) >= 1_000_000:
+                normalized["numeric_value"] = None
+        except (TypeError, ValueError):
+            normalized["numeric_value"] = None
 
     rwp = normalized.get("requires_written_policy")
     if isinstance(rwp, str):
@@ -455,6 +506,70 @@ employer size thresholds for state law applicability, harassment prevention trai
 pay equity/transparency laws, reasonable accommodation requirements (disability, pregnancy, religion),
 mandatory anti-harassment policy requirements, and complaint filing agencies/deadlines.
 Do NOT duplicate federal Title VII or ADA — focus on state and local additions.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "hipaa_privacy": """Research HIPAA PRIVACY AND SECURITY requirements as they apply in this jurisdiction.
+Cover: HIPAA Privacy Rule (45 CFR Part 164 Subpart E), HIPAA Security Rule (45 CFR Part 164 Subpart C),
+HITECH Act breach notification requirements (timing, state AG notification),
+and any STATE health privacy laws that EXCEED federal HIPAA protections
+(e.g., CA CMIA, TX HB 300, NY SHIELD Act health data provisions).
+Include state-specific breach notification timelines if shorter than HIPAA's 60-day window.
+Include penalties for non-compliance at both federal and state levels.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "billing_integrity": """Research BILLING AND FINANCIAL INTEGRITY requirements for healthcare entities in this jurisdiction.
+Cover: Federal False Claims Act (31 U.S.C. §§ 3729–3733), Anti-Kickback Statute (42 U.S.C. § 1320a-7b),
+Physician Self-Referral Law (Stark Law, 42 U.S.C. § 1395nn), Medicare/Medicaid billing requirements,
+and any STATE false claims acts, anti-kickback laws, or fee-splitting prohibitions.
+Include state-specific billing fraud statutes and qui tam provisions.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "clinical_safety": """Research CLINICAL AND PATIENT SAFETY requirements for healthcare facilities in this jurisdiction.
+Cover: CMS Conditions of Participation (42 CFR Parts 482-485), Joint Commission accreditation standards,
+medication management and DEA controlled substance requirements,
+OSHA Bloodborne Pathogens Standard (29 CFR 1910.1030), infection control and prevention requirements,
+and any STATE patient safety reporting requirements (e.g., adverse event reporting, sentinel events).
+Include state health department inspection and survey requirements.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "healthcare_workforce": """Research HEALTHCARE WORKFORCE compliance requirements in this jurisdiction.
+Cover: provider credentialing and privileging requirements, OIG List of Excluded Individuals/Entities (LEIE) screening obligations,
+mandatory reporter obligations (child abuse, elder abuse, domestic violence),
+healthcare-specific labor rules (nurse staffing ratios, mandatory overtime bans for healthcare workers),
+and state-specific scope-of-practice rules for nurses, PAs, and allied health.
+Include frequency requirements for OIG exclusion screening and credentialing verification.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "corporate_integrity": """Research CORPORATE INTEGRITY AND ETHICS requirements for healthcare organizations in this jurisdiction.
+Cover: OIG Compliance Program Guidance for hospitals/healthcare entities,
+corporate integrity agreement (CIA) common requirements, code of conduct mandates,
+conflict of interest disclosure requirements, whistleblower protections and qui tam provisions
+(federal False Claims Act qui tam + state equivalents),
+and any STATE healthcare compliance program requirements.
+Include state-specific whistleblower protections for healthcare workers.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "research_consent": """Research RESEARCH AND INFORMED CONSENT requirements in this jurisdiction.
+Cover: IRB oversight requirements (45 CFR Part 46 — Common Rule), Good Clinical Practice (ICH-GCP) standards,
+FDA investigational regulations (21 CFR Parts 50, 56, 312, 812),
+21 CFR Part 11 (electronic records/signatures), and any STATE-specific informed consent requirements,
+research subject protections, or bioethics laws that exceed federal standards.
+Include state requirements for genetic testing consent and biospecimen research.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "state_licensing": """Research STATE LICENSING AND SCOPE OF PRACTICE requirements for healthcare in this jurisdiction.
+Cover: facility licensure requirements (hospitals, clinics, ASCs, nursing facilities),
+provider licensing and renewal requirements (physicians, nurses, allied health),
+telehealth and cross-state practice regulations (interstate compacts like IMLC, NLC),
+and any recent changes to scope-of-practice laws (e.g., NP independent practice authority).
+Include state health department facility licensing categories and renewal timelines.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "emergency_preparedness": """Research EMERGENCY PREPAREDNESS requirements for healthcare facilities in this jurisdiction.
+Cover: EMTALA (Emergency Medical Treatment and Labor Act, 42 U.S.C. § 1395dd) — screening, stabilization, and transfer requirements;
+CMS Emergency Preparedness Rule (42 CFR § 482.15) — emergency plan, communication plan, policies/procedures, training/testing;
+and any STATE-specific emergency preparedness requirements for healthcare facilities.
+Include penalties for EMTALA violations and state emergency management mandates.
 Set current_value to a SHORT summary (under 80 chars).""",
     }
 
@@ -813,10 +928,10 @@ class GeminiComplianceService:
                 print(f"[Gemini Compliance] {category} error: {e}")
                 return []
 
-        # Run categories in parallel, but throttle concurrency for heavy (pro) model to
-        # avoid hammering Google's quota with all requests at the exact same millisecond.
+        # Run categories in parallel with throttled concurrency to avoid
+        # overwhelming Gemini API quota (especially with 20 categories).
         mode = await get_jurisdiction_research_model_mode()
-        concurrency = 4 if mode == "heavy" else len(selected_categories)
+        concurrency = 4 if mode == "heavy" else min(6, len(selected_categories))
         semaphore = asyncio.Semaphore(concurrency)
 
         async def research_category_throttled(category: str) -> List[Dict]:

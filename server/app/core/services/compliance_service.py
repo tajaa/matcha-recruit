@@ -74,6 +74,20 @@ REQUIRED_LABOR_CATEGORIES = {
     "anti_discrimination",
 }
 
+# Healthcare categories are researched via a background Celery worker to
+# avoid blocking the SSE stream. They're stored in jurisdiction_requirements
+# with applicable_industries=["healthcare"] and filtered at sync time.
+HEALTHCARE_CATEGORIES = {
+    "hipaa_privacy",
+    "billing_integrity",
+    "clinical_safety",
+    "healthcare_workforce",
+    "corporate_integrity",
+    "research_consent",
+    "state_licensing",
+    "emergency_preparedness",
+}
+
 # Map free-text company.industry values to canonical industry profile names.
 # Reuses the same aliases as handbook_service.GUIDED_INDUSTRY_ALIASES.
 _INDUSTRY_ALIASES: Dict[str, str] = {
@@ -6177,6 +6191,20 @@ async def research_jurisdiction_repo_only(
                     "type": "warning",
                     "message": f"Industry-specific research failed for {canonical}: {e}",
                 }
+
+        # --- Dispatch healthcare research to background worker ---
+        try:
+            from ...workers.tasks.healthcare_research import run_healthcare_research
+            run_healthcare_research.delay(str(jurisdiction_id))
+            yield {
+                "type": "repository_refresh",
+                "message": f"Healthcare compliance research queued in background for {location_name}.",
+            }
+        except Exception as e:
+            yield {
+                "type": "warning",
+                "message": f"Could not queue healthcare research (worker may be offline): {e}",
+            }
 
         yield {
             "type": "complete",

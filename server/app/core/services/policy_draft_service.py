@@ -27,19 +27,19 @@ POLICY_TYPES = [
     {"value": "pay_practices", "label": "Pay Practices and Payday", "categories": ["pay_frequency", "final_pay", "minimum_wage"]},
     {"value": "scheduling", "label": "Scheduling and Reporting Time", "categories": ["scheduling_reporting"]},
     {"value": "youth_employment", "label": "Youth Employment / Minor Work", "categories": ["minor_work_permit"]},
-    {"value": "anti_harassment", "label": "Anti-Harassment and Anti-Discrimination", "categories": []},
-    {"value": "workplace_safety", "label": "Workplace Health and Safety", "categories": []},
+    {"value": "anti_harassment", "label": "Anti-Harassment and Anti-Discrimination", "categories": ["anti_discrimination"]},
+    {"value": "workplace_safety", "label": "Workplace Health and Safety", "categories": ["workplace_safety"]},
     {"value": "remote_work", "label": "Remote Work / Telecommuting", "categories": []},
     {"value": "drug_alcohol", "label": "Drug and Alcohol", "categories": []},
     {"value": "attendance", "label": "Attendance and Punctuality", "categories": []},
     {"value": "code_of_conduct", "label": "Code of Conduct", "categories": []},
     {"value": "whistleblower", "label": "Whistleblower Protection", "categories": []},
     # Healthcare-specific policy types
-    {"value": "hipaa_privacy", "label": "HIPAA Privacy and Security", "categories": [], "industries": ["healthcare"]},
-    {"value": "bloodborne_pathogens", "label": "Bloodborne Pathogens Exposure Control", "categories": [], "industries": ["healthcare"]},
-    {"value": "credentialing", "label": "Credentialing and Licensure Verification", "categories": [], "industries": ["healthcare"]},
-    {"value": "patient_safety", "label": "Patient Safety and Incident Reporting", "categories": [], "industries": ["healthcare"]},
-    {"value": "infection_control", "label": "Infection Control and PPE", "categories": [], "industries": ["healthcare"]},
+    {"value": "hipaa_privacy", "label": "HIPAA Privacy and Security", "categories": ["hipaa_privacy"], "industries": ["healthcare"]},
+    {"value": "bloodborne_pathogens", "label": "Bloodborne Pathogens Exposure Control", "categories": ["clinical_safety"], "industries": ["healthcare"]},
+    {"value": "credentialing", "label": "Credentialing and Licensure Verification", "categories": ["healthcare_workforce"], "industries": ["healthcare"]},
+    {"value": "patient_safety", "label": "Patient Safety and Incident Reporting", "categories": ["clinical_safety"], "industries": ["healthcare"]},
+    {"value": "infection_control", "label": "Infection Control and PPE", "categories": ["clinical_safety"], "industries": ["healthcare"]},
 ]
 
 # Map free-text industry values to canonical names for filtering.
@@ -223,6 +223,11 @@ async def generate_policy_draft_stream(
                 jurisdiction_id,
             )
 
+            # Filter out industry-specific requirements that don't apply
+            reqs = [r for r in reqs
+                    if not r.get("applicable_industries")
+                    or (canonical_industry and canonical_industry in [i.lower() for i in r["applicable_industries"]])]
+
             if related_categories:
                 reqs = [r for r in reqs if r["category"] in related_categories]
 
@@ -282,7 +287,7 @@ async def generate_policy_draft_stream(
 
 ## Locations Covered
 {', '.join(location_summaries)}
-{jurisdiction_context}{additional}{industry_prompt_context}
+{jurisdiction_context}{additional}{industry_prompt_context if policy_config.get("industries") else ""}
 ## Instructions
 1. Write a complete, professional policy document in Markdown format.
 2. Include standard sections: Purpose, Scope, Definitions (if needed), Policy Statement, Procedures, and Compliance.

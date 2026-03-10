@@ -34,6 +34,7 @@ celery_app = Celery(
         "app.workers.tasks.project_close",
         "app.workers.tasks.handbook_freshness",
         "app.workers.tasks.risk_assessment",
+        "app.workers.tasks.healthcare_research",
     ],
 )
 

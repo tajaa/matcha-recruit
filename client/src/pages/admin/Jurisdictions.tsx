@@ -67,9 +67,22 @@ const categoryLabel: Record<string, string> = {
   business_license: 'Business License',
   tax_rate: 'Tax Rate',
   posting_requirements: 'Posting Reqs',
+  hipaa_privacy: 'HIPAA Privacy & Security',
+  billing_integrity: 'Billing & Financial Integrity',
+  clinical_safety: 'Clinical & Patient Safety',
+  healthcare_workforce: 'Healthcare Workforce',
+  corporate_integrity: 'Corporate Integrity & Ethics',
+  research_consent: 'Research & Informed Consent',
+  state_licensing: 'State Licensing & Scope',
+  emergency_preparedness: 'Emergency Preparedness',
 };
 
-const medicalCategories = new Set(['workers_comp', 'workplace_safety']);
+const medicalCategories = new Set([
+  'workers_comp', 'workplace_safety',
+  'hipaa_privacy', 'billing_integrity', 'clinical_safety',
+  'healthcare_workforce', 'corporate_integrity', 'research_consent',
+  'state_licensing', 'emergency_preparedness',
+]);
 
 const levelColor: Record<string, string> = {
   city: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
