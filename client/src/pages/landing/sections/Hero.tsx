@@ -10,34 +10,42 @@ const ParticleSphere = lazy(() => import("../../../components/ParticleSphere"));
 
 const MATRIX_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZｦｧｨｩｪｫｬｭｮｯｰｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉﾊﾋﾌﾍﾎﾏﾐﾑﾒﾓﾔﾕﾖﾗﾘﾙﾚﾛﾜﾝ0123456789!@#$%&';
 
-function GlitchText({ text, className, style }: { text: string; className?: string; style?: React.CSSProperties }) {
+function GlitchText({ text, cycleWords, className, style }: { text: string; cycleWords?: string[]; className?: string; style?: React.CSSProperties }) {
   const [chars, setChars] = useState<string[]>(() =>
     text.split('').map(c => (c === ' ' || c === '.') ? c : MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)])
   );
   const [isGlitching, setIsGlitching] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const currentDisplayRef = useRef(text);
 
-  // Decode left-to-right on mount
-  useEffect(() => {
-    const textArr = text.split('');
-    let revealProgress = 0;
+  const decodeInto = (target: string, onDone: () => void) => {
+    const targetArr = target.split('');
+    let progress = 0;
     const decode = setInterval(() => {
       setChars(prev =>
         prev.map((_, i) => {
-          if (textArr[i] === ' ' || textArr[i] === '.') return textArr[i];
-          if (i < revealProgress) return textArr[i];
+          const t = targetArr[i] ?? ' ';
+          if (t === ' ' || t === '.') return t;
+          if (i < progress) return t;
           return MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)];
         })
       );
-      revealProgress += 0.4;
-      if (revealProgress >= textArr.length) {
+      progress += 0.5;
+      if (progress >= targetArr.length) {
         clearInterval(decode);
-        setChars(textArr);
+        setChars(targetArr);
+        currentDisplayRef.current = target;
+        onDone();
       }
     }, 45);
-    return () => clearInterval(decode);
-  }, [text]);
+  };
+
+  // Decode left-to-right on mount
+  useEffect(() => {
+    decodeInto(text, () => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Periodic glitch — paused when off-screen
   const { ref: glitchRef, isVisible: glitchVisible } = useInViewport();
@@ -45,35 +53,55 @@ function GlitchText({ text, className, style }: { text: string; className?: stri
   glitchVisibleRef.current = glitchVisible;
 
   useEffect(() => {
-    const scheduleGlitch = () => {
-      timeoutRef.current = setTimeout(() => {
-        if (!glitchVisibleRef.current) { scheduleGlitch(); return; }
-        setIsGlitching(true);
-        let ticks = 0;
-        const maxTicks = 7 + Math.floor(Math.random() * 8);
-        intervalRef.current = setInterval(() => {
-          setChars(
-            text.split('').map(c => {
-              if (c === ' ' || c === '.') return c;
-              return Math.random() > 0.35 ? c : MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)];
-            })
-          );
-          ticks++;
-          if (ticks >= maxTicks) {
-            clearInterval(intervalRef.current!);
-            setChars(text.split(''));
-            setIsGlitching(false);
-            scheduleGlitch();
-          }
-        }, 55);
-      }, 2800 + Math.random() * 4000);
+    const allPhrases = cycleWords ? [...cycleWords, text] : [text];
+    let phraseIndex = 0;
+
+    const runGlitchThenDecode = (target: string, onDone: () => void) => {
+      setIsGlitching(true);
+      let ticks = 0;
+      const maxTicks = 5 + Math.floor(Math.random() * 5);
+      intervalRef.current = setInterval(() => {
+        const src = currentDisplayRef.current;
+        setChars(
+          Array.from({ length: Math.max(src.length, target.length) }, (_, i) => {
+            const c = src[i] ?? ' ';
+            if (c === ' ' || c === '.') return c;
+            return Math.random() > 0.35 ? c : MATRIX_CHARS[Math.floor(Math.random() * MATRIX_CHARS.length)];
+          })
+        );
+        ticks++;
+        if (ticks >= maxTicks) {
+          clearInterval(intervalRef.current!);
+          setIsGlitching(false);
+          decodeInto(target, onDone);
+        }
+      }, 55);
     };
-    scheduleGlitch();
+
+    const scheduleNext = () => {
+      const delay = phraseIndex === 0 ? 2800 + Math.random() * 4000 : 900 + Math.random() * 600;
+      timeoutRef.current = setTimeout(() => {
+        if (!glitchVisibleRef.current) { scheduleNext(); return; }
+        const target = allPhrases[phraseIndex % allPhrases.length];
+        phraseIndex++;
+        runGlitchThenDecode(target, () => {
+          if (phraseIndex < allPhrases.length) {
+            scheduleNext();
+          } else {
+            phraseIndex = 0;
+            scheduleNext();
+          }
+        });
+      }, delay);
+    };
+
+    scheduleNext();
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [text]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [text, cycleWords]);
 
   return (
     <span
@@ -134,8 +162,8 @@ export const Hero = ({ onContactClick }: HeroProps) => {
       <AsciiHalftone />
 
       <div className="relative z-10 w-full max-w-[1600px] mx-auto grid lg:grid-cols-[1fr_0.8fr] gap-12 items-center">
-        <div className="flex flex-col items-start relative z-10 py-20">
-          <m.div variants={itemVariants} className="flex items-center gap-4">
+        <div className="flex flex-col items-center lg:items-start relative z-10 py-20 text-center lg:text-left">
+          <m.div variants={itemVariants} className="flex items-center gap-4 justify-center lg:justify-start">
             <TelemetryBadge text="System Core // Offline Mode" active={false} />
             <div className="h-px w-8 bg-black/10" />
             <TechnicalSpecs 
@@ -159,6 +187,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
               </span>
               <GlitchText
                 text="Intelligence."
+                cycleWords={["Compliance.", "Risk Assessment.", "Risk Management."]}
                 className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] italic font-light text-zinc-700"
                 style={{
                   fontFamily: fonts.serif,
@@ -174,7 +203,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
                 Increase your <span className="text-amber-700">signal to noise ratio</span>.
               </p>
             
-            <div className="flex flex-wrap gap-6 pt-2">
+            <div className="flex flex-wrap gap-6 pt-2 justify-center lg:justify-start">
               <button
                 onClick={onContactClick}
                 className="group relative px-10 py-4 bg-zinc-900 text-white text-[10px] font-mono uppercase tracking-[0.3em] font-bold overflow-hidden border border-zinc-900"
@@ -193,7 +222,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
           initial={{ opacity: 0, scale: 0.9, x: 20 }}
           animate={{ opacity: 1, scale: 1, x: 0 }}
           transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1], delay: 0.4 }}
-          className="relative h-[38vh] lg:h-[66vh] w-full flex items-center justify-center z-0 group overflow-hidden"
+          className="hidden lg:flex relative h-[66vh] w-full items-center justify-center z-0 group overflow-hidden"
         >
           <Suspense
             fallback={
