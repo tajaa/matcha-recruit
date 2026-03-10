@@ -152,7 +152,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
           <div className="mt-10 rounded-xl backdrop-blur-sm px-6 py-5 -mx-6 w-fit shadow-[0_8px_32px_rgba(0,0,0,0.08)]">
             <m.h1 variants={itemVariants} className="leading-[0.9] tracking-[-0.04em] mix-blend-darken max-w-2xl">
               <span
-                className="block text-[1.875rem] md:text-[3rem] lg:text-[3.75rem] font-bold uppercase text-zinc-900"
+                className="block text-[1.875rem] md:text-[3rem] lg:text-[3.75rem] font-bold uppercase text-zinc-800"
                 style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
               >
                 Workforce
@@ -171,7 +171,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
                 className="text-zinc-900 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap"
                 style={{ fontFamily: fonts.sans }}
               >
-                Increase your <span className="text-amber-600">signal to noise ratio</span>.
+                Increase your <span className="text-amber-700">signal to noise ratio</span>.
               </p>
             
             <div className="flex flex-wrap gap-6 pt-2">
