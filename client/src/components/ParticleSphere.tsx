@@ -133,7 +133,7 @@ export function ParticleSphere({
       const phi = Math.acos(1 - 2 * (i + 0.5) / particleCount);
       const theta = Math.PI * (1 + Math.sqrt(5)) * (i + 0.5);
 
-      const radius = 1;
+      const radius = 1.15;
       positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
       positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
       positions[i * 3 + 2] = radius * Math.cos(phi);
@@ -206,18 +206,29 @@ export function ParticleSphere({
     sphereGroup.add(particles);
 
     // Add wireframe sphere for structure hint
-    const wireGeometry = new THREE.SphereGeometry(1.02, 64, 64); // Increased segments for a denser grid
+    const wireGeometry = new THREE.SphereGeometry(1.17, 64, 64);
     const wireMaterial = new THREE.MeshBasicMaterial({
-      color: 0x3f3f46, // zinc-700 for more presence
+      color: 0x3f3f46, // zinc-700
       wireframe: true,
       transparent: true,
-      opacity: 0.2 // Slightly more opaque
+      opacity: 0.2
     });
     const wireSphere = new THREE.Mesh(wireGeometry, wireMaterial);
     sphereGroup.add(wireSphere);
 
+    // Add a second, smaller internal wireframe to "fill up" the internal space
+    const innerWireGeometry = new THREE.SphereGeometry(0.85, 32, 32);
+    const innerWireMaterial = new THREE.MeshBasicMaterial({
+      color: 0x52525b, // zinc-600
+      wireframe: true,
+      transparent: true,
+      opacity: 0.1
+    });
+    const innerWireSphere = new THREE.Mesh(innerWireGeometry, innerWireMaterial);
+    sphereGroup.add(innerWireSphere);
+
     // Add glow ring around equator
-    const ringGeometry = new THREE.RingGeometry(1.15, 1.18, 64);
+    const ringGeometry = new THREE.RingGeometry(1.35, 1.38, 64);
     const ringMaterial = new THREE.MeshBasicMaterial({
       color: 0x71717a, // zinc-500
       transparent: true,
@@ -249,9 +260,9 @@ export function ParticleSphere({
 
     if (showCityMarkers) {
       cityMarkers.forEach((city, index) => {
-        const normal = latLonToVector3(city.lat, city.lon, 1).normalize();
-        const markerPosition = normal.clone().multiplyScalar(1.03);
-        const labelAnchor = normal.clone().multiplyScalar(1.35);
+        const normal = latLonToVector3(city.lat, city.lon, 1.15).normalize();
+        const markerPosition = normal.clone().multiplyScalar(1.18);
+        const labelAnchor = normal.clone().multiplyScalar(1.45);
 
         const dotMaterial = new THREE.MeshBasicMaterial({
           color: 0x3f3f46, // zinc-700
@@ -272,8 +283,8 @@ export function ParticleSphere({
         markersGroup.add(pulse);
 
         const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-          normal.clone().multiplyScalar(1.06),
-          normal.clone().multiplyScalar(1.25)
+          normal.clone().multiplyScalar(1.2),
+          normal.clone().multiplyScalar(1.4)
         ]);
         const lineMaterial = new THREE.LineBasicMaterial({
           color: 0xd4d4d8, // zinc-300
@@ -428,7 +439,7 @@ export function ParticleSphere({
 
       {/* Glow effect behind sphere */}
       <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-        <div className="w-[60%] h-[60%] rounded-full bg-zinc-500/5 blur-[60px]" />
+        <div className="w-[60%] h-[60%] rounded-full bg-matcha-500/10 blur-[60px]" />
       </div>
     </div>
   );
