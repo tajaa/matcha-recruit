@@ -152,7 +152,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
           <m.h1 variants={itemVariants} className="mt-10 leading-[0.9] tracking-[-0.04em] mix-blend-darken max-w-2xl">
             <span
               className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] font-bold uppercase text-zinc-900"
-              style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
+              style={{ fontFamily: fonts.display, letterSpacing: '0.05em', WebkitTextStroke: '2px white' }}
             >
               Workforce
             </span>
