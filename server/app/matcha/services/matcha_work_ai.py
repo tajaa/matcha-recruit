@@ -111,6 +111,8 @@ Supported skills:
   Step 2: Ask which locations/states the policy should cover.
     If Compliance Locations are listed in the company profile, present them as options.
     The user can pick from those or add new ones.
+    If the user says "all company locations", "all jurisdictions", or equivalent,
+    set policy_location_names to every active Compliance Location in the company profile.
   Step 3: Ask if there are any company-specific details to incorporate
     (e.g. "we offer unlimited PTO", "our standard workweek is 4 days").
     Reference the jurisdiction data to flag potential conflicts — e.g. "Note: CA mandates

@@ -14,6 +14,7 @@ from uuid import UUID
 
 from ...database import get_connection
 from ...config import get_settings
+from ...core.services.compliance_service import get_location_requirements, get_locations
 from ...core.services.email import EmailService
 from ...core.services.storage import get_storage
 
@@ -657,60 +658,74 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
             return {}
         profile = {k: v for k, v in dict(row).items() if v is not None}
 
-        # Load compliance locations and jurisdiction requirements summary
-        loc_rows = await conn.fetch(
-            "SELECT city, state FROM business_locations WHERE company_id = $1 AND is_active = true ORDER BY state, city",
-            company_id,
-        )
-        if loc_rows:
-            profile["compliance_locations"] = ", ".join(
-                f"{r['city']}, {r['state']}" if r.get("city") else r["state"]
-                for r in loc_rows
-            )
-
-            # Build jurisdiction requirements summary grouped by category
-            seen_states = set()
-            req_by_category: dict[str, list[str]] = {}
-            for loc in loc_rows:
-                state = loc["state"]
-                city = loc.get("city")
-
-                # Find jurisdiction — try city-level first, then state-level
-                j_row = None
-                if city:
-                    j_row = await conn.fetchrow(
-                        "SELECT id FROM jurisdictions WHERE state = $1 AND city = $2",
-                        state, city,
-                    )
-                if not j_row:
-                    if state in seen_states:
-                        continue  # already have state-level data
-                    j_row = await conn.fetchrow(
-                        "SELECT id FROM jurisdictions WHERE state = $1 AND (city IS NULL OR city = '')",
-                        state,
-                    )
-                if not j_row:
-                    continue
-                seen_states.add(state)
-
-                reqs = await conn.fetch(
-                    "SELECT category, jurisdiction_name, title, current_value FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
-                    j_row["id"],
-                )
-                for req in reqs:
-                    cat = req["category"]
-                    jname = req["jurisdiction_name"]
-                    val = req["current_value"] or req["title"]
-                    entry = f"{jname}: {val}"
-                    req_by_category.setdefault(cat, []).append(entry)
-
-            if req_by_category:
-                lines = []
-                for cat, entries in sorted(req_by_category.items()):
-                    lines.append(f"  {cat}: {'; '.join(entries)}")
-                profile["jurisdiction_requirements_summary"] = "\n".join(lines)
-
+    # Match the Compliance page's business-specific active locations and filtered requirements.
+    try:
+        locations = [
+            loc for loc in await get_locations(company_id)
+            if loc.get("is_active", True)
+        ]
+    except Exception:
+        logger.warning("Failed to load compliance locations for Matcha Work AI context", exc_info=True)
         return profile
+
+    if not locations:
+        return profile
+
+    def _location_label(loc: dict) -> str:
+        city = (loc.get("city") or "").strip()
+        state = (loc.get("state") or "").strip()
+        return f"{city}, {state}" if city else state
+
+    location_labels = {
+        str(loc["id"]): _location_label(loc)
+        for loc in locations
+        if loc.get("id") and _location_label(loc)
+    }
+    profile["compliance_locations"] = "; ".join(location_labels.values())
+
+    try:
+        requirement_results = await asyncio.gather(
+            *(
+                get_location_requirements(loc["id"], company_id)
+                for loc in locations
+                if loc.get("id")
+            ),
+            return_exceptions=True,
+        )
+    except Exception:
+        logger.warning("Failed to load compliance requirements for Matcha Work AI context", exc_info=True)
+        return profile
+
+    location_lines: list[str] = []
+    scoped_locations = [loc for loc in locations if loc.get("id")]
+    for loc, requirement_result in zip(scoped_locations, requirement_results):
+        if isinstance(requirement_result, Exception):
+            logger.warning(
+                "Failed to load compliance requirements for Matcha Work AI context location %s: %s",
+                loc.get("id"),
+                requirement_result,
+            )
+            continue
+
+        entries: list[str] = []
+        seen_entries: set[str] = set()
+        for req in requirement_result:
+            value = (req.current_value or req.title or "").strip()
+            if not value:
+                continue
+            entry = f"{req.category} ({req.jurisdiction_name}: {value})"
+            if entry in seen_entries:
+                continue
+            seen_entries.add(entry)
+            entries.append(entry)
+
+        if entries:
+            location_lines.append(f"  {location_labels.get(str(loc['id']), _location_label(loc))}: {'; '.join(entries)}")
+
+    if location_lines:
+        profile["jurisdiction_requirements_summary"] = "\n".join(location_lines)
+
+    return profile
 
 
 async def create_thread(
