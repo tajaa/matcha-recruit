@@ -155,18 +155,21 @@ export const Hero = () => {
             </span>
             <GlitchText
               text="Intelligence."
-              className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-amber-600"
+              className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-amber-500"
               style={{ 
                 fontFamily: fonts.serif,
-                WebkitTextStroke: '1px white'
+                WebkitTextStroke: '2px black'
               }}
             />
           </m.h1>
 
           <m.div variants={itemVariants} className="space-y-10 mt-10">
             <p
-              className="text-zinc-800 text-xl md:text-2xl lg:text-3xl font-semibold leading-relaxed max-w-lg"
-              style={{ fontFamily: fonts.sans }}
+              className="text-zinc-900 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap bg-white/50 backdrop-blur-sm px-4 py-2 border border-white/10 shadow-sm"
+              style={{ 
+                fontFamily: fonts.sans,
+                WebkitTextStroke: '0.4px white'
+              }}
             >
               Increase your signal to noise ratio.
             </p>

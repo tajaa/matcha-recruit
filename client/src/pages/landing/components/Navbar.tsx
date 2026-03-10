@@ -14,8 +14,8 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
       <div
         className={`w-full pointer-events-auto flex items-center justify-between px-6 py-3 transition-all duration-500 border-b ${
           scrolled
-            ? "bg-white/90 backdrop-blur-xl border-black/10 shadow-[0_4px_30px_rgba(0,0,0,0.05)]"
-            : "bg-transparent border-transparent"
+            ? "bg-white/60 backdrop-blur-xl border-black/10 shadow-[0_4px_30px_rgba(0,0,0,0.05)]"
+            : "bg-white/25 backdrop-blur-sm border-transparent"
         }`}
       >
         <div className="flex items-center gap-8">
@@ -26,8 +26,8 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
                <div className="w-1.5 h-1.5 bg-black" />
             </div>
             <span 
-              className="font-mono text-3xl font-bold tracking-[0.3em] uppercase text-emerald-400"
-              style={{ WebkitTextStroke: '1px black' }}
+              className="font-mono text-3xl font-bold tracking-[0.3em] uppercase text-emerald-100"
+              style={{ WebkitTextStroke: '2px black' }}
             >
               Matcha
             </span>
