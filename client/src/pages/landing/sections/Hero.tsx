@@ -159,7 +159,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
               </span>
               <GlitchText
                 text="Intelligence."
-                className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-black"
+                className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-amber-600"
                 style={{
                   fontFamily: fonts.serif,
                 }}
@@ -193,7 +193,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
           initial={{ opacity: 0, scale: 0.9, x: 20 }}
           animate={{ opacity: 1, scale: 1, x: 0 }}
           transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1], delay: 0.4 }}
-          className="relative h-[40vh] lg:h-[70vh] w-full flex items-center justify-center z-0 group"
+          className="relative h-[38vh] lg:h-[66vh] w-full flex items-center justify-center z-0 group overflow-hidden"
         >
           <Suspense
             fallback={
@@ -203,7 +203,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
             }
           >
             <ParticleSphere
-              className="w-full h-full scale-90 lg:scale-100 opacity-80"
+              className="w-full h-full scale-[0.875] lg:scale-95 opacity-80"
               showCityMarkers
             />
           </Suspense>
