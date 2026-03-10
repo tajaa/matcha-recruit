@@ -38,6 +38,10 @@ function getThreadTypeLabel(taskType: MWTaskType): string {
       return 'employee onboarding';
     case 'presentation':
       return 'presentation';
+    case 'handbook':
+      return 'employee handbook';
+    case 'policy':
+      return 'policy';
     case 'offer_letter':
     default:
       return 'offer letter';

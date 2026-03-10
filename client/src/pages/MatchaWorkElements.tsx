@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { matchaWork } from '../api/client';
-import type { MWElement, MWThreadStatus } from '../types/matcha-work';
+import type { MWElement, MWTaskType, MWThreadStatus } from '../types/matcha-work';
 
 type StatusFilter = 'all' | MWThreadStatus;
 
@@ -17,6 +17,28 @@ function formatDate(iso: string): string {
     day: 'numeric',
     year: 'numeric',
   });
+}
+
+function getElementTypeLabel(taskType: MWTaskType): string {
+  switch (taskType) {
+    case 'review':
+      return 'anonymized review';
+    case 'workbook':
+      return 'HR workbook';
+    case 'onboarding':
+      return 'employee onboarding';
+    case 'presentation':
+      return 'presentation';
+    case 'handbook':
+      return 'employee handbook';
+    case 'policy':
+      return 'policy';
+    case 'chat':
+      return 'chat';
+    case 'offer_letter':
+    default:
+      return 'offer letter';
+  }
 }
 
 export default function MatchaWorkElements() {
@@ -159,7 +181,7 @@ export default function MatchaWorkElements() {
                   {element.title}
                 </p>
                 <p className="text-xs text-zinc-500 light:text-black/50 mt-0.5">
-                  {element.element_type === 'review' ? 'anonymized review' : element.element_type === 'workbook' ? 'HR workbook' : 'offer letter'} · v{element.version} · Updated{' '}
+                  {getElementTypeLabel(element.element_type)} · v{element.version} · Updated{' '}
                   {formatDate(element.updated_at)}
                 </p>
               </div>

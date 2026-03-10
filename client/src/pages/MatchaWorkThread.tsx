@@ -17,6 +17,7 @@ import { LogoUpload } from '../components/matcha-work/LogoUpload';
 import HandbookDistributeModal from '../components/HandbookDistributeModal';
 
 type Tab = 'chat' | 'preview';
+type PreviewKind = 'offer_letter' | 'presentation' | 'workbook' | 'handbook' | 'policy' | 'onboarding' | 'review' | null;
 
 function toItemList(value: unknown): string[] {
   if (Array.isArray(value)) {
@@ -31,6 +32,98 @@ function toItemList(value: unknown): string[] {
       .filter((item) => item.length > 0);
   }
   return [];
+}
+
+function hasWorkbookState(state?: MWDocumentState | null): boolean {
+  return Boolean(
+    state?.workbook_title ||
+    state?.company_name ||
+    state?.objective ||
+    state?.industry ||
+    (state?.sections && state.sections.length > 0) ||
+    (state?.presentation && state.presentation.slides?.length > 0)
+  );
+}
+
+function hasReviewState(state?: MWDocumentState | null): boolean {
+  return Boolean(
+    state?.review_title ||
+    state?.review_subject ||
+    state?.summary ||
+    state?.context ||
+    state?.next_steps ||
+    toItemList(state?.strengths).length > 0 ||
+    toItemList(state?.growth_areas).length > 0 ||
+    (state?.review_request_statuses && state.review_request_statuses.length > 0)
+  );
+}
+
+function hasOnboardingState(state?: MWDocumentState | null): boolean {
+  return Boolean(
+    (state?.employees && state.employees.length > 0) ||
+    state?.batch_status
+  );
+}
+
+function hasPresentationState(state?: MWDocumentState | null): boolean {
+  return Boolean(
+    state?.presentation_title ||
+    (state?.slides && state.slides.length > 0)
+  );
+}
+
+function hasHandbookState(state?: MWDocumentState | null): boolean {
+  return Boolean(
+    state?.handbook_title ||
+    state?.handbook_sections?.length
+  );
+}
+
+function hasPolicyState(state?: MWDocumentState | null): boolean {
+  return Boolean(
+    state?.policy_title ||
+    state?.policy_type ||
+    state?.policy_status ||
+    state?.policy_additional_context ||
+    state?.policy_content ||
+    state?.policy_id ||
+    (state?.policy_location_names && state.policy_location_names.length > 0) ||
+    (state?.policy_locations && state.policy_locations.length > 0)
+  );
+}
+
+function hasAnyPreviewState(state?: MWDocumentState | null, pdfUrl?: string | null): boolean {
+  return Boolean(
+    pdfUrl ||
+    hasWorkbookState(state) ||
+    hasReviewState(state) ||
+    hasOnboardingState(state) ||
+    hasPresentationState(state) ||
+    hasHandbookState(state) ||
+    hasPolicyState(state)
+  );
+}
+
+function getThreadTypeLabel(taskType: MWThreadDetail['task_type'], isUnscopedChat: boolean): string {
+  if (isUnscopedChat || taskType === 'chat') return 'chat';
+  if (taskType === 'review') return 'review';
+  if (taskType === 'workbook') return 'workbook';
+  if (taskType === 'onboarding') return 'onboarding';
+  if (taskType === 'presentation') return 'presentation';
+  if (taskType === 'handbook') return 'handbook';
+  if (taskType === 'policy') return 'policy';
+  return 'offer letter';
+}
+
+function getPreviewTabLabel(previewKind: PreviewKind): string {
+  if (previewKind === 'offer_letter') return 'Preview';
+  if (previewKind === 'presentation') return 'Presentation';
+  if (previewKind === 'workbook') return 'Workbook';
+  if (previewKind === 'handbook') return 'Handbook';
+  if (previewKind === 'policy') return 'Policy';
+  if (previewKind === 'onboarding') return 'Onboarding';
+  if (previewKind === 'review') return 'Review';
+  return 'Summary';
 }
 
 function WorkbookPreview({ state, threadId, selectedSlideIndex, onSelectSlide }: {
@@ -1006,7 +1099,7 @@ export default function MatchaWorkThread() {
         setLoading(false);
         // Open preview panel if cached thread has content
         const cst = cached.thread.current_state || {};
-        if (cached.pdfUrl || cst.workbook_title || cst.sections?.length || cst.review_title || cst.summary || cst.strengths || cst.presentation_title || cst.slides?.length || (cst.employees as unknown[] | undefined)?.length || cst.batch_status) {
+        if (hasAnyPreviewState(cst, cached.pdfUrl)) {
           setPreviewPanelOpen(true);
         }
       } else {
@@ -1049,15 +1142,7 @@ export default function MatchaWorkThread() {
 
       // Auto-open preview panel if thread already has content
       const st = threadData.current_state || {};
-      const threadHasContent = Boolean(
-        pdfUrlResult ||
-        st.workbook_title || st.sections?.length ||
-        st.review_title || st.summary || st.strengths ||
-        st.presentation_title || st.slides?.length ||
-        (st.employees as unknown[] | undefined)?.length || st.batch_status ||
-        st.handbook_title || st.handbook_sections?.length ||
-        st.policy_content
-      );
+      const threadHasContent = hasAnyPreviewState(st, pdfUrlResult);
       if (threadHasContent) {
         setPreviewPanelOpen(true);
       }
@@ -1167,30 +1252,17 @@ export default function MatchaWorkThread() {
           if (resp.version > 0) {
             shouldRefreshVersions = true;
           }
-          const hasWorkbookState =
-            Boolean(resp.current_state?.workbook_title) ||
-            Boolean(resp.current_state?.company_name) ||
-            Boolean(resp.current_state?.objective) ||
-            Boolean(resp.current_state?.industry) ||
-            (Array.isArray(resp.current_state?.sections) && resp.current_state.sections.length > 0);
-          const hasReviewState =
-            Boolean(resp.current_state?.review_title) ||
-            Boolean(resp.current_state?.review_subject) ||
-            Boolean(resp.current_state?.summary) ||
-            Boolean(resp.current_state?.context) ||
-            Boolean(resp.current_state?.next_steps) ||
-            toItemList(resp.current_state?.strengths).length > 0 ||
-            toItemList(resp.current_state?.growth_areas).length > 0 ||
-            (Array.isArray(resp.current_state?.review_request_statuses) && resp.current_state.review_request_statuses.length > 0);
-          const hasOnboardingState = (Array.isArray(resp.current_state?.employees) && resp.current_state.employees.length > 0) ||
-            Boolean(resp.current_state?.batch_status);
-          const hasPresentationState = Boolean(resp.current_state?.presentation_title) ||
-            (Array.isArray(resp.current_state?.slides) && (resp.current_state.slides as unknown[]).length > 0);
+          const hasWorkbookStateResp = hasWorkbookState(resp.current_state);
+          const hasReviewStateResp = hasReviewState(resp.current_state);
+          const hasOnboardingStateResp = hasOnboardingState(resp.current_state);
+          const hasPresentationStateResp = hasPresentationState(resp.current_state);
+          const hasHandbookStateResp = hasHandbookState(resp.current_state);
+          const hasPolicyStateResp = hasPolicyState(resp.current_state);
           if (resp.pdf_url) {
             setPdfUrl(resp.pdf_url);
             setPreviewPanelOpen(true);
             setActiveTab('preview');
-          } else if (hasWorkbookState || hasReviewState || hasOnboardingState || hasPresentationState) {
+          } else if (hasWorkbookStateResp || hasReviewStateResp || hasOnboardingStateResp || hasPresentationStateResp || hasHandbookStateResp || hasPolicyStateResp) {
             setPreviewPanelOpen(true);
             setActiveTab('preview');
           }
@@ -1529,38 +1601,13 @@ export default function MatchaWorkThread() {
     : false;
   const hasOfferLetterPreviewContent = Boolean(pdfUrl);
   const hasPresentationPreviewContent = Boolean(
-    thread?.current_state.presentation_title ||
-    (thread?.current_state.slides && (thread.current_state.slides as unknown[]).length > 0)
+    hasPresentationState(thread?.current_state)
   );
-  const hasWorkbookPreviewContent = !isPresentation && !hasPresentationPreviewContent && Boolean(
-    thread?.current_state.workbook_title ||
-    thread?.current_state.company_name ||
-    thread?.current_state.objective ||
-    thread?.current_state.industry ||
-    (thread?.current_state.sections && thread.current_state.sections.length > 0) ||
-    (thread?.current_state.presentation && thread.current_state.presentation.slides?.length > 0)
-  );
-  const hasReviewPreviewContent = Boolean(
-    thread?.current_state.review_title ||
-    thread?.current_state.review_subject ||
-    thread?.current_state.summary ||
-    thread?.current_state.context ||
-    thread?.current_state.next_steps ||
-    reviewStrengths.length > 0 ||
-    reviewGrowthAreas.length > 0 ||
-    reviewStatuses.length > 0
-  );
-  const hasOnboardingPreviewContent = Boolean(
-    (thread?.current_state.employees && (thread.current_state.employees as unknown[]).length > 0) ||
-    thread?.current_state.batch_status
-  );
-  const hasHandbookPreviewContent = Boolean(
-    thread?.current_state.handbook_title ||
-    thread?.current_state.handbook_sections?.length
-  );
-  const hasPolicyPreviewContent = Boolean(
-    thread?.current_state.policy_content
-  );
+  const hasWorkbookPreviewContent = !isPresentation && !hasPresentationPreviewContent && hasWorkbookState(thread?.current_state);
+  const hasReviewPreviewContent = hasReviewState(thread?.current_state);
+  const hasOnboardingPreviewContent = hasOnboardingState(thread?.current_state);
+  const hasHandbookPreviewContent = hasHandbookState(thread?.current_state);
+  const hasPolicyPreviewContent = hasPolicyState(thread?.current_state);
   const hasPreviewContent = !isUnscopedChat && (
     hasOfferLetterPreviewContent ||
     hasWorkbookPreviewContent ||
@@ -1570,6 +1617,21 @@ export default function MatchaWorkThread() {
     hasPresentationPreviewContent ||
     hasPolicyPreviewContent
   );
+  const previewKind: PreviewKind =
+    isOfferLetter ? 'offer_letter'
+    : isPresentation ? 'presentation'
+    : isWorkbook ? 'workbook'
+    : isHandbook ? 'handbook'
+    : isPolicy ? 'policy'
+    : isOnboarding ? 'onboarding'
+    : hasOfferLetterPreviewContent ? 'offer_letter'
+    : hasPresentationPreviewContent ? 'presentation'
+    : hasWorkbookPreviewContent ? 'workbook'
+    : hasHandbookPreviewContent ? 'handbook'
+    : hasPolicyPreviewContent ? 'policy'
+    : hasOnboardingPreviewContent ? 'onboarding'
+    : hasReviewPreviewContent ? 'review'
+    : null;
   const isOutOfCredits = creditBalance !== null && creditBalance <= 0;
   const isLowCredits = creditBalance !== null && creditBalance > 0 && creditBalance < 2.0;
   const inputDisabled = isFinalized || isArchived || sending || isOutOfCredits;
@@ -1630,7 +1692,7 @@ export default function MatchaWorkThread() {
                 v{thread.version}
               </span>
               <span className="hidden sm:inline text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">
-                {isUnscopedChat || thread.task_type === 'chat' ? 'chat' : thread.task_type === 'review' ? 'review' : thread.task_type === 'workbook' ? 'workbook' : thread.task_type === 'onboarding' ? 'onboarding' : thread.task_type === 'presentation' ? 'presentation' : thread.task_type === 'policy' ? 'policy' : 'offer letter'}
+                {getThreadTypeLabel(thread.task_type, isUnscopedChat)}
               </span>
               {isFinalized && <span className="text-[10px] text-blue-400 border border-blue-500/20 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Finalized</span>}
               {isArchived && <span className="text-[10px] text-zinc-500 border border-white/10 px-1.5 py-0.5 uppercase tracking-wider shrink-0">Archived</span>}
@@ -1691,7 +1753,7 @@ export default function MatchaWorkThread() {
               <button
                 onClick={() => setActiveTab('preview')}
                 className={`px-3 py-1 text-xs uppercase tracking-wider transition-colors border-l border-white/10 ${activeTab === 'preview' ? 'bg-white/10 text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'}`}
-              >{(isOfferLetter || hasOfferLetterPreviewContent) ? 'Preview' : (isWorkbook || hasWorkbookPreviewContent) ? 'Workbook' : (isPresentation || hasPresentationPreviewContent) ? 'Presentation' : (isHandbook || hasHandbookPreviewContent) ? 'Handbook' : (isPolicy || hasPolicyPreviewContent) ? 'Policy' : hasOnboardingPreviewContent ? 'Onboarding' : 'Summary'}</button>
+              >{getPreviewTabLabel(previewKind)}</button>
             </div>
           )}
 
@@ -1952,7 +2014,7 @@ export default function MatchaWorkThread() {
                     selectedSlideIndex !== null
                       ? `Edit slide ${selectedSlideIndex + 1} — describe your changes...`
                       : isUnscopedChat
-                      ? 'Ask for an offer letter, review, workbook, onboarding, or handbook...'
+                      ? 'Ask for an offer letter, review, workbook, onboarding, handbook, or policy...'
                       : isReview
                       ? 'Add anonymized review details...'
                       : isWorkbook
@@ -2080,7 +2142,7 @@ export default function MatchaWorkThread() {
 
           {/* PDF iframe */}
           <div className="flex-1 bg-zinc-900 light:bg-black/[0.12] light:backdrop-blur-md min-h-0 transition-colors">
-            {(isOfferLetter || hasOfferLetterPreviewContent) ? (
+            {previewKind === 'offer_letter' ? (
               pdfBlobUrl ? (
                 <iframe
                   src={pdfBlobUrl}
@@ -2099,25 +2161,25 @@ export default function MatchaWorkThread() {
                   </p>
                 </div>
               )
-            ) : (isPresentation || hasPresentationPreviewContent) ? (
+            ) : previewKind === 'presentation' ? (
               <PresentationPreview
                 state={thread.current_state}
                 threadId={thread.id}
                 selectedSlideIndex={selectedSlideIndex}
                 onSelectSlide={!isFinalized && !isArchived ? setSelectedSlideIndex : undefined}
               />
-            ) : (isWorkbook || hasWorkbookPreviewContent) ? (
+            ) : previewKind === 'workbook' ? (
               <WorkbookPreview
                 state={thread.current_state}
                 threadId={thread.id}
                 selectedSlideIndex={selectedSlideIndex}
                 onSelectSlide={!isFinalized && !isArchived ? setSelectedSlideIndex : undefined}
               />
-            ) : (isHandbook || hasHandbookPreviewContent) ? (
+            ) : previewKind === 'handbook' ? (
               <HandbookPreview state={thread.current_state} />
-            ) : (isPolicy || hasPolicyPreviewContent) ? (
+            ) : previewKind === 'policy' ? (
               <PolicyPreview state={thread.current_state} />
-            ) : hasOnboardingPreviewContent ? (
+            ) : previewKind === 'onboarding' ? (
               <OnboardingPreview state={thread.current_state} />
             ) : (
               <div className="h-full overflow-y-auto p-4">

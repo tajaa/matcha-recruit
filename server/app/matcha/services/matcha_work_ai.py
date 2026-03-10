@@ -225,14 +225,16 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "review"
     if any(k.startswith("handbook_") for k in current_state):
         return "handbook"
+    # Policy threads can accumulate generic workbook-like keys over time.
+    # Keep explicit policy_* state authoritative so the UI renders the policy preview.
+    if any(k.startswith("policy_") for k in current_state):
+        return "policy"
     if "sections" in current_state or "workbook_title" in current_state:
         return "workbook"
     if any(k in current_state for k in ("employees", "batch_status")):
         return "onboarding"
     if any(k in current_state for k in ("presentation_title", "slides")):
         return "presentation"
-    if any(k.startswith("policy_") for k in current_state):
-        return "policy"
     return "chat"
 
 
