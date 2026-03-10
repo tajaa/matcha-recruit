@@ -130,6 +130,10 @@ export interface MWDocumentState {
   default_work_state?: string | null;
   // Handbook fields
   handbook_title?: string | null;
+  handbook_source_type?: 'template' | 'upload' | null;
+  handbook_upload_status?: 'idle' | 'uploading' | 'analyzing' | 'reviewed' | 'error' | 'blocked' | null;
+  handbook_uploaded_file_url?: string | null;
+  handbook_uploaded_filename?: string | null;
   handbook_mode?: string | null;
   handbook_industry?: string | null;
   handbook_sub_industry?: string | null;
@@ -162,6 +166,18 @@ export interface MWDocumentState {
     section_type?: string;
   }> | null;
   handbook_error?: string | null;
+  handbook_blocking_error?: string | null;
+  handbook_review_locations?: string[] | null;
+  handbook_red_flags?: Array<{
+    id: string;
+    severity: 'high' | 'medium' | 'low';
+    jurisdiction: string;
+    section_title: string;
+    summary: string;
+    why_it_matters: string;
+    recommended_action: string;
+  }> | null;
+  handbook_analysis_generated_at?: string | null;
   handbook_strength_score?: number | null;
   handbook_strength_label?: string | null;
   // Policy fields

@@ -1,7 +1,9 @@
 """Matcha Work — chat-driven AI workspace for HR document elements."""
 
+import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -11,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFi
 from fastapi.responses import StreamingResponse
 
 from ...core.models.auth import CurrentUser
+from ...core.services.compliance_service import get_location_requirements, get_locations
 from ...core.services.storage import get_storage
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
@@ -50,6 +53,8 @@ from ..models.matcha_work import (
 )
 from ..services import matcha_work_document as doc_svc
 from ..services import billing_service
+from ..services.er_document_parser import ERDocumentParser
+from ..services.matcha_work_handbook_upload import AuditedLocation, audit_uploaded_handbook
 from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
@@ -70,10 +75,22 @@ VALID_REVIEW_FIELDS = set(ReviewDocument.model_fields.keys())
 VALID_WORKBOOK_FIELDS = set(WorkbookDocument.model_fields.keys()) - {"images"}
 VALID_ONBOARDING_FIELDS = set(OnboardingDocument.model_fields.keys())
 VALID_PRESENTATION_FIELDS = set(PresentationDocument.model_fields.keys()) - {"cover_image_url"}
-VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys())
+HANDBOOK_UPLOAD_MANAGED_FIELDS = {
+    "handbook_source_type",
+    "handbook_upload_status",
+    "handbook_uploaded_file_url",
+    "handbook_uploaded_filename",
+    "handbook_blocking_error",
+    "handbook_review_locations",
+    "handbook_red_flags",
+    "handbook_analysis_generated_at",
+}
+VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys()) - HANDBOOK_UPLOAD_MANAGED_FIELDS
 VALID_POLICY_FIELDS = set(PolicyDocument.model_fields.keys())
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
+HANDBOOK_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx"}
+HANDBOOK_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 
 
 def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
@@ -105,6 +122,103 @@ def _row_to_message(row: dict) -> MWMessageOut:
         content=row["content"],
         version_created=row.get("version_created"),
         created_at=row["created_at"],
+    )
+
+
+def _location_label(location: dict) -> str:
+    city = str(location.get("city") or "").strip()
+    state = str(location.get("state") or "").strip().upper()
+    return f"{city}, {state}" if city else state
+
+
+def _thread_accepts_handbook_upload(thread: dict) -> bool:
+    current_state = thread.get("current_state") or {}
+    current_skill = _infer_skill_from_state(current_state)
+    if current_skill == "chat":
+        return True
+    if current_skill != "handbook":
+        return False
+    source_type = current_state.get("handbook_source_type")
+    if source_type == "upload":
+        return True
+    return int(thread.get("version") or 0) == 0 and not current_state
+
+
+def _build_handbook_block_message(location_labels: list[str]) -> str:
+    if not location_labels:
+        return (
+            "Handbook upload audit is blocked because no active Compliance Locations were found. "
+            "Add or sync company locations in /compliance first."
+        )
+    if len(location_labels) == 1:
+        scoped = location_labels[0]
+    else:
+        scoped = ", ".join(location_labels[:6])
+        if len(location_labels) > 6:
+            scoped += f", and {len(location_labels) - 6} more"
+    return (
+        "Handbook upload audit is blocked because these active Compliance Locations are not fully synced: "
+        f"{scoped}. Fix /compliance coverage first, then retry the upload."
+    )
+
+
+def _build_handbook_upload_summary(
+    *,
+    file_name: str,
+    reviewed_locations: list[str],
+    red_flags: list[dict],
+    blocked_message: Optional[str] = None,
+) -> str:
+    if blocked_message:
+        return blocked_message
+    if not red_flags:
+        return (
+            f"Uploaded {file_name} and reviewed it against {len(reviewed_locations)} active Compliance Location(s). "
+            "No obvious jurisdiction coverage gaps were detected from synced /compliance data."
+        )
+
+    counts = {"high": 0, "medium": 0, "low": 0}
+    for row in red_flags:
+        severity = str(row.get("severity") or "medium").lower()
+        if severity in counts:
+            counts[severity] += 1
+
+    summary_bits = []
+    for severity in ("high", "medium", "low"):
+        count = counts[severity]
+        if count:
+            summary_bits.append(f"{count} {severity}")
+
+    summary = ", ".join(summary_bits) if summary_bits else f"{len(red_flags)} issue(s)"
+    return (
+        f"Uploaded {file_name} and reviewed it against {len(reviewed_locations)} active Compliance Location(s). "
+        f"Detected {summary} red flag(s). Review the Preview panel for details."
+    )
+
+
+async def _build_thread_detail_response(thread_id: UUID, company_id: UUID) -> ThreadDetailResponse:
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread["current_state"] = await doc_svc.ensure_matcha_work_thread_storage_scope(
+        thread_id,
+        company_id,
+        thread["current_state"],
+    )
+    messages = await doc_svc.get_thread_messages(thread_id)
+    return ThreadDetailResponse(
+        id=thread["id"],
+        title=thread["title"],
+        status=thread["status"],
+        current_state=thread["current_state"],
+        version=thread["version"],
+        task_type=_infer_skill_from_state(thread["current_state"]),
+        is_pinned=thread.get("is_pinned", False),
+        linked_offer_letter_id=thread.get("linked_offer_letter_id"),
+        created_at=thread["created_at"],
+        updated_at=thread["updated_at"],
+        messages=[_row_to_message(row) for row in messages],
     )
 
 
@@ -533,6 +647,8 @@ async def _apply_ai_updates_and_operations(
 
     if should_execute_skill and ai_resp.structured_update:
         safe_updates = _validate_updates_for_skill(skill, ai_resp.structured_update)
+        if skill == "handbook" and current_state.get("handbook_source_type") == "upload":
+            safe_updates = {}
         if safe_updates:
             result = await doc_svc.apply_update(thread_id, safe_updates)
             current_version = result["version"]
@@ -689,6 +805,8 @@ async def _apply_ai_updates_and_operations(
             elif operation == "generate_handbook":
                 if skill != "handbook":
                     action_note = "Handbook generation is only available in handbook threads."
+                elif current_state.get("handbook_source_type") == "upload":
+                    action_note = "Handbook generation is unavailable in upload review mode. Start a new template handbook thread instead."
                 else:
                     title = current_state.get("handbook_title")
                     states = current_state.get("handbook_states") or []
@@ -1012,6 +1130,190 @@ async def upload_thread_logo(
         raise HTTPException(status_code=500, detail="Failed to upload logo. Please try again.")
 
 
+@router.post("/threads/{thread_id}/handbook/upload", response_model=ThreadDetailResponse)
+async def upload_thread_handbook(
+    thread_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload an existing handbook and audit it against synced company jurisdictions."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if not _thread_accepts_handbook_upload(thread):
+        raise HTTPException(
+            status_code=400,
+            detail="Handbook upload is only available in a new chat or an upload-mode handbook thread.",
+        )
+
+    filename = (file.filename or "handbook.pdf").strip() or "handbook.pdf"
+    extension = os.path.splitext(filename)[1].lower()
+    if extension not in HANDBOOK_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Only PDF, DOCX, and DOC handbooks are supported")
+
+    active_locations = [
+        loc for loc in await get_locations(company_id)
+        if loc.get("is_active", True)
+    ]
+    active_location_labels = [_location_label(loc) for loc in active_locations if _location_label(loc)]
+    unsynced_labels = [
+        _location_label(loc)
+        for loc in active_locations
+        if loc.get("data_status") != "synced" and _location_label(loc)
+    ]
+    if not active_locations or unsynced_labels:
+        blocking_message = _build_handbook_block_message(
+            unsynced_labels if unsynced_labels else active_location_labels
+        )
+        result = await doc_svc.apply_update(
+            thread_id,
+            {
+                "handbook_source_type": "upload",
+                "handbook_upload_status": "blocked",
+                "handbook_title": thread.get("current_state", {}).get("handbook_title") or "Uploaded Employee Handbook",
+                "handbook_status": "error",
+                "handbook_uploaded_file_url": None,
+                "handbook_uploaded_filename": None,
+                "handbook_blocking_error": blocking_message,
+                "handbook_review_locations": active_location_labels,
+                "handbook_red_flags": [],
+                "handbook_sections": [],
+                "handbook_analysis_generated_at": datetime.now(timezone.utc).isoformat(),
+                "handbook_error": None,
+            },
+            diff_summary="Blocked handbook upload audit",
+        )
+        await doc_svc.add_message(
+            thread_id,
+            "system",
+            f"Handbook upload attempted for {filename}.",
+            version_created=result["version"],
+        )
+        await doc_svc.add_message(
+            thread_id,
+            "assistant",
+            blocking_message,
+            version_created=result["version"],
+        )
+        return await _build_thread_detail_response(thread_id, company_id)
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded handbook file is empty")
+    if len(content) > HANDBOOK_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="Handbook file exceeds the 10 MB limit")
+
+    try:
+        extracted_text, _page_count = ERDocumentParser().extract_text_from_bytes(content, filename)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        logger.error("Failed to extract handbook upload text for thread %s: %s", thread_id, exc, exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to read the uploaded handbook file") from exc
+
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(status_code=400, detail="No readable handbook text was found in the uploaded file")
+
+    storage = get_storage()
+    uploaded_file_url = await storage.upload_file(
+        content,
+        filename,
+        prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "handbooks"),
+        content_type=file.content_type,
+    )
+    await storage.upload_file(
+        extracted_text.encode("utf-8"),
+        f"{os.path.splitext(filename)[0] or 'handbook'}-extracted.txt",
+        prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "handbook-analysis"),
+        content_type="text/plain",
+    )
+
+    requirement_results = await asyncio.gather(
+        *(
+            get_location_requirements(UUID(str(loc["id"])), company_id)
+            for loc in active_locations
+            if loc.get("id")
+        ),
+        return_exceptions=True,
+    )
+
+    audited_locations: list[AuditedLocation] = []
+    scoped_location_rows = [loc for loc in active_locations if loc.get("id")]
+    for loc, requirements in zip(scoped_location_rows, requirement_results):
+        if isinstance(requirements, Exception):
+            logger.error(
+                "Failed to load location requirements for handbook upload audit thread %s location %s: %s",
+                thread_id,
+                loc.get("id"),
+                requirements,
+                exc_info=True,
+            )
+            raise HTTPException(status_code=500, detail="Failed to load synced compliance requirements")
+        audited_locations.append(
+            AuditedLocation(
+                id=UUID(str(loc["id"])),
+                label=_location_label(loc),
+                state=str(loc.get("state") or "").strip().upper(),
+                city=str(loc.get("city") or "").strip() or None,
+                requirements=list(requirements),
+            )
+        )
+
+    profile = await doc_svc.get_company_profile_for_ai(company_id)
+    company_name = str(profile.get("name") or "").strip() or "Company"
+    company_industry = str(profile.get("industry") or "").strip() or None
+
+    audit_result = audit_uploaded_handbook(
+        thread_id=thread_id,
+        company_id=company_id,
+        company_name=company_name,
+        company_industry=company_industry,
+        uploaded_file_url=uploaded_file_url,
+        uploaded_filename=filename,
+        extracted_text=extracted_text,
+        locations=audited_locations,
+    )
+
+    result = await doc_svc.apply_update(
+        thread_id,
+        {
+            "handbook_source_type": "upload",
+            "handbook_upload_status": "reviewed",
+            "handbook_title": audit_result["handbook_title"],
+            "handbook_uploaded_file_url": uploaded_file_url,
+            "handbook_uploaded_filename": filename,
+            "handbook_status": "ready",
+            "handbook_blocking_error": None,
+            "handbook_error": None,
+            **audit_result,
+        },
+        diff_summary=f"Uploaded handbook audit: {filename}",
+    )
+    summary_message = _build_handbook_upload_summary(
+        file_name=filename,
+        reviewed_locations=audit_result["handbook_review_locations"],
+        red_flags=audit_result["handbook_red_flags"],
+    )
+    await doc_svc.add_message(
+        thread_id,
+        "system",
+        f"Uploaded handbook file: {filename}.",
+        version_created=result["version"],
+    )
+    await doc_svc.add_message(
+        thread_id,
+        "assistant",
+        summary_message,
+        version_created=result["version"],
+    )
+    return await _build_thread_detail_response(thread_id, company_id)
+
+
 @router.post("/threads/{thread_id}/images")
 async def upload_thread_images(
     thread_id: UUID,
@@ -1138,32 +1440,7 @@ async def get_thread(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-
-    thread = await doc_svc.get_thread(thread_id, company_id)
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
-    thread["current_state"] = await doc_svc.ensure_matcha_work_thread_storage_scope(
-        thread_id,
-        company_id,
-        thread["current_state"],
-    )
-
-    messages = await doc_svc.get_thread_messages(thread_id)
-
-    return ThreadDetailResponse(
-        id=thread["id"],
-        title=thread["title"],
-        status=thread["status"],
-        current_state=thread["current_state"],
-        version=thread["version"],
-        task_type=_infer_skill_from_state(thread["current_state"]),
-        is_pinned=thread.get("is_pinned", False),
-        linked_offer_letter_id=thread.get("linked_offer_letter_id"),
-        created_at=thread["created_at"],
-        updated_at=thread["updated_at"],
-        messages=[_row_to_message(m) for m in messages],
-    )
+    return await _build_thread_detail_response(thread_id, company_id)
 
 
 @router.post("/threads/{thread_id}/messages", response_model=SendMessageResponse)

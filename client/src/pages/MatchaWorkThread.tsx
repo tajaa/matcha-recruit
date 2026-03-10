@@ -13,6 +13,7 @@ import type {
 import type { CurrentUserResponse, HandbookListItem } from '../types';
 import { ApiRequestError, handbooks, matchaWork, adminPlatformSettings, getAccessToken } from '../api/client';
 import { useAuth } from '../context/AuthContext';
+import { HandbookUpload } from '../components/matcha-work/HandbookUpload';
 import { LogoUpload } from '../components/matcha-work/LogoUpload';
 import HandbookDistributeModal from '../components/HandbookDistributeModal';
 
@@ -75,7 +76,11 @@ function hasPresentationState(state?: MWDocumentState | null): boolean {
 function hasHandbookState(state?: MWDocumentState | null): boolean {
   return Boolean(
     state?.handbook_title ||
-    state?.handbook_sections?.length
+    state?.handbook_sections?.length ||
+    state?.handbook_source_type === 'upload' ||
+    state?.handbook_uploaded_filename ||
+    state?.handbook_red_flags?.length ||
+    state?.handbook_blocking_error
   );
 }
 
@@ -496,6 +501,12 @@ function PolicyPreview({ state }: { state: MWDocumentState }) {
 function HandbookPreview({ state }: { state: MWDocumentState }) {
   const title = state.handbook_title || 'Employee Handbook';
   const status = state.handbook_status || 'collecting';
+  const sourceType = state.handbook_source_type || 'template';
+  const uploadStatus = state.handbook_upload_status || 'idle';
+  const uploadedFilename = state.handbook_uploaded_filename || '';
+  const blockingError = state.handbook_blocking_error || '';
+  const reviewLocations = state.handbook_review_locations || [];
+  const redFlags = state.handbook_red_flags || [];
   const mode = state.handbook_mode || '';
   const industry = state.handbook_industry || '';
   const subIndustry = state.handbook_sub_industry || '';
@@ -508,6 +519,154 @@ function HandbookPreview({ state }: { state: MWDocumentState }) {
   const strengthLabel = state.handbook_strength_label || '';
   const states = state.handbook_states || [];
   const sections = state.handbook_sections || [];
+
+  if (sourceType === 'upload') {
+    const severityCounts = redFlags.reduce(
+      (acc, flag) => {
+        const severity = flag.severity || 'medium';
+        if (severity in acc) {
+          acc[severity as 'high' | 'medium' | 'low'] += 1;
+        }
+        return acc;
+      },
+      { high: 0, medium: 0, low: 0 }
+    );
+
+    const uploadStatusColor =
+      uploadStatus === 'reviewed' ? 'text-green-400 bg-green-400/10' :
+      uploadStatus === 'analyzing' || uploadStatus === 'uploading' ? 'text-orange-400 bg-orange-400/10' :
+      uploadStatus === 'blocked' || uploadStatus === 'error' ? 'text-red-400 bg-red-400/10' :
+      'text-zinc-400 bg-zinc-400/10';
+
+    const severityBadgeClasses = (severity: 'high' | 'medium' | 'low') =>
+      severity === 'high'
+        ? 'text-red-300 bg-red-500/10 border border-red-500/20'
+        : severity === 'medium'
+        ? 'text-orange-300 bg-orange-500/10 border border-orange-500/20'
+        : 'text-sky-300 bg-sky-500/10 border border-sky-500/20';
+
+    return (
+      <div className="h-full overflow-y-auto p-4">
+        <div className="max-w-3xl mx-auto space-y-4">
+          <div>
+            <h2 className="text-lg font-bold text-zinc-100 light:text-zinc-900 tracking-tight">{title}</h2>
+            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              <span className="text-[11px] font-medium text-zinc-300 light:text-zinc-600 px-2 py-0.5 bg-zinc-800 light:bg-zinc-200/60">
+                Uploaded Handbook
+              </span>
+              {mode && (
+                <span className="text-[11px] font-medium text-zinc-300 light:text-zinc-600 px-2 py-0.5 bg-zinc-800 light:bg-zinc-200/60">
+                  {mode === 'multi_state' ? 'Multi-State' : 'Single State'}
+                </span>
+              )}
+              <span className={`text-[11px] font-medium px-2 py-0.5 ${uploadStatusColor}`}>
+                {uploadStatus.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+              </span>
+            </div>
+          </div>
+
+          {uploadedFilename && (
+            <div className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Source File</p>
+              <p className="mt-1 text-sm text-zinc-200 light:text-zinc-800">{uploadedFilename}</p>
+              {state.handbook_analysis_generated_at && (
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  Reviewed {new Date(state.handbook_analysis_generated_at).toLocaleString()}
+                </p>
+              )}
+            </div>
+          )}
+
+          {blockingError && (
+            <div className="flex items-start gap-2 p-3 bg-red-400/10 border border-red-400/20">
+              <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+              </svg>
+              <p className="text-xs text-red-300 leading-relaxed">{blockingError}</p>
+            </div>
+          )}
+
+          {reviewLocations.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Audited Jurisdictions</p>
+              <div className="flex flex-wrap gap-2">
+                {reviewLocations.map((location) => (
+                  <span key={location} className="text-[11px] font-semibold font-mono text-white px-2 py-0.5 bg-blue-500/20 border border-blue-500/20">
+                    {location}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {(['high', 'medium', 'low'] as const).map((severity) => (
+              <div key={severity} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{severity}</p>
+                <p className="mt-1 text-xl font-semibold text-zinc-100 light:text-zinc-900">{severityCounts[severity]}</p>
+              </div>
+            ))}
+          </div>
+
+          {strengthScore != null && (
+            <div className="flex items-center gap-3 bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
+              <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center text-sm font-bold font-mono text-zinc-100 light:text-zinc-900">
+                {strengthScore}
+              </div>
+              <div>
+                <p className="text-xs text-zinc-500 font-medium">Coverage Score</p>
+                <p className="text-sm font-semibold text-zinc-200 light:text-zinc-800">{strengthLabel}</p>
+              </div>
+            </div>
+          )}
+
+          {redFlags.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Red Flags</p>
+              {redFlags.map((flag) => (
+                <div key={flag.id} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-100 light:text-zinc-900">{flag.section_title}</p>
+                      <p className="text-[11px] text-zinc-500">{flag.jurisdiction}</p>
+                    </div>
+                    <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 ${severityBadgeClasses(flag.severity)}`}>
+                      {flag.severity}
+                    </span>
+                  </div>
+                  <p className="text-sm text-zinc-200 light:text-zinc-800">{flag.summary}</p>
+                  <p className="text-xs text-zinc-400 light:text-zinc-600 leading-relaxed">{flag.why_it_matters}</p>
+                  <p className="text-xs text-zinc-300 light:text-zinc-700 leading-relaxed">
+                    <span className="text-zinc-500">Recommended action:</span> {flag.recommended_action}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : uploadStatus === 'reviewed' ? (
+            <div className="bg-green-500/10 border border-green-500/20 p-3">
+              <p className="text-xs text-green-300 leading-relaxed">
+                No obvious jurisdiction coverage gaps were detected from the synced /compliance rules. Review the parsed sections below and ask follow-up questions in chat if you want deeper remediation guidance.
+              </p>
+            </div>
+          ) : null}
+
+          {sections.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Parsed Sections</p>
+              {sections.map((section) => (
+                <div key={section.section_key} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
+                  <p className="text-sm font-medium text-zinc-200 light:text-zinc-800">{section.title}</p>
+                  {section.content && (
+                    <p className="text-xs text-zinc-400 light:text-zinc-600 mt-1 line-clamp-4 leading-relaxed">{section.content}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   const profileFlags: [string, boolean][] = [];
   if (state.handbook_profile) {
@@ -1446,6 +1605,23 @@ export default function MatchaWorkThread() {
     }
   };
 
+  const handleHandbookUpload = async (file: File) => {
+    if (!threadId || isArchived || isFinalized) return;
+    try {
+      setError(null);
+      const resp = await matchaWork.uploadHandbook(threadId, file);
+      invalidateThreadCacheEntry(cacheScope, threadId);
+      invalidateAccountCache(cacheScope);
+      setThread(resp);
+      setMessages(resp.messages);
+      setPreviewPanelOpen(true);
+      setActiveTab('preview');
+      setVersionsLoaded(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to upload handbook');
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -1639,6 +1815,7 @@ export default function MatchaWorkThread() {
   const isPresentation = thread?.task_type === 'presentation';
   const isHandbook = thread?.task_type === 'handbook';
   const isPolicy = thread?.task_type === 'policy';
+  const isUploadHandbook = isHandbook && thread?.current_state.handbook_source_type === 'upload';
   const reviewStatuses: MWReviewRequestStatus[] = (thread?.current_state.review_request_statuses || [])
     .filter((row): row is MWReviewRequestStatus => Boolean(row && typeof row === 'object' && row.email));
   const reviewStrengths = toItemList(thread?.current_state.strengths);
@@ -1860,7 +2037,7 @@ export default function MatchaWorkThread() {
             </button>
           )}
 
-          {!isFinalized && !isArchived && (
+          {!isFinalized && !isArchived && !isUploadHandbook && (
             <button
               onClick={() => setShowFinalizeConfirm(true)}
               className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs uppercase tracking-wider text-zinc-200 hover:text-white border border-white/20 hover:border-white/40 transition-all"
@@ -1942,7 +2119,7 @@ export default function MatchaWorkThread() {
                       { label: 'Review', prompt: 'Write an anonymized performance review', icon: 'M11.48 3.499a.562.562 0 011.04 0l2.125 5.111a.563.563 0 00.475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 00-.182.557l1.285 5.385a.562.562 0 01-.84.61l-4.725-2.885a.563.563 0 00-.586 0L6.982 20.54a.562.562 0 01-.84-.61l1.285-5.386a.562.562 0 00-.182-.557l-4.204-3.602a.563.563 0 01.321-.988l5.518-.442a.563.563 0 00.475-.345L11.48 3.5z' },
                       { label: 'Workbook', prompt: 'Create an HR workbook', icon: 'M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25' },
                       { label: 'Onboarding', prompt: 'Create an employee onboarding plan', icon: 'M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z' },
-                      { label: 'Handbook', prompt: 'Create an employee handbook', icon: 'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z' },
+                      { label: 'Handbook Template', prompt: 'Create an employee handbook', icon: 'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z' },
                       { label: 'Policy', prompt: 'Draft a workplace policy', icon: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418' },
                       { label: 'Presentation', prompt: 'Create a presentation', icon: 'M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5' },
                     ].map((action) => (
@@ -1958,6 +2135,15 @@ export default function MatchaWorkThread() {
                         {action.label}
                       </button>
                     ))}
+                  </div>
+                )}
+
+                {(isUnscopedChat || isHandbook) && !isFinalized && !isArchived && (
+                  <div className="mt-4 w-full max-w-md">
+                    <HandbookUpload
+                      onUpload={handleHandbookUpload}
+                      currentFilename={thread.current_state.handbook_uploaded_filename}
+                    />
                   </div>
                 )}
 
@@ -1981,6 +2167,14 @@ export default function MatchaWorkThread() {
                     <LogoUpload
                       onUpload={handleLogoUpload}
                       currentLogoUrl={thread.current_state.company_logo_url}
+                    />
+                  </div>
+                )}
+                {isUploadHandbook && !isFinalized && !isArchived && (
+                  <div className="mx-4 pb-4">
+                    <HandbookUpload
+                      onUpload={handleHandbookUpload}
+                      currentFilename={thread.current_state.handbook_uploaded_filename}
                     />
                   </div>
                 )}

@@ -23,7 +23,20 @@ REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
 WORKBOOK_FIELDS = list(WorkbookDocument.model_fields.keys())
 ONBOARDING_FIELDS = list(OnboardingDocument.model_fields.keys())
 PRESENTATION_FIELDS = list(PresentationDocument.model_fields.keys())
-HANDBOOK_FIELDS = list(HandbookDocument.model_fields.keys())
+HANDBOOK_UPLOAD_MANAGED_FIELDS = {
+    "handbook_source_type",
+    "handbook_upload_status",
+    "handbook_uploaded_file_url",
+    "handbook_uploaded_filename",
+    "handbook_blocking_error",
+    "handbook_review_locations",
+    "handbook_red_flags",
+    "handbook_analysis_generated_at",
+}
+HANDBOOK_FIELDS = [
+    field_name for field_name in HandbookDocument.model_fields.keys()
+    if field_name not in HANDBOOK_UPLOAD_MANAGED_FIELDS
+]
 POLICY_FIELDS = list(PolicyDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
@@ -74,27 +87,35 @@ Supported skills:
   Set batch_status to "collecting" while gathering info, "ready" when user confirms the list.
   Use create_employees operation ONLY when user explicitly confirms the employee list is ready.
   Always collect ALL employees before creating. Do not create one at a time unless asked.
-- handbook: create employee handbooks through guided conversation. Source type is always "template".
-  Collect these fields progressively through natural conversation:
-  1. handbook_title (string) — descriptive name like "2026 CA Employee Handbook"
-  2. handbook_states (array of 2-letter US state codes) — where the handbook applies
-  3. handbook_industry (string: general/technology/hospitality/retail/manufacturing/healthcare)
-  4. handbook_sub_industry (string) — specific business description
-  5. handbook_legal_name (string) — registered legal entity name
-  6. handbook_ceo (string) — CEO or President full name
-  7. handbook_dba (string, optional) — DBA name if used
-  8. handbook_headcount (integer, optional) — approximate employee count
-  9. handbook_profile (object with boolean flags):
-     remote_workers, minors, tipped_employees, tip_pooling, union_employees,
-     federal_contracts, group_health_insurance, background_checks,
-     hourly_employees (default true), salaried_employees, commissioned_employees
-  10. handbook_custom_sections (array of {{title, content}}, optional) — extra company policies
-  11. handbook_guided_answers (object, optional) — answers to follow-up questions
-  handbook_mode is auto-derived: 1 state = "single_state", 2+ = "multi_state".
-  Set handbook_status to "collecting" while gathering, "ready" when user confirms.
-  Use generate_handbook operation ONLY when user explicitly says to generate/create.
-  Required before generation: handbook_title, handbook_states (>=1), handbook_legal_name, handbook_ceo.
-  Ask about profile booleans naturally based on industry context (e.g., for hospitality ask about tips).
+- handbook: supports two modes.
+  Template mode:
+  - If handbook_source_type is missing or "template", create employee handbooks through guided conversation.
+  - Collect these fields progressively through natural conversation:
+    1. handbook_title (string) — descriptive name like "2026 CA Employee Handbook"
+    2. handbook_states (array of 2-letter US state codes) — where the handbook applies
+    3. handbook_industry (string: general/technology/hospitality/retail/manufacturing/healthcare)
+    4. handbook_sub_industry (string) — specific business description
+    5. handbook_legal_name (string) — registered legal entity name
+    6. handbook_ceo (string) — CEO or President full name
+    7. handbook_dba (string, optional) — DBA name if used
+    8. handbook_headcount (integer, optional) — approximate employee count
+    9. handbook_profile (object with boolean flags):
+       remote_workers, minors, tipped_employees, tip_pooling, union_employees,
+       federal_contracts, group_health_insurance, background_checks,
+       hourly_employees (default true), salaried_employees, commissioned_employees
+    10. handbook_custom_sections (array of {{title, content}}, optional) — extra company policies
+    11. handbook_guided_answers (object, optional) — answers to follow-up questions
+  - handbook_mode is auto-derived: 1 state = "single_state", 2+ = "multi_state".
+  - Set handbook_status to "collecting" while gathering, "ready" when user confirms.
+  - Use generate_handbook operation ONLY when user explicitly says to generate/create.
+  - Required before generation: handbook_title, handbook_states (>=1), handbook_legal_name, handbook_ceo.
+  - Ask about profile booleans naturally based on industry context (e.g., for hospitality ask about tips).
+  Upload review mode:
+  - If handbook_source_type == "upload", the file has already been uploaded and audited.
+  - Do NOT ask the template intake questionnaire.
+  - Do NOT modify handbook upload status, uploaded file metadata, review locations, red flags, or analysis timestamps.
+  - Do NOT use generate_handbook operation in upload mode.
+  - In upload mode, answer follow-up questions about the uploaded handbook findings, explain why a flag matters, and describe what language or topic needs to be added or revised to align with the synced /compliance requirements.
 - policy: draft jurisdiction-aware workplace policies using compliance data + AI.
   When the user asks to create/draft a policy, begin a guided wizard:
   Step 1: Ask what kind of policy they need. Present the options naturally:

@@ -136,10 +136,26 @@ class HandbookSectionPreview(BaseModel):
     section_type: Optional[str] = None
 
 
+class HandbookRedFlag(BaseModel):
+    id: str
+    severity: Literal["high", "medium", "low"] = "medium"
+    jurisdiction: str
+    section_title: str
+    summary: str
+    why_it_matters: str
+    recommended_action: str
+
+
 class HandbookDocument(BaseModel):
     """Incremental handbook state — builds turn by turn via conversation."""
 
     handbook_title: Optional[str] = None
+    handbook_source_type: Optional[Literal["template", "upload"]] = None
+    handbook_upload_status: Optional[
+        Literal["idle", "uploading", "analyzing", "reviewed", "error", "blocked"]
+    ] = None
+    handbook_uploaded_file_url: Optional[str] = None
+    handbook_uploaded_filename: Optional[str] = None
     handbook_mode: Optional[str] = None  # single_state, multi_state
     handbook_industry: Optional[str] = None
     handbook_sub_industry: Optional[str] = None
@@ -155,6 +171,10 @@ class HandbookDocument(BaseModel):
     handbook_id: Optional[str] = None
     handbook_sections: Optional[list[HandbookSectionPreview]] = None
     handbook_error: Optional[str] = None
+    handbook_blocking_error: Optional[str] = None
+    handbook_review_locations: Optional[list[str]] = None
+    handbook_red_flags: Optional[list[HandbookRedFlag]] = None
+    handbook_analysis_generated_at: Optional[str] = None
     handbook_strength_score: Optional[int] = None
     handbook_strength_label: Optional[str] = None
 

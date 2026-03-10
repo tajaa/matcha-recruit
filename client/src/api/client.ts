@@ -4000,6 +4000,30 @@ export const matchaWork = {
 
     return response.json();
   },
+
+  uploadHandbook: async (threadId: string, file: File): Promise<MWThreadDetail> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/matcha-work/threads/${threadId}/handbook/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    return response.json();
+  },
 };
 
 export const matchaWorkPublic = {
