@@ -81,7 +81,7 @@ export function PublicBlogList() {
                </span>
                <h1 className="text-7xl md:text-9xl font-bold tracking-tighter leading-[0.85] text-white">
                   SIGNAL <br/>
-                  <span className="text-zinc-600">NOISE</span>
+                  <span className="text-amber-600">NOISE</span>
                </h1>
             </div>
             

@@ -149,30 +149,30 @@ export const Hero = ({ onContactClick }: HeroProps) => {
             />
           </m.div>
           
-          <m.h1 variants={itemVariants} className="mt-10 leading-[0.9] tracking-[-0.04em] mix-blend-darken max-w-2xl">
-            <span
-              className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] font-bold uppercase text-zinc-900"
-              style={{ fontFamily: fonts.display, letterSpacing: '0.05em', WebkitTextStroke: '2px white' }}
-            >
-              Workforce
-            </span>
-            <GlitchText
-              text="Intelligence."
-              className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-black"
-              style={{
-                fontFamily: fonts.serif,
-                WebkitTextStroke: '2px white'
-              }}
-            />
-          </m.h1>
+          <div className="mt-10 rounded-xl backdrop-blur-sm bg-white/[0.01] px-6 py-5 -mx-6 w-fit">
+            <m.h1 variants={itemVariants} className="leading-[0.9] tracking-[-0.04em] mix-blend-darken max-w-2xl">
+              <span
+                className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] font-bold uppercase text-zinc-900"
+                style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
+              >
+                Workforce
+              </span>
+              <GlitchText
+                text="Intelligence."
+                className="block text-[2.75rem] md:text-[4.5rem] lg:text-[5.5rem] italic font-light text-black"
+                style={{
+                  fontFamily: fonts.serif,
+                }}
+              />
+            </m.h1>
 
-          <m.div variants={itemVariants} className="space-y-10 mt-10">
-            <p
-              className="text-zinc-900 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap"
-              style={{ fontFamily: fonts.sans }}
-            >
-              Increase your signal to noise ratio.
-            </p>
+            <m.div variants={itemVariants} className="space-y-10 mt-10">
+              <p
+                className="text-zinc-900 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap"
+                style={{ fontFamily: fonts.sans }}
+              >
+                Increase your <span className="text-amber-600">signal to noise ratio</span>.
+              </p>
             
             <div className="flex flex-wrap gap-6 pt-2">
               <button
@@ -186,6 +186,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
               </button>
             </div>
           </m.div>
+          </div>
         </div>
 
         <m.div
