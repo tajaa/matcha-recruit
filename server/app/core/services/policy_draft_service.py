@@ -34,7 +34,81 @@ POLICY_TYPES = [
     {"value": "attendance", "label": "Attendance and Punctuality", "categories": []},
     {"value": "code_of_conduct", "label": "Code of Conduct", "categories": []},
     {"value": "whistleblower", "label": "Whistleblower Protection", "categories": []},
+    # Healthcare-specific policy types
+    {"value": "hipaa_privacy", "label": "HIPAA Privacy and Security", "categories": [], "industries": ["healthcare"]},
+    {"value": "bloodborne_pathogens", "label": "Bloodborne Pathogens Exposure Control", "categories": [], "industries": ["healthcare"]},
+    {"value": "credentialing", "label": "Credentialing and Licensure Verification", "categories": [], "industries": ["healthcare"]},
+    {"value": "patient_safety", "label": "Patient Safety and Incident Reporting", "categories": [], "industries": ["healthcare"]},
+    {"value": "infection_control", "label": "Infection Control and PPE", "categories": [], "industries": ["healthcare"]},
 ]
+
+# Map free-text industry values to canonical names for filtering.
+_INDUSTRY_ALIASES: Dict[str, str] = {
+    "health": "healthcare", "healthcare": "healthcare", "medical": "healthcare",
+    "clinic": "healthcare", "hospital": "healthcare", "nursing": "healthcare",
+    "pharmacy": "healthcare", "dental": "healthcare", "physician": "healthcare",
+    "outpatient": "healthcare", "ambulatory": "healthcare",
+    "restaurant": "hospitality", "hospitality": "hospitality", "food": "hospitality",
+    "hotel": "hospitality",
+    "retail": "retail", "store": "retail",
+    "manufacturing": "manufacturing", "warehouse": "manufacturing",
+    "construction": "manufacturing",
+    "technology": "technology", "software": "technology", "saas": "technology",
+}
+
+
+def _resolve_industry(raw: str) -> str:
+    """Resolve a free-text industry string to a canonical industry name.
+
+    Tries exact match first, then substring match against alias keys.
+    """
+    raw = raw.lower().strip()
+    canonical = _INDUSTRY_ALIASES.get(raw)
+    if canonical:
+        return canonical
+    for alias_key, alias_val in _INDUSTRY_ALIASES.items():
+        if alias_key in raw or raw in alias_key:
+            return alias_val
+    return ""
+
+# Industry-specific prompt context appended to the policy draft prompt.
+_INDUSTRY_POLICY_CONTEXT: Dict[str, str] = {
+    "healthcare": (
+        "\n\n## Industry Context — Healthcare\n"
+        "This is a HEALTHCARE employer (hospital, clinic, medical office, nursing facility, "
+        "or similar). The policy MUST reference healthcare-specific regulations including:\n"
+        "- HIPAA Privacy Rule and Security Rule requirements\n"
+        "- OSHA Bloodborne Pathogens Standard (29 CFR 1910.1030)\n"
+        "- CMS Conditions of Participation (if applicable)\n"
+        "- Joint Commission standards (if applicable)\n"
+        "- State nurse practice acts and scope-of-practice rules\n"
+        "- Healthcare worker safety requirements\n"
+        "Use industry-appropriate terminology and reference healthcare-specific regulatory bodies."
+    ),
+}
+
+
+async def get_policy_types_for_company(company_id: str) -> List[dict]:
+    """Return policy types filtered by the company's industry.
+
+    Generic types (no ``industries`` key) are always included. Industry-specific
+    types are included only when the company's industry matches.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT industry FROM companies WHERE id = $1", UUID(company_id)
+        )
+    raw_industry = (row["industry"] or "").strip() if row else ""
+    canonical = _resolve_industry(raw_industry)
+
+    result = []
+    for pt in POLICY_TYPES:
+        industries = pt.get("industries")
+        if industries is None:
+            result.append(pt)
+        elif canonical and canonical in industries:
+            result.append(pt)
+    return result
 
 _POLICY_TYPE_MAP = {pt["value"]: pt for pt in POLICY_TYPES}
 
@@ -83,11 +157,14 @@ async def generate_policy_draft_stream(
     yield {"type": "phase", "message": "Loading company locations..."}
 
     async with get_connection() as conn:
-        # Load company name
+        # Load company name and industry
         company_row = await conn.fetchrow(
-            "SELECT name FROM companies WHERE id = $1", UUID(company_id)
+            "SELECT name, industry FROM companies WHERE id = $1", UUID(company_id)
         )
         company_name = company_row["name"] if company_row else "the company"
+        raw_industry = (company_row["industry"] or "").strip() if company_row else ""
+        canonical_industry = _resolve_industry(raw_industry)
+        industry_prompt_context = _INDUSTRY_POLICY_CONTEXT.get(canonical_industry, "")
 
         # Load locations
         if request.location_ids:
@@ -205,7 +282,7 @@ async def generate_policy_draft_stream(
 
 ## Locations Covered
 {', '.join(location_summaries)}
-{jurisdiction_context}{additional}
+{jurisdiction_context}{additional}{industry_prompt_context}
 ## Instructions
 1. Write a complete, professional policy document in Markdown format.
 2. Include standard sections: Purpose, Scope, Definitions (if needed), Policy Statement, Procedures, and Compliance.

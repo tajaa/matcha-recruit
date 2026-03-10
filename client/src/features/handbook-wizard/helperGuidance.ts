@@ -148,9 +148,30 @@ export const INDUSTRY_HELPER_PACKS: Record<string, IndustryHelperPack> = {
     avoid: 'Avoid understating safety controls or incident escalation requirements.',
   },
   healthcare: {
-    meaning: 'For healthcare employers, handbook logic emphasizes credentialing, patient-safety reporting, and accommodations.',
-    goodAnswer: 'Answer using current clinical/non-clinical workflows and documented escalation paths.',
-    avoid: 'Avoid generic language that bypasses credential, safety, or reporting obligations.',
+    meaning:
+      'For healthcare employers, handbook logic covers HIPAA privacy, credentialing, ' +
+      'infection control, bloodborne pathogen exposure, patient safety reporting, ' +
+      'mandatory overtime restrictions, and workplace violence prevention.',
+    goodAnswer:
+      'Answer using current clinical/non-clinical workflows, designated compliance officers ' +
+      '(Privacy Officer, Infection Control), shift structures, and documented escalation paths.',
+    avoid:
+      'Avoid generic language that bypasses HIPAA, OSHA bloodborne pathogen, credentialing, ' +
+      'or patient safety reporting obligations. Do not assume all healthcare roles have the same exposure risk.',
+    stateOverlays: {
+      CA: {
+        goodAnswer:
+          'CA healthcare employers must account for SB 525 healthcare worker minimum wage ($25/hr), ' +
+          'daily overtime, and nurse staffing ratio requirements.',
+        avoid: 'Do not overlook CA-specific healthcare worker wage and staffing rules.',
+      },
+      NY: {
+        goodAnswer:
+          'NY healthcare employers should address mandatory nurse overtime restrictions ' +
+          'and safe staffing ratio requirements.',
+        avoid: 'Do not assume generic overtime rules apply to NY nurses without checking restrictions.',
+      },
+    },
   },
 };
 

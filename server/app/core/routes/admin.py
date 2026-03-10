@@ -3542,13 +3542,25 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
         best_requirements: dict[str, tuple[float, dict[str, Any]]] = {}
         for pass_index in range(MAX_CONFIDENCE_REFETCH_ATTEMPTS + 1):
             if pass_index > 0:
+                # Only re-research categories that still have low-confidence items
+                low_conf_cats = {
+                    _normalize_category(req.get("category")) or req.get("category")
+                    for confidence, req in best_requirements.values()
+                    if confidence < STRICT_CONFIDENCE_THRESHOLD
+                }
+                if not low_conf_cats:
+                    break
+                retry_categories = sorted(low_conf_cats)
                 yield {
                     "type": "confidence_retry",
                     "message": (
                         f"Low-confidence requirements found. Cross-checking {_format_city_label(city)} "
-                        f"against {state} sources (pass {pass_index + 1}/{MAX_CONFIDENCE_REFETCH_ATTEMPTS + 1})..."
+                        f"against {state} sources — {len(retry_categories)} categor{'y' if len(retry_categories) == 1 else 'ies'} "
+                        f"(pass {pass_index + 1}/{MAX_CONFIDENCE_REFETCH_ATTEMPTS + 1})..."
                     ),
                 }
+            else:
+                retry_categories = research_categories
 
             research_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
@@ -3569,7 +3581,7 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                     city=city,
                     state=state,
                     county=county,
-                    categories=research_categories,
+                    categories=retry_categories,
                     preemption_rules=preemption_rules,
                     has_local_ordinance=has_local_ordinance,
                     on_retry=_on_retry,
@@ -3592,8 +3604,8 @@ async def _run_jurisdiction_check_events(jurisdiction_id: UUID) -> AsyncGenerato
                 yield research_queue.get_nowait()
 
             pass_requirements = research_task.result() or []
-            if research_categories and existing_requirements:
-                target_set = set(research_categories)
+            if retry_categories and existing_requirements:
+                target_set = set(retry_categories)
                 preserved = [
                     req for req in existing_requirements
                     if (_normalize_category(req.get("category")) or req.get("category")) not in target_set

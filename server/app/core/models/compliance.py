@@ -18,6 +18,9 @@ class ComplianceCategory(str, Enum):
     business_license = "business_license"
     tax_rate = "tax_rate"
     posting_requirements = "posting_requirements"
+    leave = "leave"
+    workplace_safety = "workplace_safety"
+    anti_discrimination = "anti_discrimination"
 
 
 class JurisdictionLevel(str, Enum):

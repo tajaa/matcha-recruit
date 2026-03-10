@@ -2356,6 +2356,11 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_compliance_requirements_rate_type
             ON compliance_requirements(rate_type)
         """)
+        # Add applicable_industries for industry-specific filtering at sync time
+        await conn.execute("""
+            ALTER TABLE compliance_requirements
+            ADD COLUMN IF NOT EXISTS applicable_industries TEXT[]
+        """)
 
         # Compliance alerts table
         await conn.execute("""
@@ -2591,6 +2596,11 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE jurisdiction_requirements
             ADD COLUMN IF NOT EXISTS requires_written_policy BOOLEAN
+        """)
+        # Add applicable_industries for industry-specific filtering at sync time
+        await conn.execute("""
+            ALTER TABLE jurisdiction_requirements
+            ADD COLUMN IF NOT EXISTS applicable_industries TEXT[]
         """)
 
         # Jurisdiction legislation — upcoming/pending legislation per jurisdiction

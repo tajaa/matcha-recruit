@@ -361,7 +361,7 @@ GUIDED_INDUSTRY_PLAYBOOK = {
     },
     "healthcare": {
         "label": "Healthcare",
-        "summary": "Adds patient-facing conduct controls, credentialing checks, and accommodation/escalation expectations.",
+        "summary": "Adds HIPAA privacy, credentialing, infection control, bloodborne pathogen, patient safety, and healthcare scheduling controls.",
         "profile_defaults": {
             "hourly_employees": True,
             "background_checks": True,
@@ -380,20 +380,105 @@ GUIDED_INDUSTRY_PLAYBOOK = {
                 "placeholder": "e.g., immediate verbal report + written report within 24h",
                 "required": True,
             },
+            {
+                "id": "hipaa_privacy_officer",
+                "question": "Who serves as the HIPAA Privacy Officer (and Security Officer, if separate)?",
+                "placeholder": "Name/title and contact",
+                "required": True,
+            },
+            {
+                "id": "infection_control_officer",
+                "question": "Who is the designated Infection Control Officer or committee lead?",
+                "placeholder": "Name/title or committee name",
+                "required": True,
+            },
+            {
+                "id": "shift_structure",
+                "question": "What shift structures does your facility use?",
+                "placeholder": "e.g., 8-hour, 10-hour, 12-hour, rotating",
+                "required": False,
+            },
+            {
+                "id": "overtime_exemption_8_80",
+                "question": "Does your facility use the FLSA 8/80 overtime exemption for hospital employees?",
+                "placeholder": "Yes / No / Not sure",
+                "required": False,
+            },
+            {
+                "id": "mandatory_reporting_categories",
+                "question": "What categories require mandatory external reporting (e.g., CMS events, state-reportable conditions, abuse/neglect)?",
+                "placeholder": "List applicable categories",
+                "required": False,
+            },
         ],
         "sections": [
             {
                 "title": "Credentialing and Scope-of-Practice Compliance",
                 "content": (
                     "Employees must perform duties within their active licensure and scope-of-practice limits. "
-                    "Managers must verify active credentials before assignment changes and escalate lapses immediately."
+                    "Managers must verify active credentials before assignment changes and escalate lapses immediately. "
+                    "The organization maintains a credentialing verification process that includes primary source "
+                    "verification of all required licenses, certifications, and registrations at hire and upon renewal."
                 ),
             },
             {
                 "title": "Patient Safety and Non-Retaliation Reporting",
                 "content": (
                     "Employees must report patient safety and workplace safety concerns immediately through established channels. "
-                    "Good-faith safety reporting is protected from retaliation."
+                    "Good-faith safety reporting is protected from retaliation. Sentinel events, near-misses, and adverse "
+                    "outcomes must be documented per the facility's incident reporting procedures."
+                ),
+            },
+            {
+                "title": "HIPAA Privacy and Security Obligations",
+                "content": (
+                    "All employees must protect Protected Health Information (PHI) in accordance with the HIPAA Privacy Rule "
+                    "and Security Rule. Access to patient records is limited to the minimum necessary for job duties. "
+                    "Employees must complete HIPAA training at hire and annually thereafter. Any suspected breach or "
+                    "unauthorized disclosure must be reported to the Privacy Officer immediately."
+                ),
+            },
+            {
+                "title": "Bloodborne Pathogen Exposure Control",
+                "content": (
+                    "The facility maintains an Exposure Control Plan in compliance with OSHA's Bloodborne Pathogens "
+                    "Standard (29 CFR 1910.1030). Employees must follow Universal Precautions, use appropriate PPE, "
+                    "and report all needlestick injuries, sharps injuries, and mucous membrane exposures immediately. "
+                    "Post-exposure evaluation, prophylaxis, and follow-up are provided at no cost to the employee."
+                ),
+            },
+            {
+                "title": "Infection Prevention and Control",
+                "content": (
+                    "All employees must adhere to the facility's infection prevention protocols, including hand hygiene, "
+                    "standard and transmission-based precautions, and proper use of personal protective equipment (PPE). "
+                    "Employees with communicable illnesses must notify their supervisor before reporting to work."
+                ),
+            },
+            {
+                "title": "Mandatory Overtime Restrictions and Shift Scheduling",
+                "content": (
+                    "Scheduling practices comply with applicable state mandatory overtime restrictions for healthcare workers. "
+                    "Employees are not required to work beyond their scheduled shift except in declared emergencies as "
+                    "defined by applicable law. Minimum rest periods between shifts are observed per state requirements."
+                ),
+            },
+            {
+                "title": "Professional Licensure and Continuing Education",
+                "content": (
+                    "Licensed and certified employees are responsible for maintaining active, unrestricted credentials "
+                    "and meeting all continuing education requirements mandated by their licensing boards. Employees "
+                    "must provide proof of renewal to Human Resources before expiration. Failure to maintain required "
+                    "credentials may result in reassignment or separation."
+                ),
+            },
+            {
+                "title": "Workplace Violence Prevention (Healthcare)",
+                "content": (
+                    "The facility maintains a workplace violence prevention program specific to healthcare settings. "
+                    "Employees must report threats, aggressive behavior, or violent incidents immediately. "
+                    "De-escalation training is provided to patient-facing staff. The facility conducts periodic "
+                    "risk assessments of clinical areas in compliance with applicable state healthcare workplace violence laws."
                 ),
             },
         ],

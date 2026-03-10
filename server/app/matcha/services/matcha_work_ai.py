@@ -101,6 +101,10 @@ Supported skills:
     PTO & Sick Leave, Meal & Rest Breaks, Overtime & Hours, Pay Practices,
     Scheduling, Youth Employment, Anti-Harassment, Workplace Safety,
     Remote Work, Drug & Alcohol, Attendance, Code of Conduct, Whistleblower.
+    For HEALTHCARE companies, also offer these industry-specific types:
+    HIPAA Privacy & Security, Bloodborne Pathogens Exposure Control,
+    Credentialing & Licensure, Patient Safety & Incident Reporting,
+    Infection Control & PPE.
     If Jurisdiction Requirements are in the company profile, note which categories
     have cross-state differences (e.g. "Your CA and NY locations have different sick leave
     minimums — a PTO policy would be a good fit").
@@ -119,7 +123,9 @@ Supported skills:
   Fields collected through conversation:
   - policy_type (string): pto_sick_leave, meal_rest_breaks, overtime, pay_practices,
     scheduling, youth_employment, anti_harassment, workplace_safety, remote_work,
-    drug_alcohol, attendance, code_of_conduct, whistleblower
+    drug_alcohol, attendance, code_of_conduct, whistleblower,
+    hipaa_privacy, bloodborne_pathogens, credentialing, patient_safety, infection_control
+    (last 5 are healthcare-only)
   - policy_title (string): auto-derived from policy_type if not given (e.g. "PTO and Sick Leave Policy")
   - policy_location_names (array of "City, ST" strings): e.g. ["San Francisco, CA", "New York, NY"]
   - policy_additional_context (string, optional): company-specific details

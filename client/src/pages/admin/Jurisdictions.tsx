@@ -60,11 +60,16 @@ const categoryLabel: Record<string, string> = {
   final_pay: 'Final Pay',
   minor_work_permit: 'Minor Work Permits',
   scheduling_reporting: 'Scheduling & Reporting Time',
+  leave: 'Leave',
   workers_comp: "Workers' Comp",
+  workplace_safety: 'Workplace Safety',
+  anti_discrimination: 'Anti-Discrimination',
   business_license: 'Business License',
   tax_rate: 'Tax Rate',
   posting_requirements: 'Posting Reqs',
 };
+
+const medicalCategories = new Set(['workers_comp', 'workplace_safety']);
 
 const levelColor: Record<string, string> = {
   city: 'text-blue-400 bg-blue-500/10 border-blue-500/20',
@@ -194,6 +199,9 @@ function JurisdictionDetailPanel({ detail, parentJurisdiction, onNavigate, inher
                 <span className="text-[9px] uppercase tracking-widest font-mono font-bold text-zinc-500">
                   {categoryLabel[cat] || cat.replace(/_/g, ' ')}
                 </span>
+                {medicalCategories.has(cat) && (
+                  <span className="text-[7px] px-1 py-px uppercase tracking-wider font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">med</span>
+                )}
                 <span className="text-[9px] text-zinc-700 font-mono">{reqs.length}</span>
               </div>
               {reqs.map((r: JurisdictionRequirement) => (

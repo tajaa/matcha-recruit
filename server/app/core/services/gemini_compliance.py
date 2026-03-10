@@ -31,6 +31,9 @@ VALID_CATEGORIES = {
     "minor_work_permit",
     "scheduling_reporting",
     "leave",
+    "workplace_safety",
+    "workers_comp",
+    "anti_discrimination",
 }
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
 VALID_RATE_TYPES = {
@@ -70,6 +73,20 @@ _CATEGORY_ALIASES = {
     "pfml": "leave",
     "paid_family_leave": "leave",
     "family_medical_leave": "leave",
+    "osha": "workplace_safety",
+    "occupational_safety": "workplace_safety",
+    "safety": "workplace_safety",
+    "workplace_health": "workplace_safety",
+    "workers_compensation": "workers_comp",
+    "worker_comp": "workers_comp",
+    "workman_comp": "workers_comp",
+    "workmen_comp": "workers_comp",
+    "discrimination": "anti_discrimination",
+    "harassment": "anti_discrimination",
+    "equal_pay": "anti_discrimination",
+    "pay_equity": "anti_discrimination",
+    "ada": "anti_discrimination",
+    "ada_accommodations": "anti_discrimination",
 }
 
 _JURISDICTION_LEVEL_ALIASES = {
@@ -205,10 +222,6 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
             if val is not None:
                 meta[dest_key] = val
         if meta:
-            # Store structured metadata in description (TEXT, no length limit)
-            # current_value stays as a short human-readable summary
-            existing_desc = normalized.get("description") or ""
-            normalized["description"] = json.dumps(meta)
             if not normalized.get("current_value"):
                 # Build a short summary for current_value (VARCHAR 100)
                 parts = []
@@ -221,6 +234,7 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
                 if meta.get("paid"):
                     parts.append("paid")
                 normalized["current_value"] = ", ".join(parts)[:100] if parts else None
+            # Preserve original description — do NOT overwrite with JSON meta
         if meta.get("max_weeks"):
             normalized["numeric_value"] = meta["max_weeks"]
 
@@ -343,6 +357,7 @@ def _build_category_prompt(
     category: str,
     context_section: str = "",
     preemption_context: str = "",
+    industry_context: str = "",
 ) -> str:
     """Build a focused prompt for a single compliance category."""
 
@@ -413,11 +428,40 @@ For EACH program, include these additional JSON fields:
 
 Set numeric_value to max_weeks. Set current_value to a SHORT summary (under 80 chars) like "8 weeks, 60% pay, job protected".
 Set description to a longer explanation of the program if needed.""",
+
+        "workplace_safety": """Research WORKPLACE SAFETY requirements (OSHA and state equivalents).
+Always include federal OSHA applicability (employers with 1+ employees).
+If the state operates its own OSHA-approved State Plan, include state-specific requirements.
+Cover: injury/illness recording (OSHA 300 log), reporting requirements (fatalities, hospitalizations),
+mandatory safety training, hazard communication (GHS/SDS), required workplace posters,
+bloodborne pathogen standards if applicable, and any industry-specific safety rules.
+Include employee count thresholds where they apply (e.g., OSHA 300 log exemptions for <10 employees).
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "workers_comp": """Research WORKERS' COMPENSATION INSURANCE requirements.
+Always include the STATE baseline workers' comp requirements.
+Cover: whether coverage is mandatory or elective, employee count thresholds for mandatory coverage,
+exempt categories (e.g., sole proprietors, independent contractors, domestic workers, agricultural),
+state fund vs. private insurance options, penalty for non-compliance,
+and any special industry requirements (e.g., construction must cover all workers).
+Include the state agency that administers the program.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "anti_discrimination": """Research ANTI-DISCRIMINATION AND EQUAL EMPLOYMENT requirements.
+Always include the STATE baseline anti-discrimination laws.
+If local (county/city) human rights ordinances add protections, include local overrides.
+Cover: protected classes beyond federal Title VII (e.g., sexual orientation, gender identity, marital status),
+employer size thresholds for state law applicability, harassment prevention training requirements,
+pay equity/transparency laws, reasonable accommodation requirements (disability, pregnancy, religion),
+mandatory anti-harassment policy requirements, and complaint filing agencies/deadlines.
+Do NOT duplicate federal Title VII or ADA — focus on state and local additions.
+Set current_value to a SHORT summary (under 80 chars).""",
     }
 
     return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
 {context_section}
 {preemption_context}
+{industry_context}
 {category_instructions.get(category, "")}
 If there is no distinct rule beyond federal/state baseline, still return one state-level requirement that explicitly says no additional jurisdiction-specific rule applies.
 Do NOT return an empty requirements list.
@@ -661,12 +705,15 @@ class GeminiComplianceService:
         preemption_rules: Optional[Dict[str, bool]] = None,
         has_local_ordinance: Optional[bool] = None,
         on_retry: Optional[Callable[[int, str], Any]] = None,
+        industry_context: str = "",
     ) -> List[Dict]:
         """Research compliance using parallel category-specific calls.
 
         Args:
             preemption_rules: Optional dict mapping category -> allows_local_override.
                 When provided, prompts are enhanced with preemption awareness.
+            industry_context: Optional context string for industry-specific research
+                (e.g., healthcare-specific wage/overtime/scheduling rules).
         """
 
         location_str = f"{city}, {state}"
@@ -678,17 +725,7 @@ class GeminiComplianceService:
         if corrections_context:
             context_section += f"\n\n{corrections_context}"
 
-        default_categories = [
-            "minimum_wage",
-            "overtime",
-            "sick_leave",
-            "meal_breaks",
-            "pay_frequency",
-            "final_pay",
-            "minor_work_permit",
-            "scheduling_reporting",
-            "leave",
-        ]
+        default_categories = sorted(VALID_CATEGORIES)
         selected_categories: List[str] = []
         for category in categories or default_categories:
             normalized = _normalize_category_value(category)
@@ -742,6 +779,7 @@ class GeminiComplianceService:
             prompt = _build_category_prompt(
                 location_str, category, context_section,
                 preemption_context=_preemption_context_for(category),
+                industry_context=industry_context,
             )
             try:
                 def _validate(data: dict) -> Optional[str]:
@@ -778,7 +816,7 @@ class GeminiComplianceService:
         # Run categories in parallel, but throttle concurrency for heavy (pro) model to
         # avoid hammering Google's quota with all requests at the exact same millisecond.
         mode = await get_jurisdiction_research_model_mode()
-        concurrency = 2 if mode == "heavy" else len(selected_categories)
+        concurrency = 4 if mode == "heavy" else len(selected_categories)
         semaphore = asyncio.Semaphore(concurrency)
 
         async def research_category_throttled(category: str) -> List[Dict]:
@@ -815,6 +853,7 @@ class GeminiComplianceService:
         preemption_rules: Optional[Dict[str, bool]] = None,
         has_local_ordinance: Optional[bool] = None,
         on_retry: Optional[Callable[[int, str], Any]] = None,
+        industry_context: str = "",
     ) -> List[Dict]:
         """Research compliance requirements for a location (uses parallel calls)."""
         if not self._has_api_key():
@@ -826,6 +865,7 @@ class GeminiComplianceService:
             preemption_rules=preemption_rules,
             has_local_ordinance=has_local_ordinance,
             on_retry=on_retry,
+            industry_context=industry_context,
         )
 
     async def discover_jurisdiction_sources(

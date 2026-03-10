@@ -64,8 +64,17 @@ const INDUSTRY_PLAYBOOK_PREVIEW: Record<string, { focus: string; boilerplate: st
     boilerplate: ['Safety and Stop-Work Authority', 'Shift Handoff Rules', 'Incident Reporting Controls'],
   },
   healthcare: {
-    focus: 'Adds credentialing, patient-safety reporting, and accommodation controls.',
-    boilerplate: ['Credentialing Controls', 'Patient Safety Reporting', 'Accommodation and Non-Retaliation'],
+    focus: 'Adds HIPAA privacy, credentialing, infection control, bloodborne pathogen, patient safety, and healthcare scheduling controls.',
+    boilerplate: [
+      'Credentialing and Scope-of-Practice',
+      'HIPAA Privacy and Security',
+      'Bloodborne Pathogen Exposure Control',
+      'Infection Prevention',
+      'Patient Safety Reporting',
+      'Mandatory Overtime Restrictions',
+      'Professional Licensure and CE',
+      'Workplace Violence Prevention',
+    ],
   },
 };
 

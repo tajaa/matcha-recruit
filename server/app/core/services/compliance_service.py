@@ -69,7 +69,108 @@ REQUIRED_LABOR_CATEGORIES = {
     "minor_work_permit",
     "scheduling_reporting",
     "leave",
+    "workplace_safety",
+    "workers_comp",
+    "anti_discrimination",
 }
+
+# Map free-text company.industry values to canonical industry profile names.
+# Reuses the same aliases as handbook_service.GUIDED_INDUSTRY_ALIASES.
+_INDUSTRY_ALIASES: Dict[str, str] = {
+    "restaurant": "hospitality",
+    "hospitality": "hospitality",
+    "food": "hospitality",
+    "hotel": "hospitality",
+    "health": "healthcare",
+    "healthcare": "healthcare",
+    "medical": "healthcare",
+    "clinic": "healthcare",
+    "hospital": "healthcare",
+    "nursing": "healthcare",
+    "pharmacy": "healthcare",
+    "dental": "healthcare",
+    "physician": "healthcare",
+    "outpatient": "healthcare",
+    "ambulatory": "healthcare",
+    "retail": "retail",
+    "store": "retail",
+    "shop": "retail",
+    "warehouse": "manufacturing",
+    "manufacturing": "manufacturing",
+    "industrial": "manufacturing",
+    "construction": "manufacturing",
+    "technology": "technology",
+    "software": "technology",
+    "saas": "technology",
+    "professional services": "technology",
+    "consulting": "technology",
+    "fast food": "fast food",
+    "fast_food": "fast food",
+}
+
+# Industry-specific context strings injected into Gemini research prompts.
+_INDUSTRY_RESEARCH_CONTEXT: Dict[str, str] = {
+    "healthcare": (
+        "\n\nINDUSTRY CONTEXT — HEALTHCARE EMPLOYER:\n"
+        "This business operates in the HEALTHCARE industry (hospitals, clinics, "
+        "medical offices, nursing facilities, or similar). In addition to standard "
+        "requirements, you MUST research healthcare-specific variants:\n"
+        "- Healthcare worker minimum wage laws (e.g., CA SB 525 — $25/hr for healthcare workers)\n"
+        "- Hospital/healthcare 8/80 overtime rules (FLSA Section 7(j))\n"
+        "- Mandatory overtime bans or restrictions for nurses/healthcare workers "
+        "(e.g., OR HB 2800, NJ Mandatory Overtime for Healthcare Workers Act)\n"
+        "- Nurse staffing ratio requirements (CA, MA, NY)\n"
+        "- Healthcare-specific scheduling and mandatory rest period rules "
+        "(e.g., minimum hours between shifts for nurses)\n"
+        "- Healthcare worker meal/rest break exceptions and penalty pay\n"
+        "- Enhanced sick leave provisions for healthcare workers\n"
+        "Return these as SEPARATE requirements with rate_type='healthcare' where applicable.\n"
+        'For each healthcare-specific requirement, include "applicable_industries": ["healthcare"] in the returned JSON.'
+    ),
+}
+
+
+async def _get_industry_profile(
+    conn, company_id: UUID
+) -> Optional[Dict[str, Any]]:
+    """Look up the industry compliance profile for a company.
+
+    Returns a dict with focused_categories, rate_types, category_order,
+    category_evidence, and industry_context (prompt string), or None.
+    """
+    row = await conn.fetchrow(
+        "SELECT industry FROM companies WHERE id = $1", company_id
+    )
+    if not row or not row["industry"]:
+        return None
+
+    raw = row["industry"].lower().strip()
+    canonical = _INDUSTRY_ALIASES.get(raw)
+    if not canonical:
+        # Try substring match against alias keys
+        for alias_key, alias_val in _INDUSTRY_ALIASES.items():
+            if alias_key in raw or raw in alias_key:
+                canonical = alias_val
+                break
+    if not canonical:
+        return None
+
+    profile_row = await conn.fetchrow(
+        "SELECT * FROM industry_compliance_profiles WHERE LOWER(name) LIKE $1",
+        f"%{canonical}%",
+    )
+    if not profile_row:
+        return None
+
+    return {
+        "id": str(profile_row["id"]),
+        "name": profile_row["name"],
+        "focused_categories": profile_row["focused_categories"] or [],
+        "rate_types": profile_row["rate_types"] or [],
+        "category_order": profile_row["category_order"] or [],
+        "category_evidence": profile_row.get("category_evidence"),
+        "industry_context": _INDUSTRY_RESEARCH_CONTEXT.get(canonical, ""),
+    }
 
 _CATEGORY_ALIASES = {
     "meal_rest_breaks": "meal_breaks",
@@ -243,6 +344,12 @@ VALID_RATE_TYPES = {
     "healthcare",
     "large_employer",
     "small_employer",
+}
+
+# Rate types that are industry-specific. Used at sync time to filter
+# requirements that don't apply to a company's industry.
+_INDUSTRY_SPECIFIC_RATE_TYPES: Dict[str, str] = {
+    "healthcare": "healthcare",
 }
 
 # Legacy constants kept for backwards compatibility during transition
@@ -892,6 +999,7 @@ def _jurisdiction_row_to_dict(jr: dict) -> dict:
         "expiration_date": jr["expiration_date"].isoformat()
         if jr.get("expiration_date")
         else None,
+        "applicable_industries": jr.get("applicable_industries"),
     }
 
 
@@ -1054,8 +1162,9 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
-                 effective_date, expiration_date, last_verified_at, requires_written_policy)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15)
+                 effective_date, expiration_date, last_verified_at, requires_written_policy,
+                 applicable_industries)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1069,6 +1178,7 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
                 source_url = EXCLUDED.source_url,
                 source_name = EXCLUDED.source_name,
                 requires_written_policy = EXCLUDED.requires_written_policy,
+                applicable_industries = EXCLUDED.applicable_industries,
                 effective_date = EXCLUDED.effective_date,
                 expiration_date = EXCLUDED.expiration_date,
                 last_verified_at = NOW(),
@@ -1092,6 +1202,7 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
             parse_date(req.get("effective_date")),
             parse_date(req.get("expiration_date")),
             req.get("requires_written_policy"),
+            req.get("applicable_industries"),
         )
 
 
@@ -1179,6 +1290,7 @@ async def _refresh_repository_missing_categories(
     current_requirements: List[Dict[str, Any]],
     missing_categories: List[str],
     on_retry: Optional[Callable[[int, str], Any]] = None,
+    industry_context: str = "",
 ) -> List[Dict[str, Any]]:
     """Refresh missing categories, merge with current requirements, and upsert source-of-truth."""
     if not missing_categories:
@@ -1225,6 +1337,7 @@ async def _refresh_repository_missing_categories(
         preemption_rules=preemption_rules,
         has_local_ordinance=has_local_ordinance,
         on_retry=on_retry,
+        industry_context=industry_context,
     )
     refreshed_requirements = refreshed_requirements or []
 
@@ -1293,8 +1406,9 @@ async def _upsert_jurisdiction_requirements(
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
-                 effective_date, expiration_date, last_verified_at, requires_written_policy)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15)
+                 effective_date, expiration_date, last_verified_at, requires_written_policy,
+                 applicable_industries)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1308,6 +1422,7 @@ async def _upsert_jurisdiction_requirements(
                 source_url = EXCLUDED.source_url,
                 source_name = EXCLUDED.source_name,
                 requires_written_policy = EXCLUDED.requires_written_policy,
+                applicable_industries = EXCLUDED.applicable_industries,
                 effective_date = EXCLUDED.effective_date,
                 expiration_date = EXCLUDED.expiration_date,
                 last_verified_at = NOW(),
@@ -1331,6 +1446,7 @@ async def _upsert_jurisdiction_requirements(
             parse_date(req.get("effective_date")),
             parse_date(req.get("expiration_date")),
             req.get("requires_written_policy"),
+            req.get("applicable_industries"),
         )
 
     # Remove jurisdiction rows not in new result set
@@ -1418,6 +1534,26 @@ async def _upsert_jurisdiction_legislation(
         count,
         jurisdiction_id,
     )
+
+
+async def _filter_requirements_for_company(
+    conn, company_id: UUID, requirements: List[Dict]
+) -> List[Dict]:
+    """Filter out industry-specific requirements that don't apply to this company."""
+    if not any(r.get("applicable_industries") for r in requirements):
+        return requirements
+
+    profile = await _get_industry_profile(conn, company_id)
+    company_industry = profile["name"].lower() if profile else None
+
+    filtered = []
+    for req in requirements:
+        industries = req.get("applicable_industries")
+        if not industries:
+            filtered.append(req)
+        elif company_industry and company_industry in [i.lower() for i in industries]:
+            filtered.append(req)
+    return filtered
 
 
 async def _sync_requirements_to_location(
@@ -2159,8 +2295,8 @@ async def _upsert_requirement(
         """
         INSERT INTO compliance_requirements
         (location_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name, title, description,
-         current_value, numeric_value, source_url, source_name, effective_date)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+         current_value, numeric_value, source_url, source_name, effective_date, applicable_industries)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING id
         """,
         location_id,
@@ -2176,6 +2312,7 @@ async def _upsert_requirement(
         req.get("source_url"),
         req.get("source_name"),
         parse_date(req.get("effective_date")),
+        req.get("applicable_industries"),
     )
 
 
@@ -2194,8 +2331,8 @@ async def _update_requirement(
         SET requirement_key = $1, category = $2, rate_type = $3, jurisdiction_name = $4, title = $5,
             current_value = $6, numeric_value = $7, previous_value = $8, last_changed_at = $9,
             description = $10, source_url = $11, source_name = $12, effective_date = $13,
-            updated_at = NOW()
-        WHERE id = $14
+            applicable_industries = $14, updated_at = NOW()
+        WHERE id = $15
         """,
         requirement_key,
         req.get("category"),
@@ -2210,6 +2347,7 @@ async def _update_requirement(
         req.get("source_url"),
         req.get("source_name"),
         parse_date(req.get("effective_date")),
+        req.get("applicable_industries"),
         existing_id,
     )
 
@@ -2720,6 +2858,7 @@ async def ensure_location_for_employee(
             req_dicts = await _filter_with_preemption(conn, req_dicts, norm_state)
             for req in req_dicts:
                 _clamp_varchar_fields(req)
+            req_dicts = await _filter_requirements_for_company(conn, company_id, req_dicts)
             await _sync_requirements_to_location(
                 conn, location_id, company_id, req_dicts, create_alerts=False,
             )
@@ -2850,6 +2989,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
 
         if req_dicts:
             # Clone requirements to location — no alerts for initial clone
+            req_dicts = await _filter_requirements_for_company(conn, company_id, req_dicts)
             await _sync_requirements_to_location(
                 conn,
                 location_id,
@@ -2932,8 +3072,14 @@ async def run_compliance_check_stream(
     requirements: List[Dict[str, Any]] = []
     cached_requirements_for_merge: List[Dict[str, Any]] = []
     research_categories: Optional[List[str]] = None
+    industry_context: str = ""
 
     async with get_connection() as conn:
+        # Load industry profile for industry-aware research prompts
+        industry_profile = await _get_industry_profile(conn, company_id)
+        if industry_profile:
+            industry_context = industry_profile.get("industry_context", "")
+
         log_id = await _create_check_log(conn, location_id, company_id, "manual")
 
         try:
@@ -3041,6 +3187,33 @@ async def run_compliance_check_stream(
                     }
                 else:
                     used_repository = True
+
+            # If repo is fresh but the company has an industry profile (e.g.
+            # healthcare), check whether industry-specific requirements
+            # (rate_type='healthcare') are already in the company's compliance
+            # data.  If not, force Gemini research for the industry's focused
+            # categories so the company gets SB 525, nurse-overtime, etc.
+            if used_repository and industry_context and industry_profile:
+                focused = industry_profile.get("focused_categories") or []
+                industry_rt = industry_profile.get("rate_types") or []
+                if focused and industry_rt:
+                    has_industry_data = await conn.fetchval(
+                        """SELECT EXISTS(
+                            SELECT 1 FROM compliance_requirements
+                            WHERE location_id = $1 AND rate_type = ANY($2::text[])
+                        )""",
+                        location_id,
+                        industry_rt,
+                    )
+                    if not has_industry_data:
+                        # Need to research industry-specific variants
+                        used_repository = False
+                        research_categories = focused
+                        cached_requirements_for_merge = list(requirements)
+                        yield {
+                            "type": "researching",
+                            "message": f"Researching industry-specific requirements for {location_name}...",
+                        }
 
             # ============================================================
             # TIER 2.5: County/State data reuse for no-local-ordinance cities
@@ -3189,6 +3362,7 @@ async def run_compliance_check_stream(
                         preemption_rules=preemption_rules,
                         has_local_ordinance=has_local_ordinance,
                         on_retry=_on_research_retry,
+                        industry_context=industry_context,
                     )
                 )
                 async for evt in _heartbeat_while(research_task, queue=research_queue):
@@ -3378,7 +3552,7 @@ async def run_compliance_check_stream(
                 "message": f"Processing {len(requirements)} requirements...",
             }
 
-            # If Gemini was called, contribute results to jurisdiction repository
+            # If Gemini was called, contribute results to jurisdiction repository.
             if not used_repository:
                 await _upsert_jurisdiction_requirements(
                     conn, jurisdiction_id, requirements
@@ -3414,6 +3588,7 @@ async def run_compliance_check_stream(
             # Sync requirements to location (change detection, alerts, history)
             # Only create alerts for fresh Gemini data — repository data is cached
             # and shouldn't re-alert on every check.
+            requirements = await _filter_requirements_for_company(conn, company_id, requirements)
             sync_result = await _sync_requirements_to_location(
                 conn,
                 location_id,
@@ -5306,8 +5481,14 @@ async def run_compliance_check_background(
     requirements: List[Dict[str, Any]] = []
     cached_requirements_for_merge: List[Dict[str, Any]] = []
     research_categories: Optional[List[str]] = None
+    industry_context: str = ""
 
     async with get_connection() as conn:
+        # Load industry profile for industry-aware research prompts
+        industry_profile = await _get_industry_profile(conn, company_id)
+        if industry_profile:
+            industry_context = industry_profile.get("industry_context", "")
+
         log_id = await _create_check_log(conn, location_id, company_id, check_type)
 
         try:
@@ -5390,6 +5571,28 @@ async def run_compliance_check_background(
                     )
                 else:
                     used_repository = True
+
+            # Industry-specific check (same logic as streaming path)
+            if used_repository and industry_context and industry_profile:
+                focused = industry_profile.get("focused_categories") or []
+                industry_rt = industry_profile.get("rate_types") or []
+                if focused and industry_rt:
+                    has_industry_data = await conn.fetchval(
+                        """SELECT EXISTS(
+                            SELECT 1 FROM compliance_requirements
+                            WHERE location_id = $1 AND rate_type = ANY($2::text[])
+                        )""",
+                        location_id,
+                        industry_rt,
+                    )
+                    if not has_industry_data:
+                        used_repository = False
+                        research_categories = focused
+                        cached_requirements_for_merge = list(requirements)
+                        print(
+                            f"[Compliance] Researching industry-specific requirements for "
+                            f"{location.city}, {location.state}"
+                        )
 
             # TIER 2.5: County/State data reuse for no-local-ordinance cities
             if not used_repository and has_local_ordinance is False:
@@ -5485,6 +5688,7 @@ async def run_compliance_check_background(
                     corrections_context=corrections_context,
                     preemption_rules=preemption_rules,
                     has_local_ordinance=has_local_ordinance,
+                    industry_context=industry_context,
                 )
                 if research_categories and cached_requirements_for_merge:
                     target_set = {
@@ -5593,7 +5797,7 @@ async def run_compliance_check_background(
             for req in requirements:
                 _clamp_varchar_fields(req)
 
-            # Contribute to repository after Gemini call
+            # Contribute to repository after Gemini call.
             if not used_repository:
                 await _upsert_jurisdiction_requirements(
                     conn, jurisdiction_id, requirements
@@ -5627,6 +5831,7 @@ async def run_compliance_check_background(
                             )
 
             # Sync to location
+            requirements = await _filter_requirements_for_company(conn, company_id, requirements)
             sync_result = await _sync_requirements_to_location(
                 conn,
                 location_id,
@@ -5833,26 +6038,6 @@ async def research_jurisdiction_repo_only(
         current_requirements = [_jurisdiction_row_to_dict(jr) for jr in existing_rows]
         missing_categories = _missing_required_categories(current_requirements)
 
-        if not missing_categories:
-            yield {
-                "type": "complete",
-                "message": f"Repository already has full coverage for {location_name}.",
-                "new": 0,
-                "updated": 0,
-                "alerts": 0,
-            }
-            return
-
-        yield {
-            "type": "repository_refresh",
-            "jurisdiction_id": str(jurisdiction_id),
-            "missing_categories": missing_categories,
-            "message": (
-                f"Researching {len(missing_categories)} missing categories for "
-                f"{location_name} ({', '.join(missing_categories)})."
-            ),
-        }
-
         refresh_queue: asyncio.Queue = asyncio.Queue()
 
         def _on_retry(attempt: int, error: str) -> None:
@@ -5863,38 +6048,135 @@ async def research_jurisdiction_repo_only(
                 }
             )
 
-        try:
-            refresh_task = asyncio.create_task(
-                _refresh_repository_missing_categories(
-                    conn,
-                    service,
-                    jurisdiction_id=jurisdiction_id,
-                    city=city,
-                    state=state,
-                    county=county,
-                    has_local_ordinance=has_local_ordinance,
-                    current_requirements=current_requirements,
-                    missing_categories=missing_categories,
-                    on_retry=_on_retry,
-                )
-            )
-            async for evt in _heartbeat_while(refresh_task, queue=refresh_queue):
-                yield evt
-            updated_requirements = refresh_task.result() or []
-        except Exception as e:
-            yield {"type": "error", "message": f"Research failed: {e}"}
-            return
-
-        missing_after = _missing_required_categories(updated_requirements)
-        if missing_after:
+        # --- Generic category research phase ---
+        updated_requirements = list(current_requirements)
+        if missing_categories:
             yield {
-                "type": "repository_only",
+                "type": "repository_refresh",
                 "jurisdiction_id": str(jurisdiction_id),
-                "missing_categories": missing_after,
+                "missing_categories": missing_categories,
                 "message": (
-                    f"Repository still missing {', '.join(missing_after)} after research."
+                    f"Researching {len(missing_categories)} missing categories for "
+                    f"{location_name} ({', '.join(missing_categories)})."
                 ),
             }
+
+            try:
+                refresh_task = asyncio.create_task(
+                    _refresh_repository_missing_categories(
+                        conn,
+                        service,
+                        jurisdiction_id=jurisdiction_id,
+                        city=city,
+                        state=state,
+                        county=county,
+                        has_local_ordinance=has_local_ordinance,
+                        current_requirements=current_requirements,
+                        missing_categories=missing_categories,
+                        on_retry=_on_retry,
+                    )
+                )
+                async for evt in _heartbeat_while(refresh_task, queue=refresh_queue):
+                    yield evt
+                updated_requirements = refresh_task.result() or []
+            except Exception as e:
+                yield {"type": "error", "message": f"Research failed: {e}"}
+                return
+
+            missing_after = _missing_required_categories(updated_requirements)
+            if missing_after:
+                yield {
+                    "type": "repository_only",
+                    "jurisdiction_id": str(jurisdiction_id),
+                    "missing_categories": missing_after,
+                    "message": (
+                        f"Repository still missing {', '.join(missing_after)} after research."
+                    ),
+                }
+
+        # --- Industry-specific research phase ---
+        # Call Gemini directly for industry variants and upsert additively
+        # (don't use _refresh_repository_missing_categories which replaces categories).
+        try:
+            profiles = await conn.fetch("SELECT * FROM industry_compliance_profiles")
+        except asyncpg.UndefinedTableError:
+            profiles = []
+
+        for profile in profiles:
+            rate_types = profile.get("rate_types") or []
+            relevant_rts = [rt for rt in rate_types if rt in _INDUSTRY_SPECIFIC_RATE_TYPES]
+            if not relevant_rts:
+                continue
+
+            has_industry = await conn.fetchval(
+                """SELECT EXISTS(
+                    SELECT 1 FROM jurisdiction_requirements
+                    WHERE jurisdiction_id = $1 AND rate_type = ANY($2::text[])
+                )""",
+                jurisdiction_id,
+                relevant_rts,
+            )
+            if has_industry:
+                continue
+
+            focused = profile.get("focused_categories") or []
+            if not focused:
+                continue
+
+            canonical = profile["name"].lower()
+            ctx = _INDUSTRY_RESEARCH_CONTEXT.get(canonical, "")
+            if not ctx:
+                continue
+
+            yield {
+                "type": "repository_refresh",
+                "message": f"Researching {canonical}-specific requirements for {location_name}...",
+            }
+
+            try:
+                industry_task = asyncio.create_task(
+                    service.research_location_compliance(
+                        city=city,
+                        state=state,
+                        county=county,
+                        categories=focused,
+                        industry_context=ctx,
+                        on_retry=_on_retry,
+                    )
+                )
+                async for evt in _heartbeat_while(industry_task, queue=refresh_queue):
+                    yield evt
+                industry_reqs = industry_task.result() or []
+
+                # Keep only industry-specific rows (rate_type matches)
+                industry_only = [
+                    r for r in industry_reqs
+                    if _normalize_rate_type(r.get("rate_type")) in relevant_rts
+                ]
+                for req in industry_only:
+                    _clamp_varchar_fields(req)
+                    if not req.get("applicable_industries"):
+                        req["applicable_industries"] = [canonical]
+
+                if industry_only:
+                    await _upsert_requirements_additive(
+                        conn, jurisdiction_id, industry_only
+                    )
+                    updated_requirements = updated_requirements + industry_only
+                    yield {
+                        "type": "repository_refresh",
+                        "message": f"Added {len(industry_only)} {canonical}-specific requirements.",
+                    }
+                else:
+                    yield {
+                        "type": "repository_refresh",
+                        "message": f"No {canonical}-specific requirements found for {location_name}.",
+                    }
+            except Exception as e:
+                yield {
+                    "type": "warning",
+                    "message": f"Industry-specific research failed for {canonical}: {e}",
+                }
 
         yield {
             "type": "complete",

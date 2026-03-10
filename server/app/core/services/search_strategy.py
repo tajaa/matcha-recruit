@@ -40,6 +40,22 @@ CATEGORY_SEARCH_STRATEGIES = {
         "search_guidance": "Search state/city labor agencies for predictive scheduling, fair workweek, reporting-time pay, and spread-of-hours rules.",
         "preferred_source_types": [".gov", "city labor standards office"],
     },
+    "leave": {
+        "search_guidance": "Search state labor department for paid family/medical leave programs, state disability insurance, pregnancy disability leave.",
+        "preferred_source_types": [".gov", "state labor department", "state EDD/ESD"],
+    },
+    "workplace_safety": {
+        "search_guidance": "Check federal OSHA via osha.gov, then state OSHA plans. Look for state-specific safety training and reporting requirements.",
+        "preferred_source_types": [".gov", "osha.gov", "state OSHA"],
+    },
+    "workers_comp": {
+        "search_guidance": "Check state workers' compensation board/commission. Look for mandatory coverage thresholds and exemptions.",
+        "preferred_source_types": [".gov", "state workers comp board"],
+    },
+    "anti_discrimination": {
+        "search_guidance": "Check state civil rights commission/human rights agency. Look for protected classes beyond federal, training mandates, and pay equity laws.",
+        "preferred_source_types": [".gov", "state civil rights commission", "state human rights"],
+    },
 }
 
 # States with well-structured government data portals
