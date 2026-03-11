@@ -318,9 +318,11 @@ class GeminiProvider(MatchaWorkAIProvider):
         current_state: dict,
         company_context: str = "",
         slide_index: Optional[int] = None,
+        context_summary: Optional[str] = None,
     ) -> AIResponse:
         system_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
-            messages, current_state, company_context=company_context, slide_index=slide_index
+            messages, current_state, company_context=company_context, slide_index=slide_index,
+            context_summary=context_summary,
         )
         model = await _get_model(self.settings)
 
@@ -466,8 +468,10 @@ class GeminiProvider(MatchaWorkAIProvider):
         current_state: dict,
         company_context: str = "",
         slide_index: Optional[int] = None,
+        context_summary: Optional[str] = None,
     ) -> tuple[str, list, list[str], str]:
-        windowed = messages[-20:]
+        window_size = 15 if context_summary else 20
+        windowed = messages[-window_size:]
         current_skill = _infer_skill_from_state(current_state)
         if current_skill == "offer_letter":
             valid_fields = OFFER_LETTER_FIELDS
@@ -490,10 +494,18 @@ class GeminiProvider(MatchaWorkAIProvider):
         system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
             today=date.today().isoformat(),
             current_skill=current_skill,
-            current_state=json.dumps(current_state, indent=2, default=str),
+            current_state=json.dumps(current_state, default=str, separators=(",", ":")),
             valid_fields=", ".join(valid_fields),
             company_context=company_context,
         )
+
+        # Inject compacted conversation summary if available
+        if context_summary:
+            system_prompt += (
+                f"\n\n## Conversation Context Summary\n"
+                f"(Earlier messages were summarized to preserve context)\n"
+                f"{context_summary}\n"
+            )
 
         # Inject slide-focus context when the user has selected a specific slide
         if slide_index is not None and current_skill in ("presentation", "workbook"):
@@ -570,6 +582,56 @@ class GeminiProvider(MatchaWorkAIProvider):
             "estimated": False,
             "model": model,
         }
+
+
+COMPACTION_PROMPT = (
+    "Summarize this conversation history into a concise context block (max 200 words). "
+    "Include: key decisions made, document type, specific values/names/dates mentioned, "
+    "user preferences expressed, and current state of the work. "
+    "Do NOT include greetings or filler. Return ONLY the summary text, no JSON."
+)
+
+COMPACTION_MODEL = "gemini-2.0-flash"
+COMPACTION_THRESHOLD = 30
+
+
+async def compact_conversation(
+    messages: list[dict],
+    client: genai.Client,
+) -> Optional[str]:
+    """Summarize older messages into a short context block using a fast model."""
+    if len(messages) < COMPACTION_THRESHOLD:
+        return None
+
+    # Summarize all but the most recent 15 messages
+    older = messages[:-15]
+    conversation_text = "\n".join(
+        f"{m['role'].upper()}: {m['content']}" for m in older
+    )
+
+    try:
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.models.generate_content,
+                model=COMPACTION_MODEL,
+                contents=[types.Content(
+                    role="user",
+                    parts=[types.Part(text=conversation_text)],
+                )],
+                config=types.GenerateContentConfig(
+                    system_instruction=COMPACTION_PROMPT,
+                    temperature=0.1,
+                ),
+            ),
+            timeout=30,
+        )
+        summary = (response.text or "").strip()
+        if summary:
+            return summary
+    except Exception:
+        logger.warning("Conversation compaction failed", exc_info=True)
+
+    return None
 
 
 _provider: Optional[GeminiProvider] = None

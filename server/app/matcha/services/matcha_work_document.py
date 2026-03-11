@@ -7,6 +7,7 @@ import mimetypes
 import posixpath
 import re
 import secrets
+import time
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 VALID_REVIEW_REQUEST_STATUSES = {"pending", "sent", "failed", "submitted"}
 MATCHA_WORK_STORAGE_ROOT = "matcha-work"
+
+# TTL cache for company profiles — avoids re-fetching on every message
+_company_profile_cache: dict[str, tuple[float, dict]] = {}
+_PROFILE_CACHE_TTL = 300  # 5 minutes
 
 
 def _should_enforce_company_scoped_matcha_work_storage() -> bool:
@@ -642,8 +647,19 @@ def _build_offer_letter_payload(state: dict, fallback_company_name: str) -> dict
     }
 
 
+def invalidate_company_profile_cache(company_id: UUID) -> None:
+    """Remove a company's cached profile so the next call fetches fresh data."""
+    _company_profile_cache.pop(str(company_id), None)
+
+
 async def get_company_profile_for_ai(company_id: UUID) -> dict:
     """Fetch the company profile fields relevant to AI context."""
+    key = str(company_id)
+    now = time.monotonic()
+    cached = _company_profile_cache.get(key)
+    if cached and (now - cached[0]) < _PROFILE_CACHE_TTL:
+        return dict(cached[1])  # return a copy so callers can't corrupt cache
+
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
@@ -657,6 +673,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
             company_id,
         )
         if row is None:
+            _company_profile_cache[key] = (now, {})
             return {}
         profile = {k: v for k, v in dict(row).items() if v is not None}
 
@@ -668,9 +685,11 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
         ]
     except Exception:
         logger.warning("Failed to load compliance locations for Matcha Work AI context", exc_info=True)
+        _company_profile_cache[key] = (now, profile)
         return profile
 
     if not locations:
+        _company_profile_cache[key] = (now, profile)
         return profile
 
     def _location_label(loc: dict) -> str:
@@ -696,6 +715,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
         )
     except Exception:
         logger.warning("Failed to load compliance requirements for Matcha Work AI context", exc_info=True)
+        _company_profile_cache[key] = (now, profile)
         return profile
 
     location_lines: list[str] = []
@@ -727,7 +747,41 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
     if location_lines:
         profile["jurisdiction_requirements_summary"] = "\n".join(location_lines)
 
+    _company_profile_cache[key] = (now, profile)
     return profile
+
+
+async def get_thread_message_count(thread_id: UUID) -> int:
+    """Return total message count for a thread."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT COUNT(*) AS cnt FROM mw_messages WHERE thread_id=$1",
+            thread_id,
+        )
+        return row["cnt"] if row else 0
+
+
+async def get_context_summary(thread_id: UUID) -> tuple[Optional[str], Optional[int]]:
+    """Load the compacted context summary and the message count when it was generated."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT context_summary, context_summary_at_msg_count FROM mw_threads WHERE id=$1",
+            thread_id,
+        )
+        if row and row["context_summary"]:
+            return row["context_summary"], row.get("context_summary_at_msg_count")
+        return None, None
+
+
+async def save_context_summary(thread_id: UUID, summary: str, msg_count: int) -> None:
+    """Persist a compacted context summary on the thread row."""
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE mw_threads SET context_summary=$1, context_summary_at_msg_count=$2, updated_at=NOW() WHERE id=$3",
+            summary,
+            msg_count,
+            thread_id,
+        )
 
 
 async def create_thread(

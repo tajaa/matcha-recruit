@@ -55,7 +55,7 @@ from ..services import matcha_work_document as doc_svc
 from ..services import billing_service
 from ..services.er_document_parser import ERDocumentParser
 from ..services.matcha_work_handbook_upload import AuditedLocation, audit_uploaded_handbook
-from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context
+from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -1010,14 +1010,13 @@ async def create_thread(
         # Save user message
         await doc_svc.add_message(thread_id, "user", body.initial_message)
 
-        # Call AI with company context
+        # Call AI with company context (profile already fetched during create_thread)
         ai_provider = get_ai_provider()
         profile = await doc_svc.get_company_profile_for_ai(company_id)
         ctx = _build_company_context(profile)
         messages = [{"role": "user", "content": body.initial_message}]
-        estimated_usage = await ai_provider.estimate_usage(messages, thread["current_state"], company_context=ctx)
         ai_resp = await ai_provider.generate(messages, thread["current_state"], company_context=ctx)
-        final_usage = ai_resp.token_usage or estimated_usage
+        final_usage = ai_resp.token_usage
 
         new_version = thread["version"]
         (
@@ -1470,8 +1469,12 @@ async def send_message(
     # Save user message
     user_msg = await doc_svc.add_message(thread_id, "user", body.content)
 
-    # Fetch message history for context (sliding window handled by AI provider)
-    messages = await doc_svc.get_thread_messages(thread_id, limit=20)
+    # Fetch message history + company profile + context summary in parallel
+    messages, profile, (context_summary, summary_at_count) = await asyncio.gather(
+        doc_svc.get_thread_messages(thread_id, limit=20),
+        doc_svc.get_company_profile_for_ai(company_id),
+        doc_svc.get_context_summary(thread_id),
+    )
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
@@ -1479,12 +1482,13 @@ async def send_message(
 
     # Call AI with company context
     ai_provider = get_ai_provider()
-    profile = await doc_svc.get_company_profile_for_ai(company_id)
     ctx = _build_company_context(profile)
-    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
-    ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
+    ai_resp = await ai_provider.generate(
+        msg_dicts, thread["current_state"], company_context=ctx,
+        slide_index=body.slide_index, context_summary=context_summary,
+    )
     _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
-    final_usage = ai_resp.token_usage or estimated_usage
+    final_usage = ai_resp.token_usage
 
     current_version = thread["version"]
     (
@@ -1554,6 +1558,9 @@ async def send_message(
         except Exception as exc:
             logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
 
+    # Trigger conversation compaction in the background if needed
+    asyncio.create_task(_maybe_compact(thread_id, ai_provider, summary_at_count))
+
     return SendMessageResponse(
         user_message=_row_to_message(user_msg),
         assistant_message=_row_to_message(assistant_msg),
@@ -1563,6 +1570,34 @@ async def send_message(
         pdf_url=pdf_url,
         token_usage=final_usage,
     )
+
+
+_compacting_threads: set[UUID] = set()  # simple guard against concurrent compaction
+_COMPACTION_REFRESH_INTERVAL = 20  # re-compact after this many new messages
+
+
+async def _maybe_compact(thread_id: UUID, ai_provider, summary_at_count: int | None) -> None:
+    """Check message count and run compaction if threshold is exceeded or summary is stale."""
+    if thread_id in _compacting_threads:
+        return
+    try:
+        _compacting_threads.add(thread_id)
+        msg_count = await doc_svc.get_thread_message_count(thread_id)
+        if msg_count < 30:
+            return
+        # Skip if summary is recent enough
+        if summary_at_count is not None and (msg_count - summary_at_count) < _COMPACTION_REFRESH_INTERVAL:
+            return
+        all_messages = await doc_svc.get_thread_messages(thread_id)
+        msg_dicts = [{"role": m["role"], "content": m["content"]} for m in all_messages]
+        summary = await compact_conversation(msg_dicts, ai_provider.client)
+        if summary:
+            await doc_svc.save_context_summary(thread_id, summary, msg_count)
+            logger.info("Compacted conversation for thread %s (%d messages)", thread_id, msg_count)
+    except Exception:
+        logger.warning("Background compaction failed for thread %s", thread_id, exc_info=True)
+    finally:
+        _compacting_threads.discard(thread_id)
 
 
 @router.post("/threads/{thread_id}/messages/stream")
@@ -1592,15 +1627,18 @@ async def send_message_stream(
     # Save user message before streaming
     user_msg = await doc_svc.add_message(thread_id, "user", body.content)
 
-    # Fetch message history for context (sliding window handled by AI provider)
-    messages = await doc_svc.get_thread_messages(thread_id, limit=20)
+    # Fetch message history + company profile + context summary in parallel
+    messages, profile, (context_summary, summary_at_count) = await asyncio.gather(
+        doc_svc.get_thread_messages(thread_id, limit=20),
+        doc_svc.get_company_profile_for_ai(company_id),
+        doc_svc.get_context_summary(thread_id),
+    )
     msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
     _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
 
     ai_provider = get_ai_provider()
-    profile = await doc_svc.get_company_profile_for_ai(company_id)
     ctx = _build_company_context(profile)
     estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
 
@@ -1616,7 +1654,10 @@ async def send_message_stream(
                 }
             )
 
-            ai_resp = await ai_provider.generate(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
+            ai_resp = await ai_provider.generate(
+                msg_dicts, thread["current_state"], company_context=ctx,
+                slide_index=body.slide_index, context_summary=context_summary,
+            )
             _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 
             current_version = thread["version"]
@@ -1710,6 +1751,9 @@ async def send_message_stream(
             )
 
             yield _sse_data({"type": "complete", "data": response.model_dump(mode="json")})
+
+            # Trigger compaction in the background if needed
+            asyncio.create_task(_maybe_compact(thread_id, ai_provider, summary_at_count))
         except Exception as e:
             logger.error("Matcha Work stream failed for thread %s: %s", thread_id, e, exc_info=True)
             yield _sse_data(
