@@ -197,10 +197,10 @@ export const Hero = ({ onContactClick }: HeroProps) => {
 
             <m.div variants={itemVariants} className="space-y-10 mt-10">
               <p
-                className="text-white/80 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap"
+                className="text-white/80 text-xl md:text-2xl lg:text-3xl font-normal leading-relaxed w-fit whitespace-nowrap"
                 style={{ fontFamily: fonts.sans }}
               >
-                Increase your <span className="text-amber-400">signal to noise ratio</span>.
+                Increase your <span className="text-amber-500">signal to noise ratio</span>.
               </p>
             
             <div className="flex flex-wrap gap-6 pt-2 justify-center lg:justify-start">
