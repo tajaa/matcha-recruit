@@ -11,13 +11,6 @@ export default function MatchaWork() {
     try {
       setLoading(true);
       setError(null);
-
-      const activeThreads = await matchaWork.listThreads({ status: 'active', limit: 1, offset: 0 });
-      if (activeThreads.length > 0) {
-        navigate(`/app/matcha/work/${activeThreads[0].id}`, { replace: true });
-        return;
-      }
-
       const thread = await matchaWork.createThread({ title: 'Untitled Chat' });
       navigate(`/app/matcha/work/${thread.id}`, { replace: true });
     } catch (err) {

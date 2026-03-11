@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
+import type { MWThread } from '../types/matcha-work';
+import { matchaWork } from '../api/client';
 import { HelpCircle, X, ChevronDown, Sliders, Sun, Moon, Bell } from 'lucide-react';
 import { PendingApproval } from './PendingApproval';
 import { PlatformFeatureManager } from '../pages/admin/PlatformFeatureManager';
@@ -866,6 +868,76 @@ export function Layout() {
     ? (profile as { company_name: string }).company_name
     : null;
 
+  const MatchaWorkRecentChats = () => {
+    const [expanded, setExpanded] = useState(false);
+    const [threads, setThreads] = useState<MWThread[]>([]);
+    const [fetching, setFetching] = useState(false);
+
+    const fetchRecent = useCallback(async () => {
+      try {
+        setFetching(true);
+        const data = await matchaWork.listThreads({ limit: 3 });
+        setThreads(data);
+      } catch {
+        // silently ignore
+      } finally {
+        setFetching(false);
+      }
+    }, []);
+
+    useEffect(() => {
+      if (expanded) fetchRecent();
+    }, [expanded, fetchRecent]);
+
+    // Refresh list when navigating to a new matcha work thread (e.g. after creating one)
+    useEffect(() => {
+      if (expanded && location.pathname.startsWith('/app/matcha/work/')) {
+        fetchRecent();
+      }
+    }, [location.pathname, expanded, fetchRecent]);
+
+    return (
+      <div>
+        <button
+          onClick={() => setExpanded(e => !e)}
+          className="w-full flex items-center gap-3 px-3 py-1.5 text-[10px] tracking-[0.15em] uppercase text-zinc-500 hover:text-zinc-300 sbl:text-black/40 sbl:hover:text-black border-l-2 border-transparent transition-all"
+        >
+          <ChevronDown className={`w-3 h-3 shrink-0 transition-transform duration-200 ${expanded ? '' : '-rotate-90'}`} />
+          <span>Recent Chats</span>
+        </button>
+        {expanded && (
+          <div className="ml-3 space-y-0.5 mb-0.5">
+            {fetching ? (
+              <div className="px-3 py-1.5 text-[10px] text-zinc-600">Loading...</div>
+            ) : threads.length === 0 ? (
+              <div className="px-3 py-1.5 text-[10px] text-zinc-600">No recent chats</div>
+            ) : (
+              threads.map(thread => {
+                const isActive = location.pathname === `/app/matcha/work/${thread.id}`;
+                const title = thread.title || 'Untitled Chat';
+                const display = title.length > 24 ? title.slice(0, 24) + '…' : title;
+                return (
+                  <Link
+                    key={thread.id}
+                    to={`/app/matcha/work/${thread.id}`}
+                    title={title}
+                    className={`block px-3 py-1.5 text-[10px] tracking-[0.1em] truncate border-l-2 transition-all ${
+                      isActive
+                        ? 'text-white bg-zinc-800 border-white sbl:text-black sbl:bg-white/50 sbl:border-white/60'
+                        : 'text-zinc-500 hover:text-zinc-300 border-zinc-700/40 hover:border-zinc-600 sbl:text-black/40 sbl:hover:text-black sbl:hover:border-black/20'
+                    }`}
+                  >
+                    {display}
+                  </Link>
+                );
+              })
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const NavLink = ({ item }: { item: NavItem }) => {
     const isActive = location.pathname === item.path;
     const showingHelp = activeHelp === item.path;
@@ -964,7 +1036,10 @@ export function Layout() {
                     {!isCollapsed && (
                       <div className="space-y-1 mt-1">
                         {visibleItems.map((item) => (
-                          <NavLink key={item.path} item={item} />
+                          <div key={item.path}>
+                            <NavLink item={item} />
+                            {item.path === '/app/matcha/work' && <MatchaWorkRecentChats />}
+                          </div>
                         ))}
                       </div>
                     )}
