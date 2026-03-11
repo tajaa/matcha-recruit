@@ -177,7 +177,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
             />
           </m.div>
           
-          <div className="mt-10 rounded-xl backdrop-blur-[3px] bg-white/5 border border-white/15 px-20 py-16 -mx-20 w-fit shadow-[0_8px_32px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.6)]">
+          <div className="mt-10 rounded-xl backdrop-blur-[2px] bg-white/3 px-20 py-16 -mx-20 w-fit shadow-[0_8px_32px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.6)]">
             <m.h1 variants={itemVariants} className="leading-[0.9] tracking-[-0.04em] max-w-2xl">
               <span
                 className="block mb-2 text-[1.875rem] md:text-[3rem] lg:text-[3.75rem] font-bold uppercase text-zinc-800"
