@@ -144,7 +144,16 @@ interface LeaveProtection {
 }
 
 interface LeaveEligibilityData {
-  fmla: { eligible: boolean; reasons: string[]; months_employed: number | null; hours_worked_12mo: number; company_employee_count: number };
+  fmla: {
+    eligible: boolean;
+    reasons: string[];
+    months_employed: number | null;
+    hours_worked_12mo: number;
+    hours_worked_12mo_source?: string | null;
+    hours_worked_assumed_weekly?: number | null;
+    hours_worked_note?: string | null;
+    company_employee_count: number;
+  };
   state_programs: { state: string | null; programs: LeaveProgram[]; message?: string };
   checked_at: string;
   protection: LeaveProtection;
@@ -1161,12 +1170,26 @@ export default function EmployeeDetail() {
                             </span>
                           </div>
                           {eligible ? (
-                            <div className={`flex gap-3 text-[10px] ${t.textDim}`}>
-                              <span>12 wks unpaid</span>
-                              <span className={isLight ? 'text-emerald-700' : 'text-emerald-400'}>· Job protected</span>
+                            <div className="space-y-1">
+                              <div className={`flex gap-3 text-[10px] ${t.textDim}`}>
+                                <span>12 wks unpaid</span>
+                                <span className={isLight ? 'text-emerald-700' : 'text-emerald-400'}>· Job protected</span>
+                              </div>
+                              {fmla.hours_worked_12mo_source === 'estimated' && fmla.hours_worked_note && (
+                                <p className={`text-[10px] ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                                  {fmla.hours_worked_note}
+                                </p>
+                              )}
                             </div>
                           ) : (
-                            <p className={`text-[10px] ${t.textFaint}`}>{fmla.reasons[0]}</p>
+                            <div className="space-y-1">
+                              <p className={`text-[10px] ${t.textFaint}`}>{fmla.reasons[0]}</p>
+                              {fmla.hours_worked_12mo_source === 'estimated' && fmla.hours_worked_note && (
+                                <p className={`text-[10px] ${isLight ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                                  {fmla.hours_worked_note}
+                                </p>
+                              )}
+                            </div>
                           )}
                         </div>
                       );

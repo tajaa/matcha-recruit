@@ -20,6 +20,94 @@ _leave_data_checked = False
 class LeaveEligibilityService:
     """Checks employee eligibility for federal and state leave programs."""
 
+    @staticmethod
+    def _estimate_weekly_hours(emp) -> tuple[float | None, str | None]:
+        employment_type = (emp.get("employment_type") or "").strip().lower()
+        pay_classification = (emp.get("pay_classification") or "").strip().lower()
+
+        if employment_type == "full_time" and pay_classification == "exempt":
+            return 40.0, "Estimated using 40 hours/week for a full-time exempt employee because no time records were found."
+        if employment_type == "full_time":
+            return 30.0, "Estimated using 30 hours/week for a full-time employee because no time records were found."
+        if employment_type == "part_time":
+            return 20.0, "Estimated using 20 hours/week for a part-time employee because no time records were found."
+        return None, None
+
+    @classmethod
+    def _estimate_hours_worked(
+        cls,
+        emp,
+        *,
+        today: date,
+        twelve_months_ago: date,
+    ) -> tuple[float | None, float | None, str | None]:
+        if not emp.get("start_date"):
+            return None, None, None
+
+        weekly_hours, note = cls._estimate_weekly_hours(emp)
+        if weekly_hours is None:
+            return None, None, None
+
+        window_start = max(emp["start_date"], twelve_months_ago)
+        active_days = max((today - window_start).days, 0)
+        weeks_in_window = min(active_days / 7.0, 52.0)
+        return weekly_hours * weeks_in_window, weekly_hours, note
+
+    @classmethod
+    async def _get_hours_worked_snapshot(
+        cls,
+        conn,
+        employee_id: UUID,
+        emp,
+        *,
+        today: date,
+    ) -> dict:
+        twelve_months_ago = today - timedelta(days=365)
+
+        try:
+            hours_row = await conn.fetchrow(
+                """SELECT COALESCE(SUM(hours_worked), 0) AS total_hours,
+                          COUNT(*) AS entry_count
+                   FROM employee_hours_log
+                   WHERE employee_id = $1
+                     AND period_start >= $2""",
+                employee_id, twelve_months_ago,
+            )
+            entry_count = int(hours_row["entry_count"] or 0)
+            total_hours = float(hours_row["total_hours"] or 0.0)
+        except Exception:
+            logger.warning("employee_hours_log query failed for %s — falling back to estimated hours", employee_id)
+            entry_count = 0
+            total_hours = 0.0
+
+        if entry_count > 0:
+            return {
+                "hours": total_hours,
+                "source": "logged",
+                "assumed_weekly_hours": None,
+                "note": "Based on recorded hours in the past 12 months.",
+            }
+
+        estimated_hours, assumed_weekly_hours, note = cls._estimate_hours_worked(
+            emp,
+            today=today,
+            twelve_months_ago=twelve_months_ago,
+        )
+        if estimated_hours is not None:
+            return {
+                "hours": estimated_hours,
+                "source": "estimated",
+                "assumed_weekly_hours": assumed_weekly_hours,
+                "note": note,
+            }
+
+        return {
+            "hours": total_hours,
+            "source": "missing",
+            "assumed_weekly_hours": None,
+            "note": "No time records were found and Matcha could not estimate hours from the employee classification.",
+        }
+
     async def check_fmla_eligibility(self, employee_id: UUID) -> dict:
         """
         Federal FMLA check:
@@ -29,7 +117,9 @@ class LeaveEligibilityService:
         """
         async with get_connection() as conn:
             emp = await conn.fetchrow(
-                "SELECT id, org_id, start_date, work_state FROM employees WHERE id = $1",
+                """SELECT id, org_id, start_date, work_state, employment_type, pay_classification
+                   FROM employees
+                   WHERE id = $1""",
                 employee_id,
             )
             if not emp:
@@ -51,19 +141,13 @@ class LeaveEligibilityService:
                 reasons.append("No start date on record")
 
             # Hours check (last 12 months)
-            twelve_months_ago = today - timedelta(days=365)
-            try:
-                hours_row = await conn.fetchrow(
-                    """SELECT COALESCE(SUM(hours_worked), 0) AS total_hours
-                       FROM employee_hours_log
-                       WHERE employee_id = $1
-                         AND period_start >= $2""",
-                    employee_id, twelve_months_ago,
-                )
-                hours_worked_12mo = float(hours_row["total_hours"])
-            except Exception:
-                logger.warning("employee_hours_log query failed for %s — defaulting to 0 hours", employee_id)
-                hours_worked_12mo = 0.0
+            hours_snapshot = await self._get_hours_worked_snapshot(
+                conn,
+                employee_id,
+                emp,
+                today=today,
+            )
+            hours_worked_12mo = hours_snapshot["hours"]
             if hours_worked_12mo < 1250:
                 reasons.append(
                     f"Less than 1,250 hours in past 12 months ({hours_worked_12mo:.0f} hours)"
@@ -89,6 +173,9 @@ class LeaveEligibilityService:
                 "reasons": reasons if not eligible else ["Meets all FMLA requirements"],
                 "months_employed": round(months_employed, 1) if months_employed else None,
                 "hours_worked_12mo": round(hours_worked_12mo, 1),
+                "hours_worked_12mo_source": hours_snapshot["source"],
+                "hours_worked_assumed_weekly": hours_snapshot["assumed_weekly_hours"],
+                "hours_worked_note": hours_snapshot["note"],
                 "company_employee_count": company_count,
             }
 
@@ -116,7 +203,9 @@ class LeaveEligibilityService:
         """
         async with get_connection() as conn:
             emp = await conn.fetchrow(
-                "SELECT id, org_id, start_date, work_state FROM employees WHERE id = $1",
+                """SELECT id, org_id, start_date, work_state, employment_type, pay_classification
+                   FROM employees
+                   WHERE id = $1""",
                 employee_id,
             )
             if not emp:
@@ -149,19 +238,13 @@ class LeaveEligibilityService:
                 delta = today - emp["start_date"]
                 months_employed = delta.days / 30.44
 
-            twelve_months_ago = today - timedelta(days=365)
-            try:
-                hours_row = await conn.fetchrow(
-                    """SELECT COALESCE(SUM(hours_worked), 0) AS total_hours
-                       FROM employee_hours_log
-                       WHERE employee_id = $1
-                         AND period_start >= $2""",
-                    employee_id, twelve_months_ago,
-                )
-                hours_worked = float(hours_row["total_hours"])
-            except Exception:
-                logger.warning("employee_hours_log query failed for %s — defaulting to 0 hours", employee_id)
-                hours_worked = 0.0
+            hours_snapshot = await self._get_hours_worked_snapshot(
+                conn,
+                employee_id,
+                emp,
+                today=today,
+            )
+            hours_worked = hours_snapshot["hours"]
 
             company_count = await conn.fetchval(
                 """SELECT COUNT(*) FROM employees
@@ -228,7 +311,14 @@ class LeaveEligibilityService:
                     "source_url": rule["source_url"],
                 })
 
-            return {"state": work_state, "programs": programs}
+            return {
+                "state": work_state,
+                "programs": programs,
+                "hours_worked_12mo": round(hours_worked, 1),
+                "hours_worked_12mo_source": hours_snapshot["source"],
+                "hours_worked_assumed_weekly": hours_snapshot["assumed_weekly_hours"],
+                "hours_worked_note": hours_snapshot["note"],
+            }
 
     @staticmethod
     async def ensure_leave_data():

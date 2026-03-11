@@ -58,6 +58,9 @@ interface ParsedFmlaEligibility {
   reasons: string[];
   monthsEmployed: number | null;
   hoursWorked12mo: number | null;
+  hoursWorkedSource: string | null;
+  hoursWorkedAssumedWeekly: number | null;
+  hoursWorkedNote: string | null;
   companyEmployeeCount: number | null;
 }
 
@@ -142,6 +145,9 @@ function parseEligibilitySnapshot(payload: Record<string, unknown> | null): Pars
         reasons: toStringArray(fmlaRaw.reasons),
         monthsEmployed: toNumberOrNull(fmlaRaw.months_employed),
         hoursWorked12mo: toNumberOrNull(fmlaRaw.hours_worked_12mo),
+        hoursWorkedSource: toStringOrNull(fmlaRaw.hours_worked_12mo_source),
+        hoursWorkedAssumedWeekly: toNumberOrNull(fmlaRaw.hours_worked_assumed_weekly),
+        hoursWorkedNote: toStringOrNull(fmlaRaw.hours_worked_note),
         companyEmployeeCount: toNumberOrNull(fmlaRaw.company_employee_count),
       }
     : null;
@@ -406,6 +412,14 @@ export default function PortalLeave() {
                       <div className="text-zinc-900 font-medium">
                         {formatNumber(parsedEligibility.fmla.hoursWorked12mo, 0)}
                       </div>
+                      {parsedEligibility.fmla.hoursWorkedSource === 'estimated' && (
+                        <div className="mt-1 text-[11px] text-emerald-700">
+                          Estimated
+                          {parsedEligibility.fmla.hoursWorkedAssumedWeekly !== null
+                            ? ` at ${formatNumber(parsedEligibility.fmla.hoursWorkedAssumedWeekly, 0)} hrs/wk`
+                            : ''}
+                        </div>
+                      )}
                     </div>
                     <div className="rounded-md bg-white border border-zinc-200 p-2.5">
                       <div className="text-zinc-500 uppercase tracking-wide">Company size</div>
@@ -414,6 +428,11 @@ export default function PortalLeave() {
                       </div>
                     </div>
                   </div>
+                  {parsedEligibility.fmla.hoursWorkedSource === 'estimated' && parsedEligibility.fmla.hoursWorkedNote && (
+                    <p className="mt-3 text-xs text-emerald-700">
+                      {parsedEligibility.fmla.hoursWorkedNote}
+                    </p>
+                  )}
                   {parsedEligibility.fmla.reasons.length > 0 && (
                     <div className="mt-3 space-y-1">
                       {parsedEligibility.fmla.reasons.map((reason, index) => (
