@@ -21,6 +21,29 @@ import { LifecycleWizard } from '../components/LifecycleWizard';
 import { useCompliance, useComplianceRequirements, useJurisdictionSearch, useComplianceCheck } from '../hooks/compliance';
 import { useIsLightMode } from '../hooks/useIsLightMode';
 
+function EmployeesTooltip({ names, count, children }: { names?: string[] | null; count: number; children: React.ReactNode }) {
+    const [show, setShow] = useState(false);
+    if (!names?.length) return <>{children}</>;
+    return (
+        <span className="relative" onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+            {children}
+            {show && (
+                <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 pointer-events-none">
+                    <span className="flex flex-col gap-0.5 bg-zinc-900 border border-white/10 rounded px-2.5 py-2 shadow-xl min-w-[120px]">
+                        {names.map((n, i) => (
+                            <span key={i} className="text-[10px] text-zinc-200 font-medium whitespace-nowrap">{n}</span>
+                        ))}
+                        {count > names.length && (
+                            <span className="text-[9px] text-zinc-500 font-mono mt-0.5">+{count - names.length} more</span>
+                        )}
+                    </span>
+                    <span className="block w-2 h-2 bg-zinc-900 border-r border-b border-white/10 rotate-45 mx-auto -mt-1" />
+                </span>
+            )}
+        </span>
+    );
+}
+
 function linkifyText(text: string, linkClass: string) {
     const splitRegex = /(https?:\/\/[^\s,)]+)/g;
     const parts = text.split(splitRegex);
@@ -651,9 +674,11 @@ export function Compliance() {
                                                         </span>
                                                     )}
                                                     {(req.affected_employee_count ?? 0) > 0 && (
-                                                        <span className="px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 text-[8px] uppercase tracking-widest text-violet-400 font-bold rounded-xs">
-                                                            {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
-                                                        </span>
+                                                        <EmployeesTooltip names={req.affected_employee_names} count={req.affected_employee_count!}>
+                                                            <span className="px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 text-[8px] uppercase tracking-widest text-violet-400 font-bold rounded-xs cursor-default">
+                                                                {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
+                                                            </span>
+                                                        </EmployeesTooltip>
                                                     )}
                                                     {(req.min_wage_violation_count ?? 0) > 0 && (
                                                         <span className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 text-[8px] uppercase tracking-widest text-red-400 font-bold rounded-xs">
@@ -909,10 +934,12 @@ export function Compliance() {
                                             {location.city}, {location.state} {location.zipcode}
                                         </p>
                                         <div className="flex items-center gap-4 mt-3">
-                                            <span className={`flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] ${t.textMuted}`}>
-                                                <Users size={9} />
-                                                {location.employee_count ?? 0}
-                                            </span>
+                                            <EmployeesTooltip names={location.employee_names} count={location.employee_count ?? 0}>
+                                                <span className={`flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] ${t.textMuted} cursor-default`}>
+                                                    <Users size={9} />
+                                                    {location.employee_count ?? 0}
+                                                </span>
+                                            </EmployeesTooltip>
                                             <span className={`text-[9px] font-bold uppercase tracking-[0.15em] ${t.textMuted}`}>
                                                 {location.requirements_count} Nodes
                                             </span>
@@ -1018,48 +1045,44 @@ export function Compliance() {
                     )}
                     {selectedLocationId && selectedLocation ? (
                         <div className={`${t.cardBg} border ${t.border} rounded-sm overflow-hidden min-h-[600px] flex flex-col shadow-2xl`}>
-                            <div className={`p-6 md:p-8 ${t.cardHeader} ${t.cardBg}`}>
-                                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                                    <div className="flex items-center gap-5">
-                                        <div className={`w-12 h-12 rounded-sm ${t.innerEl} border ${t.border} flex items-center justify-center shadow-inner`}>
-                                            <Building2 size={24} className={t.textDim} />
-                                        </div>
-                                        <div>
-                                            <h2 className={`text-xl font-bold ${t.textMain} uppercase tracking-tighter`}>
-                                                {selectedLocation.name || `${selectedLocation.city}, ${selectedLocation.state}`}
-                                            </h2>
-                                            <div className="flex items-center gap-3 mt-1.5">
-                                                <span className={`text-[10px] ${t.textMuted} font-mono uppercase tracking-widest`}>
-                                                    {selectedLocation.city}, {selectedLocation.state} {selectedLocation.zipcode}
-                                                </span>
-                                                {selectedLocation.last_compliance_check && (
-                                                    <>
-                                                        <div className={`w-1 h-1 rounded-full ${t.dot}`} />
-                                                        <span className={`text-[9px] ${t.textFaint} font-mono uppercase tracking-widest`}>
-                                                            Last Sync: {new Date(selectedLocation.last_compliance_check).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                                        </span>
-                                                    </>
-                                                )}
-                                            </div>
-                                        </div>
+                            <div className={`px-5 py-3 ${t.cardHeader} ${t.cardBg} flex items-center justify-between gap-4`}>
+                                <div className="flex items-center gap-3 min-w-0">
+                                    <div className={`w-7 h-7 rounded-sm ${t.innerEl} border ${t.border} flex items-center justify-center flex-shrink-0`}>
+                                        <Building2 size={13} className={t.textDim} />
                                     </div>
-                                    <button
-                                        disabled={checkInProgress}
-                                        onClick={async () => {
-                                            if (!selectedLocationId || checkInProgress) return;
-                                            await runComplianceCheck();
-                                        }}
-                                        className={`relative group px-6 py-3 ${t.btnPrimary} text-[10px] font-bold uppercase tracking-[0.2em] transition-all duration-500 disabled:opacity-50 overflow-hidden rounded-sm`}
-                                    >
-                                        <div className="relative z-10 flex items-center gap-2">
-                                            {checkInProgress ? (
-                                                <><Loader2 size={12} className="animate-spin" /> Initializing Scan</>
-                                            ) : (
-                                                <><Zap size={12} /> Sync Compliance</>
+                                    <div className="min-w-0">
+                                        <h2 className={`text-[13px] font-bold ${t.textMain} uppercase tracking-tight leading-none`}>
+                                            {selectedLocation.name || `${selectedLocation.city}, ${selectedLocation.state}`}
+                                        </h2>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <span className={`text-[9px] ${t.textMuted} font-mono uppercase tracking-widest`}>
+                                                {selectedLocation.city}, {selectedLocation.state}{selectedLocation.zipcode ? ` ${selectedLocation.zipcode}` : ''}
+                                            </span>
+                                            {selectedLocation.last_compliance_check && (
+                                                <>
+                                                    <div className={`w-1 h-1 rounded-full ${t.dot} flex-shrink-0`} />
+                                                    <span className={`text-[9px] ${t.textFaint} font-mono uppercase tracking-widest`}>
+                                                        Synced {new Date(selectedLocation.last_compliance_check).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                                    </span>
+                                                </>
                                             )}
                                         </div>
-                                    </button>
+                                    </div>
                                 </div>
+                                <button
+                                    disabled={checkInProgress}
+                                    onClick={async () => {
+                                        if (!selectedLocationId || checkInProgress) return;
+                                        await runComplianceCheck();
+                                    }}
+                                    className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 ${t.btnPrimary} text-[9px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 rounded-sm`}
+                                >
+                                    {checkInProgress ? (
+                                        <><Loader2 size={10} className="animate-spin" /> Scanning</>
+                                    ) : (
+                                        <><Zap size={10} /> Sync</>
+                                    )}
+                                </button>
                             </div>
 
                             {checkMessages.length > 0 && (

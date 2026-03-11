@@ -175,6 +175,7 @@ class RequirementResponse(BaseModel):
     previous_value: Optional[str] = None
     last_changed_at: Optional[str] = None
     affected_employee_count: Optional[int] = None
+    affected_employee_names: Optional[List[str]] = None
     min_wage_violation_count: Optional[int] = None
 
 

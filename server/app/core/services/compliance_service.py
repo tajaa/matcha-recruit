@@ -4180,6 +4180,7 @@ async def get_locations(company_id: UUID) -> list[dict]:
         rows = await conn.fetch(
             """SELECT bl.*, jr.has_local_ordinance,
                       COALESCE(ec.cnt, 0) AS employee_count,
+                      COALESCE(en.names, ARRAY[]::text[]) AS employee_names,
                       COALESCE(rc.cnt, 0) AS requirements_count,
                       COALESCE(ac.cnt, 0) AS unread_alerts_count,
                       COALESCE(jrc.cnt, 0) AS jurisdiction_repo_count
@@ -4199,6 +4200,23 @@ async def get_locations(company_id: UUID) -> list[dict]:
                        )
                      )
                ) ec ON true
+               LEFT JOIN LATERAL (
+                   SELECT ARRAY(
+                       SELECT e.first_name || ' ' || e.last_name
+                       FROM employees e
+                       WHERE e.termination_date IS NULL
+                         AND (
+                           e.work_location_id = bl.id
+                           OR (
+                             e.work_location_id IS NULL
+                             AND LOWER(e.work_city) = LOWER(bl.city)
+                             AND UPPER(e.work_state) = UPPER(bl.state)
+                             AND e.org_id = bl.company_id
+                           )
+                         )
+                       LIMIT 5
+                   ) AS names
+               ) en ON true
                LEFT JOIN LATERAL (
                    SELECT COUNT(*) AS cnt FROM compliance_requirements cr
                    WHERE cr.location_id = bl.id
@@ -4347,7 +4365,7 @@ async def get_employee_impact_for_location(
             location_id, company_id,
         )
         if not loc:
-            return {"total_affected": 0, "violations_by_rate_type": {}}
+            return {"total_affected": 0, "employee_names": [], "violations_by_rate_type": {}}
 
         loc_state = loc["state"]
         loc_city = loc["city"]
@@ -4529,8 +4547,13 @@ async def get_employee_impact_for_location(
                 }
                 violations_by_rate_type.setdefault(rate_type_key, []).append(violation)
 
+        employee_names = [
+            f"{e['first_name']} {e['last_name']}" for e in employees[:5]
+        ]
+
         return {
             "total_affected": total_affected,
+            "employee_names": employee_names,
             "violations_by_rate_type": violations_by_rate_type,
         }
 
@@ -4582,9 +4605,11 @@ async def get_location_requirements(
         try:
             impact = await get_employee_impact_for_location(location_id, company_id)
             total_affected = impact["total_affected"]
+            employee_names = impact["employee_names"]
             violations_by_rt = impact["violations_by_rate_type"]
         except Exception:
             total_affected = None
+            employee_names = []
             violations_by_rt = {}
 
         def _violation_count_for_row(row: dict) -> Optional[int]:
@@ -4618,6 +4643,7 @@ async def get_location_requirements(
                 if row["last_changed_at"]
                 else None,
                 affected_employee_count=total_affected,
+                affected_employee_names=employee_names or None,
                 min_wage_violation_count=_violation_count_for_row(row),
             )
             for row in filtered

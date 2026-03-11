@@ -19,6 +19,7 @@ export interface BusinessLocation {
     source?: 'manual' | 'employee_derived';
     coverage_status?: 'covered' | 'pending_review';
     employee_count?: number;
+    employee_names?: string[];
     data_status?: 'synced' | 'available' | 'needs_research';
 }
 
@@ -65,6 +66,7 @@ export interface ComplianceRequirement {
     previous_value: string | null;
     last_changed_at: string | null;
     affected_employee_count: number | null;
+    affected_employee_names?: string[] | null;
     min_wage_violation_count: number | null;
 }
 

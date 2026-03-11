@@ -242,6 +242,7 @@ async def get_locations_endpoint(
                 "source": loc.get("source", "manual"),
                 "coverage_status": loc.get("coverage_status", "covered"),
                 "employee_count": loc.get("employee_count", 0),
+                "employee_names": list(loc.get("employee_names") or []),
                 "requirements_count": loc.get("requirements_count", 0),
                 "unread_alerts_count": loc.get("unread_alerts_count", 0),
                 "data_status": loc.get("data_status", "needs_research"),
