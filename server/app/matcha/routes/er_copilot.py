@@ -84,6 +84,14 @@ def generate_case_number() -> str:
     return f"ER-{now.year}-{now.month:02d}-{random_suffix}"
 
 
+def _queue_risk_assessment_refresh(background_tasks: BackgroundTasks, company_id: UUID | None) -> None:
+    if not company_id:
+        return
+    from .employees import _refresh_risk_assessment
+
+    background_tasks.add_task(_refresh_risk_assessment, company_id)
+
+
 async def log_audit(
     conn,
     case_id: Optional[str],
@@ -214,6 +222,7 @@ def _build_er_analyzer(model_override: Optional[str] = None):
 async def create_case(
     case: ERCaseCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Create a new ER investigation case."""
@@ -251,6 +260,8 @@ async def create_case(
             {"title": case.title},
             request.client.host if request.client else None,
         )
+
+        _queue_risk_assessment_refresh(background_tasks, row["company_id"])
 
         return ERCaseResponse(
             id=row["id"],
@@ -591,10 +602,8 @@ async def update_case(
             request.client.host if request.client else None,
         )
 
-        # Refresh risk assessment snapshot so closed cases drop off action items
-        if case.status in ("closed", "resolved") and row["company_id"]:
-            from .employees import _refresh_risk_assessment
-            background_tasks.add_task(_refresh_risk_assessment, row["company_id"])
+        # Any case mutation can change the ER score or open-case list.
+        _queue_risk_assessment_refresh(background_tasks, row["company_id"])
 
         return ERCaseResponse(
             id=row["id"],
@@ -620,6 +629,7 @@ async def update_case(
 async def delete_case(
     case_id: UUID,
     request: Request,
+    background_tasks: BackgroundTasks,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Delete a case and all associated data."""
@@ -659,6 +669,8 @@ async def delete_case(
             {"case_number": case["case_number"], "title": case["title"]},
             request.client.host if request.client else None,
         )
+
+        _queue_risk_assessment_refresh(background_tasks, company_id)
 
         return {"status": "deleted", "case_id": str(case_id)}
 

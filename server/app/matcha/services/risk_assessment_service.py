@@ -21,6 +21,24 @@ from ...database import get_connection
 
 logger = logging.getLogger(__name__)
 
+COMPLIANCE_CRITICAL_ALERT_POINTS = 35
+COMPLIANCE_CRITICAL_ALERT_CAP = 70
+COMPLIANCE_WARNING_ALERT_POINTS = 15
+COMPLIANCE_WARNING_ALERT_CAP = 30
+COMPLIANCE_WAGE_VIOLATION_POINTS = 10
+COMPLIANCE_WAGE_VIOLATION_CAP = 80
+COMPLIANCE_WAGE_LOCATION_POINTS = 5
+COMPLIANCE_WAGE_LOCATION_CAP = 20
+
+ER_PENDING_POINTS = 15
+ER_PENDING_CAP = 60
+ER_IN_REVIEW_POINTS = 10
+ER_IN_REVIEW_CAP = 20
+ER_OPEN_POINTS = 5
+ER_OPEN_CAP = 25
+ER_MAJOR_POLICY_POINTS = 10
+ER_HIGH_DISCREPANCY_POINTS = 5
+
 
 def _band(score: int) -> str:
     if score <= 25:
@@ -190,21 +208,45 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
     score = 0
     factors = []
 
-    critical_points = min(critical_unread * 35, 70)
+    critical_points = min(
+        critical_unread * COMPLIANCE_CRITICAL_ALERT_POINTS,
+        COMPLIANCE_CRITICAL_ALERT_CAP,
+    )
     if critical_points > 0:
         score += critical_points
         factors.append(f"{critical_unread} unread critical alert{'s' if critical_unread != 1 else ''} (+{critical_points})")
 
-    warning_points = min(warning_unread * 15, 30)
+    warning_points = min(
+        warning_unread * COMPLIANCE_WARNING_ALERT_POINTS,
+        COMPLIANCE_WARNING_ALERT_CAP,
+    )
     if warning_points > 0:
         score += warning_points
         factors.append(f"{warning_unread} unread warning alert{'s' if warning_unread != 1 else ''} (+{warning_points})")
 
-    if total_wage_violations > 0:
+    wage_points = min(
+        total_wage_violations * COMPLIANCE_WAGE_VIOLATION_POINTS,
+        COMPLIANCE_WAGE_VIOLATION_CAP,
+    )
+    if wage_points > 0:
+        awarded = min(wage_points, max(0, 100 - score))
+        score += awarded
         factors.append(
             f"{total_wage_violations} employee{'s' if total_wage_violations != 1 else ''} below minimum wage across "
-            f"{wage_violation_locations} location{'s' if wage_violation_locations != 1 else ''}"
+            f"{wage_violation_locations} location{'s' if wage_violation_locations != 1 else ''} (+{awarded})"
         )
+
+    location_points = min(
+        wage_violation_locations * COMPLIANCE_WAGE_LOCATION_POINTS,
+        COMPLIANCE_WAGE_LOCATION_CAP,
+    )
+    if location_points > 0 and score < 100:
+        awarded = min(location_points, max(0, 100 - score))
+        score += awarded
+        factors.append(
+            f"{wage_violation_locations} location{'s' if wage_violation_locations != 1 else ''} with active wage violations (+{awarded})"
+        )
+
     if hourly_wage_violations > 0:
         factors.append(
             f"{hourly_wage_violations} hourly employee{'s' if hourly_wage_violations != 1 else ''} below local minimum wage"
@@ -358,27 +400,27 @@ async def compute_er_dimension(company_id: UUID, conn) -> DimensionResult:
     factors = []
 
     if pending > 0:
-        pts = min(pending * 30, 100)
+        pts = min(pending * ER_PENDING_POINTS, ER_PENDING_CAP)
         score += pts
         factors.append(f"{pending} case{'s' if pending != 1 else ''} pending determination (+{pts})")
 
     if in_review > 0:
-        pts = min(in_review * 20, max(0, 100 - score))
+        pts = min(in_review * ER_IN_REVIEW_POINTS, min(ER_IN_REVIEW_CAP, max(0, 100 - score)))
         score += pts
         factors.append(f"{in_review} case{'s' if in_review != 1 else ''} in review (+{pts})")
 
     if open_cases > 0:
-        pts = min(open_cases * 10, max(0, 100 - score))
+        pts = min(open_cases * ER_OPEN_POINTS, min(ER_OPEN_CAP, max(0, 100 - score)))
         score += pts
         factors.append(f"{open_cases} open case{'s' if open_cases != 1 else ''} (+{pts})")
 
     if has_major_policy_violation and score < 100:
-        pts = min(15, 100 - score)
+        pts = min(ER_MAJOR_POLICY_POINTS, 100 - score)
         score += pts
         factors.append(f"Major policy violation found in analysis (+{pts})")
 
     if has_high_discrepancy and score < 100:
-        pts = min(10, 100 - score)
+        pts = min(ER_HIGH_DISCREPANCY_POINTS, 100 - score)
         score += pts
         factors.append(f"High severity discrepancy in analysis (+{pts})")
 

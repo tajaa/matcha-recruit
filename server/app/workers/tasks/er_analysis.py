@@ -123,6 +123,22 @@ async def _save_analysis_result(
         generated_by,
     )
 
+    company_id = await conn.fetchval(
+        "SELECT company_id FROM er_cases WHERE id = $1",
+        case_id,
+    )
+    if company_id:
+        try:
+            from app.matcha.routes.employees import _refresh_risk_assessment
+
+            await _refresh_risk_assessment(company_id)
+        except Exception:
+            logger.exception(
+                "Failed to refresh risk assessment after %s analysis for ER case %s",
+                analysis_type,
+                case_id,
+            )
+
 
 # ===========================================
 # Timeline Analysis
