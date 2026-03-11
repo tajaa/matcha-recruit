@@ -13,7 +13,7 @@ import {
     MapPin, Trash2, Edit2, X,
     ChevronDown, AlertTriangle, Bell, CheckCircle,
     ExternalLink, Building2, Loader2, Clock, Calendar,
-    History, Eye, Zap, Info, ShieldCheck, Users
+    History, Eye, Zap, Info, ShieldCheck, Users, Layers, LayoutList
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
@@ -359,9 +359,18 @@ export function Compliance() {
     const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null);
 
     // Hook instantiation
+    const { data: companies } = useQuery({
+        queryKey: ['admin-overview'],
+        queryFn: () => adminOverview.get(),
+        enabled: isAdmin,
+    });
+
     const complianceHook = useCompliance(selectedCompanyId, selectedLocationId, isAdmin);
     const complianceCheckHook = useComplianceCheck(selectedLocationId, selectedCompanyId, () => {});
-    const complianceReqHook = useComplianceRequirements(complianceHook.requirements || []);
+    const selectedCompanyIndustry = isAdmin
+        ? companies?.companies?.find(c => c.id === selectedCompanyId)?.industry ?? undefined
+        : undefined;
+    const complianceReqHook = useComplianceRequirements(complianceHook.requirements || [], selectedCompanyIndustry);
     const jurisdictionSearchHook = useJurisdictionSearch(complianceHook.jurisdictions || []);
 
     // Aliases for easier access
@@ -374,7 +383,8 @@ export function Compliance() {
     } = complianceHook;
 
     const { checkInProgress, checkMessages, runComplianceCheck } = complianceCheckHook;
-    const { orderedRequirementCategories } = complianceReqHook;
+    const { orderedRequirementCategories, sectionedCategories } = complianceReqHook;
+    const [sectionedView, setSectionedView] = useState(true);
     const { jurisdictionSearch, setJurisdictionSearch, filteredJurisdictions } = jurisdictionSearchHook;
     const latestMissingCoverageCategories = useMemo(() => {
         for (let index = checkMessages.length - 1; index >= 0; index -= 1) {
@@ -423,12 +433,6 @@ export function Compliance() {
         if (!raw || !wizardReturnPath) return new Set<string>();
         return new Set(raw.split(',').map(s => s.trim().toUpperCase()).filter(Boolean));
     }, [searchParams, wizardReturnPath]);
-
-    const { data: companies } = useQuery({
-        queryKey: ['admin-overview'],
-        queryFn: () => adminOverview.get(),
-        enabled: isAdmin,
-    });
 
     useEffect(() => {
         if (isAdmin && companies?.companies?.length && !selectedCompanyId) {
@@ -563,6 +567,144 @@ export function Compliance() {
         const stateReq = reqs.find(r => r.jurisdiction_level === 'state');
         return { label: stateReq?.jurisdiction_name ?? 'State', type: 'state' as const };
     };
+
+    const renderCategoryAccordion = (category: string, reqs: ComplianceRequirement[]) => (
+        <div key={category} className={t.requirementItemBg}>
+            <button
+                onClick={() => toggleCategory(category)}
+                className={`w-full flex items-center justify-between p-5 ${t.cardBg} ${t.rowHover} transition-colors ${t.cardHeader}`}
+            >
+                <div className="flex items-center gap-4">
+                    <div className="flex flex-col items-start">
+                        <span className={`${t.textMain} text-[11px] font-bold uppercase tracking-widest`}>
+                            {COMPLIANCE_CATEGORY_LABELS[category] || category}
+                        </span>
+                        <span className={`text-[8px] ${t.textFaint} font-mono uppercase tracking-[0.2em] mt-0.5`}>
+                            {reqs.length} Active Node{reqs.length !== 1 ? 's' : ''}
+                        </span>
+                    </div>
+                    {reqs.length > 0 ? (
+                        (() => {
+                            const source = getCategoryJurisdiction(reqs);
+                            return (
+                                <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
+                                    source.type === 'local'
+                                        ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                                        : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
+                                }`}>
+                                    {source.label}
+                                </span>
+                            );
+                        })()
+                    ) : (
+                        <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
+                            missingCoverageCategorySet.has(category)
+                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                : `${t.cardBg} ${t.textMuted} ${t.coveragePendingBorder}`
+                        }`}>
+                            {missingCoverageCategorySet.has(category) ? 'Missing Source Coverage' : 'Coverage Pending'}
+                        </span>
+                    )}
+                </div>
+                <motion.div
+                    animate={{ rotate: expandedCategories.has(category) ? 180 : 0 }}
+                    transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+                >
+                    <ChevronDown size={14} className={t.textFaint} />
+                </motion.div>
+            </button>
+
+            <AnimatePresence initial={false}>
+                {expandedCategories.has(category) && (
+                    <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{ height: 'auto', opacity: 1 }}
+                        exit={{ height: 0, opacity: 0 }}
+                        transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                        className={`overflow-hidden ${t.expandedBg}`}
+                    >
+                        <div className={`divide-y ${t.divide} px-2`}>
+                            {reqs.length === 0 ? (
+                                <div className={`p-6 ${t.textMuted} text-xs leading-relaxed font-light`}>
+                                    {getRequirementEmptyStateCopy(category, missingCoverageCategorySet.has(category))}
+                                </div>
+                            ) : (
+                                reqs.map(req => (
+                                    <div key={req.id} className={`p-6 ${t.rowHover} transition-colors rounded-sm`}>
+                                        <div className="flex items-start justify-between mb-4 gap-6">
+                                            <div className="flex-1">
+                                                <h4 className={`${t.textMain} text-xs font-bold uppercase tracking-wide mb-2`}>
+                                                    {req.title}
+                                                </h4>
+                                                <div className="flex items-center gap-3">
+                                                    <span className={`px-1.5 py-0.5 ${t.cardBg} border ${t.border} text-[8px] uppercase tracking-widest ${t.textMuted} font-bold rounded-xs`}>
+                                                        {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
+                                                    </span>
+                                                    {req.category === 'minimum_wage' && req.rate_type && (
+                                                        <span className={`px-1.5 py-0.5 ${t.cardBg} border ${t.border} text-[8px] uppercase tracking-widest ${t.textDim} font-bold rounded-xs`}>
+                                                            {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
+                                                        </span>
+                                                    )}
+                                                    {req.applicable_industries?.includes('healthcare') && (
+                                                        <span className="px-1.5 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-[8px] uppercase tracking-widest text-cyan-300 font-bold rounded-xs">
+                                                            Medical
+                                                        </span>
+                                                    )}
+                                                    {(req.affected_employee_count ?? 0) > 0 && (
+                                                        <span className="px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 text-[8px] uppercase tracking-widest text-violet-400 font-bold rounded-xs">
+                                                            {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
+                                                        </span>
+                                                    )}
+                                                    {(req.min_wage_violation_count ?? 0) > 0 && (
+                                                        <span className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 text-[8px] uppercase tracking-widest text-red-400 font-bold rounded-xs">
+                                                            {req.min_wage_violation_count} below threshold
+                                                        </span>
+                                                    )}
+                                                    <span className={`${t.textFaint} text-[9px] font-mono uppercase tracking-tighter`}>
+                                                        Node: {req.jurisdiction_name}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                            {req.current_value && (
+                                                <span className={`${t.statusOk} font-mono text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-sm shadow-inner`}>
+                                                    {req.current_value}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {req.description && (
+                                            <p className={`${t.textMuted} text-xs leading-relaxed mb-6 max-w-2xl font-light`}>
+                                                {req.description}
+                                            </p>
+                                        )}
+                                        <div className={`flex items-center justify-between pt-4 border-t ${t.borderInline}`}>
+                                            <div className="flex items-center gap-4">
+                                                {req.effective_date && (
+                                                    <div className={`flex items-center gap-2 text-[8px] ${t.textFaint} uppercase tracking-widest font-mono`}>
+                                                        <Calendar size={10} className="opacity-40" />
+                                                        Enforced: {new Date(req.effective_date).toLocaleDateString()}
+                                                    </div>
+                                                )}
+                                            </div>
+                                            {req.source_url && (
+                                                <a
+                                                    href={req.source_url}
+                                                    target="_blank"
+                                                    rel="noopener noreferrer"
+                                                    className={`text-[9px] font-bold uppercase tracking-widest ${t.textMuted} ${t.linkHover} flex items-center gap-1.5 transition-colors`}
+                                                >
+                                                    Authority <ExternalLink size={10} />
+                                                </a>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+        </div>
+    );
 
     const getSeverityStyles = (severity: string) => {
         switch (severity) {
@@ -1294,16 +1436,30 @@ export function Compliance() {
                                     )
                                 ) : activeTab === 'requirements' ? (
                                     <>
-                                    {latestMissingCoverageCategories.length > 0 && (
-                                        <div className={`mb-4 p-4 border ${t.coverageMissingBorder} ${t.coverageMissingBg} rounded-sm`}>
-                                            <p className={`text-[10px] font-bold uppercase tracking-[0.2em] ${t.coverageMissingTitle}`}>
-                                                Source Coverage Missing
-                                            </p>
-                                            <p className={`mt-2 text-[11px] ${t.coverageMissingText} leading-relaxed`}>
-                                                This jurisdiction is still missing verified source-of-truth coverage for: <span className="font-semibold">{latestMissingCoverageLabel}</span>. Run Admin &gt; Jurisdictions research refresh, then sync this location again.
-                                            </p>
-                                        </div>
-                                    )}
+                                    <div className="flex items-center justify-between mb-4">
+                                        {latestMissingCoverageCategories.length > 0 && (
+                                            <div className={`flex-1 p-4 border ${t.coverageMissingBorder} ${t.coverageMissingBg} rounded-sm mr-3`}>
+                                                <p className={`text-[10px] font-bold uppercase tracking-[0.2em] ${t.coverageMissingTitle}`}>
+                                                    Source Coverage Missing
+                                                </p>
+                                                <p className={`mt-2 text-[11px] ${t.coverageMissingText} leading-relaxed`}>
+                                                    This jurisdiction is still missing verified source-of-truth coverage for: <span className="font-semibold">{latestMissingCoverageLabel}</span>. Run Admin &gt; Jurisdictions research refresh, then sync this location again.
+                                                </p>
+                                            </div>
+                                        )}
+                                        {sectionedCategories.length > 1 && (
+                                            <button
+                                                onClick={() => setSectionedView(v => !v)}
+                                                className={`flex-shrink-0 p-2 rounded-sm border ${t.border} ${t.cardBg} ${t.rowHover} transition-colors`}
+                                                title={sectionedView ? 'Switch to flat view' : 'Switch to sectioned view'}
+                                            >
+                                                {sectionedView
+                                                    ? <LayoutList size={14} className={t.textMuted} />
+                                                    : <Layers size={14} className={t.textMuted} />
+                                                }
+                                            </button>
+                                        )}
+                                    </div>
                                     {loadingRequirements ? (
                                         <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
@@ -1314,145 +1470,28 @@ export function Compliance() {
                                         <div className={`text-center py-24 ${t.textFaint} text-[10px] font-mono uppercase tracking-[0.2em] border border-dashed ${t.border} ${t.emptyBg}`}>
                                             Zero Nodes Detected
                                         </div>
-                                    ) : (
-                                        <div className={`space-y-px ${t.requirementDivider} border ${t.border}`}>
-                                            {orderedRequirementCategories.map(([category, reqs]) => (
-                                                <div key={category} className={t.requirementItemBg}>
-                                                    <button
-                                                        onClick={() => toggleCategory(category)}
-                                                        className={`w-full flex items-center justify-between p-5 ${t.cardBg} ${t.rowHover} transition-colors ${t.cardHeader}`}
-                                                    >
-                                                        <div className="flex items-center gap-4">
-                                                            <div className="flex flex-col items-start">
-                                                                <span className={`${t.textMain} text-[11px] font-bold uppercase tracking-widest`}>
-                                                                    {COMPLIANCE_CATEGORY_LABELS[category] || category}
-                                                                </span>
-                                                                <span className={`text-[8px] ${t.textFaint} font-mono uppercase tracking-[0.2em] mt-0.5`}>
-                                                                    {reqs.length} Active Node{reqs.length !== 1 ? 's' : ''}
-                                                                </span>
-                                                            </div>
-                                                            {reqs.length > 0 ? (
-                                                                (() => {
-                                                                    const source = getCategoryJurisdiction(reqs);
-                                                                    return (
-                                                                        <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
-                                                                            source.type === 'local'
-                                                                                ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
-                                                                                : 'bg-blue-500/10 text-blue-500 border-blue-500/20'
-                                                                        }`}>
-                                                                            {source.label}
-                                                                        </span>
-                                                                    );
-                                                                })()
-                                                            ) : (
-                                                                <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
-                                                                    missingCoverageCategorySet.has(category)
-                                                                        ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                                                                        : `${t.cardBg} ${t.textMuted} ${t.coveragePendingBorder}`
-                                                                }`}>
-                                                                    {missingCoverageCategorySet.has(category) ? 'Missing Source Coverage' : 'Coverage Pending'}
-                                                                </span>
-                                                            )}
+                                    ) : sectionedView ? (
+                                        <div className="space-y-6">
+                                            {sectionedCategories.map((section) => (
+                                                <div key={section.id}>
+                                                    {sectionedCategories.length > 1 && (
+                                                        <div className="flex items-center gap-3 mb-2">
+                                                            <div className={`flex-1 h-px ${t.border} border-t`} />
+                                                            <span className={`text-[9px] font-bold uppercase tracking-[0.25em] ${t.textFaint} flex-shrink-0`}>
+                                                                {section.label}
+                                                            </span>
+                                                            <div className={`flex-1 h-px ${t.border} border-t`} />
                                                         </div>
-                                                        <motion.div
-                                                            animate={{ rotate: expandedCategories.has(category) ? 180 : 0 }}
-                                                            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-                                                        >
-                                                            <ChevronDown size={14} className={t.textFaint} />
-                                                        </motion.div>
-                                                    </button>
-
-                                                    <AnimatePresence initial={false}>
-                                                        {expandedCategories.has(category) && (
-                                                            <motion.div
-                                                                initial={{ height: 0, opacity: 0 }}
-                                                                animate={{ height: 'auto', opacity: 1 }}
-                                                                exit={{ height: 0, opacity: 0 }}
-                                                                transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                                                                className={`overflow-hidden ${t.expandedBg}`}
-                                                            >
-                                                                <div className={`divide-y ${t.divide} px-2`}>
-                                                                    {reqs.length === 0 ? (
-                                                                        <div className={`p-6 ${t.textMuted} text-xs leading-relaxed font-light`}>
-                                                                            {getRequirementEmptyStateCopy(category, missingCoverageCategorySet.has(category))}
-                                                                        </div>
-                                                                    ) : (
-                                                                        reqs.map(req => (
-                                                                            <div key={req.id} className={`p-6 ${t.rowHover} transition-colors rounded-sm`}>
-                                                                                <div className="flex items-start justify-between mb-4 gap-6">
-                                                                                    <div className="flex-1">
-                                                                                        <h4 className={`${t.textMain} text-xs font-bold uppercase tracking-wide mb-2`}>
-                                                                                            {req.title}
-                                                                                        </h4>
-                                                                                        <div className="flex items-center gap-3">
-                                                                                            <span className={`px-1.5 py-0.5 ${t.cardBg} border ${t.border} text-[8px] uppercase tracking-widest ${t.textMuted} font-bold rounded-xs`}>
-                                                                                                {JURISDICTION_LEVEL_LABELS[req.jurisdiction_level] || req.jurisdiction_level}
-                                                                                            </span>
-                                                                                            {req.category === 'minimum_wage' && req.rate_type && (
-                                                                                                <span className={`px-1.5 py-0.5 ${t.cardBg} border ${t.border} text-[8px] uppercase tracking-widest ${t.textDim} font-bold rounded-xs`}>
-                                                                                                    {RATE_TYPE_LABELS[req.rate_type] || req.rate_type.replace(/_/g, ' ')}
-                                                                                                </span>
-                                                                                            )}
-                                                                                            {req.applicable_industries?.includes('healthcare') && (
-                                                                                                <span className="px-1.5 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-[8px] uppercase tracking-widest text-cyan-300 font-bold rounded-xs">
-                                                                                                    Medical
-                                                                                                </span>
-                                                                                            )}
-                                                                                            {(req.affected_employee_count ?? 0) > 0 && (
-                                                                                                <span className="px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 text-[8px] uppercase tracking-widest text-violet-400 font-bold rounded-xs">
-                                                                                                    {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
-                                                                                                </span>
-                                                                                            )}
-                                                                                            {(req.min_wage_violation_count ?? 0) > 0 && (
-                                                                                                <span className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 text-[8px] uppercase tracking-widest text-red-400 font-bold rounded-xs">
-                                                                                                    {req.min_wage_violation_count} below threshold
-                                                                                                </span>
-                                                                                            )}
-                                                                                            <span className={`${t.textFaint} text-[9px] font-mono uppercase tracking-tighter`}>
-                                                                                                Node: {req.jurisdiction_name}
-                                                                                            </span>
-                                                                                        </div>
-                                                                                    </div>
-                                                                                    {req.current_value && (
-                                                                                        <span className={`${t.statusOk} font-mono text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-sm shadow-inner`}>
-                                                                                            {req.current_value}
-                                                                                        </span>
-                                                                                    )}
-                                                                                </div>
-                                                                                {req.description && (
-                                                                                    <p className={`${t.textMuted} text-xs leading-relaxed mb-6 max-w-2xl font-light`}>
-                                                                                        {req.description}
-                                                                                    </p>
-                                                                                )}
-                                                                                <div className={`flex items-center justify-between pt-4 border-t ${t.borderInline}`}>
-                                                                                    <div className="flex items-center gap-4">
-                                                                                        {req.effective_date && (
-                                                                                            <div className={`flex items-center gap-2 text-[8px] ${t.textFaint} uppercase tracking-widest font-mono`}>
-                                                                                                <Calendar size={10} className="opacity-40" />
-                                                                                                Enforced: {new Date(req.effective_date).toLocaleDateString()}
-                                                                                            </div>
-                                                                                        )}
-                                                                                    </div>
-                                                                                    {req.source_url && (
-                                                                                        <a
-                                                                                            href={req.source_url}
-                                                                                            target="_blank"
-                                                                                            rel="noopener noreferrer"
-                                                                                            className={`text-[9px] font-bold uppercase tracking-widest ${t.textMuted} ${t.linkHover} flex items-center gap-1.5 transition-colors`}
-                                                                                        >
-                                                                                            Authority <ExternalLink size={10} />
-                                                                                        </a>
-                                                                                    )}
-                                                                                </div>
-                                                                            </div>
-                                                                        ))
-                                                                    )}
-                                                                </div>
-                                                            </motion.div>
-                                                        )}
-                                                    </AnimatePresence>
+                                                    )}
+                                                    <div className={`space-y-px ${t.requirementDivider} border ${t.border}`}>
+                                                        {section.categories.map(([category, reqs]) => renderCategoryAccordion(category, reqs))}
+                                                    </div>
                                                 </div>
                                             ))}
+                                        </div>
+                                    ) : (
+                                        <div className={`space-y-px ${t.requirementDivider} border ${t.border}`}>
+                                            {orderedRequirementCategories.map(([category, reqs]) => renderCategoryAccordion(category, reqs))}
                                         </div>
                                     )}
                                     </>

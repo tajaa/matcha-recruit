@@ -27,11 +27,36 @@ const CORE_REQUIREMENT_SECTIONS = [
   'scheduling_reporting',
 ];
 
+const INDUSTRY_SPECIFIC_CATEGORIES = new Set([
+  'hipaa_privacy',
+  'billing_integrity',
+  'clinical_safety',
+  'healthcare_workforce',
+  'corporate_integrity',
+  'research_consent',
+  'state_licensing',
+  'emergency_preparedness',
+]);
+
 function normalizeCategoryKey(category: string): string {
   return category.trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
-export function useComplianceRequirements(requirements: ComplianceRequirement[] | undefined) {
+function isIndustrySpecific(category: string, reqs: ComplianceRequirement[]): boolean {
+  if (INDUSTRY_SPECIFIC_CATEGORIES.has(category)) return true;
+  return reqs.some(r => r.applicable_industries && r.applicable_industries.length > 0);
+}
+
+export interface CategorySection {
+  id: 'core_labor' | 'industry_specific';
+  label: string;
+  categories: [string, ComplianceRequirement[]][];
+}
+
+export function useComplianceRequirements(
+  requirements: ComplianceRequirement[] | undefined,
+  industryName?: string,
+) {
   const requirementsByCategory = useMemo(() => {
     if (!requirements) return {};
     return requirements.reduce((acc, req) => {
@@ -59,5 +84,30 @@ export function useComplianceRequirements(requirements: ComplianceRequirement[] 
       .map((category) => [category, requirementsByCategory[category] || []] as [string, ComplianceRequirement[]]);
   }, [requirementsByCategory]);
 
-  return { requirementsByCategory, orderedRequirementCategories };
+  const sectionedCategories = useMemo(() => {
+    const core: [string, ComplianceRequirement[]][] = [];
+    const industry: [string, ComplianceRequirement[]][] = [];
+
+    for (const entry of orderedRequirementCategories) {
+      const [category, reqs] = entry;
+      if (isIndustrySpecific(category, reqs)) {
+        industry.push(entry);
+      } else {
+        core.push(entry);
+      }
+    }
+
+    const sections: CategorySection[] = [
+      { id: 'core_labor', label: 'Core Labor', categories: core },
+    ];
+
+    if (industry.length > 0) {
+      const label = industryName ? `${industryName}-Specific` : 'Industry-Specific';
+      sections.push({ id: 'industry_specific', label, categories: industry });
+    }
+
+    return sections;
+  }, [orderedRequirementCategories, industryName]);
+
+  return { requirementsByCategory, orderedRequirementCategories, sectionedCategories };
 }
