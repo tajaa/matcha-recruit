@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { matchaWork } from '../api/client';
 import type { MWTaskType, MWThread, MWThreadStatus } from '../types/matcha-work';
 
@@ -16,13 +17,6 @@ function formatDate(iso: string): string {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-  });
-}
-
-function sortThreads(rows: MWThread[]): MWThread[] {
-  return [...rows].sort((a, b) => {
-    if (a.is_pinned !== b.is_pinned) return a.is_pinned ? -1 : 1;
-    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
   });
 }
 
@@ -50,33 +44,23 @@ function getThreadTypeLabel(taskType: MWTaskType): string {
 
 export default function MatchaWorkChats() {
   const navigate = useNavigate();
-  const [threads, setThreads] = useState<MWThread[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [creatingChat, setCreatingChat] = useState(false);
   const [pinningThreadId, setPinningThreadId] = useState<string | null>(null);
+  const [archivingThreadId, setArchivingThreadId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadThreads = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const data = await matchaWork.listThreads({
+  const { data: threads = [], isLoading: loading } = useQuery({
+    queryKey: ['mw-threads', statusFilter],
+    queryFn: () =>
+      matchaWork.listThreads({
         status: statusFilter === 'all' ? undefined : statusFilter,
-        limit: 200,
+        limit: 50,
         offset: 0,
-      });
-      setThreads(sortThreads(data));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load chat history');
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter]);
-
-  useEffect(() => {
-    loadThreads();
-  }, [loadThreads]);
+      }),
+    staleTime: 60_000,
+  });
 
   const handleCreateThread = async () => {
     try {
@@ -94,12 +78,25 @@ export default function MatchaWorkChats() {
   const handleTogglePin = async (thread: MWThread) => {
     try {
       setPinningThreadId(thread.id);
-      const updated = await matchaWork.pinThread(thread.id, !thread.is_pinned);
-      setThreads((prev) => sortThreads(prev.map((t) => (t.id === updated.id ? updated : t))));
+      await matchaWork.pinThread(thread.id, !thread.is_pinned);
+      queryClient.invalidateQueries({ queryKey: ['mw-threads'] });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update pin');
     } finally {
       setPinningThreadId(null);
+    }
+  };
+
+  const handleArchive = async (thread: MWThread) => {
+    if (!window.confirm(`Archive "${thread.title}"? You can find it later under the archived filter.`)) return;
+    try {
+      setArchivingThreadId(thread.id);
+      await matchaWork.archiveThread(thread.id);
+      queryClient.invalidateQueries({ queryKey: ['mw-threads'] });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to archive thread');
+    } finally {
+      setArchivingThreadId(null);
     }
   };
 
@@ -235,6 +232,33 @@ export default function MatchaWorkChats() {
                     />
                   </svg>
                 </button>
+                {thread.status !== 'archived' && (
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      if (archivingThreadId) return;
+                      handleArchive(thread);
+                    }}
+                    className="w-7 h-7 rounded-md border border-zinc-700 hover:border-red-500/50 light:border-black/10 light:hover:border-red-500/30 flex items-center justify-center text-zinc-400 hover:text-red-400 light:text-black/40 light:hover:text-red-500 transition-colors"
+                    title="Archive chat"
+                    aria-label="Archive chat"
+                  >
+                    <svg
+                      className={`w-4 h-4 ${archivingThreadId === thread.id ? 'animate-pulse' : ''}`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={1.5}
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  </button>
+                )}
                 <span
                   className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${STATUS_COLORS[thread.status].replace('bg-matcha-500/20 text-matcha-300', 'bg-matcha-500/20 text-matcha-300 light:bg-black/10 light:text-black').replace('bg-blue-500/20 text-blue-300', 'bg-blue-500/20 text-blue-300 light:bg-black/10 light:text-black').replace('bg-zinc-500/20 text-zinc-400', 'bg-zinc-500/20 text-zinc-400 light:bg-black/10 light:text-black')}`}
                 >

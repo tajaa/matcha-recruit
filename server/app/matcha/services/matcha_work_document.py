@@ -235,6 +235,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "review"
     if any(k.startswith("handbook_") for k in current_state):
         return "handbook"
+    if any(k.startswith("policy_") for k in current_state):
+        return "policy"
     if "sections" in current_state or "workbook_title" in current_state:
         return "workbook"
     if any(k in current_state for k in ("employees", "batch_status")):
@@ -790,9 +792,7 @@ async def get_thread(thread_id: UUID, company_id: UUID) -> Optional[dict]:
 
 
 def _thread_list_item_from_row(row: dict) -> dict:
-    item = dict(row)
-    item["task_type"] = _infer_skill_from_state(_parse_jsonb(item.pop("current_state", {})))
-    return item
+    return dict(row)
 
 
 async def list_threads(
@@ -802,10 +802,23 @@ async def list_threads(
     offset: int = 0,
 ) -> list[dict]:
     async with get_connection() as conn:
+        task_type_sql = """
+                CASE
+                  WHEN current_state ?| array['candidate_name','position_title','salary','salary_range_min'] THEN 'offer_letter'
+                  WHEN current_state ?| array['overall_rating','review_title','review_request_statuses','review_expected_responses'] THEN 'review'
+                  WHEN EXISTS (SELECT 1 FROM jsonb_object_keys(current_state) k WHERE k LIKE 'handbook_%') THEN 'handbook'
+                  WHEN EXISTS (SELECT 1 FROM jsonb_object_keys(current_state) k WHERE k LIKE 'policy_%') THEN 'policy'
+                  WHEN current_state ? 'sections' OR current_state ? 'workbook_title' THEN 'workbook'
+                  WHEN current_state ?| array['employees','batch_status'] THEN 'onboarding'
+                  WHEN current_state ?| array['presentation_title','slides'] THEN 'presentation'
+                  ELSE 'chat'
+                END AS task_type
+        """
         if status:
             rows = await conn.fetch(
-                """
-                SELECT id, title, status, version, is_pinned, created_at, updated_at, current_state
+                f"""
+                SELECT id, title, status, version, is_pinned, created_at, updated_at,
+                       {task_type_sql}
                 FROM mw_threads
                 WHERE company_id=$1 AND status=$2
                 ORDER BY is_pinned DESC, updated_at DESC
@@ -818,8 +831,9 @@ async def list_threads(
             )
         else:
             rows = await conn.fetch(
-                """
-                SELECT id, title, status, version, is_pinned, created_at, updated_at, current_state
+                f"""
+                SELECT id, title, status, version, is_pinned, created_at, updated_at,
+                       {task_type_sql}
                 FROM mw_threads
                 WHERE company_id=$1
                 ORDER BY is_pinned DESC, updated_at DESC
