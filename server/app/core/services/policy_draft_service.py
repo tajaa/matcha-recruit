@@ -36,7 +36,7 @@ POLICY_TYPES = [
     {"value": "attendance", "label": "Attendance and Punctuality", "categories": [],
      "scope_guidance": "Focus on reporting procedures, tardiness policies, no-call/no-show rules, progressive discipline for attendance violations, and excused vs. unexcused absences. DO NOT include meal breaks, minimum wage, overtime, or scheduling regulations."},
     {"value": "code_of_conduct", "label": "Code of Conduct", "categories": [],
-     "scope_guidance": "Focus on professional ethics, integrity, conflicts of interest, confidentiality, workplace respect, anti-bribery/corruption, use of company resources, social media conduct, and the disciplinary process. DO NOT include meal breaks, minimum wage, overtime, scheduling, or other labor law compliance topics — those belong in separate dedicated policies."},
+     "scope_guidance": "Focus on professional ethics, integrity, conflicts of interest, confidentiality, workplace respect, anti-bribery/corruption, use of company resources, social media conduct, and the disciplinary process. DO NOT include leave laws (FMLA, state family/medical leave, disability leave), meal breaks, minimum wage, overtime, scheduling, PTO accrual rules, or other labor law compliance topics — those belong in separate dedicated policies."},
     {"value": "whistleblower", "label": "Whistleblower Protection", "categories": [],
      "scope_guidance": "Focus on protected activities, internal and external reporting channels, anti-retaliation protections, investigation procedures, and confidentiality of whistleblower identity. DO NOT include meal breaks, minimum wage, overtime, or scheduling regulations."},
     # Healthcare-specific policy types
@@ -233,7 +233,9 @@ async def generate_policy_draft_stream(
                     if not r.get("applicable_industries")
                     or (canonical_industry and canonical_industry in [i.lower() for i in r["applicable_industries"]])]
 
-            if related_categories:
+            if not related_categories:
+                reqs = []  # No DB requirements for scope-guidance-only policy types
+            else:
                 reqs = [r for r in reqs if r["category"] in related_categories]
 
             # Dedup: for state-level, only include once per state
