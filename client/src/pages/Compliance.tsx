@@ -435,7 +435,7 @@ export function Compliance() {
 
     // UI-specific state (not in hooks)
     const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
-    const [activeTab, setActiveTab] = useState<'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters'>('requirements');
+    const [activeTab, setActiveTab] = useState<'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'employees'>('requirements');
     const [expandedAlertSources, setExpandedAlertSources] = useState<Set<string>>(new Set());
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
     const [availablePosters, setAvailablePosters] = useState<AvailablePoster[]>([]);
@@ -931,8 +931,8 @@ export function Compliance() {
                                                 </span>
                                             )}
                                             <EmployeesTooltip names={location.employee_names} count={location.employee_count ?? 0}>
-                                                <span className={`ml-auto flex items-center gap-0.5 text-[8px] font-bold ${t.textMuted} cursor-default`}>
-                                                    <Users size={8} />
+                                                <span className={`ml-auto flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold ${t.textMuted} cursor-default hover:text-zinc-200 transition-colors`}>
+                                                    <Users size={12} />
                                                     {location.employee_count ?? 0}
                                                 </span>
                                             </EmployeesTooltip>
@@ -1136,6 +1136,7 @@ export function Compliance() {
                                     { id: 'upcoming', label: 'Future', count: upcomingLegislation?.length },
                                     { id: 'history', label: 'Log' },
                                     { id: 'posters', label: 'Vault' },
+                                    { id: 'employees', label: 'Employees', count: selectedLocation?.employee_count ?? 0 },
                                 ].map((tab) => (
                                     <button
                                         key={tab.id}
@@ -1192,7 +1193,22 @@ export function Compliance() {
                             )}
 
                             <div className={`p-4 flex-1 ${t.contentBg} overflow-y-auto`}>
-                                {activeTab === 'posters' ? (
+                                {activeTab === 'employees' ? (
+                                    <div className="space-y-2">
+                                        {(selectedLocation?.employee_names?.length ?? 0) === 0 ? (
+                                            <p className={`${t.textFaint} text-[10px] font-mono uppercase tracking-widest py-8 text-center`}>No employees assigned to this location.</p>
+                                        ) : (
+                                            selectedLocation!.employee_names!.map((name, i) => (
+                                                <div key={i} className={`${t.cardBg} border ${t.border} rounded-sm px-5 py-3 flex items-center gap-3`}>
+                                                    <div className={`w-7 h-7 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0`}>
+                                                        <span className="text-[10px] font-bold text-violet-400">{name.charAt(0).toUpperCase()}</span>
+                                                    </div>
+                                                    <span className={`text-xs font-medium ${t.textMain}`}>{name}</span>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                ) : activeTab === 'posters' ? (
                                     postersLoading ? (
                                         <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
