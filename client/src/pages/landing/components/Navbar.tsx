@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { fonts } from "../constants";
 
 interface NavbarProps {
   scrolled: boolean;
@@ -12,7 +13,7 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
   return (
     <nav className="fixed top-0 left-0 w-full z-50 pointer-events-none transition-all duration-500">
       <div
-        className={`w-full pointer-events-auto flex items-center justify-between px-6 py-3 transition-all duration-500 border-b ${
+        className={`w-full pointer-events-auto flex items-center justify-between px-6 py-1.5 transition-all duration-500 border-b ${
           scrolled
             ? "bg-zinc-900/60 backdrop-blur-xl border-white/10 shadow-[0_4px_30px_rgba(0,0,0,0.2)]"
             : "bg-zinc-900/30 backdrop-blur-sm border-transparent"
@@ -21,13 +22,13 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
         <div className="flex items-center gap-8">
           <Link to="/" className="flex items-center gap-4 group">
             {/* Minimalist Geometric Logo */}
-            <div className="relative w-8 h-8 flex items-center justify-center">
+            <div className="relative w-5 h-5 flex items-center justify-center">
                <div className="absolute inset-0 border border-white/50 rotate-45 group-hover:rotate-90 group-hover:border-white transition-all duration-500" />
                <div className="w-1.5 h-1.5 bg-white" />
             </div>
-            <span 
-              className="font-mono text-2xl font-bold tracking-[0.3em] uppercase text-zinc-300"
-              style={{ WebkitTextStroke: '2px white' }}
+            <span
+              className="text-base font-bold tracking-[0.2em] uppercase text-white"
+              style={{ fontFamily: fonts.display }}
             >
               Matcha
             </span>
