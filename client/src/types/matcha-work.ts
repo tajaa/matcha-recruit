@@ -177,6 +177,22 @@ export interface MWDocumentState {
     why_it_matters: string;
     recommended_action: string;
   }> | null;
+  handbook_green_flags?: Array<{
+    id: string;
+    jurisdiction: string;
+    category: string;
+    category_label: string;
+    summary: string;
+  }> | null;
+  handbook_jurisdiction_summaries?: Array<{
+    location_label: string;
+    state: string;
+    city: string | null;
+    covered_count: number;
+    total_count: number;
+    covered_categories: string[];
+    missing_categories: string[];
+  }> | null;
   handbook_analysis_generated_at?: string | null;
   handbook_strength_score?: number | null;
   handbook_strength_label?: string | null;

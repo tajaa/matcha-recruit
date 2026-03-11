@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useState } from 'react';
 
 import type { MWDocumentState } from '../../types/matcha-work';
 
@@ -20,6 +20,257 @@ const HANDBOOK_PROFILE_LABELS: [string, string][] = [
   ['salaried_employees', 'Salaried Employees'],
   ['commissioned_employees', 'Commissioned Employees'],
 ];
+
+const GREEN_FLAGS_COLLAPSED_LIMIT = 6;
+
+function UploadBranch({ state }: { state: MWDocumentState }) {
+  const [greenExpanded, setGreenExpanded] = useState(false);
+
+  const title = state.handbook_title || 'Employee Handbook';
+  const uploadStatus = state.handbook_upload_status || 'idle';
+  const uploadedFilename = state.handbook_uploaded_filename || '';
+  const blockingError = state.handbook_blocking_error || '';
+  const reviewLocations = state.handbook_review_locations || [];
+  const redFlags = state.handbook_red_flags || [];
+  const greenFlags = state.handbook_green_flags || [];
+  const jurisdictionSummaries = state.handbook_jurisdiction_summaries || [];
+  const mode = state.handbook_mode || '';
+  const sections = state.handbook_sections || [];
+  const strengthScore = state.handbook_strength_score;
+  const strengthLabel = state.handbook_strength_label || '';
+
+  const severityCounts = redFlags.reduce(
+    (acc, flag) => {
+      const severity = flag.severity || 'medium';
+      if (severity in acc) acc[severity as 'high' | 'medium' | 'low'] += 1;
+      return acc;
+    },
+    { high: 0, medium: 0, low: 0 }
+  );
+
+  const uploadStatusColor =
+    uploadStatus === 'reviewed' ? 'text-green-400 bg-green-400/10' :
+    uploadStatus === 'analyzing' || uploadStatus === 'uploading' ? 'text-orange-400 bg-orange-400/10' :
+    uploadStatus === 'blocked' || uploadStatus === 'error' ? 'text-red-400 bg-red-400/10' :
+    'text-zinc-400 bg-zinc-400/10';
+
+  const severityBadgeClasses = (severity: 'high' | 'medium' | 'low') =>
+    severity === 'high'
+      ? 'text-red-300 bg-red-500/10 border border-red-500/20'
+      : severity === 'medium'
+        ? 'text-orange-300 bg-orange-500/10 border border-orange-500/20'
+        : 'text-sky-300 bg-sky-500/10 border border-sky-500/20';
+
+  const scoreColor = strengthScore == null ? 'text-zinc-400' :
+    strengthScore >= 80 ? 'text-green-400' :
+    strengthScore >= 50 ? 'text-orange-400' : 'text-red-400';
+
+  const scoreTrackColor = strengthScore == null ? 'stroke-zinc-700' :
+    strengthScore >= 80 ? 'stroke-green-400/20' :
+    strengthScore >= 50 ? 'stroke-orange-400/20' : 'stroke-red-400/20';
+
+  const scoreStrokeColor = strengthScore == null ? 'stroke-zinc-400' :
+    strengthScore >= 80 ? 'stroke-green-400' :
+    strengthScore >= 50 ? 'stroke-orange-400' : 'stroke-red-400';
+
+  const visibleGreen = greenExpanded ? greenFlags : greenFlags.slice(0, GREEN_FLAGS_COLLAPSED_LIMIT);
+
+  return (
+    <div className="h-full overflow-y-auto p-4">
+      <div className="max-w-3xl mx-auto space-y-4">
+        {/* Header */}
+        <div>
+          <h2 className="text-lg font-bold text-zinc-100 light:text-zinc-900 tracking-tight">{title}</h2>
+          <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+            <span className="text-[11px] font-medium text-zinc-300 light:text-zinc-600 px-2 py-0.5 bg-zinc-800 light:bg-zinc-200/60">
+              Uploaded Handbook
+            </span>
+            {mode && (
+              <span className="text-[11px] font-medium text-zinc-300 light:text-zinc-600 px-2 py-0.5 bg-zinc-800 light:bg-zinc-200/60">
+                {mode === 'multi_state' ? 'Multi-State' : 'Single State'}
+              </span>
+            )}
+            <span className={`text-[11px] font-medium px-2 py-0.5 ${uploadStatusColor}`}>
+              {uploadStatus.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
+            </span>
+          </div>
+        </div>
+
+        {/* Source file */}
+        {uploadedFilename && (
+          <div className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Source File</p>
+            <p className="mt-1 text-sm text-zinc-200 light:text-zinc-800">{uploadedFilename}</p>
+            {state.handbook_analysis_generated_at && (
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Reviewed {new Date(state.handbook_analysis_generated_at).toLocaleString()}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Blocking error */}
+        {blockingError && (
+          <div className="flex items-start gap-2 p-3 bg-red-400/10 border border-red-400/20">
+            <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+            </svg>
+            <p className="text-xs text-red-300 leading-relaxed">{blockingError}</p>
+          </div>
+        )}
+
+        {/* Coverage Score ring gauge */}
+        {strengthScore != null && (
+          <div className="flex items-center gap-3 bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
+            <svg width="44" height="44" viewBox="0 0 44 44" className="flex-shrink-0">
+              <circle cx="22" cy="22" r="18" fill="none" strokeWidth="4" className={scoreTrackColor} />
+              <circle
+                cx="22" cy="22" r="18" fill="none" strokeWidth="4"
+                className={scoreStrokeColor}
+                strokeLinecap="round"
+                strokeDasharray={`${(strengthScore / 100) * 113.1} 113.1`}
+                transform="rotate(-90 22 22)"
+              />
+              <text x="22" y="22" textAnchor="middle" dominantBaseline="central" className={`text-[13px] font-bold font-mono fill-current ${scoreColor}`}>
+                {strengthScore}
+              </text>
+            </svg>
+            <div>
+              <p className="text-xs text-zinc-500 font-medium">Coverage Score</p>
+              <p className={`text-sm font-semibold ${scoreColor}`}>{strengthLabel}</p>
+            </div>
+          </div>
+        )}
+
+        {/* Severity count cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          {(['high', 'medium', 'low'] as const).map((severity) => (
+            <div key={severity} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
+              <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{severity}</p>
+              <p className="mt-1 text-xl font-semibold text-zinc-100 light:text-zinc-900">{severityCounts[severity]}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Per-Jurisdiction Summary Cards */}
+        {jurisdictionSummaries.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Jurisdiction Coverage</p>
+            {jurisdictionSummaries.map((js) => {
+              const ratio = js.total_count > 0 ? js.covered_count / js.total_count : 0;
+              const ratioColor = ratio >= 0.8 ? 'text-green-400' : ratio >= 0.5 ? 'text-orange-400' : 'text-red-400';
+              const barColor = ratio >= 0.8 ? 'bg-green-400' : ratio >= 0.5 ? 'bg-orange-400' : 'bg-red-400';
+              return (
+                <div key={js.location_label} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-zinc-100 light:text-zinc-900">{js.location_label}</p>
+                    <span className={`text-sm font-bold font-mono ${ratioColor}`}>{js.covered_count}/{js.total_count}</span>
+                  </div>
+                  <div className="h-1.5 bg-zinc-700 light:bg-zinc-300 overflow-hidden">
+                    <div className={`h-full ${barColor} transition-all`} style={{ width: `${ratio * 100}%` }} />
+                  </div>
+                  {js.covered_categories.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {js.covered_categories.map((cat) => (
+                        <span key={cat} className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-300 border border-green-500/20">
+                          {cat.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {js.missing_categories.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {js.missing_categories.map((cat) => (
+                        <span key={cat} className="text-[10px] px-1.5 py-0.5 bg-red-500/10 text-red-300 border border-red-500/20">
+                          {cat.replace(/_/g, ' ')}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Red Flags */}
+        {redFlags.length > 0 ? (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Red Flags</p>
+            {redFlags.map((flag) => (
+              <div key={flag.id} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-100 light:text-zinc-900">{flag.section_title}</p>
+                    <p className="text-[11px] text-zinc-500">{flag.jurisdiction}</p>
+                  </div>
+                  <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 ${severityBadgeClasses(flag.severity)}`}>
+                    {flag.severity}
+                  </span>
+                </div>
+                <p className="text-sm text-zinc-200 light:text-zinc-800">{flag.summary}</p>
+                <p className="text-xs text-zinc-400 light:text-zinc-600 leading-relaxed">{flag.why_it_matters}</p>
+                <p className="text-xs text-zinc-300 light:text-zinc-700 leading-relaxed">
+                  <span className="text-zinc-500">Recommended action:</span> {flag.recommended_action}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : uploadStatus === 'reviewed' ? (
+          <div className="bg-green-500/10 border border-green-500/20 p-3">
+            <p className="text-xs text-green-300 leading-relaxed">
+              No jurisdiction coverage gaps detected.{greenFlags.length > 0 ? ` ${greenFlags.length} compliance requirement(s) confirmed covered.` : ''} Review the parsed sections below for details.
+            </p>
+          </div>
+        ) : null}
+
+        {/* Green Flags — Covered Requirements */}
+        {greenFlags.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Covered Requirements</p>
+            {visibleGreen.map((flag) => (
+              <div key={flag.id} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-green-500/10 light:border-green-200 p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-medium text-zinc-100 light:text-zinc-900">{flag.category_label}</p>
+                    <p className="text-[11px] text-zinc-500">{flag.jurisdiction}</p>
+                  </div>
+                  <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 text-green-300 bg-green-500/10 border border-green-500/20">
+                    covered
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 light:text-zinc-600 mt-1 leading-relaxed">{flag.summary}</p>
+              </div>
+            ))}
+            {greenFlags.length > GREEN_FLAGS_COLLAPSED_LIMIT && (
+              <button
+                onClick={() => setGreenExpanded(!greenExpanded)}
+                className="text-xs text-matcha-400 hover:text-matcha-300 font-medium transition-colors"
+              >
+                {greenExpanded ? 'Show less' : `Show all ${greenFlags.length} covered requirements`}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Parsed Sections */}
+        {sections.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Parsed Sections</p>
+            {sections.map((section) => (
+              <div key={section.section_key} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
+                <p className="text-sm font-medium text-zinc-200 light:text-zinc-800">{section.title}</p>
+                {section.content && (
+                  <p className="text-xs text-zinc-400 light:text-zinc-600 mt-1 line-clamp-4 leading-relaxed">{section.content}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function HandbookPreviewComponent({ state, onRender }: HandbookPreviewProps) {
   onRender?.();
@@ -45,151 +296,7 @@ function HandbookPreviewComponent({ state, onRender }: HandbookPreviewProps) {
   const sections = state.handbook_sections || [];
 
   if (sourceType === 'upload') {
-    const severityCounts = redFlags.reduce(
-      (acc, flag) => {
-        const severity = flag.severity || 'medium';
-        if (severity in acc) {
-          acc[severity as 'high' | 'medium' | 'low'] += 1;
-        }
-        return acc;
-      },
-      { high: 0, medium: 0, low: 0 }
-    );
-
-    const uploadStatusColor =
-      uploadStatus === 'reviewed' ? 'text-green-400 bg-green-400/10' :
-      uploadStatus === 'analyzing' || uploadStatus === 'uploading' ? 'text-orange-400 bg-orange-400/10' :
-      uploadStatus === 'blocked' || uploadStatus === 'error' ? 'text-red-400 bg-red-400/10' :
-      'text-zinc-400 bg-zinc-400/10';
-
-    const severityBadgeClasses = (severity: 'high' | 'medium' | 'low') =>
-      severity === 'high'
-        ? 'text-red-300 bg-red-500/10 border border-red-500/20'
-        : severity === 'medium'
-          ? 'text-orange-300 bg-orange-500/10 border border-orange-500/20'
-          : 'text-sky-300 bg-sky-500/10 border border-sky-500/20';
-
-    return (
-      <div className="h-full overflow-y-auto p-4">
-        <div className="max-w-3xl mx-auto space-y-4">
-          <div>
-            <h2 className="text-lg font-bold text-zinc-100 light:text-zinc-900 tracking-tight">{title}</h2>
-            <div className="flex items-center gap-2 mt-1.5 flex-wrap">
-              <span className="text-[11px] font-medium text-zinc-300 light:text-zinc-600 px-2 py-0.5 bg-zinc-800 light:bg-zinc-200/60">
-                Uploaded Handbook
-              </span>
-              {mode && (
-                <span className="text-[11px] font-medium text-zinc-300 light:text-zinc-600 px-2 py-0.5 bg-zinc-800 light:bg-zinc-200/60">
-                  {mode === 'multi_state' ? 'Multi-State' : 'Single State'}
-                </span>
-              )}
-              <span className={`text-[11px] font-medium px-2 py-0.5 ${uploadStatusColor}`}>
-                {uploadStatus.replace(/_/g, ' ').replace(/\b\w/g, (c: string) => c.toUpperCase())}
-              </span>
-            </div>
-          </div>
-
-          {uploadedFilename && (
-            <div className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">Source File</p>
-              <p className="mt-1 text-sm text-zinc-200 light:text-zinc-800">{uploadedFilename}</p>
-              {state.handbook_analysis_generated_at && (
-                <p className="mt-1 text-[11px] text-zinc-500">
-                  Reviewed {new Date(state.handbook_analysis_generated_at).toLocaleString()}
-                </p>
-              )}
-            </div>
-          )}
-
-          {blockingError && (
-            <div className="flex items-start gap-2 p-3 bg-red-400/10 border border-red-400/20">
-              <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-              </svg>
-              <p className="text-xs text-red-300 leading-relaxed">{blockingError}</p>
-            </div>
-          )}
-
-          {reviewLocations.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Audited Jurisdictions</p>
-              <div className="flex flex-wrap gap-2">
-                {reviewLocations.map((location) => (
-                  <span key={location} className="text-[11px] font-semibold font-mono text-white px-2 py-0.5 bg-blue-500/20 border border-blue-500/20">
-                    {location}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {(['high', 'medium', 'low'] as const).map((severity) => (
-              <div key={severity} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
-                <p className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{severity}</p>
-                <p className="mt-1 text-xl font-semibold text-zinc-100 light:text-zinc-900">{severityCounts[severity]}</p>
-              </div>
-            ))}
-          </div>
-
-          {strengthScore != null && (
-            <div className="flex items-center gap-3 bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
-              <div className="w-10 h-10 rounded-full border border-white/10 flex items-center justify-center text-sm font-bold font-mono text-zinc-100 light:text-zinc-900">
-                {strengthScore}
-              </div>
-              <div>
-                <p className="text-xs text-zinc-500 font-medium">Coverage Score</p>
-                <p className="text-sm font-semibold text-zinc-200 light:text-zinc-800">{strengthLabel}</p>
-              </div>
-            </div>
-          )}
-
-          {redFlags.length > 0 ? (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Red Flags</p>
-              {redFlags.map((flag) => (
-                <div key={flag.id} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3 space-y-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-medium text-zinc-100 light:text-zinc-900">{flag.section_title}</p>
-                      <p className="text-[11px] text-zinc-500">{flag.jurisdiction}</p>
-                    </div>
-                    <span className={`text-[10px] uppercase tracking-wider px-2 py-0.5 ${severityBadgeClasses(flag.severity)}`}>
-                      {flag.severity}
-                    </span>
-                  </div>
-                  <p className="text-sm text-zinc-200 light:text-zinc-800">{flag.summary}</p>
-                  <p className="text-xs text-zinc-400 light:text-zinc-600 leading-relaxed">{flag.why_it_matters}</p>
-                  <p className="text-xs text-zinc-300 light:text-zinc-700 leading-relaxed">
-                    <span className="text-zinc-500">Recommended action:</span> {flag.recommended_action}
-                  </p>
-                </div>
-              ))}
-            </div>
-          ) : uploadStatus === 'reviewed' ? (
-            <div className="bg-green-500/10 border border-green-500/20 p-3">
-              <p className="text-xs text-green-300 leading-relaxed">
-                No obvious jurisdiction coverage gaps were detected from the synced /compliance rules. Review the parsed sections below and ask follow-up questions in chat if you want deeper remediation guidance.
-              </p>
-            </div>
-          ) : null}
-
-          {sections.length > 0 && (
-            <div className="space-y-2">
-              <p className="text-xs font-semibold text-zinc-200 light:text-zinc-800 uppercase tracking-wider">Parsed Sections</p>
-              {sections.map((section) => (
-                <div key={section.section_key} className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">
-                  <p className="text-sm font-medium text-zinc-200 light:text-zinc-800">{section.title}</p>
-                  {section.content && (
-                    <p className="text-xs text-zinc-400 light:text-zinc-600 mt-1 line-clamp-4 leading-relaxed">{section.content}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
+    return <UploadBranch state={state} />;
   }
 
   const profileFlags: [string, boolean][] = [];

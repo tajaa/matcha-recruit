@@ -54,7 +54,7 @@ from ..models.matcha_work import (
 from ..services import matcha_work_document as doc_svc
 from ..services import billing_service
 from ..services.er_document_parser import ERDocumentParser
-from ..services.matcha_work_handbook_upload import AuditedLocation, audit_uploaded_handbook
+from ..services.matcha_work_handbook_upload import AuditedLocation, audit_uploaded_handbook, check_handbook_relevance
 from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
@@ -83,6 +83,8 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
     "handbook_blocking_error",
     "handbook_review_locations",
     "handbook_red_flags",
+    "handbook_green_flags",
+    "handbook_jurisdiction_summaries",
     "handbook_analysis_generated_at",
 }
 VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys()) - HANDBOOK_UPLOAD_MANAGED_FIELDS
@@ -170,14 +172,20 @@ def _build_handbook_upload_summary(
     file_name: str,
     reviewed_locations: list[str],
     red_flags: list[dict],
+    green_flags: list[dict] | None = None,
+    jurisdiction_summaries: list[dict] | None = None,
     blocked_message: Optional[str] = None,
 ) -> str:
     if blocked_message:
         return blocked_message
+
+    passing_count = len(green_flags or [])
+    gap_count = len(red_flags)
+
     if not red_flags:
         return (
             f"Uploaded {file_name} and reviewed it against {len(reviewed_locations)} active Compliance Location(s). "
-            "No obvious jurisdiction coverage gaps were detected from synced /compliance data."
+            f"{passing_count} requirement(s) covered, no jurisdiction coverage gaps detected."
         )
 
     counts = {"high": 0, "medium": 0, "low": 0}
@@ -186,16 +194,25 @@ def _build_handbook_upload_summary(
         if severity in counts:
             counts[severity] += 1
 
-    summary_bits = []
+    severity_bits = []
     for severity in ("high", "medium", "low"):
         count = counts[severity]
         if count:
-            summary_bits.append(f"{count} {severity}")
+            severity_bits.append(f"{count} {severity}")
 
-    summary = ", ".join(summary_bits) if summary_bits else f"{len(red_flags)} issue(s)"
+    severity_summary = ", ".join(severity_bits) if severity_bits else f"{gap_count} issue(s)"
+
+    # Per-jurisdiction coverage snippet
+    jurisdiction_bits: list[str] = []
+    for js in (jurisdiction_summaries or []):
+        jurisdiction_bits.append(f"{js['location_label']} {js['covered_count']}/{js['total_count']}")
+    jurisdiction_snippet = (" | ".join(jurisdiction_bits) + ".") if jurisdiction_bits else ""
+
     return (
         f"Uploaded {file_name} and reviewed it against {len(reviewed_locations)} active Compliance Location(s). "
-        f"Detected {summary} red flag(s). Review the Preview panel for details."
+        f"{passing_count} passing, {severity_summary} red flag(s). "
+        + (f"Coverage: {jurisdiction_snippet} " if jurisdiction_snippet else "")
+        + "Review the Preview panel for details."
     )
 
 
@@ -1221,6 +1238,47 @@ async def upload_thread_handbook(
     if not extracted_text or not extracted_text.strip():
         raise HTTPException(status_code=400, detail="No readable handbook text was found in the uploaded file")
 
+    # Quick relevance check — reject clearly wrong documents before expensive work.
+    is_handbook, rejection_reason = await check_handbook_relevance(extracted_text, get_ai_provider().client)
+    if not is_handbook:
+        blocking_message = rejection_reason or (
+            "This document does not appear to be an employee handbook. "
+            "Please upload your company's employee handbook and try again."
+        )
+        result = await doc_svc.apply_update(
+            thread_id,
+            {
+                "handbook_source_type": "upload",
+                "handbook_upload_status": "blocked",
+                "handbook_title": thread.get("current_state", {}).get("handbook_title") or "Uploaded Employee Handbook",
+                "handbook_status": "error",
+                "handbook_uploaded_file_url": None,
+                "handbook_uploaded_filename": None,
+                "handbook_blocking_error": blocking_message,
+                "handbook_review_locations": [],
+                "handbook_red_flags": [],
+                "handbook_green_flags": [],
+                "handbook_jurisdiction_summaries": [],
+                "handbook_sections": [],
+                "handbook_analysis_generated_at": datetime.now(timezone.utc).isoformat(),
+                "handbook_error": None,
+            },
+            diff_summary="Rejected non-handbook upload",
+        )
+        await doc_svc.add_message(
+            thread_id,
+            "system",
+            f"Uploaded file: {filename}.",
+            version_created=result["version"],
+        )
+        await doc_svc.add_message(
+            thread_id,
+            "assistant",
+            blocking_message,
+            version_created=result["version"],
+        )
+        return await _build_thread_detail_response(thread_id, company_id)
+
     storage = get_storage()
     uploaded_file_url = await storage.upload_file(
         content,
@@ -1297,6 +1355,8 @@ async def upload_thread_handbook(
         file_name=filename,
         reviewed_locations=audit_result["handbook_review_locations"],
         red_flags=audit_result["handbook_red_flags"],
+        green_flags=audit_result.get("handbook_green_flags"),
+        jurisdiction_summaries=audit_result.get("handbook_jurisdiction_summaries"),
     )
     await doc_svc.add_message(
         thread_id,

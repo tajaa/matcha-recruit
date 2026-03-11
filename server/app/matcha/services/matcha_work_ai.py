@@ -31,6 +31,8 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
     "handbook_blocking_error",
     "handbook_review_locations",
     "handbook_red_flags",
+    "handbook_green_flags",
+    "handbook_jurisdiction_summaries",
     "handbook_analysis_generated_at",
 }
 HANDBOOK_FIELDS = [
