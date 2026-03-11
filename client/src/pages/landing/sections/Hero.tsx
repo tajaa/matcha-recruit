@@ -154,7 +154,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
     >
       {/* Atmosphere Layer - Minimalist Light Grayscale */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-[#f4f4f5]" />
+        <div className="absolute inset-0 bg-zinc-800" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] rounded-full mix-blend-multiply" style={{ background: "radial-gradient(circle, rgba(0,0,0,0.03) 0%, transparent 70%)" }} />
         <div className="absolute top-0 left-0 w-full h-full opacity-[0.06] pointer-events-none bg-[url('/textures/asfalt-light.png')]" />
       </div>
@@ -177,10 +177,10 @@ export const Hero = ({ onContactClick }: HeroProps) => {
             />
           </m.div>
           
-          <div className="mt-10 rounded-xl backdrop-blur-[2px] bg-white/3 px-20 py-16 -mx-20 w-fit shadow-[0_8px_32px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.6)]">
+          <div className="mt-10 relative z-10 px-20 py-16 -mx-20 w-fit">
             <m.h1 variants={itemVariants} className="leading-[0.9] tracking-[-0.04em] max-w-2xl">
               <span
-                className="block mb-2 text-[1.875rem] md:text-[3rem] lg:text-[3.75rem] font-bold uppercase text-zinc-800"
+                className="block mb-2 text-[1.875rem] md:text-[3rem] lg:text-[3.75rem] font-bold uppercase text-white"
                 style={{ fontFamily: fonts.display, letterSpacing: '0.05em' }}
               >
                 Workforce
@@ -188,7 +188,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
               <GlitchText
                 text="Intelligence."
                 cycleWords={["Compliance.", "Risk Assessment.", "Risk Management."]}
-                className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] italic font-light text-zinc-700"
+                className="block text-[2.25rem] md:text-[3.75rem] lg:text-[4.5rem] italic font-light text-white/90"
                 style={{
                   fontFamily: fonts.serif,
                 }}
@@ -197,10 +197,10 @@ export const Hero = ({ onContactClick }: HeroProps) => {
 
             <m.div variants={itemVariants} className="space-y-10 mt-10">
               <p
-                className="text-zinc-900 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap"
+                className="text-white/80 text-lg md:text-xl lg:text-2xl font-semibold leading-relaxed w-fit whitespace-nowrap"
                 style={{ fontFamily: fonts.sans }}
               >
-                Increase your <span className="text-amber-700">signal to noise ratio</span>.
+                Increase your <span className="text-amber-400">signal to noise ratio</span>.
               </p>
             
             <div className="flex flex-wrap gap-6 pt-2 justify-center lg:justify-start">
