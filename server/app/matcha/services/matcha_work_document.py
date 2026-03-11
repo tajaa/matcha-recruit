@@ -8,6 +8,7 @@ import posixpath
 import re
 import secrets
 import time
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import urlparse
@@ -15,7 +16,7 @@ from uuid import UUID
 
 from ...database import get_connection
 from ...config import get_settings
-from ...core.services.compliance_service import get_location_requirements, get_locations
+from ...core.services.compliance_service import get_locations
 from ...core.services.email import EmailService
 from ...core.services.storage import get_storage
 
@@ -704,45 +705,55 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
     }
     profile["compliance_locations"] = "; ".join(location_labels.values())
 
+    # Fetch all requirements for all locations in a single query to avoid
+    # connection pool exhaustion.  The old approach called get_location_requirements()
+    # per location via asyncio.gather — each call held a pool connection while also
+    # trying to acquire another for get_employee_impact_for_location(), causing a
+    # deadlock when the company had 6+ locations (pool max_size=10).
+    location_ids = [loc["id"] for loc in locations if loc.get("id")]
     try:
-        requirement_results = await asyncio.gather(
-            *(
-                get_location_requirements(loc["id"], company_id)
-                for loc in locations
-                if loc.get("id")
-            ),
-            return_exceptions=True,
-        )
+        async with get_connection() as conn:
+            req_rows = await conn.fetch(
+                """
+                SELECT r.location_id, r.category, r.jurisdiction_name,
+                       r.current_value, r.title
+                FROM compliance_requirements r
+                WHERE r.location_id = ANY($1::uuid[])
+                ORDER BY r.location_id, r.category, r.jurisdiction_level
+                """,
+                location_ids,
+            )
     except Exception:
         logger.warning("Failed to load compliance requirements for Matcha Work AI context", exc_info=True)
         _company_profile_cache[key] = (now, profile)
         return profile
 
+    # Group requirements by location
+    reqs_by_location: dict[str, list[dict]] = defaultdict(list)
+    for rr in req_rows:
+        reqs_by_location[str(rr["location_id"])].append(dict(rr))
+
     location_lines: list[str] = []
-    scoped_locations = [loc for loc in locations if loc.get("id")]
-    for loc, requirement_result in zip(scoped_locations, requirement_results):
-        if isinstance(requirement_result, Exception):
-            logger.warning(
-                "Failed to load compliance requirements for Matcha Work AI context location %s: %s",
-                loc.get("id"),
-                requirement_result,
-            )
+    for loc in locations:
+        loc_id_str = str(loc.get("id", ""))
+        loc_reqs = reqs_by_location.get(loc_id_str, [])
+        if not loc_reqs:
             continue
 
         entries: list[str] = []
         seen_entries: set[str] = set()
-        for req in requirement_result:
-            value = (req.current_value or req.title or "").strip()
+        for req in loc_reqs:
+            value = (req.get("current_value") or req.get("title") or "").strip()
             if not value:
                 continue
-            entry = f"{req.category} ({req.jurisdiction_name}: {value})"
+            entry = f"{req['category']} ({req['jurisdiction_name']}: {value})"
             if entry in seen_entries:
                 continue
             seen_entries.add(entry)
             entries.append(entry)
 
         if entries:
-            location_lines.append(f"  {location_labels.get(str(loc['id']), _location_label(loc))}: {'; '.join(entries)}")
+            location_lines.append(f"  {location_labels.get(loc_id_str, _location_label(loc))}: {'; '.join(entries)}")
 
     if location_lines:
         profile["jurisdiction_requirements_summary"] = "\n".join(location_lines)

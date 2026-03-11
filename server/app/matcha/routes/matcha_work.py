@@ -139,9 +139,12 @@ def _thread_accepts_handbook_upload(thread: dict) -> bool:
     if current_skill != "handbook":
         return False
     source_type = current_state.get("handbook_source_type")
-    if source_type == "upload":
+    # Allow upload if already in upload mode OR if source type hasn't been
+    # committed yet (user started chatting about a handbook but can still
+    # switch to upload mode via the paperclip button).
+    if source_type in ("upload", None):
         return True
-    return int(thread.get("version") or 0) == 0 and not current_state
+    return False
 
 
 def _build_handbook_block_message(location_labels: list[str]) -> str:
@@ -1232,24 +1235,21 @@ async def upload_thread_handbook(
         content_type="text/plain",
     )
 
-    requirement_results = await asyncio.gather(
-        *(
-            get_location_requirements(UUID(str(loc["id"])), company_id)
-            for loc in active_locations
-            if loc.get("id")
-        ),
-        return_exceptions=True,
-    )
-
+    # Fetch requirements sequentially to avoid connection pool exhaustion.
+    # Each get_location_requirements() call acquires a pool connection and
+    # internally calls get_employee_impact_for_location() which needs another;
+    # running them all in parallel via asyncio.gather can deadlock the pool.
     audited_locations: list[AuditedLocation] = []
-    scoped_location_rows = [loc for loc in active_locations if loc.get("id")]
-    for loc, requirements in zip(scoped_location_rows, requirement_results):
-        if isinstance(requirements, Exception):
+    for loc in active_locations:
+        if not loc.get("id"):
+            continue
+        try:
+            requirements = await get_location_requirements(UUID(str(loc["id"])), company_id)
+        except Exception:
             logger.error(
-                "Failed to load location requirements for handbook upload audit thread %s location %s: %s",
+                "Failed to load location requirements for handbook upload audit thread %s location %s",
                 thread_id,
                 loc.get("id"),
-                requirements,
                 exc_info=True,
             )
             raise HTTPException(status_code=500, detail="Failed to load synced compliance requirements")
