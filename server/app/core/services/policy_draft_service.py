@@ -29,11 +29,16 @@ POLICY_TYPES = [
     {"value": "youth_employment", "label": "Youth Employment / Minor Work", "categories": ["minor_work_permit"]},
     {"value": "anti_harassment", "label": "Anti-Harassment and Anti-Discrimination", "categories": ["anti_discrimination"]},
     {"value": "workplace_safety", "label": "Workplace Health and Safety", "categories": ["workplace_safety"]},
-    {"value": "remote_work", "label": "Remote Work / Telecommuting", "categories": []},
-    {"value": "drug_alcohol", "label": "Drug and Alcohol", "categories": []},
-    {"value": "attendance", "label": "Attendance and Punctuality", "categories": []},
-    {"value": "code_of_conduct", "label": "Code of Conduct", "categories": []},
-    {"value": "whistleblower", "label": "Whistleblower Protection", "categories": []},
+    {"value": "remote_work", "label": "Remote Work / Telecommuting", "categories": [],
+     "scope_guidance": "Focus on eligibility criteria, equipment and workspace requirements, data security and VPN policies, expense reimbursement, communication expectations, and performance monitoring. DO NOT include meal breaks, minimum wage, overtime, or scheduling regulations."},
+    {"value": "drug_alcohol", "label": "Drug and Alcohol", "categories": [],
+     "scope_guidance": "Focus on prohibited substances, drug and alcohol testing procedures, employee assistance programs (EAP), marijuana law considerations by jurisdiction, safety-sensitive positions, and consequences of violations. DO NOT include meal breaks, minimum wage, overtime, or scheduling regulations."},
+    {"value": "attendance", "label": "Attendance and Punctuality", "categories": [],
+     "scope_guidance": "Focus on reporting procedures, tardiness policies, no-call/no-show rules, progressive discipline for attendance violations, and excused vs. unexcused absences. DO NOT include meal breaks, minimum wage, overtime, or scheduling regulations."},
+    {"value": "code_of_conduct", "label": "Code of Conduct", "categories": [],
+     "scope_guidance": "Focus on professional ethics, integrity, conflicts of interest, confidentiality, workplace respect, anti-bribery/corruption, use of company resources, social media conduct, and the disciplinary process. DO NOT include meal breaks, minimum wage, overtime, scheduling, or other labor law compliance topics — those belong in separate dedicated policies."},
+    {"value": "whistleblower", "label": "Whistleblower Protection", "categories": [],
+     "scope_guidance": "Focus on protected activities, internal and external reporting channels, anti-retaliation protections, investigation procedures, and confidentiality of whistleblower identity. DO NOT include meal breaks, minimum wage, overtime, or scheduling regulations."},
     # Healthcare-specific policy types
     {"value": "hipaa_privacy", "label": "HIPAA Privacy and Security", "categories": ["hipaa_privacy"], "industries": ["healthcare"]},
     {"value": "bloodborne_pathogens", "label": "Bloodborne Pathogens Exposure Control", "categories": ["clinical_safety"], "industries": ["healthcare"]},
@@ -283,11 +288,13 @@ async def generate_policy_draft_stream(
     if request.additional_context:
         additional = f"\n\n## Additional Company Context\n{request.additional_context}\n"
 
+    scope_guidance_block = f"\n\n## Policy Scope Guidance\n{policy_config['scope_guidance']}\n" if policy_config.get("scope_guidance") else ""
+
     prompt = f"""You are an employment law attorney and HR policy writer. Draft a professional **{policy_label}** policy for **{company_name}**.
 
 ## Locations Covered
 {', '.join(location_summaries)}
-{jurisdiction_context}{additional}{industry_prompt_context if policy_config.get("industries") else ""}
+{jurisdiction_context}{additional}{industry_prompt_context}{scope_guidance_block}
 ## Instructions
 1. Write a complete, professional policy document in Markdown format.
 2. Include standard sections: Purpose, Scope, Definitions (if needed), Policy Statement, Procedures, and Compliance.
@@ -296,7 +303,8 @@ async def generate_policy_draft_stream(
 5. Use [COMPANY NAME] as a placeholder where the company name should appear in formal language, and [BRACKETS] for any company-specific details the user needs to fill in (e.g., [NUMBER OF PTO DAYS], [HR CONTACT EMAIL]).
 6. If any company context conflicts with legal minimums from the jurisdiction data, flag it clearly with a ⚠️ warning.
 7. Keep the tone professional but readable. Avoid overly legalistic jargon where plain language works.
-8. Use Google Search to find the latest legal requirements for any jurisdictions or topics not covered by the structured data above."""
+8. Stay within the scope described in the Policy Scope Guidance section if one is provided. Do not include topics from other policy domains.
+9. Use Google Search to find the latest legal requirements for any jurisdictions or topics not covered by the structured data above."""
 
     yield {"type": "phase", "message": "Generating policy draft with AI..."}
 

@@ -884,6 +884,8 @@ export default function MatchaWorkThread() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const handbookFileRef = useRef<HTMLInputElement>(null);
+  const [handbookUploading, setHandbookUploading] = useState(false);
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -1257,6 +1259,25 @@ export default function MatchaWorkThread() {
       setVersionsLoaded(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to upload handbook');
+    }
+  };
+
+  const handleHandbookFileInputChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const allowed = ['.pdf', '.doc', '.docx'];
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase();
+    if (!allowed.includes(ext)) {
+      setError('Only PDF, DOC, and DOCX files are supported');
+      if (handbookFileRef.current) handbookFileRef.current.value = '';
+      return;
+    }
+    try {
+      setHandbookUploading(true);
+      await handleHandbookUpload(file);
+    } finally {
+      setHandbookUploading(false);
+      if (handbookFileRef.current) handbookFileRef.current.value = '';
     }
   };
 
@@ -1888,6 +1909,34 @@ export default function MatchaWorkThread() {
                 );
               })()}
               <div className="flex items-end gap-2">
+                {isHandbook && !isFinalized && !isArchived && (
+                  <>
+                    <input
+                      ref={handbookFileRef}
+                      type="file"
+                      accept=".pdf,.doc,.docx"
+                      className="hidden"
+                      onChange={handleHandbookFileInputChange}
+                    />
+                    <button
+                      onClick={() => handbookFileRef.current?.click()}
+                      disabled={handbookUploading || inputDisabled}
+                      title="Upload handbook file"
+                      className="w-10 h-10 flex items-center justify-center bg-zinc-800 hover:bg-zinc-700 border border-white/10 light:bg-black/[0.06] light:hover:bg-black/[0.10] light:border-white/30 disabled:opacity-40 transition-colors flex-shrink-0 rounded-sm"
+                    >
+                      {handbookUploading ? (
+                        <svg className="w-4 h-4 text-zinc-400 animate-spin" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-4 h-4 text-zinc-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                        </svg>
+                      )}
+                    </button>
+                  </>
+                )}
                 <textarea
                   ref={inputRef}
                   value={input}
