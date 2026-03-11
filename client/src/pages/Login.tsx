@@ -92,6 +92,11 @@ export function Login() {
       {/* Left Column - Form */}
       <div className="w-full lg:w-[480px] xl:w-[560px] flex flex-col justify-center px-8 sm:px-12 lg:px-16 xl:px-20 border-r border-zinc-100 z-10 bg-white">
         <div className="w-full max-w-sm mx-auto">
+          <Link to="/" className="inline-flex items-center gap-2 mb-6 text-[10px] font-mono uppercase tracking-[0.25em] text-zinc-400 hover:text-zinc-900 transition-colors">
+            <span>←</span>
+            <span>Back</span>
+          </Link>
+
           <Link to="/" className="inline-flex items-center gap-2 mb-12 group">
             {branding?.logo_url ? (
               <img src={branding.logo_url} alt={`${brandName} logo`} className="h-6 w-6 rounded-sm object-cover" />
