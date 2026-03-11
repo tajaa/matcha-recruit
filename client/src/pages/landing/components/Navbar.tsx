@@ -14,8 +14,8 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
       <div
         className={`w-full pointer-events-auto flex items-center justify-between px-6 py-3 transition-all duration-500 border-b ${
           scrolled
-            ? "bg-white/60 backdrop-blur-xl border-black/10 shadow-[0_4px_30px_rgba(0,0,0,0.05)]"
-            : "bg-white/25 backdrop-blur-sm border-transparent"
+            ? "bg-white/95 backdrop-blur-xl border-black/10 shadow-[0_4px_30px_rgba(0,0,0,0.05)]"
+            : "bg-white/70 backdrop-blur-sm border-transparent"
         }`}
       >
         <div className="flex items-center gap-8">
