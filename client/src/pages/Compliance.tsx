@@ -885,7 +885,7 @@ export function Compliance() {
                             </p>
                         </div>
                     ) : (
-                    <div className="space-y-1.5">
+                    <div className="space-y-1">
                         {locations?.map(location => (
                             <motion.div
                                 layout
@@ -893,7 +893,7 @@ export function Compliance() {
                                 animate={{ opacity: 1, x: 0 }}
                                 key={location.id}
                                 onClick={() => setSelectedLocationId(location.id)}
-                                className={`border rounded-sm p-3.5 cursor-pointer transition-all duration-300 group relative overflow-hidden ${
+                                className={`border rounded-sm p-2.5 cursor-pointer transition-all duration-300 group relative overflow-hidden ${
                                     selectedLocationId === location.id
                                         ? 'border-matcha-500/40 bg-matcha-500/[0.03] shadow-[0_0_20px_rgba(0,0,0,0.4)]'
                                         : syncStates.has((location.state || '').toUpperCase())
@@ -902,14 +902,15 @@ export function Compliance() {
                                 }`}
                             >
                                 {selectedLocationId === location.id && (
-                                    <motion.div 
+                                    <motion.div
                                         layoutId="active-location-indicator"
-                                        className="absolute left-0 top-0 bottom-0 w-0.5 bg-matcha-500" 
+                                        className="absolute left-0 top-0 bottom-0 w-0.5 bg-matcha-500"
                                     />
                                 )}
                                 <div className="flex items-start justify-between">
                                     <div className="min-w-0 flex-1">
-                                        <div className="flex items-center gap-2 flex-wrap">
+                                        {/* Row 1: name + badges + employee count */}
+                                        <div className="flex items-center gap-1.5 flex-wrap">
                                             <h3 className={`font-bold text-xs truncate uppercase tracking-widest ${
                                                 selectedLocationId === location.id ? t.textMain : t.textDim
                                             }`}>
@@ -919,44 +920,47 @@ export function Compliance() {
                                                 <span className={`text-[7px] px-1 py-0.5 ${t.neutralBadge} rounded-xs uppercase tracking-widest`}>Local</span>
                                             )}
                                             {location.source === 'employee_derived' && (
-                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 dark:text-blue-300">
-                                                    Auto-derived
+                                                <span className="text-[7px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 uppercase tracking-widest">
+                                                    Auto
                                                 </span>
                                             )}
                                             {location.coverage_status === 'pending_review' && (
-                                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 dark:text-amber-300"
+                                                <span className="text-[7px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 uppercase tracking-widest"
                                                       title="Platform admin is reviewing this jurisdiction">
-                                                    Pending coverage
+                                                    Pending
                                                 </span>
                                             )}
-                                        </div>
-                                        <p className={`${t.textFaint} text-[10px] truncate mt-1 font-mono uppercase tracking-tighter`}>
-                                            {location.city}, {location.state} {location.zipcode}
-                                        </p>
-                                        <div className="flex items-center gap-4 mt-3">
                                             <EmployeesTooltip names={location.employee_names} count={location.employee_count ?? 0}>
-                                                <span className={`flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] ${t.textMuted} cursor-default`}>
-                                                    <Users size={9} />
+                                                <span className={`ml-auto flex items-center gap-0.5 text-[8px] font-bold ${t.textMuted} cursor-default`}>
+                                                    <Users size={8} />
                                                     {location.employee_count ?? 0}
                                                 </span>
                                             </EmployeesTooltip>
-                                            <span className={`text-[9px] font-bold uppercase tracking-[0.15em] ${t.textMuted}`}>
+                                        </div>
+                                        {/* Row 2: stats — only show city/state subtext when name differs */}
+                                        {location.name && location.name !== `${location.city}, ${location.state}` && (
+                                            <p className={`${t.textFaint} text-[9px] truncate font-mono uppercase tracking-tighter leading-none mt-0.5`}>
+                                                {location.city}, {location.state}
+                                            </p>
+                                        )}
+                                        <div className="flex items-center gap-2.5 mt-1">
+                                            <span className={`text-[8px] font-bold uppercase tracking-[0.15em] ${t.textMuted}`}>
                                                 {location.requirements_count} Nodes
                                             </span>
                                             {location.unread_alerts_count > 0 && (
-                                                <span className="text-amber-500 flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.15em] animate-pulse">
-                                                    <Bell size={8} />
-                                                    {location.unread_alerts_count} Alerts
+                                                <span className="text-amber-500 flex items-center gap-0.5 text-[8px] font-bold uppercase tracking-[0.15em] animate-pulse">
+                                                    <Bell size={7} />
+                                                    {location.unread_alerts_count}
                                                 </span>
                                             )}
                                             {location.data_status === 'needs_research' && (
-                                                <span className="text-[8px] px-1.5 py-0.5 rounded bg-red-500/10 text-red-400 uppercase tracking-wider font-bold">
-                                                    Needs Research
+                                                <span className="text-[7px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 uppercase tracking-wider font-bold">
+                                                    Research
                                                 </span>
                                             )}
                                             {location.data_status === 'available' && (
-                                                <span className="text-[8px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 uppercase tracking-wider font-bold">
-                                                    Ready to Sync
+                                                <span className="text-[7px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 uppercase tracking-wider font-bold">
+                                                    Ready
                                                 </span>
                                             )}
                                         </div>
@@ -1125,7 +1129,7 @@ export function Compliance() {
                                 </motion.div>
                             )}
 
-                            <div data-tour="compliance-tabs" className={`flex ${t.cardHeader} ${t.cardBg} px-4`}>
+                            <div data-tour="compliance-tabs" className={`flex items-center ${t.cardHeader} ${t.cardBg} px-4`}>
                                 {[
                                     { id: 'requirements', label: 'Matrix', count: requirements?.length },
                                     { id: 'alerts', label: 'Alerts', count: locationAlerts.length, badge: unreadAlertsCount },
@@ -1159,19 +1163,35 @@ export function Compliance() {
                                         )}
                                     </button>
                                 ))}
+                                {activeTab === 'requirements' && sectionedCategories.length > 1 && (
+                                    <button
+                                        onClick={() => setSectionedView(v => !v)}
+                                        className={`ml-auto p-2 rounded-sm border ${t.border} ${t.cardBg} ${t.rowHover} transition-colors flex-shrink-0`}
+                                        title={sectionedView ? 'Switch to flat view' : 'Switch to sectioned view'}
+                                    >
+                                        {sectionedView
+                                            ? <LayoutList size={13} className={t.textMuted} />
+                                            : <Layers size={13} className={t.textMuted} />
+                                        }
+                                    </button>
+                                )}
                             </div>
 
                             {selectedLocation?.has_local_ordinance === false && (
-                                <div className={`mx-6 mt-4 px-4 py-3 ${t.localInfoBg} rounded-sm flex items-start gap-3`}>
-                                    <Info size={14} className={`${t.localInfoIcon} mt-0.5 flex-shrink-0`} />
-                                    <p className={`text-[10px] ${t.localInfoText} leading-relaxed uppercase tracking-tight`}>
-                                        <span className="font-bold">{selectedLocation.city}</span> does not have local labor ordinances.
-                                        Requirements inherited from {selectedLocation.county ? `${selectedLocation.county} County / ` : ''}{selectedLocation.state} State law.
-                                    </p>
+                                <div className={`px-5 py-1 flex items-center gap-2 border-b ${t.border}`}>
+                                    <Info size={10} className={`${t.localInfoIcon} flex-shrink-0`} />
+                                    <span className={`text-[9px] font-bold uppercase tracking-[0.15em] ${t.localInfoText}`}>
+                                        State-inherited · No local ordinances
+                                        {(selectedLocation.county || selectedLocation.state) && (
+                                            <span className={`font-normal ${t.textFaint} ml-1`}>
+                                                — {selectedLocation.county ? `${selectedLocation.county} County / ` : ''}{selectedLocation.state}
+                                            </span>
+                                        )}
+                                    </span>
                                 </div>
                             )}
 
-                            <div className={`p-6 flex-1 ${t.contentBg} overflow-y-auto`}>
+                            <div className={`p-4 flex-1 ${t.contentBg} overflow-y-auto`}>
                                 {activeTab === 'posters' ? (
                                     postersLoading ? (
                                         <div className="space-y-4">
@@ -1459,30 +1479,16 @@ export function Compliance() {
                                     )
                                 ) : activeTab === 'requirements' ? (
                                     <>
-                                    <div className="flex items-center justify-between mb-4">
-                                        {latestMissingCoverageCategories.length > 0 && (
-                                            <div className={`flex-1 p-4 border ${t.coverageMissingBorder} ${t.coverageMissingBg} rounded-sm mr-3`}>
-                                                <p className={`text-[10px] font-bold uppercase tracking-[0.2em] ${t.coverageMissingTitle}`}>
-                                                    Source Coverage Missing
-                                                </p>
-                                                <p className={`mt-2 text-[11px] ${t.coverageMissingText} leading-relaxed`}>
-                                                    This jurisdiction is still missing verified source-of-truth coverage for: <span className="font-semibold">{latestMissingCoverageLabel}</span>. Run Admin &gt; Jurisdictions research refresh, then sync this location again.
-                                                </p>
-                                            </div>
-                                        )}
-                                        {sectionedCategories.length > 1 && (
-                                            <button
-                                                onClick={() => setSectionedView(v => !v)}
-                                                className={`flex-shrink-0 p-2 rounded-sm border ${t.border} ${t.cardBg} ${t.rowHover} transition-colors`}
-                                                title={sectionedView ? 'Switch to flat view' : 'Switch to sectioned view'}
-                                            >
-                                                {sectionedView
-                                                    ? <LayoutList size={14} className={t.textMuted} />
-                                                    : <Layers size={14} className={t.textMuted} />
-                                                }
-                                            </button>
-                                        )}
-                                    </div>
+                                    {latestMissingCoverageCategories.length > 0 && (
+                                        <div className={`mb-4 p-4 border ${t.coverageMissingBorder} ${t.coverageMissingBg} rounded-sm`}>
+                                            <p className={`text-[10px] font-bold uppercase tracking-[0.2em] ${t.coverageMissingTitle}`}>
+                                                Source Coverage Missing
+                                            </p>
+                                            <p className={`mt-2 text-[11px] ${t.coverageMissingText} leading-relaxed`}>
+                                                This jurisdiction is still missing verified source-of-truth coverage for: <span className="font-semibold">{latestMissingCoverageLabel}</span>. Run Admin &gt; Jurisdictions research refresh, then sync this location again.
+                                            </p>
+                                        </div>
+                                    )}
                                     {loadingRequirements ? (
                                         <div className="space-y-4">
                                             {[1, 2, 3].map(i => (
