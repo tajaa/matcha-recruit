@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 from datetime import datetime, timezone
@@ -54,7 +55,18 @@ from ..models.matcha_work import (
 from ..services import matcha_work_document as doc_svc
 from ..services import billing_service
 from ..services.er_document_parser import ERDocumentParser
-from ..services.matcha_work_handbook_upload import AuditedLocation, audit_uploaded_handbook, check_handbook_relevance
+from ..services.matcha_work_handbook_upload import (
+    AuditedLocation,
+    MAX_RED_FLAGS,
+    MAX_SECTION_PREVIEWS,
+    _audit_location_group,
+    _severity_rank,
+    audit_uploaded_handbook,
+    check_handbook_relevance,
+    compute_coverage_summaries,
+    derive_handbook_title,
+    parse_handbook_sections,
+)
 from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
@@ -86,6 +98,7 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
     "handbook_green_flags",
     "handbook_jurisdiction_summaries",
     "handbook_analysis_generated_at",
+    "handbook_analysis_progress",
 }
 VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys()) - HANDBOOK_UPLOAD_MANAGED_FIELDS
 VALID_POLICY_FIELDS = set(PolicyDocument.model_fields.keys())
@@ -139,6 +152,9 @@ def _thread_accepts_handbook_upload(thread: dict) -> bool:
     if current_skill == "chat":
         return True
     if current_skill != "handbook":
+        return False
+    # Reject if an analysis is already in progress.
+    if current_state.get("handbook_upload_status") == "analyzing":
         return False
     source_type = current_state.get("handbook_source_type")
     # Allow upload if already in upload mode OR if source type hasn't been
@@ -1149,13 +1165,17 @@ async def upload_thread_logo(
         raise HTTPException(status_code=500, detail="Failed to upload logo. Please try again.")
 
 
-@router.post("/threads/{thread_id}/handbook/upload", response_model=ThreadDetailResponse)
+@router.post("/threads/{thread_id}/handbook/upload")
 async def upload_thread_handbook(
     thread_id: UUID,
     file: UploadFile = File(...),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Upload an existing handbook and audit it against synced company jurisdictions."""
+    """Upload an existing handbook and audit it against synced company jurisdictions.
+
+    Returns JSON (ThreadDetailResponse) for blocked/rejected uploads, or an SSE
+    stream with quarterly progress events for the happy-path analysis.
+    """
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -1279,6 +1299,8 @@ async def upload_thread_handbook(
         )
         return await _build_thread_detail_response(thread_id, company_id)
 
+    # --- Happy path: upload to S3, then stream incremental analysis via SSE ---
+
     storage = get_storage()
     uploaded_file_url = await storage.upload_file(
         content,
@@ -1293,84 +1315,191 @@ async def upload_thread_handbook(
         content_type="text/plain",
     )
 
-    # Fetch requirements sequentially to avoid connection pool exhaustion.
-    # Each get_location_requirements() call acquires a pool connection and
-    # internally calls get_employee_impact_for_location() which needs another;
-    # running them all in parallel via asyncio.gather can deadlock the pool.
-    audited_locations: list[AuditedLocation] = []
-    for loc in active_locations:
-        if not loc.get("id"):
-            continue
-        try:
-            requirements = await get_location_requirements(UUID(str(loc["id"])), company_id)
-        except Exception:
-            logger.error(
-                "Failed to load location requirements for handbook upload audit thread %s location %s",
-                thread_id,
-                loc.get("id"),
-                exc_info=True,
-            )
-            raise HTTPException(status_code=500, detail="Failed to load synced compliance requirements")
-        audited_locations.append(
-            AuditedLocation(
-                id=UUID(str(loc["id"])),
-                label=_location_label(loc),
-                state=str(loc.get("state") or "").strip().upper(),
-                city=str(loc.get("city") or "").strip() or None,
-                requirements=list(requirements),
-            )
-        )
+    # Pre-compute handbook metadata that stays constant across quarters.
+    parsed_sections = parse_handbook_sections(extracted_text)
+    if not parsed_sections:
+        raise HTTPException(status_code=400, detail="No readable handbook text found in the uploaded file")
 
-    profile = await doc_svc.get_company_profile_for_ai(company_id)
-    company_name = str(profile.get("name") or "").strip() or "Company"
-    company_industry = str(profile.get("industry") or "").strip() or None
-
-    audit_result = audit_uploaded_handbook(
-        thread_id=thread_id,
-        company_id=company_id,
-        company_name=company_name,
-        company_industry=company_industry,
-        uploaded_file_url=uploaded_file_url,
-        uploaded_filename=filename,
-        extracted_text=extracted_text,
-        locations=audited_locations,
-    )
-
-    result = await doc_svc.apply_update(
-        thread_id,
+    handbook_title = derive_handbook_title(filename)
+    all_states = sorted({str(loc.get("state") or "").strip().upper() for loc in active_locations if loc.get("state")})
+    handbook_mode = "single_state" if len(set(all_states)) <= 1 else "multi_state"
+    total_location_count = len(active_locations)
+    all_location_labels = [_location_label(loc) for loc in active_locations if _location_label(loc)]
+    section_previews = [
         {
-            "handbook_source_type": "upload",
-            "handbook_upload_status": "reviewed",
-            "handbook_title": audit_result["handbook_title"],
-            "handbook_uploaded_file_url": uploaded_file_url,
-            "handbook_uploaded_filename": filename,
-            "handbook_status": "ready",
-            "handbook_blocking_error": None,
-            "handbook_error": None,
-            **audit_result,
-        },
-        diff_summary=f"Uploaded handbook audit: {filename}",
-    )
-    summary_message = _build_handbook_upload_summary(
-        file_name=filename,
-        reviewed_locations=audit_result["handbook_review_locations"],
-        red_flags=audit_result["handbook_red_flags"],
-        green_flags=audit_result.get("handbook_green_flags"),
-        jurisdiction_summaries=audit_result.get("handbook_jurisdiction_summaries"),
-    )
-    await doc_svc.add_message(
-        thread_id,
-        "system",
-        f"Uploaded handbook file: {filename}.",
-        version_created=result["version"],
-    )
-    await doc_svc.add_message(
-        thread_id,
-        "assistant",
-        summary_message,
-        version_created=result["version"],
-    )
-    return await _build_thread_detail_response(thread_id, company_id)
+            "section_key": section.section_key,
+            "title": section.title,
+            "content": section.content[:500],
+            "section_type": section.section_type,
+        }
+        for section in parsed_sections[:MAX_SECTION_PREVIEWS]
+    ]
+
+    # Split locations into up to 4 quarter groups for incremental analysis.
+    quarter_size = math.ceil(total_location_count / 4) if total_location_count else 1
+    location_quarters: list[list[dict]] = [
+        active_locations[i : i + quarter_size]
+        for i in range(0, total_location_count, quarter_size)
+    ]
+
+    async def event_stream():
+        try:
+            # Mark thread as analyzing.
+            await doc_svc.apply_update(
+                thread_id,
+                {
+                    "handbook_source_type": "upload",
+                    "handbook_upload_status": "analyzing",
+                    "handbook_analysis_progress": 0,
+                    "handbook_title": handbook_title,
+                    "handbook_uploaded_file_url": uploaded_file_url,
+                    "handbook_uploaded_filename": filename,
+                    "handbook_mode": handbook_mode,
+                    "handbook_states": all_states,
+                    "handbook_sections": section_previews,
+                    "handbook_review_locations": all_location_labels,
+                    "handbook_blocking_error": None,
+                    "handbook_error": None,
+                },
+                diff_summary="Started handbook analysis",
+            )
+            yield _sse_data({"type": "handbook_progress", "progress": 0, "status": "analyzing"})
+
+            seen_flag_keys: set[str] = set()
+            accumulated_red_flags: list[dict] = []
+            accumulated_green_flags: list[dict] = []
+            accumulated_coverage: dict[str, dict[str, set[str]]] = {}
+            num_quarters = len(location_quarters)
+
+            for q_idx, quarter_locs in enumerate(location_quarters, 1):
+                # Fetch requirements for this quarter's locations sequentially
+                # to avoid connection pool exhaustion.
+                audited_locs: list[AuditedLocation] = []
+                for loc in quarter_locs:
+                    if not loc.get("id"):
+                        continue
+                    try:
+                        requirements = await get_location_requirements(UUID(str(loc["id"])), company_id)
+                    except Exception:
+                        logger.error(
+                            "Failed to load location requirements for handbook upload audit thread %s location %s",
+                            thread_id,
+                            loc.get("id"),
+                            exc_info=True,
+                        )
+                        yield _sse_data({"type": "error", "message": "Failed to load synced compliance requirements."})
+                        return
+                    audited_locs.append(
+                        AuditedLocation(
+                            id=UUID(str(loc["id"])),
+                            label=_location_label(loc),
+                            state=str(loc.get("state") or "").strip().upper(),
+                            city=str(loc.get("city") or "").strip() or None,
+                            requirements=list(requirements),
+                        )
+                    )
+
+                # Audit this quarter's locations.
+                q_red, q_green, q_coverage = _audit_location_group(
+                    parsed_sections=parsed_sections,
+                    locations_subset=audited_locs,
+                    all_states=all_states,
+                    total_location_count=total_location_count,
+                    seen_flag_keys=seen_flag_keys,
+                )
+
+                # Accumulate results.
+                accumulated_red_flags.extend(q_red)
+                accumulated_green_flags.extend(q_green)
+                for loc_key, info in q_coverage.items():
+                    if loc_key in accumulated_coverage:
+                        accumulated_coverage[loc_key]["covered"] |= info["covered"]
+                        accumulated_coverage[loc_key]["total"] |= info["total"]
+                        accumulated_coverage[loc_key]["state"] |= info["state"]
+                        accumulated_coverage[loc_key]["city"] |= info["city"]
+                    else:
+                        accumulated_coverage[loc_key] = info
+
+                # Sort and cap red flags.
+                sorted_red = sorted(
+                    accumulated_red_flags,
+                    key=lambda item: (_severity_rank(item["severity"]), item["jurisdiction"], item["section_title"]),
+                )
+                sorted_red = sorted_red[:MAX_RED_FLAGS]
+
+                # Compute running summaries.
+                jurisdiction_summaries, strength_score, strength_label = compute_coverage_summaries(accumulated_coverage)
+                progress = q_idx / num_quarters
+
+                partial_state = {
+                    "handbook_source_type": "upload",
+                    "handbook_upload_status": "analyzing",
+                    "handbook_analysis_progress": progress,
+                    "handbook_title": handbook_title,
+                    "handbook_mode": handbook_mode,
+                    "handbook_states": all_states,
+                    "handbook_uploaded_file_url": uploaded_file_url,
+                    "handbook_uploaded_filename": filename,
+                    "handbook_blocking_error": None,
+                    "handbook_error": None,
+                    "handbook_sections": section_previews,
+                    "handbook_review_locations": all_location_labels,
+                    "handbook_red_flags": sorted_red,
+                    "handbook_green_flags": accumulated_green_flags,
+                    "handbook_jurisdiction_summaries": jurisdiction_summaries,
+                    "handbook_strength_score": strength_score,
+                    "handbook_strength_label": strength_label,
+                    "handbook_analysis_generated_at": datetime.now(timezone.utc).isoformat(),
+                }
+
+                await doc_svc.apply_update(
+                    thread_id,
+                    partial_state,
+                    diff_summary=f"Handbook analysis quarter {q_idx}/{num_quarters}",
+                )
+                yield _sse_data({"type": "handbook_progress", "progress": progress, "partial_state": partial_state})
+
+            # Final: mark as reviewed and add messages.
+            final_state = {
+                **partial_state,
+                "handbook_upload_status": "reviewed",
+                "handbook_analysis_progress": 1.0,
+                "handbook_status": "ready",
+            }
+            result = await doc_svc.apply_update(
+                thread_id,
+                final_state,
+                diff_summary=f"Uploaded handbook audit: {filename}",
+            )
+
+            summary_message = _build_handbook_upload_summary(
+                file_name=filename,
+                reviewed_locations=all_location_labels,
+                red_flags=sorted_red,
+                green_flags=accumulated_green_flags,
+                jurisdiction_summaries=jurisdiction_summaries,
+            )
+            await doc_svc.add_message(
+                thread_id,
+                "system",
+                f"Uploaded handbook file: {filename}.",
+                version_created=result["version"],
+            )
+            await doc_svc.add_message(
+                thread_id,
+                "assistant",
+                summary_message,
+                version_created=result["version"],
+            )
+
+            detail = await _build_thread_detail_response(thread_id, company_id)
+            yield _sse_data({"type": "complete", "data": detail.model_dump(mode="json")})
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            logger.error("Handbook upload stream failed for thread %s: %s", thread_id, e, exc_info=True)
+            yield _sse_data({"type": "error", "message": "Handbook analysis failed. Please try again."})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/threads/{thread_id}/images")

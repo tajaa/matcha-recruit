@@ -196,6 +196,7 @@ export interface MWDocumentState {
   handbook_analysis_generated_at?: string | null;
   handbook_strength_score?: number | null;
   handbook_strength_label?: string | null;
+  handbook_analysis_progress?: number | null;
   // Policy fields
   policy_title?: string | null;
   policy_type?: string | null;

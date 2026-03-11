@@ -1249,7 +1249,14 @@ export default function MatchaWorkThread() {
     if (!threadId || isArchived || isFinalized) return;
     try {
       setError(null);
-      const resp = await matchaWork.uploadHandbook(threadId, file);
+      const resp = await matchaWork.uploadHandbookStream(threadId, file, (_progress, partialState) => {
+        setThread(prev => prev ? {
+          ...prev,
+          current_state: { ...prev.current_state, ...partialState },
+        } : prev);
+        setPreviewPanelOpen(true);
+        setActiveTab('preview');
+      });
       invalidateThreadCacheEntry(cacheScope, threadId);
       invalidateAccountCache(cacheScope);
       setThread(resp);

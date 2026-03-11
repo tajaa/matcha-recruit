@@ -4024,6 +4024,96 @@ export const matchaWork = {
 
     return response.json();
   },
+
+  uploadHandbookStream: async (
+    threadId: string,
+    file: File,
+    onProgress: (progress: number, partialState: Partial<MWDocumentState>) => void,
+  ): Promise<MWThreadDetail> => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${API_BASE}/matcha-work/threads/${threadId}/handbook/upload`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+
+    // JSON response — blocked/error path (no SSE).
+    if (contentType.includes('application/json')) {
+      return response.json();
+    }
+
+    // SSE response — streaming analysis.
+    if (!response.body) {
+      throw new Error('No response body for streaming');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let finalResult: MWThreadDetail | null = null;
+    let streamError: string | null = null;
+
+    const processLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data: ')) return;
+      const payload = trimmed.slice(6);
+      if (payload === '[DONE]') return;
+      try {
+        const event = JSON.parse(payload);
+        if (event.type === 'handbook_progress' && event.partial_state) {
+          onProgress(event.progress, event.partial_state);
+        } else if (event.type === 'complete' && event.data) {
+          finalResult = event.data;
+        } else if (event.type === 'error') {
+          streamError = event.message || 'Handbook analysis failed';
+        }
+      } catch {
+        // Ignore malformed SSE payload chunks.
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        processLine(line);
+      }
+    }
+
+    if (buffer.trim()) {
+      processLine(buffer);
+    }
+
+    if (streamError) {
+      throw new Error(streamError);
+    }
+
+    if (!finalResult) {
+      throw new Error('Handbook analysis stream ended without completion');
+    }
+
+    return finalResult;
+  },
 };
 
 export const matchaWorkPublic = {

@@ -96,6 +96,22 @@ function UploadBranch({ state }: { state: MWDocumentState }) {
           </div>
         </div>
 
+        {/* Analysis progress bar */}
+        {uploadStatus === 'analyzing' && state.handbook_analysis_progress != null && (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <p className="text-xs text-zinc-400 font-medium">Analyzing handbook...</p>
+              <p className="text-xs font-mono text-matcha-400">{Math.round(state.handbook_analysis_progress * 100)}%</p>
+            </div>
+            <div className="h-1.5 bg-zinc-700 light:bg-zinc-300 overflow-hidden">
+              <div
+                className="h-full bg-matcha-500 transition-all duration-500"
+                style={{ width: `${state.handbook_analysis_progress * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
         {/* Source file */}
         {uploadedFilename && (
           <div className="bg-zinc-800/60 light:bg-zinc-100/60 border border-white/10 light:border-zinc-200 p-3">

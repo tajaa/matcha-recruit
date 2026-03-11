@@ -177,6 +177,7 @@ class HandbookDocument(BaseModel):
     handbook_analysis_generated_at: Optional[str] = None
     handbook_strength_score: Optional[int] = None
     handbook_strength_label: Optional[str] = None
+    handbook_analysis_progress: Optional[float] = None
 
 
 class PresentationSlide(BaseModel):

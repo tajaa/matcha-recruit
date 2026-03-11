@@ -467,35 +467,30 @@ def _assign_severity(category: str) -> str:
     return "low"
 
 
-def audit_uploaded_handbook(
+def _audit_location_group(
     *,
-    thread_id: UUID,
-    company_id: UUID,
-    company_name: str,
-    company_industry: Optional[str],
-    uploaded_file_url: str,
-    uploaded_filename: str,
-    extracted_text: str,
-    locations: list[AuditedLocation],
-) -> dict[str, Any]:
-    parsed_sections = parse_handbook_sections(extracted_text)
-    if not parsed_sections:
-        raise ValueError("No readable handbook text found in the uploaded file")
+    parsed_sections: list[ParsedHandbookSection],
+    locations_subset: list[AuditedLocation],
+    all_states: list[str],
+    total_location_count: int,
+    seen_flag_keys: set[str],
+) -> tuple[list[dict], list[dict], dict[str, dict[str, set[str]]]]:
+    """Audit a subset of locations against parsed handbook sections.
 
-    handbook_title = derive_handbook_title(uploaded_filename)
-
-    red_flags: list[dict[str, str]] = []
-    green_flags: list[dict[str, str]] = []
-    seen_flag_keys: set[str] = set()
-    # Per-location coverage tracking: {location_label: {covered: set, total: set}}
+    Returns (red_flags, green_flags, location_coverage).
+    ``seen_flag_keys`` is mutated in-place so successive calls share dedup state.
+    """
+    red_flags: list[dict] = []
+    green_flags: list[dict] = []
     location_coverage: dict[str, dict[str, set[str]]] = {}
 
-    all_states = sorted({loc.state for loc in locations})
-
-    for location in locations:
+    for location in locations_subset:
         state_text = _state_specific_content(parsed_sections, location.state, all_states)
         city_text = _city_specific_content(parsed_sections, location.city)
-        location_text = city_text or state_text or ("\n\n".join(section.content for section in parsed_sections) if len(locations) == 1 else "")
+        location_text = city_text or state_text or (
+            "\n\n".join(section.content for section in parsed_sections)
+            if total_location_count == 1 else ""
+        )
         lowered_text = location_text.lower()
 
         categories: dict[str, list[Any]] = {}
@@ -520,7 +515,6 @@ def audit_uploaded_handbook(
             flag_key = f"{location.label}:{category}"
 
             if keywords and any(keyword in lowered_text for keyword in keywords):
-                # Covered — green flag
                 location_coverage[loc_key]["covered"].add(category)
                 if flag_key not in seen_flag_keys:
                     seen_flag_keys.add(flag_key)
@@ -535,7 +529,6 @@ def audit_uploaded_handbook(
                     )
                 continue
 
-            # Not covered — red flag
             if flag_key in seen_flag_keys:
                 continue
             seen_flag_keys.add(flag_key)
@@ -567,10 +560,16 @@ def audit_uploaded_handbook(
                 }
             )
 
-    red_flags.sort(key=lambda item: (_severity_rank(item["severity"]), item["jurisdiction"], item["section_title"]))
-    red_flags = red_flags[:MAX_RED_FLAGS]
+    return red_flags, green_flags, location_coverage
 
-    # Per-jurisdiction summaries
+
+def compute_coverage_summaries(
+    location_coverage: dict[str, dict[str, set[str]]],
+) -> tuple[list[dict[str, Any]], int, str]:
+    """Compute jurisdiction summaries and overall strength from location_coverage.
+
+    Returns (jurisdiction_summaries, strength_score, strength_label).
+    """
     jurisdiction_summaries: list[dict[str, Any]] = []
     total_covered = 0
     total_required = 0
@@ -601,6 +600,41 @@ def audit_uploaded_handbook(
         strength_label = "Moderate"
     else:
         strength_label = "Weak"
+
+    return jurisdiction_summaries, strength_score, strength_label
+
+
+def audit_uploaded_handbook(
+    *,
+    thread_id: UUID,
+    company_id: UUID,
+    company_name: str,
+    company_industry: Optional[str],
+    uploaded_file_url: str,
+    uploaded_filename: str,
+    extracted_text: str,
+    locations: list[AuditedLocation],
+) -> dict[str, Any]:
+    parsed_sections = parse_handbook_sections(extracted_text)
+    if not parsed_sections:
+        raise ValueError("No readable handbook text found in the uploaded file")
+
+    handbook_title = derive_handbook_title(uploaded_filename)
+    seen_flag_keys: set[str] = set()
+    all_states = sorted({loc.state for loc in locations})
+
+    red_flags, green_flags, location_coverage = _audit_location_group(
+        parsed_sections=parsed_sections,
+        locations_subset=locations,
+        all_states=all_states,
+        total_location_count=len(locations),
+        seen_flag_keys=seen_flag_keys,
+    )
+
+    red_flags.sort(key=lambda item: (_severity_rank(item["severity"]), item["jurisdiction"], item["section_title"]))
+    red_flags = red_flags[:MAX_RED_FLAGS]
+
+    jurisdiction_summaries, strength_score, strength_label = compute_coverage_summaries(location_coverage)
 
     return {
         "handbook_title": handbook_title,
