@@ -71,8 +71,8 @@ const createCityLabel = (text: string) => {
   ctx.font = '400 32px "Space Mono", monospace';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillStyle = '#09090b'; // zinc-950
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.2)';
+  ctx.fillStyle = '#ffffff';
+  ctx.shadowColor = 'rgba(255, 255, 255, 0.3)';
   ctx.shadowBlur = 8;
   ctx.fillText(spacedText, canvas.width / 2, canvas.height / 2);
 
@@ -144,10 +144,10 @@ export function ParticleSphere({
     // Add wireframe sphere for structure hint
     const wireGeometry = new THREE.SphereGeometry(1.3, 64, 64);
     const wireMaterial = new THREE.MeshBasicMaterial({
-      color: 0x3f3f46, // zinc-700
+      color: 0xe4e4e7, // zinc-200
       wireframe: true,
       transparent: true,
-      opacity: 0.2
+      opacity: 0.5
     });
     const wireSphere = new THREE.Mesh(wireGeometry, wireMaterial);
     sphereGroup.add(wireSphere);
@@ -200,9 +200,9 @@ export function ParticleSphere({
           normal.clone().multiplyScalar(1.4)
         ]);
         const lineMaterial = new THREE.LineBasicMaterial({
-          color: 0xd4d4d8, // zinc-300
+          color: 0xfafafa, // white
           transparent: true,
-          opacity: 0.45
+          opacity: 0.7
         });
         const line = new THREE.Line(lineGeometry, lineMaterial);
         markersGroup.add(line);

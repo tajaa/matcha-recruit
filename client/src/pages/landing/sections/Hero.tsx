@@ -154,7 +154,7 @@ export const Hero = ({ onContactClick }: HeroProps) => {
     >
       {/* Atmosphere Layer - Minimalist Light Grayscale */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-zinc-800" />
+        <div className="absolute inset-0 bg-zinc-600" />
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[1200px] h-[800px] rounded-full mix-blend-multiply" style={{ background: "radial-gradient(circle, rgba(0,0,0,0.03) 0%, transparent 70%)" }} />
         <div className="absolute top-0 left-0 w-full h-full opacity-[0.06] pointer-events-none bg-[url('/textures/asfalt-light.png')]" />
       </div>
