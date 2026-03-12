@@ -87,16 +87,17 @@ const STATUS_LIGHT: Record<string, string> = {
 };
 
 const LT = {
-  card: 'bg-stone-100 rounded-2xl',
+  pageBg: 'bg-stone-300',
+  card: 'bg-stone-100 rounded-xl',
   border: 'border-stone-200',
   divide: 'divide-stone-200',
   textMain: 'text-zinc-900',
-  textMuted: 'text-stone-500',
+  textMuted: 'text-stone-50',
   textFaint: 'text-stone-400',
   rowHover: 'hover:bg-stone-50',
   skeleton: 'bg-stone-200',
   skeletonFaint: 'bg-stone-200/50',
-  emptyBg: 'bg-stone-100 rounded-2xl',
+  emptyBg: 'bg-stone-100 rounded-xl',
   emptyIcon: 'text-stone-300',
   emptyText: 'text-stone-400',
   errorBg: 'bg-red-50 border-red-200 text-red-700',
@@ -111,7 +112,8 @@ const LT = {
 } as const;
 
 const DK = {
-  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  pageBg: 'bg-zinc-950',
+  card: 'bg-zinc-900/50 border border-white/10 rounded-xl',
   border: 'border-white/10',
   divide: 'divide-white/5',
   textMain: 'text-zinc-100',
@@ -120,7 +122,7 @@ const DK = {
   rowHover: 'hover:bg-white/5',
   skeleton: 'bg-zinc-800',
   skeletonFaint: 'bg-zinc-800/50',
-  emptyBg: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
+  emptyBg: 'bg-zinc-900/50 border border-white/10 rounded-xl',
   emptyIcon: 'text-zinc-700',
   emptyText: 'text-zinc-500',
   errorBg: 'bg-red-500/10 border-red-500/20 text-red-400',
@@ -197,7 +199,7 @@ export function AdminNotifications() {
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto space-y-8">
+      <div className="max-w-5xl mx-auto space-y-8 py-4">
         <div className={`border-b ${t.border} pb-6 md:pb-8`}>
           <div className={`h-8 w-64 ${t.skeleton} animate-pulse rounded`} />
           <div className={`h-4 w-96 ${t.skeletonFaint} animate-pulse mt-3 rounded`} />
@@ -219,18 +221,18 @@ export function AdminNotifications() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-8">
+    <div className="max-w-5xl mx-auto space-y-8 py-4">
       {/* Header */}
       <div className={`border-b ${t.border} pb-6 md:pb-8`}>
-        <h1 className={`text-2xl md:text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>Notifications</h1>
-        <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>
+        <h1 className={`text-3xl font-bold tracking-tight ${t.textMain}`}>Notifications</h1>
+        <p className={`text-[11px] ${t.textMuted} mt-1.5`}>
           Recent activity across all companies &mdash; {total} total
         </p>
       </div>
 
       {/* Error */}
       {error && (
-        <div className={`p-4 border text-sm rounded-xl ${t.errorBg}`}>
+        <div className={`p-4 border text-sm rounded-lg ${t.errorBg}`}>
           {error}
         </div>
       )}
@@ -244,12 +246,12 @@ export function AdminNotifications() {
           </div>
         </div>
       ) : (
-        <div className={`${t.card} divide-y ${t.divide} overflow-hidden`}>
+        <div className={`${t.card} divide-y ${t.divide} overflow-hidden shadow-sm`}>
           {items.map((item) => (
             <div
               key={item.id}
               onClick={() => item.link && navigate(item.link)}
-              className={`p-4 md:px-6 md:py-4 ${t.rowHover} transition-colors cursor-pointer active:opacity-80 flex items-start gap-3 md:gap-4`}
+              className={`p-4 md:px-5 md:py-4 ${t.rowHover} transition-colors cursor-pointer active:opacity-80 flex items-start gap-3 md:gap-4`}
             >
               {/* Type Icon */}
               <div className={`w-8 h-8 border flex items-center justify-center shrink-0 mt-0.5 rounded-lg ${t.typeBg[item.type]}`}>
@@ -260,12 +262,12 @@ export function AdminNotifications() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <div className={`text-sm ${t.textMain} font-bold truncate`}>{item.title}</div>
+                    <div className={`text-sm ${t.textMain} font-semibold truncate`}>{item.title}</div>
                     {item.subtitle && (
-                      <div className={`text-[11px] ${t.subtitleMono} font-mono mt-0.5 truncate`}>{item.subtitle}</div>
+                      <div className={`text-[11px] ${t.subtitleMono} font-mono mt-0.5 truncate opacity-70`}>{item.subtitle}</div>
                     )}
                   </div>
-                  <div className={`text-[10px] ${t.textFaint} font-mono tracking-wide whitespace-nowrap shrink-0 mt-0.5`}>
+                  <div className={`text-[10px] ${t.textFaint} font-mono whitespace-nowrap shrink-0 mt-0.5`}>
                     {relativeTime(item.created_at)}
                   </div>
                 </div>
@@ -273,7 +275,7 @@ export function AdminNotifications() {
                 <div className="flex items-center gap-2 mt-2 flex-wrap">
                   {/* Company badge */}
                   {item.company_name && (
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 border text-[10px] font-mono uppercase tracking-wider rounded ${t.companyBadge}`}>
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 border text-[10px] font-semibold rounded-md ${t.companyBadge}`}>
                       <Building2 size={10} className={t.companyIcon} />
                       {item.company_name}
                     </span>
@@ -281,14 +283,14 @@ export function AdminNotifications() {
 
                   {/* Severity badge */}
                   {item.severity && (
-                    <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] uppercase tracking-wider font-bold rounded ${t.severity[item.severity] || t.badgeBg}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] font-semibold rounded-md ${t.severity[item.severity] || t.badgeBg}`}>
                       {item.severity}
                     </span>
                   )}
 
                   {/* Status badge */}
                   {item.status && (
-                    <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] uppercase tracking-wider font-bold rounded ${t.status[item.status] || t.badgeBg}`}>
+                    <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] font-semibold rounded-md ${t.status[item.status] || t.badgeBg}`}>
                       {item.status}
                     </span>
                   )}
@@ -305,7 +307,7 @@ export function AdminNotifications() {
           <button
             onClick={handleLoadMore}
             disabled={loadingMore}
-            className={`px-8 py-3 border text-[10px] uppercase tracking-widest font-bold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${t.btnPrimary}`}
+            className={`px-6 py-2 border text-[10px] font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${t.btnPrimary}`}
           >
             {loadingMore ? 'Loading...' : `Load More (${items.length} of ${total})`}
           </button>
