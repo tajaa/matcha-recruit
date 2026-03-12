@@ -2251,6 +2251,11 @@ async def init_db():
             CREATE INDEX IF NOT EXISTS idx_employee_credentials_org
             ON employee_credentials(org_id)
         """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_employee_credentials_expiry
+            ON employee_credentials(license_expiration)
+            WHERE license_expiration IS NOT NULL
+        """)
 
         await conn.execute("""
             DO $$

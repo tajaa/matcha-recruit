@@ -55,13 +55,16 @@ def upgrade() -> None:
             updated_at TIMESTAMP DEFAULT NOW(),
 
             UNIQUE(employee_id)
-        );
-
+        )
+    """)
+    op.execute("""
         CREATE INDEX IF NOT EXISTS idx_employee_credentials_org
-            ON employee_credentials(org_id);
+            ON employee_credentials(org_id)
+    """)
+    op.execute("""
         CREATE INDEX IF NOT EXISTS idx_employee_credentials_expiry
             ON employee_credentials(license_expiration)
-            WHERE license_expiration IS NOT NULL;
+            WHERE license_expiration IS NOT NULL
     """)
 
 
