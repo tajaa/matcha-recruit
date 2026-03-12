@@ -146,6 +146,7 @@ export function IRDetail() {
   const [escalateForm, setEscalateForm] = useState({ title: '', description: '', category: 'other' as ERCaseCategory });
 
   const [investigationInterviews, setInvestigationInterviews] = useState<InvestigationInterview[]>([]);
+  const [loadingInterviews, setLoadingInterviews] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showAnalysisModal, setShowAnalysisModal] = useState<InvestigationInterview | null>(null);
 
@@ -535,7 +536,9 @@ export function IRDetail() {
                 )}
               </div>
 
-              {investigationInterviews.length === 0 ? (
+              {loadingInterviews ? (
+                <p className={`text-xs ${t.textMuted}`}>Loading interviews...</p>
+              ) : investigationInterviews.length === 0 ? (
                 <p className={`text-xs ${t.textMuted}`}>No investigation interviews scheduled yet.</p>
               ) : (
                 <div className="space-y-3">

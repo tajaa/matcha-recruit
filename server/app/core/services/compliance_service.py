@@ -1377,7 +1377,7 @@ async def _research_healthcare_requirements_for_jurisdiction(
 ) -> Dict[str, Any]:
     """Research missing healthcare-only categories inline for a jurisdiction."""
     from .gemini_compliance import get_gemini_compliance_service
-    from .jurisdiction_context import get_known_sources, build_context_prompt
+    from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
 
     j = await conn.fetchrow(
         "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
@@ -1394,6 +1394,7 @@ async def _research_healthcare_requirements_for_jurisdiction(
     has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
     known_sources = await get_known_sources(conn, jurisdiction_id)
     source_context = build_context_prompt(known_sources)
+    source_context += get_global_authority_sources(list(HEALTHCARE_CATEGORIES))
     corrections = await get_recent_corrections(jurisdiction_id)
     corrections_context = format_corrections_for_prompt(corrections)
 
@@ -1507,7 +1508,7 @@ async def _research_oncology_requirements_for_jurisdiction(
 ) -> Dict[str, Any]:
     """Research missing oncology-only categories for a jurisdiction."""
     from .gemini_compliance import get_gemini_compliance_service
-    from .jurisdiction_context import get_known_sources, build_context_prompt
+    from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
 
     j = await conn.fetchrow(
         "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
@@ -1524,6 +1525,7 @@ async def _research_oncology_requirements_for_jurisdiction(
     has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
     known_sources = await get_known_sources(conn, jurisdiction_id)
     source_context = build_context_prompt(known_sources)
+    source_context += get_global_authority_sources(list(ONCOLOGY_CATEGORIES))
     corrections = await get_recent_corrections(jurisdiction_id)
     corrections_context = format_corrections_for_prompt(corrections)
 

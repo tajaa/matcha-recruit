@@ -76,6 +76,94 @@ def extract_domain(url: str) -> str:
         return ""
 
 
+# Authoritative federal/national sources for healthcare and oncology categories.
+# These are always applicable regardless of jurisdiction and are injected into
+# Gemini prompts to anchor research to the highest-authority sources.
+CATEGORY_AUTHORITY_SOURCES: Dict[str, List[Dict[str, str]]] = {
+    # Healthcare
+    "hipaa_privacy": [
+        {"domain": "hhs.gov/hipaa", "name": "HHS Office for Civil Rights (HIPAA)"},
+        {"domain": "ecfr.gov", "name": "45 CFR Part 164 (Privacy Rule)"},
+    ],
+    "billing_integrity": [
+        {"domain": "oig.hhs.gov", "name": "HHS Office of Inspector General"},
+        {"domain": "cms.gov", "name": "CMS Billing & Coding"},
+        {"domain": "ftc.gov", "name": "FTC Healthcare Billing"},
+    ],
+    "clinical_safety": [
+        {"domain": "jointcommission.org", "name": "The Joint Commission"},
+        {"domain": "cms.gov", "name": "CMS Conditions of Participation"},
+        {"domain": "ahrq.gov", "name": "AHRQ Patient Safety"},
+    ],
+    "healthcare_workforce": [
+        {"domain": "hrsa.gov", "name": "HRSA Health Workforce"},
+        {"domain": "bls.gov", "name": "BLS Occupational Outlook"},
+        {"domain": "cms.gov", "name": "CMS Staffing Requirements"},
+    ],
+    "corporate_integrity": [
+        {"domain": "oig.hhs.gov/compliance", "name": "OIG Corporate Integrity Agreements"},
+        {"domain": "hhs.gov", "name": "HHS Compliance Guidance"},
+    ],
+    "research_consent": [
+        {"domain": "hhs.gov/ohrp", "name": "HHS Office for Human Research Protections"},
+        {"domain": "fda.gov", "name": "FDA 21 CFR Part 50 (Informed Consent)"},
+        {"domain": "ecfr.gov", "name": "45 CFR Part 46 (Common Rule)"},
+    ],
+    "state_licensing": [
+        {"domain": "hhs.gov", "name": "HHS State Health Licensing"},
+        {"domain": "cms.gov", "name": "CMS Provider Enrollment"},
+    ],
+    "emergency_preparedness": [
+        {"domain": "aspr.hhs.gov", "name": "ASPR (HHS Office of Preparedness)"},
+        {"domain": "cms.gov", "name": "CMS Emergency Preparedness Rule"},
+        {"domain": "cdc.gov", "name": "CDC Public Health Emergency"},
+    ],
+    # Oncology
+    "radiation_safety": [
+        {"domain": "nrc.gov", "name": "Nuclear Regulatory Commission"},
+        {"domain": "cdc.gov/niosh", "name": "NIOSH Radiation Safety"},
+        {"domain": "osha.gov", "name": "OSHA Ionizing Radiation (29 CFR 1910.1096)"},
+    ],
+    "chemotherapy_handling": [
+        {"domain": "cdc.gov/niosh", "name": "NIOSH Hazardous Drug Alert (2004-165)"},
+        {"domain": "usp.org", "name": "USP 800 Hazardous Drugs Standard"},
+        {"domain": "osha.gov", "name": "OSHA Hazardous Drugs in Healthcare"},
+    ],
+    "tumor_registry": [
+        {"domain": "naaccr.org", "name": "NAACCR (North American Cancer Registries)"},
+        {"domain": "seer.cancer.gov", "name": "NCI SEER Program"},
+        {"domain": "cdc.gov/cancer", "name": "CDC National Program of Cancer Registries"},
+    ],
+    "oncology_clinical_trials": [
+        {"domain": "clinicaltrials.gov", "name": "ClinicalTrials.gov"},
+        {"domain": "nci.nih.gov", "name": "National Cancer Institute"},
+        {"domain": "fda.gov", "name": "FDA IND/Clinical Trial Regulations"},
+    ],
+    "oncology_patient_rights": [
+        {"domain": "cancer.gov", "name": "NCI Patient Rights"},
+        {"domain": "cms.gov", "name": "CMS Patient Rights (Conditions of Participation)"},
+        {"domain": "hhs.gov/ocr", "name": "HHS Office for Civil Rights"},
+    ],
+}
+
+
+def get_global_authority_sources(categories: List[str]) -> str:
+    """Return a formatted prompt section listing federal authoritative sources
+    for the given categories. Returns empty string if no matches."""
+    lines = []
+    seen_domains: set = set()
+    for cat in categories:
+        sources = CATEGORY_AUTHORITY_SOURCES.get(cat, [])
+        for src in sources:
+            if src["domain"] not in seen_domains:
+                seen_domains.add(src["domain"])
+                lines.append(f"- {src['domain']} ({src['name']}) - for: {cat.replace('_', ' ')}")
+
+    if not lines:
+        return ""
+    return "\nFEDERAL AUTHORITATIVE SOURCES (prioritize these):\n" + "\n".join(lines)
+
+
 def build_context_prompt(known_sources: List[dict]) -> str:
     """Build prompt section from known sources.
 
