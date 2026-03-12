@@ -2551,6 +2551,33 @@ export const clientNotifications = {
     request<ClientNotificationsResponse>(`/dashboard/notifications?limit=${limit}&offset=${offset}`),
 };
 
+// Credential Expiration Alerts (healthcare)
+export interface CredentialExpiration {
+  employee_id: string;
+  employee_name: string;
+  job_title: string | null;
+  credential_type: string;
+  credential_label: string;
+  expiry_date: string;
+  severity: 'expired' | 'critical' | 'warning';
+}
+
+export interface CredentialExpirationSummary {
+  expired: number;
+  critical: number;
+  warning: number;
+}
+
+export interface CredentialExpirationsResponse {
+  summary: CredentialExpirationSummary;
+  expirations: CredentialExpiration[];
+}
+
+export const credentialExpirations = {
+  get: (): Promise<CredentialExpirationsResponse> =>
+    request<CredentialExpirationsResponse>('/dashboard/credential-expirations'),
+};
+
 // Jurisdiction Admin API
 export interface JurisdictionLocation {
   id: string;

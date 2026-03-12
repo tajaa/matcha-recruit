@@ -1,8 +1,8 @@
 """Dashboard stats endpoint — returns company-scoped metrics."""
 
 import logging
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import date, datetime, timezone
+from typing import List, Literal, Optional
 from uuid import UUID
 
 import asyncpg
@@ -271,6 +271,7 @@ _CLIENT_NOTIFICATION_LINK_MAP: dict[str, str] = {
     "er_case": "/app/matcha/er-copilot/{id}",
     "handbook": "/app/matcha/handbooks/{id}",
     "compliance_alert": "/app/matcha/compliance",
+    "credential_expiry": "/app/matcha/employees",
 }
 
 # Each sub-query is parameterized with $1 = company_id.
@@ -316,6 +317,27 @@ _CLIENT_NOTIFICATION_SUBQUERIES: list[str] = [
          AND created_at > NOW() - INTERVAL '30 days'
          AND alert_type = 'change'
          AND COALESCE(confidence_score, 1.0) >= 0.6""",
+    # Credential expirations — healthcare employee licenses expiring within 90 days
+    """SELECT ec.id::text, 'credential_expiry' AS type,
+            e.first_name || ' ' || e.last_name || ' — ' || x.label AS title,
+            'Expires ' || to_char(x.expiry_date, 'Mon DD, YYYY') AS subtitle,
+            CASE WHEN x.expiry_date < CURRENT_DATE THEN 'expired'
+                 WHEN x.expiry_date <= CURRENT_DATE + INTERVAL '30 days' THEN 'critical'
+                 ELSE 'warning' END AS severity,
+            CASE WHEN x.expiry_date < CURRENT_DATE THEN 'expired' ELSE 'expiring' END AS status,
+            ec.updated_at AS created_at
+       FROM employees e
+       JOIN employee_credentials ec ON ec.employee_id = e.id
+       CROSS JOIN LATERAL (VALUES
+           ('Medical License',      ec.license_expiration),
+           ('DEA Registration',     ec.dea_expiration),
+           ('Board Certification',  ec.board_certification_expiration),
+           ('Malpractice Insurance', ec.malpractice_expiration)
+       ) AS x(label, expiry_date)
+       WHERE e.org_id = $1
+         AND e.termination_date IS NULL
+         AND x.expiry_date IS NOT NULL
+         AND x.expiry_date <= CURRENT_DATE + INTERVAL '90 days'""",
 ]
 
 
@@ -387,3 +409,115 @@ async def get_client_notifications(
         )
 
     return ClientNotificationsResponse(items=items, total=total)
+
+
+# ---------------------------------------------------------------------------
+# Credential expiration alerts (healthcare companies)
+# ---------------------------------------------------------------------------
+
+_CREDENTIAL_LABELS: dict[str, str] = {
+    "medical_license": "Medical License",
+    "dea_registration": "DEA Registration",
+    "board_certification": "Board Certification",
+    "malpractice_insurance": "Malpractice Insurance",
+}
+
+
+class CredentialExpiration(BaseModel):
+    employee_id: str
+    employee_name: str
+    job_title: Optional[str] = None
+    credential_type: str
+    credential_label: str
+    expiry_date: date
+    severity: Literal["expired", "critical", "warning"]
+
+
+class CredentialExpirationSummary(BaseModel):
+    expired: int
+    critical: int
+    warning: int
+
+
+class CredentialExpirationsResponse(BaseModel):
+    summary: CredentialExpirationSummary
+    expirations: list[CredentialExpiration]
+
+
+def _classify_severity(expiry_date: date, today: date) -> str:
+    days = (expiry_date - today).days
+    if days < 0:
+        return "expired"
+    if days <= 30:
+        return "critical"
+    return "warning"
+
+
+@router.get("/credential-expirations", response_model=CredentialExpirationsResponse)
+async def get_credential_expirations(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return credentials expiring within 90 days (or already expired) for the company."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return CredentialExpirationsResponse(
+            summary=CredentialExpirationSummary(expired=0, critical=0, warning=0),
+            expirations=[],
+        )
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT e.id AS employee_id,
+                   e.first_name || ' ' || e.last_name AS employee_name,
+                   e.job_title,
+                   x.credential_type,
+                   x.expiry_date
+            FROM employees e
+            JOIN employee_credentials ec ON ec.employee_id = e.id
+            CROSS JOIN LATERAL (VALUES
+                ('medical_license',      ec.license_expiration),
+                ('dea_registration',     ec.dea_expiration),
+                ('board_certification',  ec.board_certification_expiration),
+                ('malpractice_insurance', ec.malpractice_expiration)
+            ) AS x(credential_type, expiry_date)
+            WHERE e.org_id = $1
+              AND e.termination_date IS NULL
+              AND x.expiry_date IS NOT NULL
+              AND x.expiry_date <= CURRENT_DATE + INTERVAL '90 days'
+            ORDER BY x.expiry_date ASC
+            """,
+            company_id,
+        )
+
+    today = date.today()
+    expired = 0
+    critical = 0
+    warning = 0
+    expirations: list[CredentialExpiration] = []
+
+    for row in rows:
+        sev = _classify_severity(row["expiry_date"], today)
+        if sev == "expired":
+            expired += 1
+        elif sev == "critical":
+            critical += 1
+        else:
+            warning += 1
+
+        expirations.append(
+            CredentialExpiration(
+                employee_id=str(row["employee_id"]),
+                employee_name=row["employee_name"],
+                job_title=row["job_title"],
+                credential_type=row["credential_type"],
+                credential_label=_CREDENTIAL_LABELS.get(row["credential_type"], row["credential_type"]),
+                expiry_date=row["expiry_date"],
+                severity=sev,
+            )
+        )
+
+    return CredentialExpirationsResponse(
+        summary=CredentialExpirationSummary(expired=expired, critical=critical, warning=warning),
+        expirations=expirations,
+    )

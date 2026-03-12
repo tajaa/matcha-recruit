@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink, Sparkles, Circle, Check } from 'lucide-react';
 import { useIsLightMode } from '../hooks/useIsLightMode';
-import { getAccessToken } from '../api/client';
+import { getAccessToken, credentialExpirations } from '../api/client';
+import type { CredentialExpiration, CredentialExpirationSummary } from '../api/client';
 import { OnboardingWizard } from '../components/OnboardingWizard';
 import { Collapsible } from '../components/Collapsible';
 import { Tabs } from '../components/Tabs';
@@ -895,10 +896,15 @@ function ComplianceDashboardWidget() {
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const { user, hasFeature, platformFeatures } = useAuth();
+  const { user, hasFeature, platformFeatures, profile } = useAuth();
   const [ptoSummary, setPtoSummary] = useState<PTOSummary | null>(null);
   const [dashStats, setDashStats] = useState<DashboardStats | null>(null);
   const [compliancePendingActions, setCompliancePendingActions] = useState<ComplianceDashboardItem[]>([]);
+  const [credExpiry, setCredExpiry] = useState<{ summary: CredentialExpirationSummary; expirations: CredentialExpiration[] } | null>(null);
+
+  const isHealthcare = user?.role === 'client'
+    ? (profile as ClientProfile | null)?.industry?.toLowerCase() === 'healthcare'
+    : false;
 
   useEffect(() => {
     const token = getAccessToken();
@@ -917,7 +923,13 @@ export function Dashboard() {
       .then(r => r.ok ? r.json() : null)
       .then(data => data && setDashStats(data))
       .catch(err => console.error('Failed to fetch dashboard stats:', err));
-  }, [hasFeature, platformFeatures]);
+
+    if (isHealthcare) {
+      credentialExpirations.get()
+        .then(data => setCredExpiry(data))
+        .catch(err => console.error('Failed to fetch credential expirations:', err));
+    }
+  }, [hasFeature, platformFeatures, isHealthcare]);
 
   const showComplianceImpact =
     user?.role === 'client' &&
@@ -1004,6 +1016,7 @@ export function Dashboard() {
     { id: 'compliance', label: 'Compliance Health', icon: ShieldAlert },
     { id: 'compliance_impact', label: 'Compliance Impact', icon: ShieldAlert },
     { id: 'actions', label: 'Pending Actions', icon: Clock },
+    ...(isHealthcare ? [{ id: 'credential_alerts', label: 'Credential Alerts', icon: AlertTriangle }] : []),
     { id: 'activity', label: 'System Activity', icon: History },
     { id: 'incidents', label: 'Incident Reports', icon: AlertTriangle },
     { id: 'pto', label: 'Upcoming Time Off', icon: Calendar },
@@ -1199,10 +1212,30 @@ export function Dashboard() {
                                     <ArrowUpRight className={`w-3.5 h-3.5 ${t.arrow} ml-auto transition-colors`} />
                                 </div>
                               )}
+                              {credExpiry && credExpiry.expirations.length > 0 && (
+                                <div
+                                  onClick={() => navigate('/app/matcha/employees')}
+                                  className={`${t.innerHover} p-4 flex items-start gap-3 cursor-pointer transition-colors group`}
+                                >
+                                    <div className={`mt-1.5 w-1.5 h-1.5 rounded-full ${credExpiry.summary.expired > 0 ? t.activityDot.warning : t.activityDot.def} flex-shrink-0`} />
+                                    <div className="flex-1">
+                                      <div className={`text-sm ${t.textMain} font-medium mb-0.5`}>Credential Alerts</div>
+                                      <div className={`text-xs ${t.textMuted}`}>
+                                        {[
+                                          credExpiry.summary.expired > 0 && `${credExpiry.summary.expired} expired`,
+                                          credExpiry.summary.critical > 0 && `${credExpiry.summary.critical} expiring soon`,
+                                          credExpiry.summary.warning > 0 && `${credExpiry.summary.warning} upcoming`,
+                                        ].filter(Boolean).join(' · ')}
+                                      </div>
+                                    </div>
+                                    <ArrowUpRight className={`w-3.5 h-3.5 ${t.arrow} ml-auto transition-colors`} />
+                                </div>
+                              )}
                               {(!ptoSummary || ptoSummary.pending_count === 0)
                                 && (!dashStats || dashStats.pending_incidents.length === 0)
                                 && (!showComplianceImpact || compliancePendingActions.length === 0)
-                                && !dashStats?.wage_alerts && (
+                                && !dashStats?.wage_alerts
+                                && (!credExpiry || credExpiry.expirations.length === 0) && (
                                 <div className="p-4 text-center">
                                   <CheckCircle2 className={`w-5 h-5 ${t.icon} mx-auto mb-1.5`} />
                                   <p className={`text-sm ${t.textFaint}`}>All caught up</p>
@@ -1226,6 +1259,77 @@ export function Dashboard() {
                               >
                                 View Calendar
                               </button>
+                          </div>
+                        )}
+
+                        {visibleWidgets.has('credential_alerts') && credExpiry && credExpiry.expirations.length > 0 && (
+                          <div className={`${t.cardLight} overflow-hidden`}>
+                            <div className={`p-4 border-b ${t.border} flex justify-between items-center`}>
+                              <div className={t.label}>Credential Alerts</div>
+                              <AlertTriangle className={`w-4 h-4 ${t.icon}`} />
+                            </div>
+                            <div className="p-5">
+                              <div className="flex items-center gap-3 mb-4">
+                                {credExpiry.summary.expired > 0 && (
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${isLight ? 'bg-red-100 text-red-700' : 'bg-red-900/30 text-red-400'}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-red-500' : 'bg-red-400'} animate-pulse`} />
+                                    {credExpiry.summary.expired} Expired
+                                  </span>
+                                )}
+                                {credExpiry.summary.critical > 0 && (
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${isLight ? 'bg-amber-100 text-amber-700' : 'bg-amber-900/30 text-amber-400'}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-amber-500' : 'bg-amber-400'}`} />
+                                    {credExpiry.summary.critical} Critical
+                                  </span>
+                                )}
+                                {credExpiry.summary.warning > 0 && (
+                                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${isLight ? 'bg-yellow-100 text-yellow-700' : 'bg-yellow-900/30 text-yellow-400'}`}>
+                                    <span className={`w-1.5 h-1.5 rounded-full ${isLight ? 'bg-yellow-500' : 'bg-yellow-400'}`} />
+                                    {credExpiry.summary.warning} Warning
+                                  </span>
+                                )}
+                              </div>
+                              <div className={`divide-y ${t.divide}`}>
+                                {credExpiry.expirations.map((item, i) => {
+                                  const expDate = new Date(item.expiry_date + 'T00:00:00');
+                                  const dateStr = expDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+                                  const sevColor = item.severity === 'expired'
+                                    ? (isLight ? 'text-red-600' : 'text-red-400')
+                                    : item.severity === 'critical'
+                                    ? (isLight ? 'text-amber-600' : 'text-amber-400')
+                                    : (isLight ? 'text-yellow-600' : 'text-yellow-400');
+                                  const sevDot = item.severity === 'expired'
+                                    ? (isLight ? 'bg-red-500' : 'bg-red-400')
+                                    : item.severity === 'critical'
+                                    ? (isLight ? 'bg-amber-500' : 'bg-amber-400')
+                                    : (isLight ? 'bg-yellow-500' : 'bg-yellow-400');
+                                  return (
+                                    <div
+                                      key={`${item.employee_id}-${item.credential_type}-${i}`}
+                                      onClick={() => navigate(`/app/matcha/employees`)}
+                                      className={`py-3 flex items-center gap-3 cursor-pointer ${t.rowHover} transition-colors group`}
+                                    >
+                                      <div className={`w-1.5 h-1.5 rounded-full ${sevDot} flex-shrink-0 ${item.severity === 'expired' ? 'animate-pulse' : ''}`} />
+                                      <div className="flex-1 min-w-0">
+                                        <div className={`text-sm ${t.textMain} font-medium truncate`}>{item.employee_name}</div>
+                                        <div className={`text-xs ${t.textMuted} truncate`}>{item.credential_label}</div>
+                                      </div>
+                                      <div className={`text-xs font-mono ${sevColor} whitespace-nowrap`}>
+                                        {item.severity === 'expired' ? 'Expired ' : 'Expires '}{dateStr}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                            <div className={`p-3 ${t.footerBg}`}>
+                              <button
+                                onClick={() => navigate('/app/matcha/employees')}
+                                className={`w-full text-center text-xs ${t.footerLink} transition-colors`}
+                              >
+                                View All Employees
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
