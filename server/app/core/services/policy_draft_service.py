@@ -45,6 +45,12 @@ POLICY_TYPES = [
     {"value": "credentialing", "label": "Credentialing and Licensure Verification", "categories": ["healthcare_workforce"], "industries": ["healthcare"]},
     {"value": "patient_safety", "label": "Patient Safety and Incident Reporting", "categories": ["clinical_safety"], "industries": ["healthcare"]},
     {"value": "infection_control", "label": "Infection Control and PPE", "categories": ["clinical_safety"], "industries": ["healthcare"]},
+    # Oncology-specific policy types
+    {"value": "radiation_safety", "label": "Radiation Safety Program", "categories": ["radiation_safety"], "industries": ["healthcare:oncology"]},
+    {"value": "chemotherapy_handling", "label": "Chemotherapy and Hazardous Drug Handling", "categories": ["chemotherapy_handling"], "industries": ["healthcare:oncology"]},
+    {"value": "tumor_registry", "label": "Tumor Registry Reporting", "categories": ["tumor_registry"], "industries": ["healthcare:oncology"]},
+    {"value": "oncology_clinical_trials", "label": "Clinical Trials Compliance", "categories": ["oncology_clinical_trials"], "industries": ["healthcare:oncology"]},
+    {"value": "oncology_patient_rights", "label": "Oncology Patient Rights", "categories": ["oncology_patient_rights"], "industries": ["healthcare:oncology"]},
 ]
 
 # Map free-text industry values to canonical names for filtering.
@@ -90,6 +96,17 @@ _INDUSTRY_POLICY_CONTEXT: Dict[str, str] = {
         "- Healthcare worker safety requirements\n"
         "Use industry-appropriate terminology and reference healthcare-specific regulatory bodies."
     ),
+    "healthcare:oncology": (
+        "\n\n## Industry Context — Oncology\n"
+        "This is an ONCOLOGY employer. The policy MUST reference oncology-specific "
+        "regulations including:\n"
+        "- NRC 10 CFR 35 / Agreement State radiation licensing\n"
+        "- USP <800> hazardous drug handling standards\n"
+        "- OSHA cytotoxic drug exposure limits\n"
+        "- State tumor/cancer registry reporting requirements\n"
+        "- 21 CFR 50/56 clinical trial protections (if applicable)\n"
+        "Use oncology-appropriate terminology."
+    ),
 }
 
 
@@ -97,21 +114,28 @@ async def get_policy_types_for_company(company_id: str) -> List[dict]:
     """Return policy types filtered by the company's industry.
 
     Generic types (no ``industries`` key) are always included. Industry-specific
-    types are included only when the company's industry matches.
+    types are included only when the company's industry tags match.
     """
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT industry FROM companies WHERE id = $1", UUID(company_id)
+            "SELECT industry, healthcare_specialties FROM companies WHERE id = $1",
+            UUID(company_id),
         )
     raw_industry = (row["industry"] or "").strip() if row else ""
     canonical = _resolve_industry(raw_industry)
+
+    # Build tag set: {"healthcare", "healthcare:oncology"} for oncology company
+    company_tags = {canonical} if canonical else set()
+    if canonical == "healthcare" and row and row["healthcare_specialties"]:
+        for spec in row["healthcare_specialties"]:
+            company_tags.add(f"healthcare:{spec}")
 
     result = []
     for pt in POLICY_TYPES:
         industries = pt.get("industries")
         if industries is None:
             result.append(pt)
-        elif canonical and canonical in industries:
+        elif company_tags & set(industries):
             result.append(pt)
     return result
 

@@ -31,7 +31,8 @@ ALL_RETURNING = (
     "id, name, industry, size, ir_guidance_blurb, logo_url, "
     "headquarters_state, headquarters_city, work_arrangement, "
     "default_employment_type, benefits_summary, pto_policy_summary, "
-    "compensation_notes, company_values, ai_guidance_notes, created_at"
+    "compensation_notes, company_values, ai_guidance_notes, "
+    "healthcare_specialties, created_at"
 )
 
 
@@ -52,6 +53,7 @@ def _row_to_response(row, *, culture_profile=None, interview_count=0):
         compensation_notes=row.get("compensation_notes"),
         company_values=row.get("company_values"),
         ai_guidance_notes=row.get("ai_guidance_notes"),
+        healthcare_specialties=row.get("healthcare_specialties"),
         created_at=row["created_at"],
         culture_profile=culture_profile,
         interview_count=interview_count,
@@ -68,9 +70,10 @@ async def create_company(company: CompanyCreate):
                 name, industry, size, ir_guidance_blurb,
                 headquarters_state, headquarters_city, work_arrangement,
                 default_employment_type, benefits_summary, pto_policy_summary,
-                compensation_notes, company_values, ai_guidance_notes
+                compensation_notes, company_values, ai_guidance_notes,
+                healthcare_specialties
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
             RETURNING {ALL_RETURNING}
             """,
             company.name,
@@ -86,6 +89,7 @@ async def create_company(company: CompanyCreate):
             company.compensation_notes,
             company.company_values,
             company.ai_guidance_notes,
+            company.healthcare_specialties,
         )
         return _row_to_response(row)
 
@@ -161,6 +165,13 @@ async def update_company(company_id: UUID, company: CompanyUpdate):
                 updates.append(f"{field_name} = ${param_idx}")
                 params.append(value)
                 param_idx += 1
+
+        # Handle TEXT[] field specially
+        hs = company.healthcare_specialties
+        if hs is not None:
+            updates.append(f"healthcare_specialties = ${param_idx}::text[]")
+            params.append(hs)
+            param_idx += 1
 
         if not updates:
             raise HTTPException(status_code=400, detail="No fields to update")

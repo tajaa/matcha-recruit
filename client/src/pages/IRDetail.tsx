@@ -146,7 +146,6 @@ export function IRDetail() {
   const [escalateForm, setEscalateForm] = useState({ title: '', description: '', category: 'other' as ERCaseCategory });
 
   const [investigationInterviews, setInvestigationInterviews] = useState<InvestigationInterview[]>([]);
-  const [loadingInterviews, setLoadingInterviews] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showAnalysisModal, setShowAnalysisModal] = useState<InvestigationInterview | null>(null);
 
@@ -845,7 +844,7 @@ export function IRDetail() {
                 {showAnalysisModal.investigation_analysis.key_facts.length > 0 && (
                   <div>
                     <div className={`${t.label} mb-2`}>Key Facts</div>
-                    <ul className={`space-y-1 ${t.textSecondary ?? t.textMain}`}>
+                    <ul className={`space-y-1 ${t.textSecondary}`}>
                       {showAnalysisModal.investigation_analysis.key_facts.map((f, i) => <li key={i} className="flex gap-2"><span className="shrink-0">•</span>{f}</li>)}
                     </ul>
                   </div>

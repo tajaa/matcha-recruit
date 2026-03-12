@@ -19,6 +19,7 @@ class CompanyCreate(BaseModel):
     compensation_notes: Optional[str] = None
     company_values: Optional[str] = None
     ai_guidance_notes: Optional[str] = None
+    healthcare_specialties: Optional[list[str]] = None
 
 
 class CompanyUpdate(BaseModel):
@@ -35,6 +36,7 @@ class CompanyUpdate(BaseModel):
     compensation_notes: Optional[str] = None
     company_values: Optional[str] = None
     ai_guidance_notes: Optional[str] = None
+    healthcare_specialties: Optional[list[str]] = None
 
 
 class Company(BaseModel):
@@ -53,6 +55,7 @@ class Company(BaseModel):
     compensation_notes: Optional[str] = None
     company_values: Optional[str] = None
     ai_guidance_notes: Optional[str] = None
+    healthcare_specialties: Optional[list[str]] = None
     created_at: datetime
 
 
@@ -79,6 +82,7 @@ class CompanyResponse(BaseModel):
     compensation_notes: Optional[str] = None
     company_values: Optional[str] = None
     ai_guidance_notes: Optional[str] = None
+    healthcare_specialties: Optional[list[str]] = None
     created_at: datetime
     culture_profile: Optional[dict[str, Any]] = None
     interview_count: int = 0

@@ -15,6 +15,10 @@ const INDUSTRIES = [
   'Real Estate', 'Legal', 'Media', 'Nonprofit', 'Government', 'Other',
 ];
 
+const HEALTHCARE_SPECIALTIES = [
+  { value: 'oncology', label: 'Oncology' },
+];
+
 const SIZES = [
   { value: 'startup', label: '1-50 employees' },
   { value: 'mid', label: '51-500 employees' },
@@ -59,6 +63,7 @@ interface CompanyData {
   compensation_notes: string | null;
   company_values: string | null;
   ai_guidance_notes: string | null;
+  healthcare_specialties: string[] | null;
 }
 
 const LT = {
@@ -175,6 +180,7 @@ export function CompanyProfile() {
   const [compensationNotes, setCompensationNotes] = useState('');
   const [companyValues, setCompanyValues] = useState('');
   const [aiGuidanceNotes, setAiGuidanceNotes] = useState('');
+  const [healthcareSpecialties, setHealthcareSpecialties] = useState<string[]>([]);
 
   // Logo upload
   const [logoUploading, setLogoUploading] = useState(false);
@@ -232,6 +238,7 @@ export function CompanyProfile() {
       setName(data.name || '');
       setIndustry(data.industry || '');
       setSize(data.size || '');
+      setHealthcareSpecialties(data.healthcare_specialties || []);
       setHeadquartersState(data.headquarters_state || '');
       setHeadquartersCity(data.headquarters_city || '');
       setWorkArrangement(data.work_arrangement || '');
@@ -257,7 +264,7 @@ export function CompanyProfile() {
 
     try {
       const token = getAccessToken();
-      const body: Record<string, string> = {};
+      const body: Record<string, string | string[]> = {};
       if (name !== (company?.name || '')) body.name = name;
       if (industry !== (company?.industry || '')) body.industry = industry;
       if (size !== (company?.size || '')) body.size = size;
@@ -270,6 +277,12 @@ export function CompanyProfile() {
       if (compensationNotes !== (company?.compensation_notes || '')) body.compensation_notes = compensationNotes;
       if (companyValues !== (company?.company_values || '')) body.company_values = companyValues;
       if (aiGuidanceNotes !== (company?.ai_guidance_notes || '')) body.ai_guidance_notes = aiGuidanceNotes;
+      // Healthcare specialties — clear when industry changes away from Healthcare
+      const effectiveSpecialties = industry === 'Healthcare' ? healthcareSpecialties : [];
+      const prevSpecialties = company?.healthcare_specialties || [];
+      if (JSON.stringify(effectiveSpecialties) !== JSON.stringify(prevSpecialties)) {
+        body.healthcare_specialties = effectiveSpecialties;
+      }
 
       if (Object.keys(body).length === 0) {
         setSaveSuccess(true);
@@ -363,7 +376,8 @@ export function CompanyProfile() {
     ptoPolicySummary !== (company?.pto_policy_summary || '') ||
     compensationNotes !== (company?.compensation_notes || '') ||
     companyValues !== (company?.company_values || '') ||
-    aiGuidanceNotes !== (company?.ai_guidance_notes || '');
+    aiGuidanceNotes !== (company?.ai_guidance_notes || '') ||
+    JSON.stringify(industry === 'Healthcare' ? healthcareSpecialties : []) !== JSON.stringify(company?.healthcare_specialties || []);
 
   const googleBadge = (() => {
     if (loadingGoogle) return { label: 'Checking', tone: t.badgeChecking };
@@ -458,6 +472,30 @@ export function CompanyProfile() {
                     <option value="">Select industry</option>
                     {INDUSTRIES.map((ind) => (<option key={ind} value={ind}>{ind}</option>))}
                   </select>
+                  {industry === 'Healthcare' && (
+                    <div className="mt-3">
+                      <label className={`${t.label} mb-2`}>Healthcare Specialties</label>
+                      <div className="flex flex-wrap gap-3">
+                        {HEALTHCARE_SPECIALTIES.map((spec) => (
+                          <label key={spec.value} className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={healthcareSpecialties.includes(spec.value)}
+                              onChange={(e) => {
+                                if (e.target.checked) {
+                                  setHealthcareSpecialties([...healthcareSpecialties, spec.value]);
+                                } else {
+                                  setHealthcareSpecialties(healthcareSpecialties.filter((s) => s !== spec.value));
+                                }
+                              }}
+                              className="rounded border-zinc-600"
+                            />
+                            <span className={`text-sm ${isLight ? 'text-zinc-700' : 'text-zinc-300'}`}>{spec.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className={t.label}>Company Size</label>

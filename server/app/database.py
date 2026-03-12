@@ -718,6 +718,7 @@ async def init_db():
                 compensation_notes TEXT,
                 company_values TEXT,
                 ai_guidance_notes TEXT,
+                healthcare_specialties TEXT[],
                 report_email_token VARCHAR(32) UNIQUE,
                 report_token_used_at TIMESTAMPTZ,
                 created_at TIMESTAMP DEFAULT NOW()
@@ -751,6 +752,9 @@ async def init_db():
                 END IF;
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'risk_assessment_interval_days') THEN
                     ALTER TABLE companies ADD COLUMN risk_assessment_interval_days INTEGER DEFAULT 7;
+                END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'healthcare_specialties') THEN
+                    ALTER TABLE companies ADD COLUMN healthcare_specialties TEXT[];
                 END IF;
             END $$;
         """)

@@ -3353,6 +3353,8 @@ async def _run_jurisdiction_check_events(
         _lookup_has_local_ordinance,
         _refresh_repository_missing_categories,
         _research_healthcare_requirements_for_jurisdiction,
+        _research_oncology_requirements_for_jurisdiction,
+        ONCOLOGY_CATEGORIES,
     )
     from ..models.compliance import VerificationResult
 
@@ -4199,6 +4201,62 @@ async def _run_jurisdiction_check_events(
                     "type": "warning",
                     "message": f"Healthcare-specific research failed: {exc}",
                 }
+
+            # Oncology research (inline, after healthcare)
+            try:
+                yield {
+                    "type": "repository_refresh",
+                    "message": f"Researching oncology-specific compliance for {location_label}...",
+                }
+                oncology_result = await _research_oncology_requirements_for_jurisdiction(
+                    conn, canonical_jurisdiction_id
+                )
+                if oncology_result.get("new", 0):
+                    rows = await conn.fetch(
+                        "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                        canonical_jurisdiction_id,
+                    )
+                    requirements = [
+                        _jurisdiction_row_to_dict(dict(row)) for row in rows
+                    ]
+                    requirements = await _prepare_requirements_for_sync(requirements)
+                    new_count = len(requirements)
+                    if linked_locations:
+                        yield {
+                            "type": "syncing",
+                            "message": (
+                                f"Syncing oncology-specific updates to "
+                                f"{len(linked_locations)} location(s)..."
+                            ),
+                        }
+                        for loc in linked_locations:
+                            location_requirements = await _filter_requirements_for_company(
+                                conn,
+                                loc["company_id"],
+                                requirements,
+                            )
+                            sync_result = await _sync_requirements_to_location(
+                                conn,
+                                loc["id"],
+                                loc["company_id"],
+                                location_requirements,
+                                create_alerts=True,
+                            )
+                            total_alerts += sync_result["alerts"]
+                            total_updated += sync_result["updated"]
+                yield {
+                    "type": "repository_refresh",
+                    "message": (
+                        f"Oncology research completed for {location_label}: "
+                        f"{oncology_result.get('new', 0)} requirement(s) added."
+                    ),
+                }
+            except Exception as exc:
+                logger.warning("Oncology inline research failed: %s", exc)
+                yield {
+                    "type": "warning",
+                    "message": f"Oncology-specific research failed: {exc}",
+                }
         else:
             # Keep top-metro batch fast by queuing healthcare-only work.
             try:
@@ -4219,6 +4277,25 @@ async def _run_jurisdiction_check_events(
                     }
             except Exception as exc:
                 logger.warning("Could not queue healthcare research: %s", exc)
+
+            # Queue oncology research in background too
+            try:
+                from app.workers.tasks.oncology_research import run_oncology_research
+                onc_existing = await conn.fetch(
+                    "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1 AND category = ANY($2::text[])",
+                    canonical_jurisdiction_id,
+                    sorted(ONCOLOGY_CATEGORIES),
+                )
+                onc_present = {r["category"] for r in onc_existing}
+                onc_missing = ONCOLOGY_CATEGORIES - onc_present
+                if onc_missing:
+                    run_oncology_research.delay(str(canonical_jurisdiction_id))
+                    yield {
+                        "type": "repository_refresh",
+                        "message": f"Oncology compliance research queued in background ({len(onc_missing)} categories).",
+                    }
+            except Exception as exc:
+                logger.warning("Could not queue oncology research: %s", exc)
 
         yield {
             "type": "completed",

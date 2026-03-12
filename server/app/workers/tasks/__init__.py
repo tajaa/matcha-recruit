@@ -12,6 +12,7 @@ from .risk_assessment import (
     enqueue_scheduled_risk_assessments,
 )
 from .healthcare_research import run_healthcare_research
+from .oncology_research import run_oncology_research
 
 __all__ = [
     "analyze_interview_async",
@@ -23,4 +24,5 @@ __all__ = [
     "run_risk_assessment_task",
     "enqueue_scheduled_risk_assessments",
     "run_healthcare_research",
+    "run_oncology_research",
 ]

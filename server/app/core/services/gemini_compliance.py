@@ -300,6 +300,14 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
         if not normalized.get("applicable_industries"):
             normalized["applicable_industries"] = ["healthcare"]
 
+    _ONCOLOGY_CATEGORIES = {
+        "radiation_safety", "chemotherapy_handling", "tumor_registry",
+        "oncology_clinical_trials", "oncology_patient_rights",
+    }
+    if normalized.get("category") in _ONCOLOGY_CATEGORIES:
+        if not normalized.get("applicable_industries"):
+            normalized["applicable_industries"] = ["healthcare:oncology"]
+
     # Clamp numeric_value to fit DECIMAL(10,4) — max absolute value 999999.9999
     nv = normalized.get("numeric_value")
     if nv is not None:

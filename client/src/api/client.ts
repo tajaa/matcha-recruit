@@ -3784,6 +3784,7 @@ import type {
   MWGeneratePresentationResponse,
   MWPublicReviewRequest,
   MWPublicReviewSubmitResponse,
+  MWDocumentState,
 } from '../types/matcha-work';
 
 export const matchaWork = {

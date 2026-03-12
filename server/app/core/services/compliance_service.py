@@ -88,6 +88,14 @@ HEALTHCARE_CATEGORIES = {
     "emergency_preparedness",
 }
 
+ONCOLOGY_CATEGORIES = {
+    "radiation_safety",
+    "chemotherapy_handling",
+    "tumor_registry",
+    "oncology_clinical_trials",
+    "oncology_patient_rights",
+}
+
 # Map free-text company.industry values to canonical industry profile names.
 # Reuses the same aliases as handbook_service.GUIDED_INDUSTRY_ALIASES.
 _INDUSTRY_ALIASES: Dict[str, str] = {
@@ -149,6 +157,29 @@ async def _get_company_canonical_industry(
     return canonical or None
 
 
+async def _get_company_industry_tags(conn, company_id: UUID) -> set:
+    """Return the set of industry tags this company should match against.
+
+    An oncology healthcare company returns: {"healthcare", "healthcare:oncology"}
+    A plain healthcare company returns: {"healthcare"}
+    A retail company returns: {"retail"}
+    """
+    row = await conn.fetchrow(
+        "SELECT industry, healthcare_specialties FROM companies WHERE id = $1",
+        company_id,
+    )
+    if not row:
+        return set()
+    canonical = _resolve_industry(row["industry"] or "")
+    if not canonical:
+        return set()
+    tags = {canonical}
+    if canonical == "healthcare" and row["healthcare_specialties"]:
+        for spec in row["healthcare_specialties"]:
+            tags.add(f"healthcare:{spec}")
+    return tags
+
+
 _HEALTHCARE_TEXT_MARKERS = (
     "healthcare worker",
     "health care worker",
@@ -165,6 +196,13 @@ _HEALTHCARE_TEXT_MARKERS = (
     "registered nurse",
     "licensed vocational nurse",
     "licensed practical nurse",
+)
+
+_ONCOLOGY_TEXT_MARKERS = (
+    "radiation safety", "radiation therapy", "radiation oncology",
+    "chemotherapy", "chemo", "hazardous drug", "antineoplastic",
+    "tumor registry", "cancer registry", "oncology",
+    "brachytherapy", "linear accelerator", "linac",
 )
 
 
@@ -186,7 +224,18 @@ def _looks_healthcare_specific(req: Dict[str, Any]) -> bool:
     return False
 
 
-def _requirement_applicable_industries(req: Dict[str, Any]) -> set[str]:
+def _looks_oncology_specific(req: Dict[str, Any]) -> bool:
+    """Infer oncology-only rows that were saved without industry tags."""
+    haystack = " ".join(
+        str(req.get(field) or "")
+        for field in ("title", "description", "current_value", "source_name")
+    ).lower()
+    if not haystack:
+        return False
+    return any(marker in haystack for marker in _ONCOLOGY_TEXT_MARKERS)
+
+
+def _requirement_applicable_industries(req: Dict[str, Any]) -> set:
     """Return canonical industries a requirement applies to."""
     raw_industries = req.get("applicable_industries")
     if isinstance(raw_industries, str):
@@ -194,8 +243,13 @@ def _requirement_applicable_industries(req: Dict[str, Any]) -> set[str]:
 
     normalized = set()
     for industry in raw_industries or []:
-        canonical = _resolve_industry(str(industry))
-        normalized.add(canonical or str(industry).strip().lower())
+        tag = str(industry).strip().lower()
+        if ":" in tag:
+            # Hierarchical tag like "healthcare:oncology" — keep as-is
+            normalized.add(tag)
+        else:
+            canonical = _resolve_industry(tag)
+            normalized.add(canonical or tag)
 
     if normalized:
         return normalized
@@ -204,6 +258,10 @@ def _requirement_applicable_industries(req: Dict[str, Any]) -> set[str]:
     # so retail/company syncs still drop those rows on the next resync/read.
     category = _normalize_category(req.get("category"))
     rate_type = _normalize_rate_type(req.get("rate_type"))
+
+    if category in ONCOLOGY_CATEGORIES or _looks_oncology_specific(req):
+        return {"healthcare:oncology"}
+
     if (
         category in HEALTHCARE_CATEGORIES
         or rate_type == "healthcare"
@@ -231,6 +289,19 @@ _INDUSTRY_RESEARCH_CONTEXT: Dict[str, str] = {
         "- Enhanced sick leave provisions for healthcare workers\n"
         "Return these as SEPARATE requirements with rate_type='healthcare' where applicable.\n"
         'For each healthcare-specific requirement, include "applicable_industries": ["healthcare"] in the returned JSON.'
+    ),
+    "healthcare:oncology": (
+        "\n\nINDUSTRY CONTEXT — ONCOLOGY PRACTICE:\n"
+        "This is an ONCOLOGY healthcare employer (cancer treatment center, radiation "
+        "oncology clinic, medical oncology practice, or similar). In addition to standard "
+        "healthcare requirements, you MUST research oncology-specific regulations:\n"
+        "- NRC 10 CFR 35 / state radiation safety licensing and machine QA\n"
+        "- USP <800> hazardous drug handling (chemotherapy compounding, spill kits, PPE)\n"
+        "- OSHA chemotherapy exposure limits and monitoring\n"
+        "- State tumor/cancer registry reporting mandates\n"
+        "- Clinical trial regulations (21 CFR 50/56 informed consent, IRB oversight)\n"
+        "- Oncology patient rights (treatment refusal, second opinion, palliative care access)\n"
+        'Tag each oncology-specific requirement with "applicable_industries": ["healthcare:oncology"].'
     ),
 }
 
@@ -1429,6 +1500,136 @@ async def _research_healthcare_requirements_for_jurisdiction(
     }
 
 
+async def _research_oncology_requirements_for_jurisdiction(
+    conn,
+    jurisdiction_id: UUID,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> Dict[str, Any]:
+    """Research missing oncology-only categories for a jurisdiction."""
+    from .gemini_compliance import get_gemini_compliance_service
+    from .jurisdiction_context import get_known_sources, build_context_prompt
+
+    j = await conn.fetchrow(
+        "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
+        jurisdiction_id,
+    )
+    if not j:
+        return {"error": "Jurisdiction not found", "new": 0, "categories": [], "failed": []}
+
+    city = j["city"]
+    state = j["state"]
+    county = j.get("county")
+    location_name = f"{city}, {state}"
+
+    has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
+    known_sources = await get_known_sources(conn, jurisdiction_id)
+    source_context = build_context_prompt(known_sources)
+    corrections = await get_recent_corrections(jurisdiction_id)
+    corrections_context = format_corrections_for_prompt(corrections)
+
+    try:
+        preemption_rows = await conn.fetch(
+            "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+            state.upper(),
+        )
+        preemption_rules = {
+            row["category"]: row["allows_local_override"] for row in preemption_rows
+        }
+    except Exception:
+        preemption_rules = {}
+
+    existing = await conn.fetch(
+        "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+        jurisdiction_id,
+    )
+    existing_cats = {r["category"] for r in existing}
+    missing = sorted(cat for cat in ONCOLOGY_CATEGORIES if cat not in existing_cats)
+
+    if not missing:
+        print(f"[Oncology Research] All oncology categories already present for {location_name}")
+        return {
+            "new": 0,
+            "location": location_name,
+            "categories": [],
+            "failed": [],
+            "requirements": [],
+            "skipped": True,
+        }
+
+    print(
+        f"[Oncology Research] Researching {len(missing)} oncology categories "
+        f"for {location_name}: {', '.join(missing)}"
+    )
+
+    service = get_gemini_compliance_service()
+    total_new = 0
+    failed_categories: List[str] = []
+    added_requirements: List[Dict[str, Any]] = []
+
+    for idx, category in enumerate(missing, start=1):
+        print(
+            f"[Oncology Research] [{idx}/{len(missing)}] Researching {category} "
+            f"for {location_name}..."
+        )
+        if progress_callback:
+            progress_callback(
+                idx,
+                len(missing),
+                f"Researching {category.replace('_', ' ')} for {location_name}...",
+            )
+
+        try:
+            reqs = await service.research_location_compliance(
+                city=city,
+                state=state,
+                county=county,
+                categories=[category],
+                source_context=source_context,
+                corrections_context=corrections_context,
+                preemption_rules=preemption_rules,
+                has_local_ordinance=has_local_ordinance,
+            )
+            reqs = reqs or []
+
+            for req in reqs:
+                _clamp_varchar_fields(req)
+                if not req.get("applicable_industries"):
+                    req["applicable_industries"] = ["healthcare:oncology"]
+
+            if reqs:
+                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                total_new += len(reqs)
+                added_requirements.extend(reqs)
+                print(
+                    f"[Oncology Research]   -> {len(reqs)} requirements saved "
+                    f"for {category}"
+                )
+            else:
+                print(f"[Oncology Research]   -> No results for {category}")
+        except Exception as e:
+            failed_categories.append(category)
+            print(f"[Oncology Research]   -> Error researching {category}: {e}")
+
+    print(
+        f"[Oncology Research] Complete for {location_name}: {total_new} new, "
+        f"{len(failed_categories)} failed"
+    )
+
+    if failed_categories and total_new == 0:
+        raise RuntimeError(
+            f"All oncology categories failed for {location_name}: "
+            f"{', '.join(failed_categories)}"
+        )
+
+    return {
+        "new": total_new,
+        "location": location_name,
+        "categories": missing,
+        "failed": failed_categories,
+        "requirements": added_requirements,
+    }
+
+
 async def _fill_from_state_fallback(
     conn,
     service,
@@ -1766,15 +1967,17 @@ async def _filter_requirements_for_company(
     if not any(_requirement_applicable_industries(r) for r in requirements):
         return requirements
 
-    company_industry = await _get_company_canonical_industry(conn, company_id)
+    company_tags = await _get_company_industry_tags(conn, company_id)
 
     filtered = []
     for req in requirements:
-        industries = _requirement_applicable_industries(req)
-        if not industries:
-            filtered.append(req)
-        elif company_industry and company_industry in industries:
-            filtered.append(req)
+        req_industries = _requirement_applicable_industries(req)
+        if not req_industries:
+            filtered.append(req)  # Generic requirement — always include
+        elif not company_tags:
+            continue  # Company has no industry — skip industry-specific reqs
+        elif req_industries & company_tags:
+            filtered.append(req)  # Direct match (set intersection)
     return filtered
 
 
