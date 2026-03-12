@@ -2902,15 +2902,19 @@ async def resend_investigation_interview_invite(
         )
         company_name = company_row["name"] if company_row else "Your Company"
 
-        email_service = get_email_service()
-        await email_service.send_investigation_interview_invite_email(
-            to_email=row["interviewee_email"],
-            to_name=row["interviewee_name"],
-            company_name=company_name,
-            interviewee_role=row["interviewee_role"],
-            invite_token=invite_token,
-            custom_message=None,
-        )
+        try:
+            email_service = get_email_service()
+            await email_service.send_investigation_interview_invite_email(
+                to_email=row["interviewee_email"],
+                to_name=row["interviewee_name"],
+                company_name=company_name,
+                interviewee_role=row["interviewee_role"],
+                invite_token=invite_token,
+                custom_message=None,
+            )
+        except Exception as e:
+            logger.warning("Failed to resend investigation invite email: %s", e)
+            raise HTTPException(status_code=502, detail="Failed to send invite email")
 
         await log_audit(
             conn, incident_id, current_user.id,
