@@ -1,5 +1,4 @@
-import React, {
-  useCallback,
+import {
   useEffect,
   useRef,
   useState,
@@ -10,15 +9,9 @@ import { CinematicNoise } from "./components/CinematicNoise";
 import { Navbar } from "./components/Navbar";
 import { PricingContactModal } from "./components/PricingContactModal";
 import { Hero } from "./sections/Hero";
-import { Compliance } from "./sections/Compliance";
-import { ERCopilot } from "./sections/ERCopilot";
-import { RiskSnapshot } from "./sections/RiskSnapshot";
-import { DynamicHandbooks } from "./sections/DynamicHandbooks";
 import { Footer } from "./sections/Footer";
 
 export function Landing() {
-  const manifestoRef = useRef<HTMLDivElement>(null);
-
   const [scrolled, setScrolled] = useState(false);
   const [activeSection, setActiveSection] = useState("Core");
   const [isPricingModalOpen, setIsPricingModalOpen] = useState(false);
@@ -76,10 +69,6 @@ export function Landing() {
     return () => observer.disconnect();
   }, []);
 
-  const scrollTo = useCallback((ref: React.RefObject<HTMLDivElement | null>) => {
-    ref.current?.scrollIntoView({ behavior: "smooth" });
-  }, []);
-
   return (
     <div
       className="bg-[#0A0E0C] text-[#F0EFEA] selection:bg-[#4ADE80] selection:text-[#0A0E0C] overflow-x-hidden min-h-screen"
@@ -90,8 +79,6 @@ export function Landing() {
         <Navbar
           scrolled={scrolled}
           activeSection={activeSection}
-          scrollTo={scrollTo}
-          manifestoRef={manifestoRef}
           onPricingClick={() => setIsPricingModalOpen(true)}
         />
 

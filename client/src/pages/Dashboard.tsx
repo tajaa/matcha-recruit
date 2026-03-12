@@ -1383,7 +1383,6 @@ export function Dashboard() {
       </WidgetContainer>
     </div>
     </div>
-    </div>
     </>
   );
 }
