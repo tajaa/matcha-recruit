@@ -5,7 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 
-InterviewType = Literal["culture", "candidate", "screening", "tutor_interview", "tutor_language"]
+InterviewType = Literal["culture", "candidate", "screening", "tutor_interview", "tutor_language", "investigation"]
 
 
 # Conversation Analysis Models
@@ -73,6 +73,16 @@ class ScreeningAnalysis(BaseModel):
     overall_score: float  # 0-100
     recommendation: Literal["strong_pass", "pass", "borderline", "fail"]
     summary: str
+    analyzed_at: datetime
+
+
+# Investigation Analysis Models
+class InvestigationAnalysis(BaseModel):
+    key_facts: list[str]
+    credibility_notes: list[str]
+    gaps_identified: list[str]
+    suggested_followup_questions: list[str]
+    interview_summary: str
     analyzed_at: datetime
 
 
@@ -204,6 +214,10 @@ class Interview(BaseModel):
     conversation_analysis: Optional[ConversationAnalysis] = None
     screening_analysis: Optional[ScreeningAnalysis] = None
     tutor_analysis: Optional[dict[str, Any]] = None  # TutorInterviewAnalysis or TutorLanguageAnalysis
+    incident_id: Optional[UUID] = None
+    er_case_id: Optional[UUID] = None
+    interviewee_role: Optional[str] = None
+    investigation_analysis: Optional[InvestigationAnalysis] = None
     status: str  # pending, in_progress, analyzing, completed
     created_at: datetime
     completed_at: Optional[datetime] = None
@@ -220,6 +234,10 @@ class InterviewResponse(BaseModel):
     conversation_analysis: Optional[ConversationAnalysis] = None
     screening_analysis: Optional[ScreeningAnalysis] = None
     tutor_analysis: Optional[dict[str, Any]] = None  # TutorInterviewAnalysis or TutorLanguageAnalysis
+    incident_id: Optional[UUID] = None
+    er_case_id: Optional[UUID] = None
+    interviewee_role: Optional[str] = None
+    investigation_analysis: Optional[InvestigationAnalysis] = None
     status: str
     created_at: datetime
     completed_at: Optional[datetime] = None
@@ -231,6 +249,40 @@ class InterviewStart(BaseModel):
     websocket_url: str
     ws_auth_token: Optional[str] = None
     max_session_duration_seconds: Optional[int] = None  # Session time limit
+
+
+class InvestigationInterviewCreate(BaseModel):
+    """Request to create an investigation interview from an IR incident."""
+    interviewee_name: str
+    interviewee_email: Optional[str] = None
+    interviewee_role: str  # complainant, respondent, witness
+    er_case_id: Optional[UUID] = None
+
+
+class InvestigationInterviewResponse(BaseModel):
+    """Response model for investigation interview listing."""
+    id: UUID
+    incident_id: UUID
+    interview_id: UUID
+    er_case_id: Optional[UUID] = None
+    interviewee_role: Optional[str] = None
+    interviewee_name: Optional[str] = None
+    interviewee_email: Optional[str] = None
+    questions_generated: Optional[list[dict]] = None
+    status: str
+    has_transcript: bool = False
+    investigation_analysis: Optional[InvestigationAnalysis] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+
+class InvestigationInterviewStart(BaseModel):
+    """Response when creating an investigation interview."""
+    investigation_interview_id: UUID
+    interview_id: UUID
+    websocket_url: str
+    ws_auth_token: str
+    questions_generated: list[dict]
 
 
 class TutorSessionCreate(BaseModel):

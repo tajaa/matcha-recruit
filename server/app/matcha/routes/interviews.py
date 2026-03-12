@@ -1207,6 +1207,51 @@ async def interview_websocket(
             if culture_row and culture_row["profile_data"]:
                 culture_profile = json.loads(culture_row["profile_data"]) if isinstance(culture_row["profile_data"], str) else culture_row["profile_data"]
 
+        # For investigation interviews, fetch incident data and generated questions
+        incident_summary = None
+        investigation_questions_text = None
+        interviewee_name_for_prompt = None
+        interviewee_role_for_prompt = None
+        incident_id_str = None
+        if interview_type == "investigation":
+            inv_row = await conn.fetchrow(
+                """
+                SELECT irii.interviewee_name, irii.interviewee_role, irii.questions_generated,
+                       ir.title, ir.description, ir.incident_type, ir.severity, ir.location, ir.occurred_at,
+                       ir.id as incident_id
+                FROM ir_investigation_interviews irii
+                JOIN ir_incidents ir ON irii.incident_id = ir.id
+                WHERE irii.interview_id = $1
+                """,
+                interview_id,
+            )
+            if inv_row:
+                incident_id_str = str(inv_row["incident_id"])
+                interviewee_name_for_prompt = inv_row["interviewee_name"]
+                interviewee_role_for_prompt = inv_row["interviewee_role"]
+                incident_summary = (
+                    f"Title: {inv_row['title']}\n"
+                    f"Type: {inv_row['incident_type']}\n"
+                    f"Severity: {inv_row['severity']}\n"
+                    f"Description: {inv_row['description'] or 'N/A'}\n"
+                    f"Location: {inv_row['location'] or 'N/A'}\n"
+                    f"Occurred: {inv_row['occurred_at'] or 'N/A'}"
+                )
+                questions = inv_row["questions_generated"]
+                if isinstance(questions, str):
+                    questions = json.loads(questions)
+                if questions:
+                    investigation_questions_text = "\n".join(
+                        f"{i+1}. [{q.get('category', 'general')}] {q.get('question', '')}"
+                        for i, q in enumerate(questions)
+                        if q.get('question')
+                    )
+                # Update junction table status
+                await conn.execute(
+                    "UPDATE ir_investigation_interviews SET status = 'in_progress' WHERE interview_id = $1",
+                    interview_id,
+                )
+
         # Update interview status
         await conn.execute(
             "UPDATE interviews SET status = 'in_progress' WHERE id = $1",
@@ -1238,12 +1283,19 @@ async def interview_websocket(
             culture_profile=culture_profile,
             tutor_language=tutor_language,
             tutor_interview_role=tutor_interview_role,
+            incident_summary=incident_summary,
+            investigation_questions=investigation_questions_text,
+            interviewee_name_for_prompt=interviewee_name_for_prompt,
+            interviewee_role_for_prompt=interviewee_role_for_prompt,
         )
 
         await send_message(MessageType.STATUS, "Session started")
 
         # Trigger the model to speak first
-        if interview_type == "tutor_interview":
+        if interview_type == "investigation":
+            name = interviewee_name_for_prompt or "the interviewee"
+            await gemini_session.send_text(f"Please begin the investigation interview now. Introduce yourself to {name}, explain this is a fact-finding conversation, and start with the introduction protocol.")
+        elif interview_type == "tutor_interview":
             role_msg = f" for a {tutor_interview_role} position" if tutor_interview_role else ""
             await gemini_session.send_text(f"Please start the coaching session now. Greet them warmly and explain you'll help them practice interview questions{role_msg}.")
         elif interview_type == "tutor_language":
@@ -1336,6 +1388,11 @@ async def interview_websocket(
                             transcript_text,
                             interview_id,
                         )
+                        if interview_type == "investigation":
+                            await conn.execute(
+                                "UPDATE ir_investigation_interviews SET status = 'cancelled' WHERE interview_id = $1",
+                                interview_id,
+                            )
                     print(f"[Interview {interview_id}] Session cancelled by user, skipping analysis")
             else:
                 # Save transcript with 'analyzing' status - analysis will run in background worker
@@ -1350,6 +1407,13 @@ async def interview_websocket(
                         interview_id,
                     )
 
+                    # For investigation interviews, update junction table
+                    if interview_type == "investigation":
+                        await conn.execute(
+                            "UPDATE ir_investigation_interviews SET status = 'completed', completed_at = NOW() WHERE interview_id = $1",
+                            interview_id,
+                        )
+
                 # Queue analysis task for Celery worker
                 if transcript_text:
                     from app.workers.tasks.interview_analysis import analyze_interview_async
@@ -1361,6 +1425,7 @@ async def interview_websocket(
                         company_id=str(row["company_id"]) if row["company_id"] else None,
                         culture_profile=culture_profile,
                         language=tutor_language,  # Pass language for tutor_language sessions
+                        incident_id=incident_id_str if interview_type == "investigation" else None,
                     )
                     print(f"[Interview {interview_id}] Queued analysis task for background processing")
                 else:

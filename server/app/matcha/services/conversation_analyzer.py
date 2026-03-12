@@ -595,6 +595,38 @@ Return ONLY a JSON object with this structure:
 Return ONLY the JSON object, no other text."""
 
 
+INVESTIGATION_INTERVIEW_ANALYSIS_PROMPT = """Analyze this investigation interview transcript from a workplace investigation.
+
+TRANSCRIPT:
+{transcript}
+
+INCIDENT CONTEXT:
+{incident_context}
+
+Analyze the interview for investigation quality and extract key findings:
+
+1. KEY FACTS: What verifiable facts did the interviewee state? Focus on direct observations, dates, times, locations, people present.
+
+2. CREDIBILITY NOTES: Assess consistency of statements, level of detail, hedging language ("I think" vs "I saw"), emotional indicators, potential bias.
+
+3. GAPS IDENTIFIED: What important questions went unanswered? What areas need follow-up? What was vague or contradictory?
+
+4. SUGGESTED FOLLOW-UP QUESTIONS: Based on gaps and inconsistencies, what should be asked in subsequent interviews (of this person or others)?
+
+5. INTERVIEW SUMMARY: Overall summary of what was learned and its significance to the investigation.
+
+Return ONLY a JSON object with this structure:
+{{
+    "key_facts": ["fact 1", "fact 2", ...],
+    "credibility_notes": ["note 1", "note 2", ...],
+    "gaps_identified": ["gap 1", "gap 2", ...],
+    "suggested_followup_questions": ["question 1", "question 2", ...],
+    "interview_summary": "2-3 paragraph summary of interview findings and significance"
+}}
+
+Return ONLY the JSON object, no other text."""
+
+
 class ConversationAnalyzer:
     def __init__(
         self,
@@ -880,4 +912,54 @@ class ConversationAnalyzer:
                 "session_summary": f"Failed to analyze transcript: {str(e)}",
                 "analyzed_at": datetime.now(timezone.utc).isoformat(),
                 "language": language,
+            }
+
+    async def analyze_investigation_interview(
+        self,
+        transcript: str,
+        incident_data: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Analyze an investigation interview transcript for key findings."""
+        incident_context = "No incident context available."
+        if incident_data:
+            incident_context = (
+                f"Title: {incident_data.get('title', 'N/A')}\n"
+                f"Type: {incident_data.get('incident_type', 'N/A')}\n"
+                f"Severity: {incident_data.get('severity', 'N/A')}\n"
+                f"Description: {incident_data.get('description', 'N/A')}"
+            )
+
+        prompt = INVESTIGATION_INTERVIEW_ANALYSIS_PROMPT.format(
+            transcript=transcript,
+            incident_context=incident_context,
+        )
+
+        response = await self.client.aio.models.generate_content(
+            model=self.model,
+            contents=prompt,
+        )
+
+        text = response.text.strip()
+        if text.startswith("```json"):
+            text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+
+        try:
+            analysis = json.loads(text)
+            analysis["analyzed_at"] = datetime.now(timezone.utc).isoformat()
+            return analysis
+        except json.JSONDecodeError as e:
+            print(f"[ConversationAnalyzer] Failed to parse investigation JSON: {e}")
+            print(f"[ConversationAnalyzer] Raw response: {text}")
+            return {
+                "key_facts": [],
+                "credibility_notes": [],
+                "gaps_identified": [],
+                "suggested_followup_questions": [],
+                "interview_summary": f"Failed to analyze transcript: {str(e)}",
+                "analyzed_at": datetime.now(timezone.utc).isoformat(),
             }

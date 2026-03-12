@@ -54,6 +54,11 @@ from ..models.ir_incident import (
     Osha300LogEntry,
     Osha300ASummary,
 )
+from ..models.interview import (
+    InvestigationInterviewCreate,
+    InvestigationInterviewResponse,
+    InvestigationInterviewStart,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -2470,4 +2475,261 @@ Respond in JSON:
             "recordable": result.get("recordable", False),
             "classification": result.get("classification", "not_recordable"),
             "reasoning": result.get("reasoning", ""),
+        }
+
+
+# ===========================================
+# Investigation Interview Endpoints
+# ===========================================
+
+@router.post("/{incident_id}/investigation-interviews", response_model=InvestigationInterviewStart)
+async def create_investigation_interview(
+    incident_id: UUID,
+    request_body: InvestigationInterviewCreate,
+    current_user=Depends(require_admin_or_client),
+):
+    """Create an investigation interview for an IR incident.
+
+    Generates questions, creates interview + junction row, returns ws_auth_token.
+    """
+    from ..services.ir_interview_questions import generate_investigation_questions
+    from ...core.services.auth import create_interview_ws_token
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Validate incident exists and is in an appropriate status
+        incident = await conn.fetchrow(
+            """
+            SELECT id, title, description, incident_type, severity, status, location,
+                   occurred_at, witnesses, company_id
+            FROM ir_incidents WHERE id = $1
+            """,
+            incident_id,
+        )
+        if not incident:
+            raise HTTPException(status_code=404, detail="Incident not found")
+
+        # Company access check
+        if current_user.role != "admin" and incident["company_id"] != company_id:
+            raise HTTPException(status_code=404, detail="Incident not found")
+
+        if incident["status"] not in ("investigating", "action_required", "reported"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Incident must be in investigating, action_required, or reported status (current: {incident['status']})",
+            )
+
+        # Fetch prior transcripts for context-aware question generation
+        prior_transcripts = []
+        prior_rows = await conn.fetch(
+            """
+            SELECT i.transcript
+            FROM ir_investigation_interviews irii
+            JOIN interviews i ON irii.interview_id = i.id
+            WHERE irii.incident_id = $1 AND i.transcript IS NOT NULL
+            ORDER BY irii.created_at
+            """,
+            incident_id,
+        )
+        prior_transcripts = [r["transcript"] for r in prior_rows]
+
+        # Generate questions
+        settings = get_settings()
+        incident_data = {
+            "title": incident["title"],
+            "description": incident["description"],
+            "incident_type": incident["incident_type"],
+            "severity": incident["severity"],
+            "location": incident["location"],
+            "occurred_at": str(incident["occurred_at"]) if incident["occurred_at"] else None,
+        }
+        questions = await generate_investigation_questions(
+            incident=incident_data,
+            interviewee_name=request_body.interviewee_name,
+            interviewee_role=request_body.interviewee_role,
+            prior_transcripts=prior_transcripts if prior_transcripts else None,
+            api_key=settings.gemini_api_key,
+            vertex_project=settings.vertex_project,
+            vertex_location=settings.vertex_location,
+            model=settings.analysis_model,
+        )
+
+        # Create interview + junction row atomically
+        async with conn.transaction():
+            interview_row = await conn.fetchrow(
+                """
+                INSERT INTO interviews (company_id, interview_type, incident_id, er_case_id, interviewee_role, status)
+                VALUES ($1, 'investigation', $2, $3, $4, 'pending')
+                RETURNING id
+                """,
+                incident["company_id"],
+                incident_id,
+                request_body.er_case_id,
+                request_body.interviewee_role,
+            )
+            interview_id = interview_row["id"]
+
+            junction_row = await conn.fetchrow(
+                """
+                INSERT INTO ir_investigation_interviews
+                    (incident_id, interview_id, er_case_id, interviewee_role, interviewee_name, interviewee_email, questions_generated, status)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
+                RETURNING id
+                """,
+                incident_id,
+                interview_id,
+                request_body.er_case_id,
+                request_body.interviewee_role,
+                request_body.interviewee_name,
+                request_body.interviewee_email,
+                json.dumps(questions),
+            )
+
+            # Audit log inside transaction
+            await log_audit(
+                conn, incident_id, current_user.id,
+                "investigation_interview_created", "investigation_interview",
+                junction_row["id"],
+                {"interviewee_name": request_body.interviewee_name, "interviewee_role": request_body.interviewee_role},
+            )
+
+        # Generate WS auth token (outside transaction — stateless JWT creation)
+        ws_token = create_interview_ws_token(interview_id)
+
+        return InvestigationInterviewStart(
+            investigation_interview_id=junction_row["id"],
+            interview_id=interview_id,
+            websocket_url=f"/api/ws/interview/{interview_id}",
+            ws_auth_token=ws_token,
+            questions_generated=questions,
+        )
+
+
+@router.get("/{incident_id}/investigation-interviews", response_model=list[InvestigationInterviewResponse])
+async def list_investigation_interviews(
+    incident_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    """List investigation interviews for an IR incident."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        incident = await conn.fetchrow(
+            "SELECT id, company_id FROM ir_incidents WHERE id = $1", incident_id,
+        )
+        if not incident:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        if current_user.role != "admin" and incident["company_id"] != company_id:
+            raise HTTPException(status_code=404, detail="Incident not found")
+
+        rows = await conn.fetch(
+            """
+            SELECT irii.id, irii.incident_id, irii.interview_id, irii.er_case_id,
+                   irii.interviewee_role, irii.interviewee_name, irii.interviewee_email,
+                   irii.questions_generated, irii.status, irii.created_at, irii.completed_at,
+                   i.transcript IS NOT NULL as has_transcript,
+                   i.investigation_analysis
+            FROM ir_investigation_interviews irii
+            JOIN interviews i ON irii.interview_id = i.id
+            WHERE irii.incident_id = $1
+            ORDER BY irii.created_at DESC
+            """,
+            incident_id,
+        )
+
+        results = []
+        for row in rows:
+            analysis = row["investigation_analysis"]
+            if isinstance(analysis, str):
+                analysis = json.loads(analysis)
+            questions = row["questions_generated"]
+            if isinstance(questions, str):
+                questions = json.loads(questions)
+            results.append(InvestigationInterviewResponse(
+                id=row["id"],
+                incident_id=row["incident_id"],
+                interview_id=row["interview_id"],
+                er_case_id=row["er_case_id"],
+                interviewee_role=row["interviewee_role"],
+                interviewee_name=row["interviewee_name"],
+                interviewee_email=row["interviewee_email"],
+                questions_generated=questions,
+                status=row["status"],
+                has_transcript=row["has_transcript"],
+                investigation_analysis=analysis,
+                created_at=row["created_at"],
+                completed_at=row["completed_at"],
+            ))
+        return results
+
+
+@router.delete("/{incident_id}/investigation-interviews/{investigation_interview_id}")
+async def cancel_investigation_interview(
+    incident_id: UUID,
+    investigation_interview_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    """Cancel a pending investigation interview."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        incident = await conn.fetchrow(
+            "SELECT id, company_id FROM ir_incidents WHERE id = $1", incident_id,
+        )
+        if not incident:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        if current_user.role != "admin" and incident["company_id"] != company_id:
+            raise HTTPException(status_code=404, detail="Incident not found")
+
+        row = await conn.fetchrow(
+            """
+            SELECT id, status FROM ir_investigation_interviews
+            WHERE id = $1 AND incident_id = $2
+            """,
+            investigation_interview_id, incident_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Investigation interview not found")
+        if row["status"] not in ("pending",):
+            raise HTTPException(status_code=400, detail="Only pending interviews can be cancelled")
+
+        await conn.execute(
+            "UPDATE ir_investigation_interviews SET status = 'cancelled' WHERE id = $1",
+            investigation_interview_id,
+        )
+        await conn.execute(
+            "UPDATE interviews SET status = 'cancelled' WHERE id = (SELECT interview_id FROM ir_investigation_interviews WHERE id = $1)",
+            investigation_interview_id,
+        )
+
+        await log_audit(
+            conn, incident_id, current_user.id,
+            "investigation_interview_cancelled", "investigation_interview",
+            investigation_interview_id, {},
+        )
+
+        return {"status": "cancelled"}
+
+
+@router.get("/{incident_id}/er-case")
+async def get_linked_er_case(
+    incident_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    """Get linked ER case ID for an incident (Phase 2)."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        incident = await conn.fetchrow(
+            "SELECT id, company_id, er_case_id FROM ir_incidents WHERE id = $1", incident_id,
+        )
+        if not incident:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        if current_user.role != "admin" and incident["company_id"] != company_id:
+            raise HTTPException(status_code=404, detail="Incident not found")
+
+        return {
+            "incident_id": str(incident_id),
+            "er_case_id": str(incident["er_case_id"]) if incident["er_case_id"] else None,
         }

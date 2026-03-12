@@ -2321,6 +2321,29 @@ async def generate_suggested_guidance(
     ]
     can_run_discrepancies = len(completed_non_policy_docs) >= 2
 
+    # Check for linked incident witnesses and investigation transcript count
+    linked_incident_has_witnesses = False
+    completed_investigation_transcript_count = 0
+    async with get_connection() as conn:
+        linked_incident = await conn.fetchrow(
+            "SELECT witnesses FROM ir_incidents WHERE er_case_id = $1 LIMIT 1",
+            case_id,
+        )
+        if linked_incident:
+            witnesses = linked_incident["witnesses"]
+            if isinstance(witnesses, str):
+                witnesses = json.loads(witnesses)
+            if isinstance(witnesses, list) and len(witnesses) > 0:
+                linked_incident_has_witnesses = True
+
+        completed_investigation_transcript_count = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM ir_investigation_interviews
+            WHERE er_case_id = $1 AND status IN ('completed', 'analyzed')
+            """,
+            case_id,
+        ) or 0
+
     fallback_payload = _build_fallback_guidance_payload(
         timeline_data=timeline_data,
         discrepancies_data=discrepancies_data,
@@ -2328,6 +2351,8 @@ async def generate_suggested_guidance(
         completed_non_policy_docs=completed_non_policy_docs,
         objective=objective if isinstance(objective, str) else None,
         immediate_risk=immediate_risk if isinstance(immediate_risk, str) else None,
+        linked_incident_has_witnesses=linked_incident_has_witnesses,
+        completed_investigation_transcript_count=completed_investigation_transcript_count,
     )
 
     case_info = {
@@ -3569,3 +3594,97 @@ async def get_retaliation_risk(
         events.sort(key=lambda x: x["days_since_case"])
 
         return {"at_risk": at_risk, "events": events}
+
+
+# ===========================================
+# Investigation Interview Linked Data (Phase 2)
+# ===========================================
+
+@router.get("/{case_id}/investigation-interviews")
+async def get_case_investigation_interviews(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List investigation interviews linked to this ER case."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+
+        rows = await conn.fetch(
+            """
+            SELECT irii.id, irii.incident_id, irii.interview_id, irii.interviewee_role,
+                   irii.interviewee_name, irii.interviewee_email, irii.status,
+                   irii.created_at, irii.completed_at,
+                   i.transcript IS NOT NULL as has_transcript,
+                   i.investigation_analysis
+            FROM ir_investigation_interviews irii
+            JOIN interviews i ON irii.interview_id = i.id
+            WHERE irii.er_case_id = $1
+            ORDER BY irii.created_at DESC
+            """,
+            case_id,
+        )
+
+        results = []
+        for row in rows:
+            analysis = row["investigation_analysis"]
+            if isinstance(analysis, str):
+                analysis = json.loads(analysis)
+            results.append({
+                "id": str(row["id"]),
+                "incident_id": str(row["incident_id"]),
+                "interview_id": str(row["interview_id"]),
+                "interviewee_role": row["interviewee_role"],
+                "interviewee_name": row["interviewee_name"],
+                "interviewee_email": row["interviewee_email"],
+                "status": row["status"],
+                "has_transcript": row["has_transcript"],
+                "investigation_analysis": analysis,
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+                "completed_at": row["completed_at"].isoformat() if row["completed_at"] else None,
+            })
+        return results
+
+
+@router.get("/{case_id}/linked-incidents")
+async def get_case_linked_incidents(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return IR incidents linked to this ER case via er_case_id."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+
+        rows = await conn.fetch(
+            """
+            SELECT id, incident_number, title, incident_type, severity, status,
+                   occurred_at, location, reported_by_name, created_at
+            FROM ir_incidents
+            WHERE er_case_id = $1
+            ORDER BY occurred_at DESC
+            """,
+            case_id,
+        )
+
+        return [
+            {
+                "id": str(row["id"]),
+                "incident_number": row["incident_number"],
+                "title": row["title"],
+                "incident_type": row["incident_type"],
+                "severity": row["severity"],
+                "status": row["status"],
+                "occurred_at": row["occurred_at"].isoformat() if row["occurred_at"] else None,
+                "location": row["location"],
+                "reported_by_name": row["reported_by_name"],
+                "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            }
+            for row in rows
+        ]

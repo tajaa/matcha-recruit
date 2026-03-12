@@ -41,7 +41,7 @@ def _normalize_guidance_action(
     raw_action: Any,
     can_run_discrepancies: bool,
 ) -> dict[str, Any]:
-    valid_action_types = {"run_analysis", "open_tab", "search_evidence", "upload_document"}
+    valid_action_types = {"run_analysis", "open_tab", "search_evidence", "upload_document", "schedule_interview"}
     valid_tabs = {"timeline", "discrepancies", "policy", "search"}
     valid_analysis_types = {"timeline", "discrepancies", "policy", "similar_cases"}
 
@@ -98,6 +98,15 @@ def _normalize_guidance_action(
         return {
             "type": "upload_document",
             "label": label or "Upload Evidence",
+            "tab": None,
+            "analysis_type": None,
+            "search_query": None,
+        }
+
+    if action_type == "schedule_interview":
+        return {
+            "type": "schedule_interview",
+            "label": label or "Schedule Interview",
             "tab": None,
             "analysis_type": None,
             "search_query": None,
@@ -175,6 +184,8 @@ def _build_fallback_guidance_payload(
     completed_non_policy_docs: list[dict[str, Any]],
     objective: Optional[str],
     immediate_risk: Optional[str],
+    linked_incident_has_witnesses: bool = False,
+    completed_investigation_transcript_count: int = 0,
 ) -> dict[str, Any]:
     doc_count = len(completed_non_policy_docs)
     can_run_discrepancies = doc_count >= 2
@@ -255,6 +266,25 @@ def _build_fallback_guidance_payload(
                     "type": "open_tab",
                     "label": "View Policy Findings",
                     "tab": "policy",
+                    "analysis_type": None,
+                    "search_query": None,
+                },
+            }
+        )
+
+    if linked_incident_has_witnesses and completed_investigation_transcript_count < 2:
+        cards.append(
+            {
+                "id": "schedule-investigation-interview",
+                "title": "Schedule investigation interview",
+                "recommendation": "The linked incident has witnesses. Schedule investigation interviews to gather firsthand accounts before reaching a determination.",
+                "rationale": f"Only {completed_investigation_transcript_count} investigation transcript(s) completed so far. Witness interviews strengthen the evidentiary record.",
+                "priority": "high",
+                "blockers": [],
+                "action": {
+                    "type": "schedule_interview",
+                    "label": "Schedule Interview",
+                    "tab": None,
                     "analysis_type": None,
                     "search_query": None,
                 },

@@ -9,7 +9,7 @@ from .rate_limiter import get_rate_limiter, RateLimitExceeded
 
 from typing import Literal
 
-InterviewType = Literal["culture", "candidate", "screening", "tutor_interview", "tutor_language"]
+InterviewType = Literal["culture", "candidate", "screening", "tutor_interview", "tutor_language", "investigation"]
 
 CULTURE_INTERVIEW_PROMPT = """You are an AI interviewer conducting a company culture interview for Matcha Recruit.
 
@@ -436,6 +436,45 @@ IMPORTANTE:
 """
 
 
+INVESTIGATION_INTERVIEW_PROMPT = """You are an AI investigator conducting a workplace investigation interview for an HR department.
+
+INCIDENT CONTEXT:
+{incident_summary}
+
+INTERVIEWEE: {interviewee_name}
+ROLE: {interviewee_role}
+
+PREPARED QUESTIONS:
+{investigation_questions}
+
+YOUR GOAL:
+Conduct a thorough, neutral fact-finding interview. Gather detailed firsthand accounts while maintaining objectivity and fairness.
+
+INTERVIEW PROTOCOL:
+1. INTRODUCTION: Introduce yourself, explain the purpose (fact-finding, not disciplinary), assure confidentiality within investigation scope, explain no retaliation policy
+2. OPEN ACCOUNT: Ask the interviewee to describe events in their own words without interruption
+3. TARGETED QUESTIONS: Work through the prepared questions, adapting based on their account
+4. CLARIFICATION: Follow up on vague or inconsistent statements — ask for specifics (dates, times, locations, who was present)
+5. CLOSING: Ask if there's anything else they want to add, any witnesses they'd recommend, any documents that might be relevant
+
+RULES:
+- Ask ONE question at a time
+- Use open-ended, non-leading questions
+- Do not share other witness statements or evidence
+- Do not make promises about outcomes
+- Do not express opinions about guilt or innocence
+- If the interviewee becomes emotional, acknowledge and give them space
+- Keep responses concise and professional (2-3 sentences max)
+- Do not use bullet points or lists when speaking
+- Maintain a calm, neutral, empathetic tone throughout
+
+IMPORTANT:
+- This is a voice conversation — be natural but professional
+- Document-quality accuracy matters — probe for specifics
+- If they say "I think" or "I believe", ask what they directly observed vs. what they heard from others
+"""
+
+
 @dataclass
 class GeminiResponse:
     type: str  # "audio", "transcription", "turn_complete"
@@ -489,6 +528,10 @@ class GeminiLiveSession:
         culture_profile: Optional[dict] = None,
         tutor_language: Optional[str] = None,  # "en" or "es" for language tests
         tutor_interview_role: Optional[str] = None,  # Role being practiced for (e.g., "CTO")
+        incident_summary: Optional[str] = None,
+        investigation_questions: Optional[str] = None,
+        interviewee_name_for_prompt: Optional[str] = None,
+        interviewee_role_for_prompt: Optional[str] = None,
     ) -> None:
         """Connect to Gemini with appropriate interview prompt based on type."""
         # Check rate limit before starting a live session
@@ -513,6 +556,13 @@ class GeminiLiveSession:
                 system_prompt = TUTOR_LANGUAGE_SPANISH_PROMPT
             else:
                 system_prompt = TUTOR_LANGUAGE_ENGLISH_PROMPT
+        elif interview_type == "investigation":
+            system_prompt = INVESTIGATION_INTERVIEW_PROMPT.format(
+                incident_summary=incident_summary or "No incident details provided",
+                interviewee_name=interviewee_name_for_prompt or "Interviewee",
+                interviewee_role=interviewee_role_for_prompt or "witness",
+                investigation_questions=investigation_questions or "Use your professional judgment to ask relevant questions.",
+            )
         elif interview_type == "screening":
             # Screening interview - first-round candidate filtering
             system_prompt = SCREENING_INTERVIEW_PROMPT.format(
@@ -710,6 +760,8 @@ class GeminiLiveSession:
                     speaker = "Coach"
                 elif self._interview_type == "tutor_language":
                     speaker = "Tutor"
+                elif self._interview_type == "investigation":
+                    speaker = "Investigator"
                 else:
                     speaker = "Interviewer"
             else:
@@ -718,6 +770,8 @@ class GeminiLiveSession:
                     speaker = "Candidate"
                 elif self._interview_type in ("tutor_interview", "tutor_language"):
                     speaker = "Learner"
+                elif self._interview_type == "investigation":
+                    speaker = "Interviewee"
                 else:
                     speaker = "HR"
             lines.append(f"{speaker}: {text}")

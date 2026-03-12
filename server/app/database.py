@@ -1898,6 +1898,59 @@ async def init_db():
         """)
 
         # ===========================================
+        # IR Investigation Interviews (bridge IR → ER)
+        # ===========================================
+
+        # Add investigation interview columns to interviews table
+        # (placed here because FKs reference ir_incidents and er_cases created above)
+        await conn.execute("""
+            ALTER TABLE interviews ADD COLUMN IF NOT EXISTS incident_id UUID REFERENCES ir_incidents(id) ON DELETE SET NULL
+        """)
+        await conn.execute("""
+            ALTER TABLE interviews ADD COLUMN IF NOT EXISTS er_case_id UUID REFERENCES er_cases(id) ON DELETE SET NULL
+        """)
+        await conn.execute("""
+            ALTER TABLE interviews ADD COLUMN IF NOT EXISTS interviewee_role VARCHAR(50)
+        """)
+        await conn.execute("""
+            ALTER TABLE interviews ADD COLUMN IF NOT EXISTS investigation_analysis JSONB
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_interviews_incident_id ON interviews(incident_id) WHERE incident_id IS NOT NULL
+        """)
+
+        # Add er_case_id to ir_incidents for ER linking
+        await conn.execute("""
+            ALTER TABLE ir_incidents ADD COLUMN IF NOT EXISTS er_case_id UUID REFERENCES er_cases(id) ON DELETE SET NULL
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_ir_incidents_er_case_id ON ir_incidents(er_case_id) WHERE er_case_id IS NOT NULL
+        """)
+
+        # Junction table for investigation interviews
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS ir_investigation_interviews (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
+                interview_id UUID NOT NULL REFERENCES interviews(id) ON DELETE CASCADE,
+                er_case_id UUID REFERENCES er_cases(id) ON DELETE SET NULL,
+                interviewee_role VARCHAR(50),
+                interviewee_name VARCHAR(255),
+                interviewee_email VARCHAR(255),
+                questions_generated JSONB,
+                status VARCHAR(50) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT NOW(),
+                completed_at TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_irii_incident_id ON ir_investigation_interviews(incident_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_irii_interview_id ON ir_investigation_interviews(interview_id)
+        """)
+
+        # ===========================================
         # Leads Agent Tables (Executive Lead Generation)
         # ===========================================
 
