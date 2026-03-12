@@ -2355,6 +2355,9 @@ export const adminCompanies = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  delete: (id: string): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/admin/companies/${id}`, { method: 'DELETE' }),
 };
 
 // Admin Broker Management

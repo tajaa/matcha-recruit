@@ -756,6 +756,9 @@ async def init_db():
                 IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'healthcare_specialties') THEN
                     ALTER TABLE companies ADD COLUMN healthcare_specialties TEXT[];
                 END IF;
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'companies' AND column_name = 'deleted_at') THEN
+                    ALTER TABLE companies ADD COLUMN deleted_at TIMESTAMP;
+                END IF;
             END $$;
         """)
 

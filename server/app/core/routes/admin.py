@@ -5905,6 +5905,7 @@ async def list_companies_admin():
                 (SELECT COUNT(*) FROM employees e WHERE e.org_id = c.id AND e.termination_date IS NULL) AS user_count,
                 (SELECT COUNT(*) FROM business_locations bl WHERE bl.company_id = c.id) AS location_count
             FROM companies c
+            WHERE c.deleted_at IS NULL
             ORDER BY c.name
         """)
         return [
@@ -6013,4 +6014,17 @@ async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate):
         )
         if not row:
             raise HTTPException(status_code=404, detail="Company not found")
+    return {"ok": True}
+
+
+@router.delete("/companies/{company_id}", dependencies=[Depends(require_admin)])
+async def delete_company_admin(company_id: UUID):
+    """Soft-delete a company so it no longer appears in lists."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "UPDATE companies SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL RETURNING id",
+            company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Company not found or already deleted")
     return {"ok": True}

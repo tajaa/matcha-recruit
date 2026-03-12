@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminCompanies } from '../../api/client';
 import type { AdminCompany, AdminCompanyDetail } from '../../api/client';
-import { Building2, Users, Copy, Check, X, Pencil, ChevronRight, MapPin } from 'lucide-react';
+import { Building2, Users, Copy, Check, X, Pencil, ChevronRight, MapPin, Trash2 } from 'lucide-react';
 
 const DK = {
   pageBg: 'bg-zinc-950',
@@ -91,13 +91,16 @@ function CompanyDrawer({
   company,
   onClose,
   onUpdated,
+  onDeleted,
 }: {
   company: AdminCompanyDetail;
   onClose: () => void;
   onUpdated: (updated: AdminCompanyDetail) => void;
+  onDeleted: (id: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [form, setForm] = useState({
     name: company.name ?? '',
     industry: company.industry ?? '',
@@ -114,6 +117,17 @@ function CompanyDrawer({
         ? f.healthcare_specialties.filter(s => s !== val)
         : [...f.healthcare_specialties, val],
     }));
+  };
+
+  const deleteCompany = async () => {
+    if (!confirm(`Delete "${company.name}"? This will hide it from all lists.`)) return;
+    setDeleting(true);
+    try {
+      await adminCompanies.delete(company.id);
+      onDeleted(company.id);
+    } finally {
+      setDeleting(false);
+    }
   };
 
   const save = async () => {
@@ -156,6 +170,11 @@ function CompanyDrawer({
             {!editing && (
               <button onClick={() => setEditing(true)} className={DK.btn}>
                 <Pencil className="w-3.5 h-3.5" />
+              </button>
+            )}
+            {!editing && (
+              <button onClick={deleteCompany} disabled={deleting} className={`${DK.btn} !text-red-400 hover:!bg-red-500/10`}>
+                <Trash2 className="w-3.5 h-3.5" />
               </button>
             )}
             <button onClick={onClose} className={`${DK.btn} !px-2`}>
@@ -469,6 +488,11 @@ export function Companies() {
             onUpdated={updated => {
               setDetail(updated);
               setCompanies(prev => prev.map(c => c.id === updated.id ? { ...c, ...updated } : c));
+            }}
+            onDeleted={id => {
+              setCompanies(prev => prev.filter(c => c.id !== id));
+              setSelectedId(null);
+              setDetail(null);
             }}
           />
         ) : null
