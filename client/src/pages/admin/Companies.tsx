@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminCompanies } from '../../api/client';
-import type { AdminCompany, AdminCompanyDetail, AdminCompanyEmployee } from '../../api/client';
-import { Building2, Users, Copy, Check, X, Pencil, ChevronRight, MapPin, Trash2, ChevronDown } from 'lucide-react';
+import type { AdminCompany, AdminCompanyDetail, AdminCompanyEmployee, AdminEmployeeProfile } from '../../api/client';
+import { Building2, Users, Copy, Check, X, Pencil, ChevronRight, MapPin, Trash2, ChevronDown, ArrowLeft, AlertTriangle } from 'lucide-react';
 
 const DK = {
   pageBg: 'bg-zinc-950',
@@ -87,6 +87,183 @@ function CopyId({ id }: { id: string }) {
   );
 }
 
+function expiryStatus(dateStr: string | null): 'expired' | 'soon' | 'ok' | null {
+  if (!dateStr) return null;
+  const d = new Date(dateStr);
+  const now = new Date();
+  const days = (d.getTime() - now.getTime()) / 86400000;
+  if (days < 0) return 'expired';
+  if (days < 60) return 'soon';
+  return 'ok';
+}
+
+function ExpiryBadge({ date }: { date: string | null }) {
+  if (!date) return null;
+  const status = expiryStatus(date);
+  const fmt = new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  if (status === 'expired') return <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-red-500/40 bg-red-500/10 text-red-400 flex items-center gap-1"><AlertTriangle className="w-2.5 h-2.5" />Expired {fmt}</span>;
+  if (status === 'soon') return <span className="text-[10px] px-1.5 py-0.5 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-400">Exp {fmt}</span>;
+  return <span className={`text-[10px] ${DK.textFaint}`}>{fmt}</span>;
+}
+
+function EmployeeProfilePanel({
+  employeeId,
+  isHealthcare,
+  onBack,
+}: {
+  employeeId: string;
+  isHealthcare: boolean;
+  onBack: () => void;
+}) {
+  const [profile, setProfile] = useState<AdminEmployeeProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    adminCompanies.getEmployee(employeeId).then(setProfile).finally(() => setLoading(false));
+  }, [employeeId]);
+
+  if (loading) return (
+    <div className="flex-1 flex items-center justify-center">
+      <span className={`text-sm ${DK.textFaint}`}>Loading...</span>
+    </div>
+  );
+  if (!profile) return null;
+
+  const creds = profile.credentials;
+  const ec = profile.emergency_contact;
+
+  return (
+    <div className="flex flex-col h-full overflow-y-auto">
+      {/* Back header */}
+      <div className={`flex items-center gap-3 p-4 border-b ${DK.border} flex-shrink-0`}>
+        <button onClick={onBack} className={`${DK.btn} !px-2`}>
+          <ArrowLeft className="w-4 h-4" />
+        </button>
+        <div className="min-w-0">
+          <div className={`text-sm font-semibold ${DK.textMain}`}>{profile.first_name} {profile.last_name}</div>
+          <div className={`text-[11px] ${DK.textFaint}`}>{profile.job_title || profile.email}</div>
+        </div>
+        {profile.termination_date && (
+          <span className={`ml-auto flex-shrink-0 ${DK.badge} border-red-500/30 text-red-400 bg-red-500/10`}>terminated</span>
+        )}
+      </div>
+
+      <div className="p-4 space-y-5">
+
+        {/* Identity */}
+        <section className="space-y-2">
+          <div className={DK.label}>Identity</div>
+          <div className={`${DK.innerEl} p-3 space-y-2`}>
+            <PRow label="Work Email" value={profile.email} />
+            {profile.personal_email && <PRow label="Personal Email" value={profile.personal_email} />}
+            {profile.phone && <PRow label="Phone" value={profile.phone} />}
+            {profile.address && <PRow label="Address" value={profile.address} />}
+          </div>
+        </section>
+
+        {/* Employment */}
+        <section className="space-y-2">
+          <div className={DK.label}>Employment</div>
+          <div className={`${DK.innerEl} p-3 space-y-2`}>
+            {profile.job_title && <PRow label="Title" value={profile.job_title} />}
+            {profile.department && <PRow label="Department" value={profile.department} />}
+            {profile.manager_name && <PRow label="Manager" value={profile.manager_name} />}
+            <PRow label="Type" value={profile.employment_type?.replace('_', ' ') ?? '—'} />
+            {profile.pay_classification && <PRow label="Pay Class" value={profile.pay_classification} />}
+            {profile.pay_rate && <PRow label="Pay Rate" value={`$${parseFloat(profile.pay_rate).toLocaleString()}`} />}
+            <PRow label="Location" value={[profile.work_city, profile.work_state].filter(Boolean).join(', ') || '—'} />
+            {profile.start_date && <PRow label="Start Date" value={new Date(profile.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} />}
+            {profile.termination_date && <PRow label="End Date" value={new Date(profile.termination_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })} />}
+            {profile.status_reason && <PRow label="Status Reason" value={profile.status_reason} />}
+            <PRow label="Status" value={
+              <span className={profile.employment_status === 'active'
+                ? `${DK.badge} border-emerald-500/30 text-emerald-400 bg-emerald-500/10`
+                : `${DK.badge} border-zinc-700 text-zinc-400`
+              }>{profile.employment_status ?? 'active'}</span>
+            } />
+          </div>
+        </section>
+
+        {/* Emergency Contact */}
+        {Object.keys(ec).length > 0 && (
+          <section className="space-y-2">
+            <div className={DK.label}>Emergency Contact</div>
+            <div className={`${DK.innerEl} p-3 space-y-2`}>
+              {ec.name && <PRow label="Name" value={ec.name} />}
+              {ec.relationship && <PRow label="Relationship" value={ec.relationship} />}
+              {ec.phone && <PRow label="Phone" value={ec.phone} />}
+              {ec.email && <PRow label="Email" value={ec.email} />}
+            </div>
+          </section>
+        )}
+
+        {/* Healthcare Credentials */}
+        {isHealthcare && (
+          <section className="space-y-2">
+            <div className={DK.label}>Healthcare Credentials</div>
+            {!creds ? (
+              <p className={`text-xs ${DK.textFaint}`}>No credentials on file.</p>
+            ) : (
+              <div className={`${DK.innerEl} p-3 space-y-3`}>
+                {(creds.license_number || creds.license_type) && (
+                  <div>
+                    <div className={`text-[10px] ${DK.textFaint} mb-1`}>License</div>
+                    <div className={`text-sm ${DK.textMain}`}>{[creds.license_type, creds.license_number, creds.license_state && `(${creds.license_state})`].filter(Boolean).join(' ')}</div>
+                    <ExpiryBadge date={creds.license_expiration} />
+                  </div>
+                )}
+                {creds.npi_number && <PRow label="NPI" value={creds.npi_number} />}
+                {creds.dea_number && (
+                  <div>
+                    <div className={`text-[10px] ${DK.textFaint} mb-1`}>DEA</div>
+                    <div className={`text-sm ${DK.textMain}`}>{creds.dea_number}</div>
+                    <ExpiryBadge date={creds.dea_expiration} />
+                  </div>
+                )}
+                {creds.board_certification && (
+                  <div>
+                    <div className={`text-[10px] ${DK.textFaint} mb-1`}>Board Certification</div>
+                    <div className={`text-sm ${DK.textMain}`}>{creds.board_certification}</div>
+                    <ExpiryBadge date={creds.board_certification_expiration} />
+                  </div>
+                )}
+                {creds.clinical_specialty && <PRow label="Specialty" value={creds.clinical_specialty} />}
+                {creds.malpractice_carrier && (
+                  <div>
+                    <div className={`text-[10px] ${DK.textFaint} mb-1`}>Malpractice</div>
+                    <div className={`text-sm ${DK.textMain}`}>{creds.malpractice_carrier}{creds.malpractice_policy_number ? ` · ${creds.malpractice_policy_number}` : ''}</div>
+                    <ExpiryBadge date={creds.malpractice_expiration} />
+                  </div>
+                )}
+                {creds.oig_status && creds.oig_status !== 'not_checked' && (
+                  <PRow label="OIG Status" value={
+                    <span className={creds.oig_status === 'excluded'
+                      ? `${DK.badge} border-red-500/40 text-red-400 bg-red-500/10`
+                      : `${DK.badge} border-emerald-500/30 text-emerald-400 bg-emerald-500/10`
+                    }>{creds.oig_status}</span>
+                  } />
+                )}
+                {creds.oig_last_checked && <PRow label="OIG Checked" value={new Date(creds.oig_last_checked).toLocaleDateString()} />}
+              </div>
+            )}
+          </section>
+        )}
+
+      </div>
+    </div>
+  );
+}
+
+function PRow({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <span className={`text-[11px] ${DK.textFaint} flex-shrink-0`}>{label}</span>
+      <span className={`text-sm ${DK.textDim} text-right break-all`}>{value}</span>
+    </div>
+  );
+}
+
 function CompanyDrawer({
   company,
   onClose,
@@ -98,6 +275,7 @@ function CompanyDrawer({
   onUpdated: (updated: AdminCompanyDetail) => void;
   onDeleted: (id: string) => void;
 }) {
+  const isHealthcare = company.industry?.toLowerCase() === 'healthcare';
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -106,6 +284,7 @@ function CompanyDrawer({
   const [employees, setEmployees] = useState<AdminCompanyEmployee[] | null>(null);
   const [employeesLoading, setEmployeesLoading] = useState(false);
   const [adminsOpen, setAdminsOpen] = useState(false);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null);
   const [form, setForm] = useState({
     name: company.name ?? '',
     industry: company.industry ?? '',
@@ -182,7 +361,17 @@ function CompanyDrawer({
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-black/50" onClick={onClose} />
-      <div className={`w-[500px] h-full overflow-y-auto ${DK.pageBg} border-l ${DK.border} flex flex-col`}>
+      <div className={`w-[500px] h-full ${DK.pageBg} border-l ${DK.border} flex flex-col relative overflow-hidden`}>
+        {/* Employee profile slide-over */}
+        {selectedEmployeeId && (
+          <div className={`absolute inset-0 z-10 ${DK.pageBg} flex flex-col`}>
+            <EmployeeProfilePanel
+              employeeId={selectedEmployeeId}
+              isHealthcare={isHealthcare}
+              onBack={() => setSelectedEmployeeId(null)}
+            />
+          </div>
+        )}
 
         {/* Header */}
         <div className={`flex items-start justify-between gap-3 p-5 border-b ${DK.border}`}>
@@ -207,7 +396,7 @@ function CompanyDrawer({
           </div>
         </div>
 
-        <div className="p-5 space-y-5 flex-1">
+        <div className="p-5 space-y-5 flex-1 overflow-y-auto">
 
           {/* Snapshot card */}
           {!editing && (
@@ -359,7 +548,8 @@ function CompanyDrawer({
                 ) : employees !== null ? (
                   <div className="space-y-1.5 pt-1">
                     {activeEmployees.map(e => (
-                      <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
+                      <button key={e.id} onClick={() => setSelectedEmployeeId(e.id)}
+                        className={`w-full ${DK.innerEl} px-3 py-2.5 flex items-center gap-3 hover:bg-zinc-700 transition text-left`}>
                         <div className="flex-1 min-w-0">
                           <div className={`text-sm font-medium ${DK.textMain} truncate`}>{e.name || e.email}</div>
                           <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
@@ -367,8 +557,9 @@ function CompanyDrawer({
                         <div className="flex items-center gap-2 flex-shrink-0">
                           {e.work_state && <span className={`text-[10px] ${DK.textMuted}`}>{e.work_state}</span>}
                           {e.employment_type && <span className={`text-[10px] ${DK.textFaint}`}>{e.employment_type}</span>}
+                          <ChevronRight className={`w-3 h-3 ${DK.textFaint}`} />
                         </div>
-                      </div>
+                      </button>
                     ))}
                     {terminatedEmployees.length > 0 && (
                       <>
@@ -376,13 +567,17 @@ function CompanyDrawer({
                           Terminated ({terminatedEmployees.length})
                         </div>
                         {terminatedEmployees.map(e => (
-                          <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3 opacity-50`}>
+                          <button key={e.id} onClick={() => setSelectedEmployeeId(e.id)}
+                            className={`w-full ${DK.innerEl} px-3 py-2.5 flex items-center gap-3 opacity-50 hover:opacity-80 hover:bg-zinc-700 transition text-left`}>
                             <div className="flex-1 min-w-0">
                               <div className={`text-sm ${DK.textFaint} truncate`}>{e.name || e.email}</div>
                               <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
                             </div>
-                            {e.work_state && <span className={`text-[10px] ${DK.textMuted} flex-shrink-0`}>{e.work_state}</span>}
-                          </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              {e.work_state && <span className={`text-[10px] ${DK.textMuted}`}>{e.work_state}</span>}
+                              <ChevronRight className={`w-3 h-3 ${DK.textFaint}`} />
+                            </div>
+                          </button>
                         ))}
                       </>
                     )}

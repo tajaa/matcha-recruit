@@ -2350,6 +2350,49 @@ export interface AdminCompanyEmployee {
   active: boolean;
 }
 
+export interface AdminEmployeeProfile {
+  id: string;
+  org_id: string;
+  email: string;
+  personal_email: string | null;
+  first_name: string;
+  last_name: string;
+  phone: string | null;
+  address: string | null;
+  job_title: string | null;
+  department: string | null;
+  employment_type: string | null;
+  employment_status: string | null;
+  pay_classification: string | null;
+  pay_rate: string | null;
+  work_state: string | null;
+  work_city: string | null;
+  start_date: string | null;
+  termination_date: string | null;
+  status_reason: string | null;
+  manager_name: string | null;
+  emergency_contact: Record<string, string>;
+  created_at: string | null;
+  credentials: {
+    license_type: string | null;
+    license_number: string | null;
+    license_state: string | null;
+    license_expiration: string | null;
+    npi_number: string | null;
+    dea_number: string | null;
+    dea_expiration: string | null;
+    board_certification: string | null;
+    board_certification_expiration: string | null;
+    clinical_specialty: string | null;
+    oig_last_checked: string | null;
+    oig_status: string | null;
+    malpractice_carrier: string | null;
+    malpractice_policy_number: string | null;
+    malpractice_expiration: string | null;
+    health_clearances: Record<string, string>;
+  } | null;
+}
+
 export const adminCompanies = {
   list: (): Promise<AdminCompany[]> =>
     request<AdminCompany[]>('/admin/companies'),
@@ -2368,6 +2411,9 @@ export const adminCompanies = {
 
   getEmployees: (id: string): Promise<AdminCompanyEmployee[]> =>
     request<AdminCompanyEmployee[]>(`/admin/companies/${id}/employees`),
+
+  getEmployee: (employeeId: string): Promise<AdminEmployeeProfile> =>
+    request<AdminEmployeeProfile>(`/admin/employees/${employeeId}`),
 };
 
 // Admin Broker Management

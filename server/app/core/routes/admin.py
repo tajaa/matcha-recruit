@@ -6025,6 +6025,81 @@ async def get_company_employees_admin(company_id: UUID):
         ]
 
 
+@router.get("/employees/{employee_id}", dependencies=[Depends(require_admin)])
+async def get_employee_admin(employee_id: UUID):
+    """Get full employee profile including credentials."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow("""
+            SELECT
+                e.id, e.org_id, e.email, e.personal_email, e.first_name, e.last_name,
+                e.phone, e.address, e.job_title, e.department, e.employment_type,
+                e.employment_status, e.pay_classification, e.pay_rate,
+                e.work_state, e.work_city, e.start_date, e.termination_date,
+                e.status_reason, e.emergency_contact, e.created_at,
+                mgr.first_name || ' ' || mgr.last_name AS manager_name
+            FROM employees e
+            LEFT JOIN employees mgr ON mgr.id = e.manager_id
+            WHERE e.id = $1
+        """, employee_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        creds = await conn.fetchrow("""
+            SELECT license_type, license_number, license_state, license_expiration,
+                   npi_number, dea_number, dea_expiration,
+                   board_certification, board_certification_expiration,
+                   clinical_specialty, oig_last_checked, oig_status,
+                   malpractice_carrier, malpractice_policy_number, malpractice_expiration,
+                   health_clearances
+            FROM employee_credentials WHERE employee_id = $1
+        """, employee_id)
+
+        ec = dict(row["emergency_contact"] or {})
+        result = {
+            "id": str(row["id"]),
+            "org_id": str(row["org_id"]),
+            "email": row["email"],
+            "personal_email": row["personal_email"],
+            "first_name": row["first_name"],
+            "last_name": row["last_name"],
+            "phone": row["phone"],
+            "address": row["address"],
+            "job_title": row["job_title"],
+            "department": row["department"],
+            "employment_type": row["employment_type"],
+            "employment_status": row["employment_status"],
+            "pay_classification": row["pay_classification"],
+            "pay_rate": str(row["pay_rate"]) if row["pay_rate"] else None,
+            "work_state": row["work_state"],
+            "work_city": row["work_city"],
+            "start_date": row["start_date"].isoformat() if row["start_date"] else None,
+            "termination_date": row["termination_date"].isoformat() if row["termination_date"] else None,
+            "status_reason": row["status_reason"],
+            "manager_name": row["manager_name"],
+            "emergency_contact": ec,
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "credentials": {
+                "license_type": creds["license_type"],
+                "license_number": creds["license_number"],
+                "license_state": creds["license_state"],
+                "license_expiration": creds["license_expiration"].isoformat() if creds["license_expiration"] else None,
+                "npi_number": creds["npi_number"],
+                "dea_number": creds["dea_number"],
+                "dea_expiration": creds["dea_expiration"].isoformat() if creds["dea_expiration"] else None,
+                "board_certification": creds["board_certification"],
+                "board_certification_expiration": creds["board_certification_expiration"].isoformat() if creds["board_certification_expiration"] else None,
+                "clinical_specialty": creds["clinical_specialty"],
+                "oig_last_checked": creds["oig_last_checked"].isoformat() if creds["oig_last_checked"] else None,
+                "oig_status": creds["oig_status"],
+                "malpractice_carrier": creds["malpractice_carrier"],
+                "malpractice_policy_number": creds["malpractice_policy_number"],
+                "malpractice_expiration": creds["malpractice_expiration"].isoformat() if creds["malpractice_expiration"] else None,
+                "health_clearances": dict(creds["health_clearances"] or {}),
+            } if creds else None,
+        }
+        return result
+
+
 @router.patch("/companies/{company_id}", dependencies=[Depends(require_admin)])
 async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate):
     """Update company profile fields."""
