@@ -34,8 +34,7 @@ Update EC2 deployments by pulling latest images and restarting containers.
 
 OPTIONS:
     --matcha         Update Matcha-Recruit (ports 8002/8082)
-    --agent          Deploy/update agent + llama (Qwen local LLM)
-    --agent-upload   Upload Qwen model to EC2 (one-time, ~508MB)
+    --agent          Deploy/update agent (Gemini API)
     --all            Update matcha + agent
     --status         Show status of all containers
     -h, --help       Show this help message
@@ -43,8 +42,7 @@ OPTIONS:
 EXAMPLES:
     $0 --matcha          # Update only Matcha
     $0 --all             # Update matcha + agent
-    $0 --agent-upload    # Upload Qwen model (first time only)
-    $0 --agent           # Deploy/restart agent with local Qwen
+    $0 --agent           # Deploy/restart agent
     $0 --status          # Check container status
 EOF
 }
@@ -91,18 +89,6 @@ update_matcha() {
     log_success "Matcha-Recruit updated!"
 }
 
-upload_model() {
-    local model_file="server/agent/models/Qwen3.5-0.8B-Q4_K_M.gguf"
-    if [ ! -f "$model_file" ]; then
-        log_error "Model file not found: $model_file"
-        exit 1
-    fi
-    log_info "Creating models directory on EC2..."
-    ssh_cmd "mkdir -p ~/matcha/models"
-    log_info "Uploading Qwen 0.8B model (~508MB)..."
-    scp -i "$SSH_KEY" "$model_file" "$EC2_USER@$EC2_HOST:~/matcha/models/"
-    log_success "Model uploaded to EC2:~/matcha/models/"
-}
 
 deploy_agent() {
     log_info "Deploying agent API..."
@@ -126,7 +112,6 @@ cleanup() {
 # Parse arguments
 UPDATE_MATCHA=false
 UPDATE_AGENT=false
-AGENT_UPLOAD=false
 SHOW_STATUS=false
 
 if [ $# -eq 0 ]; then
@@ -142,10 +127,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --agent)
             UPDATE_AGENT=true
-            shift
-            ;;
-        --agent-upload)
-            AGENT_UPLOAD=true
             shift
             ;;
         --all)
@@ -172,12 +153,6 @@ done
 # Execute
 if [ "$SHOW_STATUS" = true ]; then
     show_status
-    exit 0
-fi
-
-# Agent-only operations (no backup/cleanup needed)
-if [ "$AGENT_UPLOAD" = true ]; then
-    upload_model
     exit 0
 fi
 

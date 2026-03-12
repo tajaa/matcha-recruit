@@ -99,42 +99,6 @@ services:
     healthcheck:
       disable: true
 
-  # llama.cpp server for local LLM inference (Qwen 0.8B)
-  # Model file must exist on host at ./models/Qwen3.5-0.8B-Q4_K_M.gguf
-  # Upload with: scp -i roonMT-arm.pem server/agent/models/Qwen3.5-0.8B-Q4_K_M.gguf ec2-user@<host>:~/matcha-recruit/models/
-  llama:
-    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-llama:latest
-    container_name: matcha-llama
-    profiles:
-      - agent
-    volumes:
-      - ./models:/models:ro
-    command: >
-      --model /models/Qwen3.5-0.8B-Q4_K_M.gguf
-      --port 8999
-      --host 0.0.0.0
-      --ctx-size 4096
-      --chat-template chatml
-      --log-disable
-    restart: unless-stopped
-    networks:
-      - agent-network
-    deploy:
-      resources:
-        limits:
-          memory: 768M
-    healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:8999/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   # Autonomous agent — Gemini API + standalone UI on port 9100
   matcha-agent:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION:-us-west-1}.amazonaws.com/matcha-agent:latest
@@ -159,7 +123,6 @@ services:
       - no-new-privileges:true
     restart: unless-stopped
     networks:
-      - agent-network
       - matcha-network
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9100/health')"]
@@ -210,15 +173,11 @@ services:
 networks:
   matcha-network:
     driver: bridge
-  agent-network:
-    driver: bridge
 
 volumes:
   uploads:
     driver: local
   redis_data:
     driver: local
-  matcha_postgres_data:
-    external: true
   agent_workspace:
     driver: local
