@@ -31,8 +31,8 @@ const LT = {
   rowHover: 'hover:bg-stone-50',
   icon: 'text-stone-400',
   arrow: 'text-stone-400 group-hover:text-zinc-900',
-  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
-  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  label: 'text-xs text-stone-500 font-semibold',
+  labelOnDark: 'text-xs text-zinc-500 font-semibold',
   kpiGap: 'bg-stone-300',
   kpiCell: 'bg-stone-200',
   kpiValActive: 'text-zinc-900',
@@ -93,8 +93,8 @@ const DK = {
   rowHover: 'hover:bg-white/5',
   icon: 'text-zinc-600',
   arrow: 'text-zinc-600 group-hover:text-zinc-100',
-  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
-  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
+  label: 'text-xs text-zinc-500 font-semibold',
+  labelOnDark: 'text-xs text-zinc-500 font-semibold',
   kpiGap: 'bg-zinc-950',
   kpiCell: 'bg-zinc-900',
   kpiValActive: 'text-zinc-100',
@@ -322,7 +322,7 @@ function GettingStartedChecklist() {
     <div className={`${t.cardLight} p-5 mb-4 animate-in fade-in slide-in-from-top-2 duration-500`}>
       <div className="flex items-center justify-between mb-3.5">
         <div>
-          <h2 className={`text-xs font-bold ${t.textMain} uppercase tracking-wider`}>Getting Started</h2>
+          <h2 className={`text-sm font-semibold ${t.textMain}`}>Getting Started</h2>
           <p className={`text-[10px] ${t.textMuted} mt-0.5`}>{completedCount} of {totalCount} complete</p>
         </div>
         <button
@@ -511,7 +511,7 @@ function ComplianceDashboardWidget() {
           <ShieldAlert className={`w-4 h-4 ${t.icon}`} />
           <div className={t.label}>Compliance Impact</div>
           {criticalCount > 0 && (
-            <span className={`px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${t.sevBadge.critical}`}>
+            <span className={`px-2 py-0.5 text-[10px] font-bold ${t.sevBadge.critical}`}>
               {criticalCount} critical
             </span>
           )}
@@ -545,7 +545,7 @@ function ComplianceDashboardWidget() {
           ].map(kpi => (
             <div key={kpi.label} className={`${t.kpiCell} p-2.5 text-center`}>
               <div className={`text-lg font-light tabular-nums ${kpi.value > 0 ? t.kpiValActive : t.kpiValEmpty}`}>{kpi.value}</div>
-              <div className={`text-[8px] uppercase tracking-widest ${t.kpiLabelCls} mt-0.5`}>{kpi.label}</div>
+              <div className={`text-[9px] font-semibold ${t.kpiLabelCls} mt-0.5`}>{kpi.label}</div>
             </div>
           ))}
         </div>
@@ -1013,8 +1013,7 @@ export function Dashboard() {
   return (
     <>
     <OnboardingWizard />
-    <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-16 md:-mt-4 -mb-8 px-4 sm:px-6 lg:px-8 py-6 md:pt-8 min-h-screen ${t.pageBg}`}>
-    <div className="max-w-5xl mx-auto">
+    <div className="max-w-5xl mx-auto py-4">
     <CompanyProfileBanner />
     <GettingStartedChecklist />
     <div className="space-y-5 animate-in fade-in duration-500">
@@ -1022,25 +1021,25 @@ export function Dashboard() {
       <div className="flex justify-between items-start mb-8 pb-6">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className={`text-3xl font-bold tracking-tighter ${t.textMain} uppercase`}>
+            <h1 className={`text-3xl font-bold tracking-tight ${t.textMain}`}>
               Command Center
             </h1>
-            <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] uppercase tracking-widest font-bold rounded-full`}>
+            <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] font-bold rounded-full`}>
               Live
             </div>
           </div>
-          <p className={`text-[10px] ${t.textMuted} mt-1.5 font-mono tracking-wide uppercase`}>Operations Dashboard</p>
+          <p className={`text-[10px] ${t.textMuted} mt-1.5 font-mono tracking-wide`}>Operations Dashboard</p>
         </div>
         <div className="flex gap-2">
           <button
             onClick={() => navigate('/app/matcha/policies/new')}
-            className={`px-4 py-2 ${t.btnSecondary} rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all`}
+            className={`px-4 py-2 ${t.btnSecondary} rounded-lg text-[10px] font-bold transition-all`}
           >
             New Policy
           </button>
           <button
             onClick={() => navigate('/app/matcha/offer-letters')}
-            className={`px-4 py-2 ${t.btnPrimary} rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all`}
+            className={`px-4 py-2 ${t.btnPrimary} rounded-lg text-[10px] font-bold transition-all`}
           >
             Create Offer
           </button>
@@ -1223,7 +1222,7 @@ export function Dashboard() {
                               <div className={`text-[10px] ${t.textMuted} font-mono`}>employees out (30d)</div>
                               <button
                                 onClick={() => navigate('/app/matcha/pto')}
-                                className={`mt-4 ${t.btnPrimary} rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors`}
+                                className={`mt-4 ${t.btnPrimary} rounded-lg px-4 py-2 text-xs font-bold transition-colors`}
                               >
                                 View Calendar
                               </button>

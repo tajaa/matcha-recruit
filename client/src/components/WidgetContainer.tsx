@@ -56,7 +56,7 @@ export function WidgetContainer({ widgets, children }: WidgetContainerProps) {
           <div className="p-1 bg-emerald-500/10 rounded">
              <Settings className="w-3 h-3 text-emerald-500" />
           </div>
-          <span className="text-[9px] uppercase tracking-[0.2em] text-zinc-400 font-bold">Dashboard Layout</span>
+          <span className="text-[10px] text-zinc-400 font-semibold">Dashboard Layout</span>
         </div>
         <button
           onClick={() => setIsConfiguring(!isConfiguring)}
@@ -85,7 +85,7 @@ export function WidgetContainer({ widgets, children }: WidgetContainerProps) {
                    {Icon && <Icon className={`w-3 h-3 ${isVisible ? 'text-emerald-500' : 'text-zinc-600'}`} />}
                 </div>
                 <div className="flex-1 text-left">
-                   <div className={`text-[9px] uppercase tracking-widest font-bold ${isVisible ? 'text-white' : 'text-zinc-500'}`}>{w.label}</div>
+                   <div className={`text-[10px] font-semibold ${isVisible ? 'text-white' : 'text-zinc-500'}`}>{w.label}</div>
                 </div>
                 {isVisible ? (
                   <Eye className="w-2.5 h-2.5 text-emerald-500 group-hover:scale-110 transition-transform" />

@@ -21,7 +21,7 @@ export function Collapsible({ title, children, defaultOpen = true, icon: Icon, v
       >
         <div className="flex items-center gap-2.5">
           {Icon && <Icon className={`w-3.5 h-3.5 ${isLight ? 'text-stone-400' : 'text-zinc-500'}`} />}
-          <h2 className={isLight ? 'text-[9px] text-stone-500 uppercase tracking-widest font-bold' : 'text-white text-[9px] font-bold uppercase tracking-[0.2em]'}>{title}</h2>
+          <h2 className={isLight ? 'text-[11px] text-stone-500 font-semibold' : 'text-zinc-100 text-[11px] font-semibold'}>{title}</h2>
         </div>
         {isOpen ? (
           <ChevronUp className={`w-3.5 h-3.5 ${isLight ? 'text-stone-400' : 'text-zinc-500'}`} />
