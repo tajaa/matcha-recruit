@@ -45,12 +45,6 @@ export const Navbar = ({ scrolled, activeSection, scrollTo, manifestoRef, onPric
         <div className="hidden md:flex items-center gap-10">
           <div className="flex gap-10 text-sm font-mono uppercase tracking-[0.2em] text-zinc-300">
             <button
-              onClick={() => scrollTo(manifestoRef)}
-              className="hover:text-white transition-colors uppercase tracking-[0.2em]"
-            >
-              System
-            </button>
-            <button
               onClick={onPricingClick}
               className="hover:text-white transition-colors uppercase tracking-[0.2em]"
             >

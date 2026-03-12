@@ -102,14 +102,6 @@ export function Landing() {
 
         <Hero onContactClick={() => setIsPricingModalOpen(true)} />
 
-        <Compliance />
-
-        <ERCopilot ref={manifestoRef} />
-
-        <RiskSnapshot ref={manifestoRef} />
-
-        <DynamicHandbooks ref={manifestoRef} />
-
         <Footer />
       </LazyMotion>
     </div>
