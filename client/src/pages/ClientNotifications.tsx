@@ -76,109 +76,119 @@ const TYPE_STRIP_LT: Record<ClientNotificationItem['type'], string> = {
 // ─── Badge color maps ─────────────────────────────────────────────────────────
 
 const SEVERITY_DK: Record<string, string> = {
-  critical: 'bg-zinc-700 text-zinc-100 shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_1px_2px_rgba(0,0,0,0.2)]',
-  high:     'bg-zinc-800 text-zinc-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_2px_rgba(0,0,0,0.2)]',
-  medium:   'bg-zinc-800/60 text-zinc-400',
-  low:      'bg-zinc-900/50 text-zinc-500',
+  critical: 'bg-zinc-800 text-zinc-100',
+  high:     'bg-zinc-800 text-zinc-300',
+  medium:   'bg-zinc-800 text-zinc-400',
+  low:      'bg-zinc-800 text-zinc-500',
 };
 
 const SEVERITY_LT: Record<string, string> = {
-  critical: 'bg-stone-800 text-stone-50 shadow-[0_1px_2px_rgba(0,0,0,0.1)]',
-  high:     'bg-stone-600 text-stone-100 shadow-[0_1px_2px_rgba(0,0,0,0.05)]',
-  medium:   'bg-stone-300 text-stone-800',
-  low:      'bg-stone-200 text-stone-600',
+  critical: 'bg-stone-200 text-zinc-900',
+  high:     'bg-stone-200 text-stone-700',
+  medium:   'bg-stone-200 text-stone-600',
+  low:      'bg-stone-200 text-stone-500',
 };
 
 const STATUS_DK: Record<string, string> = {
-  investigating: 'bg-zinc-800 text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_2px_rgba(0,0,0,0.2)]',
-  pending:       'bg-zinc-800/60 text-zinc-300',
-  draft:         'bg-zinc-900/50 text-zinc-500',
-  onboarded:     'bg-zinc-900 text-zinc-400',
-  approved:      'bg-zinc-900 text-zinc-400',
-  active:        'bg-zinc-900 text-zinc-400',
-  resolved:      'bg-zinc-900 text-zinc-400',
-  closed:        'bg-zinc-950/80 text-zinc-600',
-  rejected:      'bg-zinc-800 text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_2px_rgba(0,0,0,0.2)]',
-  sent:          'bg-zinc-900 text-zinc-400',
-  open:          'bg-zinc-900 text-zinc-400',
+  investigating: 'bg-zinc-800 text-zinc-100',
+  pending:       'bg-zinc-800 text-zinc-400',
+  draft:         'bg-zinc-800 text-zinc-500',
+  onboarded:     'bg-zinc-800 text-zinc-400',
+  approved:      'bg-zinc-800 text-zinc-400',
+  active:        'bg-zinc-800 text-zinc-400',
+  resolved:      'bg-zinc-800 text-zinc-400',
+  closed:        'bg-zinc-800 text-zinc-600',
+  rejected:      'bg-zinc-800 text-zinc-100',
+  sent:          'bg-zinc-800 text-zinc-400',
+  open:          'bg-zinc-800 text-zinc-400',
 };
 
 const STATUS_LT: Record<string, string> = {
-  investigating: 'bg-stone-700 text-stone-100 shadow-[0_1px_2px_rgba(0,0,0,0.1)]',
-  pending:       'bg-stone-400 text-stone-900',
-  draft:         'bg-stone-200 text-stone-500',
-  onboarded:     'bg-stone-300 text-stone-800',
-  approved:      'bg-stone-300 text-stone-800',
-  active:        'bg-stone-300 text-stone-800',
-  resolved:      'bg-stone-300 text-stone-800',
-  closed:        'bg-stone-200 text-stone-500',
-  rejected:      'bg-stone-700 text-stone-100 shadow-[0_1px_2px_rgba(0,0,0,0.1)]',
-  sent:          'bg-stone-300 text-stone-800',
-  open:          'bg-stone-300 text-stone-800',
+  investigating: 'bg-stone-200 text-zinc-900',
+  pending:       'bg-stone-200 text-stone-600',
+  draft:         'bg-stone-100 text-stone-400',
+  onboarded:     'bg-stone-100 text-stone-400',
+  approved:      'bg-stone-100 text-stone-400',
+  active:        'bg-stone-100 text-stone-400',
+  resolved:      'bg-stone-100 text-stone-400',
+  closed:        'bg-stone-100 text-stone-400',
+  rejected:      'bg-stone-200 text-zinc-900',
+  sent:          'bg-stone-100 text-stone-400',
+  open:          'bg-stone-100 text-stone-400',
 };
 
-// ─── Theme tokens ─────────────────────────────────────────────────────────────
-
-const DK = {
-  page:          'bg-zinc-950',
-  heading:       'text-zinc-100',
-  subheading:    'text-zinc-500',
-  border:        'border-white/[0.07]',
-  divider:       'divide-white/[0.05]',
-  surface:       'bg-zinc-900 shadow-sm',
-  surfaceBorder: 'border-white/[0.05]',
-  rowHover:      'hover:bg-white/[0.03]',
-  iconBg:        'bg-gradient-to-b from-zinc-700 to-zinc-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_2px_4px_rgba(0,0,0,0.4)]',
-  iconBgBorder:  '',
-  typeLabel:     'text-zinc-600',
-  time:          'text-zinc-600',
-  subtitle:      'text-zinc-500',
-  skeleton:      'bg-zinc-800',
-  skeletonFaint: 'bg-zinc-800/40',
-  emptyBg:       'bg-zinc-900/40 border border-white/[0.07]',
-  emptyIcon:     'text-zinc-700',
-  emptyText:     'text-zinc-500',
-  errorBg:       'bg-zinc-900/80 border border-zinc-600/50 text-zinc-300',
-  filterActive:  'bg-zinc-200 text-zinc-900 shadow-[inset_0_-1px_0_rgba(0,0,0,0.1)] border-transparent',
-  filterIdle:    'bg-transparent text-zinc-500 border-white/[0.08] hover:text-zinc-200 hover:border-white/20',
-  markRead:      'text-zinc-600 border-white/[0.08] hover:text-zinc-200 hover:border-white/20',
-  loadMore:      'bg-zinc-900 border-white/[0.08] text-zinc-400 hover:border-white/20 hover:text-zinc-200 shadow-sm',
-  countBadge:    'bg-zinc-800 text-zinc-300 border-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_1px_2px_rgba(0,0,0,0.2)]',
-  iconColor:     TYPE_ICON_COLOR_DK,
-  strip:         TYPE_STRIP_DK,
-  severity:      SEVERITY_DK,
-  status:        STATUS_DK,
-} as const;
+// ─── Theme tokens (Matched to Dashboard.tsx) ──────────────────────────────────────────────────
 
 const LT = {
-  page:          'bg-stone-100',
-  heading:       'text-zinc-900',
-  subheading:    'text-stone-500',
-  border:        'border-stone-200',
-  divider:       'divide-stone-200',
-  surface:       'bg-white shadow-sm',
-  surfaceBorder: 'border-stone-200',
-  rowHover:      'hover:bg-stone-50',
-  iconBg:        'bg-gradient-to-b from-stone-50 to-stone-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.8),0_1px_2px_rgba(0,0,0,0.1)]',
-  iconBgBorder:  '',
-  typeLabel:     'text-stone-400',
-  time:          'text-stone-400',
-  subtitle:      'text-stone-500',
-  skeleton:      'bg-stone-200',
+  pageBg: 'bg-stone-300',
+  cardLight: 'bg-stone-100 rounded-xl',
+  innerHover: 'bg-stone-200 rounded-lg hover:bg-stone-300',
+  innerEl: 'bg-stone-200 rounded-lg',
+  textMain: 'text-zinc-900',
+  textMuted: 'text-stone-500',
+  textFaint: 'text-stone-400',
+  textDim: 'text-stone-600',
+  border: 'border-stone-200',
+  divide: 'divide-stone-200',
+  footerBg: 'border-t border-stone-200 bg-stone-200',
+  rowHover: 'hover:bg-stone-50',
+  icon: 'text-stone-400',
+  arrow: 'text-stone-400 group-hover:text-zinc-900',
+  label: 'text-xs text-stone-500 font-semibold',
+  labelOnDark: 'text-xs text-zinc-500 font-semibold',
+  cardDark: 'bg-zinc-900 rounded-xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  cardDarkGhost: 'text-zinc-800',
+  cardDarkText: 'text-zinc-100',
+  cardDarkMuted: 'text-zinc-400',
+  cardDarkBorder: 'border-zinc-800',
+  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
+  btnSecondary: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900',
+  livePill: 'bg-stone-200 text-stone-600',
+  skeleton: 'bg-stone-200',
   skeletonFaint: 'bg-stone-100',
-  emptyBg:       'bg-white border border-stone-200',
-  emptyIcon:     'text-stone-300',
-  emptyText:     'text-stone-400',
-  errorBg:       'bg-stone-100 border border-stone-300 text-stone-700',
-  filterActive:  'bg-stone-800 text-stone-50 shadow-[inset_0_1px_0_rgba(255,255,255,0.1)] border-transparent',
-  filterIdle:    'bg-white text-stone-500 border-stone-200 hover:text-zinc-700 hover:border-stone-300',
-  markRead:      'text-stone-500 border-stone-200 hover:text-zinc-700 hover:border-stone-300',
-  loadMore:      'bg-white border-stone-200 text-stone-600 hover:border-stone-300 hover:text-zinc-700 shadow-sm',
-  countBadge:    'bg-stone-200 text-stone-600 border-transparent shadow-[inset_0_1px_0_rgba(255,255,255,0.5),0_1px_2px_rgba(0,0,0,0.05)]',
-  iconColor:     TYPE_ICON_COLOR_LT,
-  strip:         TYPE_STRIP_LT,
-  severity:      SEVERITY_LT,
-  status:        STATUS_LT,
+  emptyBg: 'bg-stone-100',
+  emptyIcon: 'text-stone-300',
+  errorBg: 'bg-stone-200 text-stone-700',
+  filterActive: 'bg-zinc-900 text-zinc-50',
+  filterIdle: 'bg-stone-200 text-stone-500 hover:text-zinc-900',
+  countBadge: 'bg-stone-200 text-stone-600',
+} as const;
+
+const DK = {
+  pageBg: 'bg-zinc-950',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-xl',
+  innerHover: 'bg-zinc-800 rounded-lg hover:bg-zinc-700',
+  innerEl: 'bg-zinc-800 rounded-lg',
+  textMain: 'text-zinc-100',
+  textMuted: 'text-zinc-500',
+  textFaint: 'text-zinc-600',
+  textDim: 'text-zinc-400',
+  border: 'border-white/10',
+  divide: 'divide-white/10',
+  footerBg: 'border-t border-white/10 bg-white/5',
+  rowHover: 'hover:bg-white/5',
+  icon: 'text-zinc-600',
+  arrow: 'text-zinc-600 group-hover:text-zinc-100',
+  label: 'text-xs text-zinc-500 font-semibold',
+  labelOnDark: 'text-xs text-zinc-500 font-semibold',
+  cardDark: 'bg-zinc-800 rounded-xl',
+  cardDarkHover: 'hover:bg-zinc-700',
+  cardDarkGhost: 'text-zinc-700',
+  cardDarkText: 'text-zinc-100',
+  cardDarkMuted: 'text-zinc-400',
+  cardDarkBorder: 'border-white/10',
+  btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600',
+  btnSecondary: 'border border-white/10 hover:border-white/20 text-zinc-500 hover:text-zinc-100',
+  livePill: 'bg-zinc-800 text-zinc-400',
+  skeleton: 'bg-zinc-800',
+  skeletonFaint: 'bg-zinc-800/40',
+  emptyBg: 'bg-zinc-900/50 border border-white/10',
+  emptyIcon: 'text-zinc-700',
+  errorBg: 'bg-zinc-800 border border-white/10 text-zinc-100',
+  filterActive: 'bg-zinc-700 text-zinc-100',
+  filterIdle: 'bg-zinc-800 text-zinc-500 hover:text-zinc-100',
+  countBadge: 'bg-zinc-800 text-zinc-300',
 } as const;
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
@@ -288,7 +298,7 @@ export function ClientNotifications() {
             ))}
           </div>
         </div>
-        <div className={`${tk.surface} border ${tk.surfaceBorder} rounded-xl overflow-hidden`}>
+        <div className={`${tk.cardDark} border ${tk.cardDarkBorder} rounded-xl overflow-hidden`}>
           {Array.from({ length: 7 }).map((_, i) => (
             <div
               key={i}
@@ -313,27 +323,27 @@ export function ClientNotifications() {
   // ── Full render ───────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-4xl mx-auto py-6 px-4 sm:px-6">
+    <div className="max-w-5xl mx-auto py-4 px-4 sm:px-6">
 
       {/* ── Header ── */}
       <div className={`pb-4 mb-4 border-b ${tk.border}`}>
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2.5 mb-1">
-              <h1 className={`text-base font-semibold ${tk.heading}`}>Notifications</h1>
+              <h1 className={`text-base font-semibold ${tk.textMain}`}>Notifications</h1>
               {total > 0 && (
                 <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-sm border font-mono ${tk.countBadge}`}>
                   {total}
                 </span>
               )}
             </div>
-            <p className={`text-xs ${tk.subheading}`}>
+            <p className={`text-xs ${tk.textMuted}`}>
               Compliance alerts, incidents, and activity log
             </p>
           </div>
           <button
             onClick={() => {}}
-            className={`flex items-center gap-1.5 text-[10px] font-bold font-mono uppercase tracking-wider px-2.5 py-1 rounded-sm border transition-colors shrink-0 ${tk.markRead}`}
+            className={`flex items-center gap-1.5 text-[10px] font-bold font-mono uppercase tracking-wider px-2.5 py-1 rounded-sm border transition-colors shrink-0 ${tk.btnSecondary}`}
           >
             <CheckCheck size={11} />
             Mark all read
@@ -375,11 +385,11 @@ export function ClientNotifications() {
 
       {/* Empty state */}
       {filtered.length === 0 && !error && (
-        <div className={`${tk.emptyBg} rounded-sm text-center py-12`}>
-          <div className={`w-8 h-8 rounded-sm bg-zinc-800/50 flex items-center justify-center mx-auto mb-3`}>
+        <div className={`${tk.cardDark} rounded-sm text-center py-12`}>
+          <div className={`w-8 h-8 rounded-sm ${tk.innerEl} flex items-center justify-center mx-auto mb-3`}>
             <Bell size={14} className={tk.emptyIcon} />
           </div>
-          <p className={`text-sm font-semibold ${tk.heading} mb-1`}>No notifications</p>
+          <p className={`text-sm font-semibold ${tk.textMain} mb-1`}>No notifications</p>
           <p className={`text-xs ${tk.emptyText}`}>
             {filter === 'all' ? "You're all caught up." : `No ${TYPE_LABEL[filter as ClientNotificationItem['type']] ?? filter} activity.`}
           </p>
@@ -400,12 +410,12 @@ export function ClientNotifications() {
               </div>
 
               {/* Rows */}
-              <div className={`${tk.surface} border ${tk.surfaceBorder} rounded-sm overflow-hidden`}>
+              <div className={`${tk.cardDark} border ${tk.cardDarkBorder} rounded-sm overflow-hidden`}>
                 {group.items.map((item, idx) => (
                   <div
                     key={item.id}
                     onClick={() => item.link && navigate(item.link)}
-                    className={`relative flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${tk.rowHover} ${
+                    className={`relative flex items-center gap-3 px-3 py-2 cursor-pointer transition-colors ${tk.cardDarkHover} ${
                       idx > 0 ? `border-t ${isLight ? 'border-stone-100' : 'border-white/[0.04]'}` : ''
                     }`}
                   >
@@ -413,7 +423,7 @@ export function ClientNotifications() {
                     <div className={`w-0.5 self-stretch shrink-0 ${tk.strip[item.type]}`} />
 
                     {/* Icon */}
-                    <div className={`w-7 h-7 flex items-center justify-center shrink-0 rounded-sm ${tk.iconBg}`}>
+                    <div className={`w-7 h-7 flex items-center justify-center shrink-0 rounded-sm ${tk.innerEl}`}>
                       <span className={tk.iconColor[item.type]}>
                         {TYPE_ICONS[item.type]}
                       </span>
@@ -426,7 +436,7 @@ export function ClientNotifications() {
                           {TYPE_LABEL[item.type]}
                         </span>
                       </div>
-                      <div className={`text-[12px] font-semibold leading-tight truncate ${tk.heading}`}>
+                      <div className={`text-[12px] font-semibold leading-tight truncate ${tk.textMain}`}>
                         {item.title}
                       </div>
                       {item.subtitle && (
@@ -475,7 +485,7 @@ export function ClientNotifications() {
           <button
             onClick={handleLoadMore}
             disabled={loadingMore}
-            className={`px-4 py-1.5 text-[10px] font-bold font-mono uppercase tracking-wider rounded-sm border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${tk.loadMore}`}
+            className={`px-4 py-1.5 text-[10px] font-bold font-mono uppercase tracking-wider rounded-sm border transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${tk.btnSecondary}`}
           >
             {loadingMore ? 'Loading…' : 'Load more'}
           </button>
