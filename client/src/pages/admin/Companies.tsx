@@ -101,9 +101,11 @@ function CompanyDrawer({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [jurisdictionsOpen, setJurisdictionsOpen] = useState(false);
   const [employeesOpen, setEmployeesOpen] = useState(false);
   const [employees, setEmployees] = useState<AdminCompanyEmployee[] | null>(null);
   const [employeesLoading, setEmployeesLoading] = useState(false);
+  const [adminsOpen, setAdminsOpen] = useState(false);
   const [form, setForm] = useState({
     name: company.name ?? '',
     industry: company.industry ?? '',
@@ -300,111 +302,128 @@ function CompanyDrawer({
             </section>
           )}
 
-          {/* Jurisdictions */}
+          {/* Jurisdictions — collapsible */}
           {!editing && (
-            <section className="space-y-2">
-              <div className={`${DK.label} flex items-center gap-1.5`}>
-                <MapPin className="w-3 h-3" />
-                Jurisdictions ({company.jurisdictions.length})
-              </div>
-              {company.jurisdictions.length === 0 ? (
-                <p className={`text-xs ${DK.textFaint}`}>No locations on record.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {company.jurisdictions.map(j => (
-                    <div key={j.state} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-sm font-semibold ${DK.textMain}`}>{j.state}</div>
-                        <div className={`text-[11px] ${DK.textFaint} truncate`}>{j.cities.join(', ')}</div>
+            <section className={`border-t ${DK.border} pt-4 space-y-2`}>
+              <button
+                onClick={() => setJurisdictionsOpen(o => !o)}
+                className={`w-full flex items-center justify-between group`}
+              >
+                <span className={`${DK.label} flex items-center gap-1.5 group-hover:text-zinc-300 transition`}>
+                  <MapPin className="w-3 h-3" />
+                  Jurisdictions ({company.jurisdictions.length})
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 ${DK.textFaint} transition-transform ${jurisdictionsOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {jurisdictionsOpen && (
+                company.jurisdictions.length === 0 ? (
+                  <p className={`text-xs ${DK.textFaint} py-1`}>No locations on record.</p>
+                ) : (
+                  <div className="space-y-1.5 pt-1">
+                    {company.jurisdictions.map(j => (
+                      <div key={j.state} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm font-semibold ${DK.textMain}`}>{j.state}</div>
+                          <div className={`text-[11px] ${DK.textFaint} truncate`}>{j.cities.join(', ')}</div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <Users className={`w-3 h-3 ${DK.textFaint}`} />
+                          <span className={`text-sm ${j.employee_count > 0 ? DK.textDim : DK.textFaint}`}>{j.employee_count}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1 flex-shrink-0">
-                        <Users className={`w-3 h-3 ${DK.textFaint}`} />
-                        <span className={`text-sm ${j.employee_count > 0 ? DK.textDim : DK.textFaint}`}>{j.employee_count}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )
               )}
             </section>
           )}
 
-          {/* Admin Users */}
+          {/* Employees — collapsible + lazy */}
           {!editing && (
-            <section className="space-y-2">
-              <div className={`${DK.label} flex items-center gap-1.5`}>
-                <Users className="w-3 h-3" />
-                Admin Users ({company.users.length})
-              </div>
-              {company.users.length === 0 ? (
-                <p className={`text-xs ${DK.textFaint}`}>No admin users.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {company.users.map(u => (
-                    <div key={u.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
-                      <div className="flex-1 min-w-0">
-                        <div className={`text-sm font-medium ${DK.textMain} truncate`}>{u.name || u.email}</div>
-                        <div className={`text-[11px] ${DK.textFaint} truncate`}>{u.email}</div>
-                      </div>
-                      <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                        {u.job_title && <span className={`text-[10px] ${DK.textMuted}`}>{u.job_title}</span>}
-                        <span className={`${DK.badge} border-zinc-700 text-zinc-400`}>{u.role}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-
-          {/* Employees — lazy */}
-          {!editing && (
-            <section className="space-y-2">
+            <section className={`border-t ${DK.border} pt-4 space-y-2`}>
               <button
                 onClick={loadEmployees}
-                className={`w-full flex items-center justify-between ${DK.label} hover:text-zinc-300 transition`}
+                className={`w-full flex items-center justify-between group`}
               >
-                <span className="flex items-center gap-1.5">
+                <span className={`${DK.label} flex items-center gap-1.5 group-hover:text-zinc-300 transition`}>
                   <Users className="w-3 h-3" />
                   Employees ({company.employee_count} active)
                 </span>
-                <ChevronDown className={`w-3 h-3 transition-transform ${employeesOpen ? 'rotate-180' : ''}`} />
+                <ChevronDown className={`w-3.5 h-3.5 ${DK.textFaint} transition-transform ${employeesOpen ? 'rotate-180' : ''}`} />
               </button>
-
               {employeesOpen && (
                 employeesLoading ? (
-                  <p className={`text-xs ${DK.textFaint} py-2`}>Loading employees...</p>
-                ) : employees && employees.length === 0 ? (
-                  <p className={`text-xs ${DK.textFaint}`}>No employees on record.</p>
-                ) : employees ? (
-                  <div className="space-y-1.5">
+                  <p className={`text-xs ${DK.textFaint} py-1`}>Loading...</p>
+                ) : employees !== null && employees.length === 0 ? (
+                  <p className={`text-xs ${DK.textFaint} py-1`}>No employees on record.</p>
+                ) : employees !== null ? (
+                  <div className="space-y-1.5 pt-1">
                     {activeEmployees.map(e => (
                       <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
                         <div className="flex-1 min-w-0">
                           <div className={`text-sm font-medium ${DK.textMain} truncate`}>{e.name || e.email}</div>
                           <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
                         </div>
-                        <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                        <div className="flex items-center gap-2 flex-shrink-0">
                           {e.work_state && <span className={`text-[10px] ${DK.textMuted}`}>{e.work_state}</span>}
                           {e.employment_type && <span className={`text-[10px] ${DK.textFaint}`}>{e.employment_type}</span>}
                         </div>
                       </div>
                     ))}
                     {terminatedEmployees.length > 0 && (
-                      <div className={`text-[10px] ${DK.textFaint} uppercase tracking-wider pt-1 pb-0.5`}>
-                        Terminated ({terminatedEmployees.length})
-                      </div>
-                    )}
-                    {terminatedEmployees.map(e => (
-                      <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3 opacity-50`}>
-                        <div className="flex-1 min-w-0">
-                          <div className={`text-sm ${DK.textFaint} truncate`}>{e.name || e.email}</div>
-                          <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
+                      <>
+                        <div className={`text-[10px] ${DK.textFaint} uppercase tracking-wider pt-2 pb-0.5`}>
+                          Terminated ({terminatedEmployees.length})
                         </div>
-                        {e.work_state && <span className={`text-[10px] ${DK.textMuted} flex-shrink-0`}>{e.work_state}</span>}
+                        {terminatedEmployees.map(e => (
+                          <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3 opacity-50`}>
+                            <div className="flex-1 min-w-0">
+                              <div className={`text-sm ${DK.textFaint} truncate`}>{e.name || e.email}</div>
+                              <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
+                            </div>
+                            {e.work_state && <span className={`text-[10px] ${DK.textMuted} flex-shrink-0`}>{e.work_state}</span>}
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                ) : null
+              )}
+            </section>
+          )}
+
+          {/* Admin Users — collapsible */}
+          {!editing && (
+            <section className={`border-t ${DK.border} pt-4 space-y-2`}>
+              <button
+                onClick={() => setAdminsOpen(o => !o)}
+                className={`w-full flex items-center justify-between group`}
+              >
+                <span className={`${DK.label} flex items-center gap-1.5 group-hover:text-zinc-300 transition`}>
+                  <Users className="w-3 h-3" />
+                  Admin Users ({company.users.length})
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 ${DK.textFaint} transition-transform ${adminsOpen ? 'rotate-180' : ''}`} />
+              </button>
+              {adminsOpen && (
+                company.users.length === 0 ? (
+                  <p className={`text-xs ${DK.textFaint} py-1`}>No admin users.</p>
+                ) : (
+                  <div className="space-y-1.5 pt-1">
+                    {company.users.map(u => (
+                      <div key={u.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm font-medium ${DK.textMain} truncate`}>{u.name || u.email}</div>
+                          <div className={`text-[11px] ${DK.textFaint} truncate`}>{u.email}</div>
+                        </div>
+                        <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                          {u.job_title && <span className={`text-[10px] ${DK.textMuted}`}>{u.job_title}</span>}
+                          <span className={`${DK.badge} border-zinc-700 text-zinc-400`}>{u.role}</span>
+                        </div>
                       </div>
                     ))}
                   </div>
-                ) : null
+                )
               )}
             </section>
           )}
