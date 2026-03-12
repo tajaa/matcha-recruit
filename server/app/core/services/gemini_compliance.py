@@ -15,7 +15,7 @@ from .search_strategy import build_search_strategy_prompt
 from .platform_settings import get_jurisdiction_research_model_mode
 
 # Timeout for individual Gemini API calls (seconds)
-GEMINI_CALL_TIMEOUT = 120
+GEMINI_CALL_TIMEOUT = 30
 
 DEFAULT_LITE_MODEL = "gemini-3.1-flash-lite-preview"
 DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
@@ -768,6 +768,7 @@ class GeminiComplianceService:
         validate_fn: Optional[Callable[[Any], Optional[str]]] = None,
         label: str = "Gemini call",
         on_retry: Optional[Callable[[int, str], Any]] = None,
+        timeout_override: int = 0,
     ) -> Any:
         """Call Gemini with retry-on-failure loop.
 
@@ -805,7 +806,7 @@ class GeminiComplianceService:
                         tools=tools,
                         response_modalities=["TEXT"],
                     ),
-                    timeout_seconds=GEMINI_CALL_TIMEOUT,
+                    timeout_seconds=timeout_override or GEMINI_CALL_TIMEOUT,
                 )
 
                 # Record the actual API call
@@ -843,7 +844,11 @@ class GeminiComplianceService:
 
             except (asyncio.TimeoutError, TimeoutError):
                 last_error = f"timed out after {GEMINI_CALL_TIMEOUT}s"
-                current_prompt = prompt + _build_correction_feedback("timeout")
+                # Don't retry timeouts — the same call will likely time out again
+                raise GeminiExhaustedError(
+                    f"{label}: {last_error}",
+                    last_raw=last_raw,
+                )
 
             except Exception as e:
                 error_msg = str(e).upper()
@@ -938,8 +943,11 @@ class GeminiComplianceService:
                     f"Do NOT return city or county level requirements for this category."
                 )
 
-        async def research_category(category: str) -> List[Dict]:
-            """Research a single category with retry."""
+        # Sentinel to distinguish timeouts from genuine empty results
+        _TIMED_OUT = "__TIMED_OUT__"
+
+        async def research_category(category: str, timeout_override: int = 0) -> List[Dict] | str:
+            """Research a single category. Returns list of reqs, or _TIMED_OUT sentinel."""
             prompt = _build_category_prompt(
                 location_str, category, context_section,
                 preemption_context=_preemption_context_for(category),
@@ -959,6 +967,7 @@ class GeminiComplianceService:
                     validate_fn=_validate,
                     label=f"Research {category} for {location_str}",
                     on_retry=on_retry,
+                    timeout_override=timeout_override or 0,
                 )
                 if not isinstance(result, list):
                     return []
@@ -971,6 +980,9 @@ class GeminiComplianceService:
 
                 return normalized_rows
             except GeminiExhaustedError as e:
+                if "timed out" in str(e).lower():
+                    print(f"[Gemini Compliance] {category} timed out")
+                    return _TIMED_OUT
                 print(f"[Gemini Compliance] {category} exhausted: {e}")
                 return []
             except Exception as e:
@@ -983,25 +995,50 @@ class GeminiComplianceService:
         concurrency = 4 if mode == "heavy" else min(8 if mode == "lite" else 6, len(selected_categories))
         semaphore = asyncio.Semaphore(concurrency)
 
-        async def research_category_throttled(category: str) -> List[Dict]:
+        async def research_category_throttled(category: str) -> tuple[str, List[Dict] | str]:
             async with semaphore:
-                return await research_category(category)
+                result = await research_category(category)
+                return (category, result)
 
         print(
             f"[Gemini Compliance] Researching {location_str} "
             f"({len(selected_categories)} categories, concurrency={concurrency})..."
         )
-        results = await asyncio.gather(*[research_category_throttled(c) for c in selected_categories])
+        paired_results = await asyncio.gather(*[research_category_throttled(c) for c in selected_categories])
 
-        # Flatten and validate
+        # Separate successes from timeouts
         all_requirements = []
-        for category_results in results:
+        timed_out_categories = []
+        for category, category_results in paired_results:
+            if category_results == _TIMED_OUT:
+                timed_out_categories.append(category)
+                continue
             for req in category_results:
                 error = _validate_requirement(req)
                 if error:
                     print(f"[Gemini Compliance] Dropping invalid: {error}")
                 else:
                     all_requirements.append(req)
+
+        # Retry timed-out categories sequentially with 2x timeout
+        if timed_out_categories:
+            retry_timeout = GEMINI_CALL_TIMEOUT * 2
+            print(
+                f"[Gemini Compliance] Retrying {len(timed_out_categories)} timed-out "
+                f"categories sequentially ({retry_timeout}s timeout): "
+                f"{', '.join(timed_out_categories)}"
+            )
+            for category in timed_out_categories:
+                result = await research_category(category, timeout_override=retry_timeout)
+                if result == _TIMED_OUT:
+                    print(f"[Gemini Compliance] {category} timed out again — skipping")
+                    continue
+                for req in result:
+                    error = _validate_requirement(req)
+                    if error:
+                        print(f"[Gemini Compliance] Dropping invalid: {error}")
+                    else:
+                        all_requirements.append(req)
 
         print(f"[Gemini Compliance] Found {len(all_requirements)} requirements for {location_str}")
         return all_requirements
