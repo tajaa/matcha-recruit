@@ -30,7 +30,6 @@ function UploadBranch({ state }: { state: MWDocumentState }) {
   const uploadStatus = state.handbook_upload_status || 'idle';
   const uploadedFilename = state.handbook_uploaded_filename || '';
   const blockingError = state.handbook_blocking_error || '';
-  const reviewLocations = state.handbook_review_locations || [];
   const redFlags = state.handbook_red_flags || [];
   const greenFlags = state.handbook_green_flags || [];
   const jurisdictionSummaries = state.handbook_jurisdiction_summaries || [];
@@ -289,15 +288,16 @@ function UploadBranch({ state }: { state: MWDocumentState }) {
 }
 
 function HandbookPreviewComponent({ state, onRender }: HandbookPreviewProps) {
+  const sourceType = state.handbook_source_type || 'template';
+
+  if (sourceType === 'upload') {
+    onRender?.();
+    return <UploadBranch state={state} />;
+  }
+
   onRender?.();
   const title = state.handbook_title || 'Employee Handbook';
   const status = state.handbook_status || 'collecting';
-  const sourceType = state.handbook_source_type || 'template';
-  const uploadStatus = state.handbook_upload_status || 'idle';
-  const uploadedFilename = state.handbook_uploaded_filename || '';
-  const blockingError = state.handbook_blocking_error || '';
-  const reviewLocations = state.handbook_review_locations || [];
-  const redFlags = state.handbook_red_flags || [];
   const mode = state.handbook_mode || '';
   const industry = state.handbook_industry || '';
   const subIndustry = state.handbook_sub_industry || '';
@@ -310,10 +310,6 @@ function HandbookPreviewComponent({ state, onRender }: HandbookPreviewProps) {
   const strengthLabel = state.handbook_strength_label || '';
   const states = state.handbook_states || [];
   const sections = state.handbook_sections || [];
-
-  if (sourceType === 'upload') {
-    return <UploadBranch state={state} />;
-  }
 
   const profileFlags: [string, boolean][] = [];
   if (state.handbook_profile) {
@@ -338,15 +334,15 @@ function HandbookPreviewComponent({ state, onRender }: HandbookPreviewProps) {
     status === 'ready' ? 'text-blue-400 bg-blue-400/10' :
     'text-zinc-400 bg-zinc-400/10';
 
-  const scoreColor = !strengthScore ? 'text-zinc-400' :
+  const scoreColor = strengthScore == null ? 'text-zinc-400' :
     strengthScore >= 80 ? 'text-green-400' :
     strengthScore >= 50 ? 'text-orange-400' : 'text-red-400';
 
-  const scoreTrackColor = !strengthScore ? 'stroke-zinc-700' :
+  const scoreTrackColor = strengthScore == null ? 'stroke-zinc-700' :
     strengthScore >= 80 ? 'stroke-green-400/20' :
     strengthScore >= 50 ? 'stroke-orange-400/20' : 'stroke-red-400/20';
 
-  const scoreStrokeColor = !strengthScore ? 'stroke-zinc-400' :
+  const scoreStrokeColor = strengthScore == null ? 'stroke-zinc-400' :
     strengthScore >= 80 ? 'stroke-green-400' :
     strengthScore >= 50 ? 'stroke-orange-400' : 'stroke-red-400';
 

@@ -34,6 +34,8 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
     "handbook_green_flags",
     "handbook_jurisdiction_summaries",
     "handbook_analysis_generated_at",
+    "handbook_strength_score",
+    "handbook_strength_label",
     "handbook_analysis_progress",
 }
 HANDBOOK_FIELDS = [

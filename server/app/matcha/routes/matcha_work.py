@@ -98,6 +98,8 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
     "handbook_green_flags",
     "handbook_jurisdiction_summaries",
     "handbook_analysis_generated_at",
+    "handbook_strength_score",
+    "handbook_strength_label",
     "handbook_analysis_progress",
 }
 VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys()) - HANDBOOK_UPLOAD_MANAGED_FIELDS
