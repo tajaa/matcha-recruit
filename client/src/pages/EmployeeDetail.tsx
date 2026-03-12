@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAccessToken, provisioning, employees as employeesApi } from '../api/client';
+import type { EmployeeCredentials } from '../api/client';
 import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioningStatus, ProvisioningRunStatus, EmployeeIncidentItem } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useIsLightMode } from '../hooks/useIsLightMode';
@@ -185,7 +186,8 @@ export default function EmployeeDetail() {
   const t = isLight ? LT : DK;
   const { employeeId } = useParams<{ employeeId: string }>();
   const navigate = useNavigate();
-  const { hasFeature } = useAuth();
+  const { hasFeature, profile } = useAuth();
+  const isHealthcare = (profile as any)?.industry?.toLowerCase() === 'healthcare';
   const [employee, setEmployee] = useState<Employee | null>(null);
   const [tasks, setTasks] = useState<OnboardingTask[]>([]);
   const [templates, setTemplates] = useState<OnboardingTemplate[]>([]);
@@ -207,6 +209,12 @@ export default function EmployeeDetail() {
   const [directReports, setDirectReports] = useState<EmployeeListItem[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [incidents, setIncidents] = useState<EmployeeIncidentItem[]>([]);
+
+  // Healthcare credentials
+  const [credentials, setCredentials] = useState<EmployeeCredentials | null>(null);
+  const [credentialsEditing, setCredentialsEditing] = useState(false);
+  const [credentialsSaving, setCredentialsSaving] = useState(false);
+  const [credentialsForm, setCredentialsForm] = useState<Partial<EmployeeCredentials>>({});
 
   // Leave state
   const [leaveEligibility, setLeaveEligibility] = useState<LeaveEligibilityData | null>(null);
@@ -431,6 +439,15 @@ export default function EmployeeDetail() {
     fetchDepartments();
   }, [employeeId]);
 
+  // Fetch healthcare credentials
+  useEffect(() => {
+    if (!employeeId || !isHealthcare) return;
+    employeesApi.getCredentials(employeeId).then(c => {
+      setCredentials(c);
+      setCredentialsForm(c);
+    }).catch(() => {});
+  }, [employeeId, isHealthcare]);
+
   // Fetch incidents related to this employee
   useEffect(() => {
     if (!employeeId || !hasFeature('incidents')) return;
@@ -546,6 +563,21 @@ export default function EmployeeDetail() {
       setError(err instanceof Error ? err.message : 'Failed to complete leave');
     } finally {
       setLeaveActionLoading(false);
+    }
+  };
+
+  const saveCredentials = async () => {
+    if (!employeeId) return;
+    setCredentialsSaving(true);
+    try {
+      const updated = await employeesApi.updateCredentials(employeeId, credentialsForm);
+      setCredentials(updated);
+      setCredentialsForm(updated);
+      setCredentialsEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save credentials');
+    } finally {
+      setCredentialsSaving(false);
     }
   };
 
@@ -1256,6 +1288,83 @@ export default function EmployeeDetail() {
               </>
             )}
           </div>
+
+          {isHealthcare && (
+            <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
+              <div className="flex items-center justify-between">
+                <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Healthcare Credentials</h2>
+                {!credentialsEditing && (
+                  <button onClick={() => setCredentialsEditing(true)} className={`p-1.5 ${t.textMuted} hover:${t.textMain} hover:${isLight ? 'bg-stone-200' : 'bg-zinc-800'} rounded transition-colors`}>
+                    <Pencil size={14} />
+                  </button>
+                )}
+              </div>
+              {credentialsEditing ? (
+                <div className="space-y-3 text-sm">
+                  {[
+                    { key: 'license_type', label: 'License Type', placeholder: 'MD, DO, RN, NP, PA…' },
+                    { key: 'license_number', label: 'License Number' },
+                    { key: 'license_state', label: 'License State', placeholder: 'CA' },
+                    { key: 'license_expiration', label: 'License Expiration', type: 'date' },
+                    { key: 'npi_number', label: 'NPI Number' },
+                    { key: 'dea_number', label: 'DEA Number' },
+                    { key: 'dea_expiration', label: 'DEA Expiration', type: 'date' },
+                    { key: 'board_certification', label: 'Board Certification' },
+                    { key: 'board_certification_expiration', label: 'Board Cert Expiration', type: 'date' },
+                    { key: 'clinical_specialty', label: 'Clinical Specialty' },
+                    { key: 'oig_last_checked', label: 'OIG Last Checked', type: 'date' },
+                    { key: 'malpractice_carrier', label: 'Malpractice Carrier' },
+                    { key: 'malpractice_policy_number', label: 'Malpractice Policy #' },
+                    { key: 'malpractice_expiration', label: 'Malpractice Expiration', type: 'date' },
+                  ].map(({ key, label, placeholder, type }) => (
+                    <div key={key}>
+                      <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>{label}</label>
+                      <input
+                        type={type || 'text'}
+                        value={(credentialsForm as any)[key] || ''}
+                        placeholder={placeholder}
+                        onChange={e => setCredentialsForm(f => ({ ...f, [key]: e.target.value || null }))}
+                        className={`w-full mt-1 px-3 py-1.5 ${t.inputCls}`}
+                      />
+                    </div>
+                  ))}
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={saveCredentials} disabled={credentialsSaving} className={`px-4 py-1.5 text-sm rounded-xl font-medium ${t.btnPrimary}`}>
+                      {credentialsSaving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button onClick={() => { setCredentialsEditing(false); setCredentialsForm(credentials || {}); }} className={`px-4 py-1.5 text-sm rounded-xl ${t.btnSecondary}`}>
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2 text-sm">
+                  {[
+                    { label: 'License', value: [credentials?.license_type, credentials?.license_number, credentials?.license_state ? `(${credentials.license_state})` : null].filter(Boolean).join(' ') },
+                    { label: 'License Exp', value: credentials?.license_expiration },
+                    { label: 'NPI', value: credentials?.npi_number },
+                    { label: 'DEA', value: credentials?.dea_number },
+                    { label: 'DEA Exp', value: credentials?.dea_expiration },
+                    { label: 'Board Cert', value: credentials?.board_certification },
+                    { label: 'Board Exp', value: credentials?.board_certification_expiration },
+                    { label: 'Specialty', value: credentials?.clinical_specialty },
+                    { label: 'OIG Checked', value: credentials?.oig_last_checked },
+                    { label: 'OIG Status', value: credentials?.oig_status !== 'not_checked' ? credentials?.oig_status : null },
+                    { label: 'Malpractice', value: [credentials?.malpractice_carrier, credentials?.malpractice_policy_number].filter(Boolean).join(' · ') || null },
+                    { label: 'Mal. Exp', value: credentials?.malpractice_expiration },
+                  ].filter(r => r.value).map(({ label, value }) => (
+                    <div key={label} className="flex justify-between gap-4">
+                      <span className={`text-xs ${t.textMuted} flex-shrink-0`}>{label}</span>
+                      <span className={`text-xs ${t.textDim} text-right`}>{value}</span>
+                    </div>
+                  ))}
+                  {!credentials?.license_number && !credentials?.npi_number && (
+                    <p className={`text-xs ${t.textFaint} italic`}>No credentials on file. Click edit to add.</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
             <div className="flex items-center justify-between gap-2">
