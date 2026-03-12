@@ -2220,6 +2220,38 @@ async def init_db():
             ON employee_onboarding_drafts(company_id, user_id)
         """)
 
+        # Healthcare employee credentials
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS employee_credentials (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+                org_id UUID NOT NULL,
+                license_type VARCHAR(50),
+                license_number VARCHAR(100),
+                license_state VARCHAR(2),
+                license_expiration DATE,
+                npi_number VARCHAR(20),
+                dea_number VARCHAR(20),
+                dea_expiration DATE,
+                board_certification VARCHAR(200),
+                board_certification_expiration DATE,
+                clinical_specialty VARCHAR(100),
+                oig_last_checked DATE,
+                oig_status VARCHAR(20) DEFAULT 'not_checked',
+                malpractice_carrier VARCHAR(200),
+                malpractice_policy_number VARCHAR(100),
+                malpractice_expiration DATE,
+                health_clearances JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(employee_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_employee_credentials_org
+            ON employee_credentials(org_id)
+        """)
+
         await conn.execute("""
             DO $$
             BEGIN

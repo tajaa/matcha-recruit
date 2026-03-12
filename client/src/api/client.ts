@@ -4360,6 +4360,27 @@ export const adminPlatformSettings = {
     }),
 };
 
+export interface EmployeeCredentials {
+  id?: string;
+  employee_id: string;
+  license_type?: string | null;
+  license_number?: string | null;
+  license_state?: string | null;
+  license_expiration?: string | null;
+  npi_number?: string | null;
+  dea_number?: string | null;
+  dea_expiration?: string | null;
+  board_certification?: string | null;
+  board_certification_expiration?: string | null;
+  clinical_specialty?: string | null;
+  oig_last_checked?: string | null;
+  oig_status?: string | null;
+  malpractice_carrier?: string | null;
+  malpractice_policy_number?: string | null;
+  malpractice_expiration?: string | null;
+  health_clearances?: Record<string, unknown> | null;
+}
+
 export const employees = {
   list: (status?: string): Promise<{ id: string; first_name: string; last_name: string; email: string }[]> =>
     request(`/employees${status ? `?status=${status}` : ''}`),
@@ -4383,6 +4404,13 @@ export const employees = {
     request<PreTermCheck>(`/employees/pre-termination-checks/${checkId}/outcome`, {
       method: 'PATCH',
       body: JSON.stringify(body),
+    }),
+  getCredentials: (employeeId: string): Promise<EmployeeCredentials> =>
+    request<EmployeeCredentials>(`/employees/${employeeId}/credentials`),
+  updateCredentials: (employeeId: string, data: Partial<EmployeeCredentials>): Promise<EmployeeCredentials> =>
+    request<EmployeeCredentials>(`/employees/${employeeId}/credentials`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
     }),
 };
 

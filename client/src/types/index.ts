@@ -598,6 +598,8 @@ export interface ClientProfile {
   user_id: string;
   company_id: string;
   company_name: string;
+  industry: string | null;
+  healthcare_specialties: string[];
   name: string;
   phone: string | null;
   job_title: string | null;

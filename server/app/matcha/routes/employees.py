@@ -4270,3 +4270,173 @@ async def delete_onboarding_draft(
         )
 
     return {"deleted": result == "DELETE 1"}
+
+
+# ---------------------------------------------------------------------------
+# Healthcare Employee Credentials
+# ---------------------------------------------------------------------------
+
+class EmployeeCredentialsRequest(BaseModel):
+    license_type: Optional[str] = None
+    license_number: Optional[str] = None
+    license_state: Optional[str] = None
+    license_expiration: Optional[str] = None  # YYYY-MM-DD
+    npi_number: Optional[str] = None
+    dea_number: Optional[str] = None
+    dea_expiration: Optional[str] = None
+    board_certification: Optional[str] = None
+    board_certification_expiration: Optional[str] = None
+    clinical_specialty: Optional[str] = None
+    oig_last_checked: Optional[str] = None
+    oig_status: Optional[str] = None
+    malpractice_carrier: Optional[str] = None
+    malpractice_policy_number: Optional[str] = None
+    malpractice_expiration: Optional[str] = None
+    health_clearances: Optional[dict] = None
+
+
+class EmployeeCredentialsResponse(BaseModel):
+    id: Optional[UUID] = None
+    employee_id: UUID
+    license_type: Optional[str] = None
+    license_number: Optional[str] = None
+    license_state: Optional[str] = None
+    license_expiration: Optional[str] = None
+    npi_number: Optional[str] = None
+    dea_number: Optional[str] = None
+    dea_expiration: Optional[str] = None
+    board_certification: Optional[str] = None
+    board_certification_expiration: Optional[str] = None
+    clinical_specialty: Optional[str] = None
+    oig_last_checked: Optional[str] = None
+    oig_status: Optional[str] = None
+    malpractice_carrier: Optional[str] = None
+    malpractice_policy_number: Optional[str] = None
+    malpractice_expiration: Optional[str] = None
+    health_clearances: Optional[dict] = None
+
+
+@router.get("/{employee_id}/credentials", response_model=EmployeeCredentialsResponse)
+async def get_employee_credentials(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get healthcare credentials for an employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify employee belongs to company
+        emp = await conn.fetchval(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id,
+        )
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        row = await conn.fetchrow(
+            "SELECT * FROM employee_credentials WHERE employee_id = $1",
+            employee_id,
+        )
+        if not row:
+            return EmployeeCredentialsResponse(employee_id=employee_id)
+
+        def _date_str(val):
+            return val.isoformat() if val else None
+
+        return EmployeeCredentialsResponse(
+            id=row["id"],
+            employee_id=row["employee_id"],
+            license_type=row["license_type"],
+            license_number=row["license_number"],
+            license_state=row["license_state"],
+            license_expiration=_date_str(row["license_expiration"]),
+            npi_number=row["npi_number"],
+            dea_number=row["dea_number"],
+            dea_expiration=_date_str(row["dea_expiration"]),
+            board_certification=row["board_certification"],
+            board_certification_expiration=_date_str(row["board_certification_expiration"]),
+            clinical_specialty=row["clinical_specialty"],
+            oig_last_checked=_date_str(row["oig_last_checked"]),
+            oig_status=row["oig_status"],
+            malpractice_carrier=row["malpractice_carrier"],
+            malpractice_policy_number=row["malpractice_policy_number"],
+            malpractice_expiration=_date_str(row["malpractice_expiration"]),
+            health_clearances=dict(row["health_clearances"]) if row["health_clearances"] else None,
+        )
+
+
+@router.put("/{employee_id}/credentials", response_model=EmployeeCredentialsResponse)
+async def upsert_employee_credentials(
+    employee_id: UUID,
+    body: EmployeeCredentialsRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create or update healthcare credentials for an employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        emp = await conn.fetchval(
+            "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id,
+        )
+        if not emp:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        def _parse_date(val):
+            if not val:
+                return None
+            return date.fromisoformat(val)
+
+        await conn.execute("""
+            INSERT INTO employee_credentials (
+                employee_id, org_id,
+                license_type, license_number, license_state, license_expiration,
+                npi_number, dea_number, dea_expiration,
+                board_certification, board_certification_expiration,
+                clinical_specialty,
+                oig_last_checked, oig_status,
+                malpractice_carrier, malpractice_policy_number, malpractice_expiration,
+                health_clearances,
+                updated_at
+            ) VALUES (
+                $1, $2,
+                $3, $4, $5, $6,
+                $7, $8, $9,
+                $10, $11,
+                $12,
+                $13, $14,
+                $15, $16, $17,
+                $18,
+                NOW()
+            )
+            ON CONFLICT (employee_id) DO UPDATE SET
+                license_type = EXCLUDED.license_type,
+                license_number = EXCLUDED.license_number,
+                license_state = EXCLUDED.license_state,
+                license_expiration = EXCLUDED.license_expiration,
+                npi_number = EXCLUDED.npi_number,
+                dea_number = EXCLUDED.dea_number,
+                dea_expiration = EXCLUDED.dea_expiration,
+                board_certification = EXCLUDED.board_certification,
+                board_certification_expiration = EXCLUDED.board_certification_expiration,
+                clinical_specialty = EXCLUDED.clinical_specialty,
+                oig_last_checked = EXCLUDED.oig_last_checked,
+                oig_status = EXCLUDED.oig_status,
+                malpractice_carrier = EXCLUDED.malpractice_carrier,
+                malpractice_policy_number = EXCLUDED.malpractice_policy_number,
+                malpractice_expiration = EXCLUDED.malpractice_expiration,
+                health_clearances = EXCLUDED.health_clearances,
+                updated_at = NOW()
+        """,
+            employee_id, company_id,
+            body.license_type, body.license_number, body.license_state, _parse_date(body.license_expiration),
+            body.npi_number, body.dea_number, _parse_date(body.dea_expiration),
+            body.board_certification, _parse_date(body.board_certification_expiration),
+            body.clinical_specialty,
+            _parse_date(body.oig_last_checked), body.oig_status or "not_checked",
+            body.malpractice_carrier, body.malpractice_policy_number, _parse_date(body.malpractice_expiration),
+            json.dumps(body.health_clearances) if body.health_clearances else "{}",
+        )
+
+    # Return updated data
+    return await get_employee_credentials(employee_id, current_user)
