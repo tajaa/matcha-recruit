@@ -17,6 +17,7 @@ from .platform_settings import get_jurisdiction_research_model_mode
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 120
 
+DEFAULT_LITE_MODEL = "gemini-3.1-flash-lite-preview"
 DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
 DEFAULT_HEAVY_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
@@ -42,13 +43,21 @@ VALID_CATEGORIES = {
     "research_consent",
     "state_licensing",
     "emergency_preparedness",
+    # Oncology specialty categories
+    "radiation_safety",
+    "chemotherapy_handling",
+    "tumor_registry",
+    "oncology_clinical_trials",
+    "oncology_patient_rights",
 }
-# Healthcare categories are researched via a background Celery worker, so they
-# should NOT be included in the default sweep when categories=None.
+# Healthcare and oncology categories are researched via dedicated specialty
+# research functions, so they should NOT be included in the default sweep.
 _HEALTHCARE_ONLY_CATEGORIES = {
     "hipaa_privacy", "billing_integrity", "clinical_safety",
     "healthcare_workforce", "corporate_integrity", "research_consent",
     "state_licensing", "emergency_preparedness",
+    "radiation_safety", "chemotherapy_handling", "tumor_registry",
+    "oncology_clinical_trials", "oncology_patient_rights",
 }
 DEFAULT_RESEARCH_CATEGORIES = sorted(VALID_CATEGORIES - _HEALTHCARE_ONLY_CATEGORIES)
 
@@ -687,6 +696,9 @@ class GeminiComplianceService:
         mode = await get_jurisdiction_research_model_mode()
         light_model = (self.settings.analysis_model or DEFAULT_LIGHT_MODEL).strip() or DEFAULT_LIGHT_MODEL
 
+        if mode == "lite":
+            return [DEFAULT_LITE_MODEL, light_model]
+
         if mode != "heavy":
             return [light_model]
 
@@ -968,7 +980,7 @@ class GeminiComplianceService:
         # Run categories in parallel with throttled concurrency to avoid
         # overwhelming Gemini API quota (especially with 20 categories).
         mode = await get_jurisdiction_research_model_mode()
-        concurrency = 4 if mode == "heavy" else min(6, len(selected_categories))
+        concurrency = 4 if mode == "heavy" else min(8 if mode == "lite" else 6, len(selected_categories))
         semaphore = asyncio.Semaphore(concurrency)
 
         async def research_category_throttled(category: str) -> List[Dict]:

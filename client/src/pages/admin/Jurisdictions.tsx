@@ -360,6 +360,7 @@ export function Jurisdictions() {
   const [checkingId, setCheckingId] = useState<string | null>(null);
   const [checkTargetId, setCheckTargetId] = useState<string | null>(null);
   const [checkMessages, setCheckMessages] = useState<CheckMessage[]>([]);
+  const [specialtyId, setSpecialtyId] = useState<string | null>(null);
   const [topMetroRunning, setTopMetroRunning] = useState(false);
   const [topMetroCities, setTopMetroCities] = useState<Record<string, MetroRunCity>>({});
   const [topMetroOrder, setTopMetroOrder] = useState<string[]>([]);
@@ -371,7 +372,7 @@ export function Jurisdictions() {
   } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [jurisdictionModelMode, setJurisdictionModelMode] = useState<'light' | 'heavy'>('light');
+  const [jurisdictionModelMode, setJurisdictionModelMode] = useState<'lite' | 'light' | 'heavy'>('light');
 
   const fetchData = useCallback(async () => {
     try {
@@ -387,7 +388,7 @@ export function Jurisdictions() {
       setTotals(jData.totals);
       setSchedulers(schedulerData);
       setStats(statsData);
-      setJurisdictionModelMode(platformSettings.jurisdiction_research_model_mode as 'light' | 'heavy');
+      setJurisdictionModelMode(platformSettings.jurisdiction_research_model_mode as 'lite' | 'light' | 'heavy');
     } catch (err) {
       console.error('Failed to fetch data:', err);
       setError('Failed to load data');
@@ -700,6 +701,45 @@ export function Jurisdictions() {
       setCheckMessages(prev => [...prev, { type: 'error', message: msg }]);
     } finally {
       setCheckingId(null);
+    }
+  };
+
+  const handleSpecialtyResearch = async (id: string) => {
+    if (topMetroRunning || checkingId || specialtyId) return;
+    setSpecialtyId(id);
+    setCheckTargetId(id);
+    setCheckMessages([]);
+    setExpanded(id);
+    try {
+      const response = await adminJurisdictions.checkSpecialty(id);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          const payload = trimmed.slice(6);
+          if (payload === '[DONE]') continue;
+          try {
+            const event = JSON.parse(payload);
+            setCheckMessages(prev => [...prev, event]);
+          } catch { /* skip malformed */ }
+        }
+      }
+      setDetailCache({});
+      await fetchData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to run specialty research';
+      setCheckMessages(prev => [...prev, { type: 'error', message: msg }]);
+    } finally {
+      setSpecialtyId(null);
     }
   };
 
@@ -1046,12 +1086,14 @@ export function Jurisdictions() {
       <div className="px-6 py-2 bg-zinc-900/60 border-b border-white/5 flex items-center gap-2 text-[10px] font-mono tracking-wider text-zinc-500">
         <span className="uppercase">Jurisdiction Research</span>
         <span className="text-zinc-600">·</span>
-        <span className={jurisdictionModelMode === 'heavy' ? 'text-amber-400 font-bold' : 'text-zinc-400'}>
-          {jurisdictionModelMode === 'heavy' ? 'gemini-3.1-pro-preview (auto-fallback)' : 'gemini-3-flash-preview'}
+        <span className={jurisdictionModelMode === 'heavy' ? 'text-amber-400 font-bold' : jurisdictionModelMode === 'lite' ? 'text-cyan-400' : 'text-zinc-400'}>
+          {jurisdictionModelMode === 'heavy' ? 'gemini-3.1-pro-preview (auto-fallback)' : jurisdictionModelMode === 'lite' ? 'gemini-3.1-flash-lite-preview' : 'gemini-3-flash-preview'}
         </span>
         <span className={`ml-1 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-widest ${
           jurisdictionModelMode === 'heavy'
             ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
+            : jurisdictionModelMode === 'lite'
+            ? 'bg-cyan-500/10 text-cyan-500 border border-cyan-500/20'
             : 'bg-zinc-800 text-zinc-500 border border-white/5'
         }`}>
           {jurisdictionModelMode}
@@ -1273,7 +1315,7 @@ export function Jurisdictions() {
                                     <div className="flex items-center gap-2 shrink-0 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
-                                        disabled={topMetroRunning || checkingId !== null || deletingId !== null}
+                                        disabled={topMetroRunning || checkingId !== null || specialtyId !== null || deletingId !== null}
                                         className={`relative px-3 py-2 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
                                           checkingId === j.id ? 'text-blue-300 border-blue-500/40 bg-blue-500/5' : 'text-zinc-500 border-zinc-700/60 hover:text-white hover:border-zinc-500 disabled:opacity-30'
                                         }`}
@@ -1284,6 +1326,23 @@ export function Jurisdictions() {
                                             <><svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>Scanning</>
                                           ) : (
                                             <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>Research</>
+                                          )}
+                                        </span>
+                                      </button>
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleSpecialtyResearch(j.id); }}
+                                        disabled={topMetroRunning || checkingId !== null || specialtyId !== null || deletingId !== null}
+                                        className={`relative px-3 py-2 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
+                                          specialtyId === j.id ? 'text-purple-300 border-purple-500/40 bg-purple-500/5' : 'text-zinc-500 border-zinc-700/60 hover:text-purple-300 hover:border-purple-500/40 disabled:opacity-30'
+                                        }`}
+                                        title="Research healthcare + oncology specialty policies"
+                                      >
+                                        {specialtyId === j.id && <span className="absolute inset-0 bg-gradient-to-r from-transparent via-purple-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />}
+                                        <span className="relative flex items-center gap-1.5">
+                                          {specialtyId === j.id ? (
+                                            <><svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>Specialty</>
+                                          ) : (
+                                            <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714a2.25 2.25 0 00.659 1.591L19 14.5M14.25 3.104c.251.023.501.05.75.082M19 14.5l-2.47 2.47a2.25 2.25 0 01-1.59.659H9.06a2.25 2.25 0 01-1.59-.659L5 14.5m14 0V17a2 2 0 01-2 2H7a2 2 0 01-2-2v-2.5" /></svg>Specialty</>
                                           )}
                                         </span>
                                       </button>
@@ -1305,7 +1364,7 @@ export function Jurisdictions() {
                               </div>
 
                               {isExpanded && checkTargetId === j.id && checkMessages.length > 0 && (() => {
-                                const isActive = checkingId === j.id;
+                                const isActive = checkingId === j.id || specialtyId === j.id;
                                 const completed = checkMessages.find(m => m.type === 'completed');
                                 const hasError = checkMessages.some(m => m.type === 'error');
                                 const resultCount = checkMessages.filter(m => m.type === 'result').length;

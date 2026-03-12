@@ -102,10 +102,35 @@ const CAT_LABELS: Record<string, string> = {
   final_pay: 'Final Pay',
   minor_work_permit: 'Minor',
   scheduling_reporting: 'Sched',
+  // Healthcare
+  hipaa_privacy: 'HIPAA Privacy',
+  billing_integrity: 'Billing Integrity',
+  clinical_safety: 'Clinical Safety',
+  healthcare_workforce: 'HC Workforce',
+  corporate_integrity: 'Corp Integrity',
+  research_consent: 'Research Consent',
+  state_licensing: 'State Licensing',
+  emergency_preparedness: 'Emergency Prep',
+  // Oncology
+  radiation_safety: 'Radiation Safety',
+  chemotherapy_handling: 'Chemo Handling',
+  tumor_registry: 'Tumor Registry',
+  oncology_clinical_trials: 'Onc Trials',
+  oncology_patient_rights: 'Onc Patient Rights',
 };
 
 const ALL_CATEGORIES = Object.keys(CAT_LABELS);
 const VALID_RATE_TYPES = ['general', 'tipped', 'exempt_salary', 'hotel', 'fast_food', 'healthcare'];
+
+const HEALTHCARE_CATEGORIES = new Set([
+  'hipaa_privacy', 'billing_integrity', 'clinical_safety', 'healthcare_workforce',
+  'corporate_integrity', 'research_consent', 'state_licensing', 'emergency_preparedness',
+]);
+const ONCOLOGY_CATEGORIES = new Set([
+  'radiation_safety', 'chemotherapy_handling', 'tumor_registry',
+  'oncology_clinical_trials', 'oncology_patient_rights',
+]);
+type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology';
 
 const INDUSTRY_SPECIFIC_RATE_TYPES = ['tipped', 'hotel', 'fast_food', 'healthcare'];
 
@@ -917,6 +942,7 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
   onDetailUpdate: (updated: JurisdictionDetail) => void;
 }) {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+  const [specialtyFilter, setSpecialtyFilter] = useState<SpecialtyFilter>('all');
   const [drawerTab, setDrawerTab] = useState<'requirements' | 'hierarchy'>('requirements');
   const [editingReqId, setEditingReqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: '', description: '', current_value: '', effective_date: '', source_url: '', source_name: '' });
@@ -1004,9 +1030,16 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
 
   const grouped = useMemo(() => {
     if (!detail) return {} as Record<string, JurisdictionDetail['requirements']>;
-    const reqs = selectedProfile?.rate_types?.length
+    let reqs = selectedProfile?.rate_types?.length
       ? detail.requirements.filter(r => matchesProfileRateTypes(r.requirement_key, new Set(selectedProfile.rate_types)))
       : detail.requirements;
+    if (specialtyFilter === 'healthcare') {
+      reqs = reqs.filter(r => HEALTHCARE_CATEGORIES.has(r.category) || ONCOLOGY_CATEGORIES.has(r.category));
+    } else if (specialtyFilter === 'oncology') {
+      reqs = reqs.filter(r => ONCOLOGY_CATEGORIES.has(r.category));
+    } else if (specialtyFilter === 'general') {
+      reqs = reqs.filter(r => !HEALTHCARE_CATEGORIES.has(r.category) && !ONCOLOGY_CATEGORIES.has(r.category));
+    }
     const map: Record<string, JurisdictionDetail['requirements']> = {};
     for (const req of reqs) {
       const cat = req.category || 'other';
@@ -1037,7 +1070,7 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
 
     for (const [k, v] of entries) sorted[k] = v;
     return sorted;
-  }, [detail, selectedProfile]);
+  }, [detail, selectedProfile, specialtyFilter]);
 
   const focusedSet = useMemo(
     () => selectedProfile ? new Set(selectedProfile.focused_categories) : null,
@@ -1047,9 +1080,16 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
   // Hierarchy view: category → level → requirements[]
   const hierarchyGrouped = useMemo(() => {
     if (!detail) return {} as Record<string, Record<string, JurisdictionDetail['requirements']>>;
-    const reqs = selectedProfile?.rate_types?.length
+    let reqs = selectedProfile?.rate_types?.length
       ? detail.requirements.filter(r => matchesProfileRateTypes(r.requirement_key, new Set(selectedProfile.rate_types)))
       : detail.requirements;
+    if (specialtyFilter === 'healthcare') {
+      reqs = reqs.filter(r => HEALTHCARE_CATEGORIES.has(r.category) || ONCOLOGY_CATEGORIES.has(r.category));
+    } else if (specialtyFilter === 'oncology') {
+      reqs = reqs.filter(r => ONCOLOGY_CATEGORIES.has(r.category));
+    } else if (specialtyFilter === 'general') {
+      reqs = reqs.filter(r => !HEALTHCARE_CATEGORIES.has(r.category) && !ONCOLOGY_CATEGORIES.has(r.category));
+    }
     const map: Record<string, Record<string, JurisdictionDetail['requirements']>> = {};
     for (const req of reqs) {
       const cat = req.category || 'other';
@@ -1084,7 +1124,7 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
     });
     for (const [k, v] of entries) sorted[k] = v;
     return sorted;
-  }, [detail, selectedProfile]);
+  }, [detail, selectedProfile, specialtyFilter]);
 
   // Preemption lookup: "state|category" → { allows, notes }
   const preemptionLookup = useMemo(() => {
@@ -1119,7 +1159,7 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                     {detail.state}{detail.county ? ` · ${detail.county} County` : ''}
                     {' · '}{detail.requirements.length} requirement{detail.requirements.length !== 1 ? 's' : ''}
                   </p>
-                  {/* Profile selector */}
+                  {/* Profile selector + Specialty filter */}
                   <div className="flex items-center gap-1.5 mt-2">
                     <select
                       value={selectedProfileId ?? ''}
@@ -1130,6 +1170,16 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                       {profiles.map(p => (
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
+                    </select>
+                    <select
+                      value={specialtyFilter}
+                      onChange={e => setSpecialtyFilter(e.target.value as SpecialtyFilter)}
+                      className={`${t.select} text-xs px-2.5 py-1`}
+                    >
+                      <option value="all">All Specialties</option>
+                      <option value="general">General Labor</option>
+                      <option value="healthcare">Healthcare</option>
+                      <option value="oncology">Oncology</option>
                     </select>
                     <button
                       onClick={onOpenProfileEditor}

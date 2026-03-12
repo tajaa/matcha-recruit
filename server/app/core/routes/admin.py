@@ -61,7 +61,7 @@ class MatchaWorkModelModeUpdate(BaseModel):
 
 
 class JurisdictionResearchModelModeUpdate(BaseModel):
-    mode: str = Field(..., pattern="^(light|heavy)$")
+    mode: str = Field(..., pattern="^(lite|light|heavy)$")
 
 
 class ERSimilarityWeightsUpdate(BaseModel):
@@ -4483,6 +4483,125 @@ async def check_jurisdiction(jurisdiction_id: UUID):
         except Exception:
             logger.error("Jurisdiction check failed for %s", jurisdiction_id, exc_info=True)
             yield _to_sse({"type": "error", "message": "Jurisdiction check failed"})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/jurisdictions/{jurisdiction_id}/check-specialty", dependencies=[Depends(require_admin)])
+async def check_jurisdiction_specialty(jurisdiction_id: UUID):
+    """Run healthcare + oncology specialty research for a jurisdiction. Returns SSE stream."""
+    from ..services.compliance_service import (
+        _research_healthcare_requirements_for_jurisdiction,
+        _research_oncology_requirements_for_jurisdiction,
+        _jurisdiction_row_to_dict,
+        _filter_requirements_for_company,
+        _filter_city_level_requirements,
+        _filter_with_preemption,
+        _normalize_requirement_categories,
+        _sync_requirements_to_location,
+        _lookup_has_local_ordinance,
+    )
+
+    async with get_connection() as conn:
+        j = await conn.fetchrow("SELECT id, city, state FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        if not j:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
+        location_label = f"{_format_city_label(j['city'])}, {j['state']}"
+
+    async def event_stream():
+        try:
+            async with get_connection() as conn:
+                yield _to_sse({"type": "started", "location": location_label})
+
+                # Healthcare research
+                yield _to_sse({
+                    "type": "researching",
+                    "message": f"Researching healthcare-specific compliance for {location_label}...",
+                })
+                try:
+                    hc_result = await _research_healthcare_requirements_for_jurisdiction(
+                        conn, jurisdiction_id
+                    )
+                    hc_new = hc_result.get("new", 0)
+                    hc_failed = hc_result.get("failed", [])
+                    yield _to_sse({
+                        "type": "repository_refresh",
+                        "message": f"Healthcare: +{hc_new} requirement(s) added."
+                            + (f" Failed: {', '.join(hc_failed)}" if hc_failed else ""),
+                    })
+                except Exception as exc:
+                    logger.warning("Healthcare specialty research failed: %s", exc)
+                    yield _to_sse({"type": "warning", "message": f"Healthcare research failed: {exc}"})
+
+                # Oncology research
+                yield _to_sse({
+                    "type": "researching",
+                    "message": f"Researching oncology-specific compliance for {location_label}...",
+                })
+                try:
+                    onc_result = await _research_oncology_requirements_for_jurisdiction(
+                        conn, jurisdiction_id
+                    )
+                    onc_new = onc_result.get("new", 0)
+                    onc_failed = onc_result.get("failed", [])
+                    yield _to_sse({
+                        "type": "repository_refresh",
+                        "message": f"Oncology: +{onc_new} requirement(s) added."
+                            + (f" Failed: {', '.join(onc_failed)}" if onc_failed else ""),
+                    })
+                except Exception as exc:
+                    logger.warning("Oncology specialty research failed: %s", exc)
+                    yield _to_sse({"type": "warning", "message": f"Oncology research failed: {exc}"})
+
+                # Sync to linked locations
+                linked = await conn.fetch(
+                    """SELECT bl.id, bl.company_id
+                       FROM business_locations bl
+                       JOIN jurisdictions j ON LOWER(bl.city) = LOWER(j.city)
+                           AND UPPER(bl.state) = UPPER(j.state)
+                       WHERE j.id = $1""",
+                    jurisdiction_id,
+                )
+                if linked:
+                    yield _to_sse({
+                        "type": "syncing",
+                        "message": f"Syncing specialty updates to {len(linked)} location(s)...",
+                    })
+                    rows = await conn.fetch(
+                        "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                        jurisdiction_id,
+                    )
+                    requirements = [_jurisdiction_row_to_dict(dict(r)) for r in rows]
+                    # Apply same prep as inline research: filter city-level if no local ordinance, normalize, preemption
+                    state = j["state"]
+                    has_local = await _lookup_has_local_ordinance(conn, j["city"], state)
+                    if has_local is False:
+                        requirements = _filter_city_level_requirements(requirements, state)
+                    _normalize_requirement_categories(requirements)
+                    requirements = await _filter_with_preemption(conn, requirements, state)
+                    total_synced = 0
+                    for loc in linked:
+                        loc_reqs = await _filter_requirements_for_company(
+                            conn, loc["company_id"], requirements,
+                        )
+                        sync_result = await _sync_requirements_to_location(
+                            conn, loc["id"], loc["company_id"], loc_reqs, create_alerts=True,
+                        )
+                        total_synced += sync_result.get("updated", 0)
+                    yield _to_sse({
+                        "type": "syncing",
+                        "message": f"Synced to {len(linked)} location(s), {total_synced} update(s).",
+                    })
+
+                yield _to_sse({"type": "completed", "message": "Specialty research complete."})
+        except Exception:
+            logger.error("Specialty check failed for %s", jurisdiction_id, exc_info=True)
+            yield _to_sse({"type": "error", "message": "Specialty research failed"})
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(

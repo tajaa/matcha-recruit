@@ -112,7 +112,7 @@ export function PlatformFeatureManager({ onClose }: Props) {
   const { platformFeatures, setPlatformFeatures } = useAuth();
   const [activeKeys, setActiveKeys] = useState<Set<string>>(new Set(platformFeatures));
   const [modelMode, setModelMode] = useState<'light' | 'heavy'>('light');
-  const [jurisdictionModelMode, setJurisdictionModelMode] = useState<'light' | 'heavy'>('light');
+  const [jurisdictionModelMode, setJurisdictionModelMode] = useState<'lite' | 'light' | 'heavy'>('light');
   const [erWeights, setErWeights] = useState<Record<string, number>>({
     category: 0.30, status: 0.05, evidence: 0.10, temporal: 0.05, intake: 0.05, text: 0.35, investigation: 0.10,
   });
@@ -130,7 +130,7 @@ export function PlatformFeatureManager({ onClose }: Props) {
     adminPlatformSettings.get()
       .then(data => {
         setModelMode(data.matcha_work_model_mode as 'light' | 'heavy');
-        setJurisdictionModelMode(data.jurisdiction_research_model_mode as 'light' | 'heavy');
+        setJurisdictionModelMode(data.jurisdiction_research_model_mode as 'lite' | 'light' | 'heavy');
         if (data.er_similarity_weights) setErWeights(data.er_similarity_weights);
       })
       .catch(() => {
@@ -304,6 +304,12 @@ export function PlatformFeatureManager({ onClose }: Props) {
                 <div className="flex items-center gap-3">
                   <span className="text-[9px] tracking-[0.2em] uppercase text-zinc-500 font-bold">Jurisdiction Research:</span>
                   <div className="flex bg-zinc-900 border border-white/5 p-0.5 rounded">
+                    <button
+                      onClick={() => setJurisdictionModelMode('lite')}
+                      className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${jurisdictionModelMode === 'lite' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    >
+                      Lite
+                    </button>
                     <button
                       onClick={() => setJurisdictionModelMode('light')}
                       className={`px-3 py-1 text-[9px] tracking-[0.1em] uppercase transition-all ${jurisdictionModelMode === 'light' ? 'bg-zinc-800 text-white font-bold' : 'text-zinc-500 hover:text-zinc-300'}`}

@@ -2576,6 +2576,16 @@ export const adminJurisdictions = {
     return response;
   },
 
+  checkSpecialty: async (id: string): Promise<Response> => {
+    const token = getAccessToken();
+    const response = await fetch(`/api/admin/jurisdictions/${id}/check-specialty`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error('Failed to start specialty research');
+    return response;
+  },
+
   checkTopMetros: async (): Promise<Response> => {
     const token = getAccessToken();
     const response = await fetch('/api/admin/jurisdictions/top-metros/check', {
@@ -4295,7 +4305,7 @@ export const adminPlatformSettings = {
       method: 'PUT',
       body: JSON.stringify({ mode }),
     }),
-  updateJurisdictionResearchModelMode: (mode: 'light' | 'heavy'): Promise<{ jurisdiction_research_model_mode: string }> =>
+  updateJurisdictionResearchModelMode: (mode: 'lite' | 'light' | 'heavy'): Promise<{ jurisdiction_research_model_mode: string }> =>
     request('/admin/platform-settings/jurisdiction-research-model-mode', {
       method: 'PUT',
       body: JSON.stringify({ mode }),

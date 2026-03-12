@@ -1566,49 +1566,43 @@ async def _research_oncology_requirements_for_jurisdiction(
     failed_categories: List[str] = []
     added_requirements: List[Dict[str, Any]] = []
 
-    for idx, category in enumerate(missing, start=1):
-        print(
-            f"[Oncology Research] [{idx}/{len(missing)}] Researching {category} "
-            f"for {location_name}..."
+    if progress_callback:
+        progress_callback(1, 1, f"Researching {len(missing)} oncology categories for {location_name}...")
+
+    try:
+        reqs = await service.research_location_compliance(
+            city=city,
+            state=state,
+            county=county,
+            categories=missing,
+            source_context=source_context,
+            corrections_context=corrections_context,
+            preemption_rules=preemption_rules,
+            has_local_ordinance=has_local_ordinance,
         )
-        if progress_callback:
-            progress_callback(
-                idx,
-                len(missing),
-                f"Researching {category.replace('_', ' ')} for {location_name}...",
-            )
+        reqs = reqs or []
 
-        try:
-            reqs = await service.research_location_compliance(
-                city=city,
-                state=state,
-                county=county,
-                categories=[category],
-                source_context=source_context,
-                corrections_context=corrections_context,
-                preemption_rules=preemption_rules,
-                has_local_ordinance=has_local_ordinance,
-            )
-            reqs = reqs or []
+        for req in reqs:
+            _clamp_varchar_fields(req)
+            if not req.get("applicable_industries"):
+                req["applicable_industries"] = ["healthcare:oncology"]
 
-            for req in reqs:
-                _clamp_varchar_fields(req)
-                if not req.get("applicable_industries"):
-                    req["applicable_industries"] = ["healthcare:oncology"]
-
-            if reqs:
-                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
-                total_new += len(reqs)
-                added_requirements.extend(reqs)
-                print(
-                    f"[Oncology Research]   -> {len(reqs)} requirements saved "
-                    f"for {category}"
-                )
-            else:
-                print(f"[Oncology Research]   -> No results for {category}")
-        except Exception as e:
-            failed_categories.append(category)
-            print(f"[Oncology Research]   -> Error researching {category}: {e}")
+        if reqs:
+            await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+            total_new = len(reqs)
+            added_requirements.extend(reqs)
+            # Log per-category breakdown
+            by_cat: Dict[str, int] = {}
+            for r in reqs:
+                by_cat[r.get("category", "unknown")] = by_cat.get(r.get("category", "unknown"), 0) + 1
+            for cat, count in sorted(by_cat.items()):
+                print(f"[Oncology Research]   -> {count} requirements saved for {cat}")
+        else:
+            print(f"[Oncology Research]   -> No results returned")
+            failed_categories = list(missing)
+    except Exception as e:
+        failed_categories = list(missing)
+        print(f"[Oncology Research]   -> Error: {e}")
 
     print(
         f"[Oncology Research] Complete for {location_name}: {total_new} new, "
