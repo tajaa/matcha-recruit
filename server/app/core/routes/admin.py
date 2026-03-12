@@ -5956,7 +5956,7 @@ async def get_company_admin(company_id: UUID):
             "headquarters_state": row["headquarters_state"],
             "headquarters_city": row["headquarters_city"],
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-            "enabled_features": dict(row["enabled_features"] or {}),
+            "enabled_features": row["enabled_features"] or {},
             "users": [
                 {
                     "id": str(u["id"]),
