@@ -149,10 +149,18 @@ const LT = {
   skeletonFaint: 'bg-stone-100',
   emptyBg: 'bg-stone-100',
   emptyIcon: 'text-stone-300',
+  emptyText: 'text-stone-400',
   errorBg: 'bg-stone-200 text-stone-700',
   filterActive: 'bg-zinc-900 text-zinc-50',
   filterIdle: 'bg-stone-200 text-stone-500 hover:text-zinc-900',
   countBadge: 'bg-stone-200 text-stone-600',
+  typeLabel: 'text-stone-500',
+  subtitle: 'text-stone-600',
+  time: 'text-stone-400',
+  iconColor: TYPE_ICON_COLOR_LT,
+  strip: TYPE_STRIP_LT,
+  severity: SEVERITY_LT,
+  status: STATUS_LT,
 } as const;
 
 const DK = {
@@ -185,10 +193,18 @@ const DK = {
   skeletonFaint: 'bg-zinc-800/40',
   emptyBg: 'bg-zinc-900/50 border border-white/10',
   emptyIcon: 'text-zinc-700',
+  emptyText: 'text-zinc-500',
   errorBg: 'bg-zinc-800 border border-white/10 text-zinc-100',
   filterActive: 'bg-zinc-700 text-zinc-100',
   filterIdle: 'bg-zinc-800 text-zinc-500 hover:text-zinc-100',
   countBadge: 'bg-zinc-800 text-zinc-300',
+  typeLabel: 'text-zinc-500',
+  subtitle: 'text-zinc-400',
+  time: 'text-zinc-500',
+  iconColor: TYPE_ICON_COLOR_DK,
+  strip: TYPE_STRIP_DK,
+  severity: SEVERITY_DK,
+  status: STATUS_DK,
 } as const;
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
