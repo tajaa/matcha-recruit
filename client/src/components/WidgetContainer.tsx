@@ -50,9 +50,9 @@ export function WidgetContainer({ widgets, children }: WidgetContainerProps) {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center bg-zinc-950 p-3 border border-white/5 rounded-lg shadow-2xl">
-        <div className="flex items-center gap-2.5">
+    <div className="space-y-4">
+      <div className="flex justify-between items-center bg-zinc-950 p-2.5 border border-white/5 rounded-lg shadow-lg">
+        <div className="flex items-center gap-2">
           <div className="p-1 bg-emerald-500/10 rounded">
              <Settings className="w-3 h-3 text-emerald-500" />
           </div>
@@ -69,7 +69,7 @@ export function WidgetContainer({ widgets, children }: WidgetContainerProps) {
       </div>
 
       {isConfiguring && (
-        <div className="p-4 bg-zinc-900/50 border border-white/10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 animate-in slide-in-from-top-2 duration-300">
+        <div className="p-3 bg-zinc-900/50 border border-white/10 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 animate-in slide-in-from-top-2 duration-300">
           {widgets.map((w) => {
             const isVisible = visibleWidgets.has(w.id);
             const Icon = w.icon;
@@ -77,20 +77,20 @@ export function WidgetContainer({ widgets, children }: WidgetContainerProps) {
               <button
                 key={w.id}
                 onClick={() => toggleWidget(w.id)}
-                className={`p-4 flex items-center gap-3 border transition-all group ${
+                className={`p-3 flex items-center gap-2.5 border transition-all group ${
                   isVisible ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-white/5 bg-transparent opacity-50 grayscale'
                 }`}
               >
-                <div className={`p-2 rounded ${isVisible ? 'bg-emerald-500/20' : 'bg-white/5'}`}>
-                   {Icon && <Icon className={`w-3.5 h-3.5 ${isVisible ? 'text-emerald-500' : 'text-zinc-600'}`} />}
+                <div className={`p-1.5 rounded ${isVisible ? 'bg-emerald-500/20' : 'bg-white/5'}`}>
+                   {Icon && <Icon className={`w-3 h-3 ${isVisible ? 'text-emerald-500' : 'text-zinc-600'}`} />}
                 </div>
                 <div className="flex-1 text-left">
-                   <div className={`text-[10px] uppercase tracking-widest font-bold ${isVisible ? 'text-white' : 'text-zinc-500'}`}>{w.label}</div>
+                   <div className={`text-[9px] uppercase tracking-widest font-bold ${isVisible ? 'text-white' : 'text-zinc-500'}`}>{w.label}</div>
                 </div>
                 {isVisible ? (
-                  <Eye className="w-3 h-3 text-emerald-500 group-hover:scale-110 transition-transform" />
+                  <Eye className="w-2.5 h-2.5 text-emerald-500 group-hover:scale-110 transition-transform" />
                 ) : (
-                  <EyeOff className="w-3 h-3 text-zinc-700 group-hover:scale-110 transition-transform" />
+                  <EyeOff className="w-2.5 h-2.5 text-zinc-700 group-hover:scale-110 transition-transform" />
                 )}
               </button>
             );

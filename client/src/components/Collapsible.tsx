@@ -14,19 +14,19 @@ export function Collapsible({ title, children, defaultOpen = true, icon: Icon, v
   const isLight = variant === 'light';
 
   return (
-    <div className={isLight ? 'bg-stone-100 rounded-2xl overflow-hidden' : 'border border-white/10 bg-zinc-900/30 overflow-hidden'}>
+    <div className={isLight ? 'bg-stone-100 rounded-xl overflow-hidden' : 'border border-white/10 bg-zinc-900/30 overflow-hidden'}>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className={`w-full p-4 flex justify-between items-center transition-colors text-left ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'}`}
+        className={`w-full p-3 flex justify-between items-center transition-colors text-left ${isLight ? 'hover:bg-stone-50' : 'hover:bg-white/5'}`}
       >
-        <div className="flex items-center gap-3">
-          {Icon && <Icon className={`w-4 h-4 ${isLight ? 'text-stone-400' : 'text-zinc-500'}`} />}
-          <h2 className={isLight ? 'text-[10px] text-stone-500 uppercase tracking-widest font-bold' : 'text-white text-[10px] font-bold uppercase tracking-[0.2em]'}>{title}</h2>
+        <div className="flex items-center gap-2.5">
+          {Icon && <Icon className={`w-3.5 h-3.5 ${isLight ? 'text-stone-400' : 'text-zinc-500'}`} />}
+          <h2 className={isLight ? 'text-[9px] text-stone-500 uppercase tracking-widest font-bold' : 'text-white text-[9px] font-bold uppercase tracking-[0.2em]'}>{title}</h2>
         </div>
         {isOpen ? (
-          <ChevronUp className={`w-4 h-4 ${isLight ? 'text-stone-400' : 'text-zinc-500'}`} />
+          <ChevronUp className={`w-3.5 h-3.5 ${isLight ? 'text-stone-400' : 'text-zinc-500'}`} />
         ) : (
-          <ChevronDown className={`w-4 h-4 ${isLight ? 'text-stone-400' : 'text-zinc-500'}`} />
+          <ChevronDown className={`w-3.5 h-3.5 ${isLight ? 'text-stone-400' : 'text-zinc-500'}`} />
         )}
       </button>
       {isOpen && (

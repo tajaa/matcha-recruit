@@ -18,9 +18,9 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api';
 
 const LT = {
   pageBg: 'bg-stone-300',
-  cardLight: 'bg-stone-100 rounded-2xl',
-  innerHover: 'bg-stone-200 rounded-xl hover:bg-stone-300',
-  innerEl: 'bg-stone-200 rounded-xl',
+  cardLight: 'bg-stone-100 rounded-xl',
+  innerHover: 'bg-stone-200 rounded-lg hover:bg-stone-300',
+  innerEl: 'bg-stone-200 rounded-lg',
   textMain: 'text-zinc-900',
   textMuted: 'text-stone-500',
   textFaint: 'text-stone-400',
@@ -41,9 +41,9 @@ const LT = {
   horizonActive: 'bg-zinc-900 text-zinc-50',
   horizonInactive: 'bg-stone-200 text-stone-500 hover:text-zinc-900',
   spinner: 'border-stone-300 border-t-zinc-900',
-  modalBg: 'bg-stone-100 rounded-2xl',
-  descBox: 'bg-stone-200 rounded-xl',
-  selectCls: 'bg-white border border-stone-300 rounded-xl text-zinc-900 text-xs px-3 py-2 focus:outline-none focus:border-stone-400',
+  modalBg: 'bg-stone-100 rounded-lg',
+  descBox: 'bg-stone-200 rounded-lg',
+  selectCls: 'bg-white border border-stone-300 rounded-lg text-zinc-900 text-xs px-3 py-2 focus:outline-none focus:border-stone-400',
   pillActive: 'bg-zinc-900 text-zinc-50',
   pillInactive: 'bg-stone-200 text-stone-500 hover:text-zinc-900',
   sevDot: { critical: 'bg-zinc-900 animate-pulse', warning: 'bg-stone-400', info: 'bg-stone-300' },
@@ -57,7 +57,7 @@ const LT = {
   },
   daysColor: (d: number | null | undefined) =>
     d != null && d <= 30 ? 'text-zinc-900 font-semibold' : d != null && d <= 60 ? 'text-stone-600' : 'text-stone-400',
-  cardDark: 'bg-zinc-900 rounded-2xl',
+  cardDark: 'bg-zinc-900 rounded-xl',
   cardDarkHover: 'hover:bg-zinc-800',
   cardDarkGhost: 'text-zinc-800',
   cardDarkTrack: 'text-zinc-800',
@@ -67,7 +67,7 @@ const LT = {
   livePill: 'bg-stone-200 text-stone-600',
   dateBadge: 'bg-stone-200 text-stone-500',
   recentBadge: 'bg-stone-200 text-stone-600',
-  innerBg: 'bg-stone-300 rounded-lg',
+  innerBg: 'bg-stone-300 rounded-md',
   footerLink: 'text-stone-500 hover:text-zinc-900',
   activityDot: { success: 'bg-zinc-900', warning: 'bg-stone-400 animate-pulse', def: 'bg-stone-300' },
   incidentSev: [
@@ -80,9 +80,9 @@ const LT = {
 
 const DK = {
   pageBg: 'bg-zinc-950',
-  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
-  innerHover: 'bg-zinc-800 rounded-xl hover:bg-zinc-700',
-  innerEl: 'bg-zinc-800 rounded-xl',
+  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-xl',
+  innerHover: 'bg-zinc-800 rounded-lg hover:bg-zinc-700',
+  innerEl: 'bg-zinc-800 rounded-lg',
   textMain: 'text-zinc-100',
   textMuted: 'text-zinc-500',
   textFaint: 'text-zinc-600',
@@ -103,9 +103,9 @@ const DK = {
   horizonActive: 'bg-zinc-700 text-zinc-100',
   horizonInactive: 'bg-zinc-800 text-zinc-500 hover:text-zinc-100',
   spinner: 'border-zinc-800 border-t-zinc-100',
-  modalBg: 'bg-zinc-900 border border-white/10 rounded-2xl',
-  descBox: 'bg-zinc-800 rounded-xl',
-  selectCls: 'bg-zinc-800 border border-white/10 rounded-xl text-zinc-100 text-xs px-3 py-2 focus:outline-none focus:border-white/20',
+  modalBg: 'bg-zinc-900 border border-white/10 rounded-lg',
+  descBox: 'bg-zinc-800 rounded-lg',
+  selectCls: 'bg-zinc-800 border border-white/10 rounded-lg text-zinc-100 text-xs px-3 py-2 focus:outline-none focus:border-white/20',
   pillActive: 'bg-zinc-700 text-zinc-100',
   pillInactive: 'bg-zinc-800 text-zinc-500 hover:text-zinc-100',
   sevDot: { critical: 'bg-zinc-100 animate-pulse', warning: 'bg-zinc-400', info: 'bg-zinc-600' },
@@ -119,7 +119,7 @@ const DK = {
   },
   daysColor: (d: number | null | undefined) =>
     d != null && d <= 30 ? 'text-zinc-100 font-semibold' : d != null && d <= 60 ? 'text-zinc-400' : 'text-zinc-600',
-  cardDark: 'bg-zinc-800 rounded-2xl',
+  cardDark: 'bg-zinc-800 rounded-xl',
   cardDarkHover: 'hover:bg-zinc-700',
   cardDarkGhost: 'text-zinc-700',
   cardDarkTrack: 'text-zinc-700',
@@ -129,7 +129,7 @@ const DK = {
   livePill: 'bg-zinc-800 text-zinc-400',
   dateBadge: 'bg-zinc-800 text-zinc-500',
   recentBadge: 'bg-zinc-800 text-zinc-400',
-  innerBg: 'bg-zinc-700 rounded-lg',
+  innerBg: 'bg-zinc-700 rounded-md',
   footerLink: 'text-zinc-500 hover:text-zinc-100',
   activityDot: { success: 'bg-zinc-100', warning: 'bg-zinc-400 animate-pulse', def: 'bg-zinc-600' },
   incidentSev: [
@@ -254,7 +254,7 @@ function CompanyProfileBanner() {
   };
 
   return (
-    <div className={`relative ${t.cardLight} p-6 mb-6 animate-in fade-in slide-in-from-top-2 duration-500`}>
+    <div className={`relative ${t.cardLight} p-5 mb-4 animate-in fade-in slide-in-from-top-2 duration-500`}>
       <button
         onClick={dismiss}
         className={`absolute top-4 right-4 ${t.icon} hover:${t.textMain} transition-colors`}
@@ -262,19 +262,19 @@ function CompanyProfileBanner() {
       >
         <X className="w-4 h-4" />
       </button>
-      <div className="flex items-start gap-4">
-        <div className={`p-2.5 ${t.innerEl} shrink-0`}>
+      <div className="flex items-start gap-3">
+        <div className={`p-2 ${t.innerEl} shrink-0`}>
           <Sparkles className={`w-5 h-5 ${t.textMain}`} />
         </div>
         <div className="flex-1 min-w-0">
-          <h3 className={`text-base ${t.textMain} mb-1`}>Complete your company profile</h3>
-          <p className={`text-sm ${t.textMuted} leading-relaxed mb-3`}>
+          <h3 className={`text-base font-medium ${t.textMain} mb-0.5`}>Complete your company profile</h3>
+          <p className={`text-xs ${t.textMuted} leading-relaxed mb-2.5`}>
             Add your headquarters location, benefits, and employment defaults so the AI can pre-fill offer letters,
             give jurisdiction-aware guidance, and generate better documents without extra questions.
           </p>
           <button
             onClick={() => { dismiss(); navigate('/app/matcha/company'); }}
-            className={`inline-flex items-center gap-2 px-4 py-2 ${t.btnPrimary} rounded-xl text-xs font-bold transition-colors`}
+            className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 ${t.btnPrimary} rounded-lg text-[11px] font-bold transition-colors`}
           >
             Set Up Profile
             <ChevronRight className="w-3 h-3" />
@@ -319,11 +319,11 @@ function GettingStartedChecklist() {
   const pct = Math.round((completedCount / totalCount) * 100);
 
   return (
-    <div className={`${t.cardLight} p-6 mb-6 animate-in fade-in slide-in-from-top-2 duration-500`}>
-      <div className="flex items-center justify-between mb-4">
+    <div className={`${t.cardLight} p-5 mb-4 animate-in fade-in slide-in-from-top-2 duration-500`}>
+      <div className="flex items-center justify-between mb-3.5">
         <div>
-          <h2 className={`text-sm font-bold ${t.textMain} uppercase tracking-wider`}>Getting Started</h2>
-          <p className={`text-xs ${t.textMuted} mt-0.5`}>{completedCount} of {totalCount} complete</p>
+          <h2 className={`text-xs font-bold ${t.textMain} uppercase tracking-wider`}>Getting Started</h2>
+          <p className={`text-[10px] ${t.textMuted} mt-0.5`}>{completedCount} of {totalCount} complete</p>
         </div>
         <button
           onClick={() => { if (dismissKey) localStorage.setItem(dismissKey, 'true'); setDismissed(true); }}
@@ -335,14 +335,14 @@ function GettingStartedChecklist() {
       </div>
 
       {/* Progress bar */}
-      <div className={`h-1.5 ${t.innerEl} mb-4 overflow-hidden`}>
+      <div className={`h-1 ${t.innerEl} mb-3.5 overflow-hidden`}>
         <div
           className="h-full bg-emerald-500 rounded-full transition-all duration-500"
           style={{ width: `${pct}%` }}
         />
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-0.5">
         {visibleItems.map(item => {
           const done = !onboardingNeeded[item.key];
           return (
@@ -350,19 +350,19 @@ function GettingStartedChecklist() {
               key={item.key}
               onClick={() => !done && navigate(item.path)}
               disabled={done}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors ${
+              className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-lg text-left transition-colors ${
                 done ? 'opacity-60 cursor-default' : `${t.rowHover} cursor-pointer`
               }`}
             >
               {done ? (
-                <Check className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+                <Check className="w-3.5 h-3.5 text-emerald-500 flex-shrink-0" />
               ) : (
-                <Circle className={`w-4 h-4 ${t.textFaint} flex-shrink-0`} />
+                <Circle className={`w-3.5 h-3.5 ${t.textFaint} flex-shrink-0`} />
               )}
-              <span className={`text-xs font-medium flex-1 ${done ? `line-through ${t.textMuted}` : t.textMain}`}>
+              <span className={`text-[11px] font-medium flex-1 ${done ? `line-through ${t.textMuted}` : t.textMain}`}>
                 {item.label}
               </span>
-              {!done && <ChevronRight className={`w-3.5 h-3.5 ${t.textFaint}`} />}
+              {!done && <ChevronRight className={`w-3 h-3 ${t.textFaint}`} />}
             </button>
           );
         })}
@@ -823,7 +823,7 @@ function ComplianceDashboardWidget() {
                       <button
                         key={opt.days}
                         onClick={() => setModalTurnaround(modalTurnaround === opt.days ? null : opt.days)}
-                        className={`px-3 py-1.5 text-xs rounded-xl transition-colors ${
+                        className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
                           modalTurnaround === opt.days ? t.pillActive : t.pillInactive
                         }`}
                       >
@@ -855,7 +855,7 @@ function ComplianceDashboardWidget() {
                   <button
                     onClick={() => void markActioned(selectedItem)}
                     disabled={modalSaving}
-                    className={`px-4 py-2 text-xs rounded-xl ${t.innerEl} ${t.textDim} hover:${t.textMain} disabled:opacity-50 transition-colors`}
+                    className={`px-4 py-2 text-xs rounded-lg ${t.innerEl} ${t.textDim} hover:${t.textMain} disabled:opacity-50 transition-colors`}
                   >
                     Mark Actioned
                   </button>
@@ -873,14 +873,14 @@ function ComplianceDashboardWidget() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={closeModal}
-                  className={`px-4 py-2 text-xs rounded-xl ${t.innerEl} ${t.textMuted} hover:${t.textMain} transition-colors`}
+                  className={`px-4 py-2 text-xs rounded-lg ${t.innerEl} ${t.textMuted} hover:${t.textMain} transition-colors`}
                 >
                   Cancel
                 </button>
                 <button
                   onClick={() => void saveModalChanges()}
                   disabled={modalSaving || (modalOwnerId === (selectedItem.action_owner_id ?? '') && modalTurnaround === null)}
-                  className={`px-4 py-2 text-xs rounded-xl ${t.btnPrimary} disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
+                  className={`px-4 py-2 text-xs rounded-lg ${t.btnPrimary} disabled:opacity-40 disabled:cursor-not-allowed transition-colors`}
                 >
                   {modalSaving ? 'Saving…' : 'Save'}
                 </button>
@@ -1013,34 +1013,34 @@ export function Dashboard() {
   return (
     <>
     <OnboardingWizard />
-    <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
+    <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-16 md:-mt-4 -mb-8 px-4 sm:px-6 lg:px-8 py-6 md:pt-8 min-h-screen ${t.pageBg}`}>
     <div className="max-w-5xl mx-auto">
     <CompanyProfileBanner />
     <GettingStartedChecklist />
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-5 animate-in fade-in duration-500">
       {/* Header Section */}
-      <div className="flex justify-between items-start mb-12 pb-8">
+      <div className="flex justify-between items-start mb-8 pb-6">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
+            <h1 className={`text-3xl font-bold tracking-tighter ${t.textMain} uppercase`}>
               Command Center
             </h1>
             <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] uppercase tracking-widest font-bold rounded-full`}>
               Live
             </div>
           </div>
-          <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>Operations Dashboard</p>
+          <p className={`text-[10px] ${t.textMuted} mt-1.5 font-mono tracking-wide uppercase`}>Operations Dashboard</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2">
           <button
             onClick={() => navigate('/app/matcha/policies/new')}
-            className={`px-5 py-2 ${t.btnSecondary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
+            className={`px-4 py-2 ${t.btnSecondary} rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all`}
           >
             New Policy
           </button>
           <button
             onClick={() => navigate('/app/matcha/offer-letters')}
-            className={`px-5 py-2 ${t.btnPrimary} rounded-xl text-xs font-bold uppercase tracking-wider transition-all`}
+            className={`px-4 py-2 ${t.btnPrimary} rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all`}
           >
             Create Offer
           </button>
@@ -1049,7 +1049,7 @@ export function Dashboard() {
 
       <WidgetContainer widgets={dashboardWidgets}>
         {(visibleWidgets) => (
-          <div className="space-y-6">
+          <div className="space-y-5">
             {/* Stats Grid */}
             {visibleWidgets.has('stats') && (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -1057,16 +1057,16 @@ export function Dashboard() {
                   <button
                     key={stat.label}
                     onClick={() => navigate(stat.path)}
-                    className={`${t.cardDark} p-6 ${t.cardDarkHover} transition-all group relative overflow-hidden text-left`}
+                    className={`${t.cardDark} p-5 ${t.cardDarkHover} transition-all group relative overflow-hidden text-left`}
                   >
                     <div className={`absolute top-0 right-0 p-3 ${t.cardDarkGhost} group-hover:scale-110 transition-all duration-500`}>
-                       <stat.icon className="w-10 h-10" strokeWidth={0.5} />
+                       <stat.icon className="w-8 h-8" strokeWidth={0.5} />
                     </div>
 
                     <div className="relative z-10">
-                      <div className={`${t.labelOnDark} mb-3`}>{stat.label}</div>
-                      <div className="text-4xl font-light font-mono text-zinc-50 mb-1 tabular-nums">{stat.value}</div>
-                      <div className={`text-[10px] ${t.textMuted} font-mono`}>
+                      <div className={`${t.labelOnDark} mb-2`}>{stat.label}</div>
+                      <div className="text-3xl font-light font-mono text-zinc-50 mb-0.5 tabular-nums">{stat.value}</div>
+                      <div className={`text-[9px] ${t.textMuted} font-mono`}>
                          {stat.change}
                       </div>
                     </div>
@@ -1223,7 +1223,7 @@ export function Dashboard() {
                               <div className={`text-[10px] ${t.textMuted} font-mono`}>employees out (30d)</div>
                               <button
                                 onClick={() => navigate('/app/matcha/pto')}
-                                className={`mt-4 ${t.btnPrimary} rounded-xl px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors`}
+                                className={`mt-4 ${t.btnPrimary} rounded-lg px-4 py-2 text-xs font-bold uppercase tracking-wider transition-colors`}
                               >
                                 View Calendar
                               </button>
