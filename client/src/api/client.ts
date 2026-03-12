@@ -124,6 +124,10 @@ import type {
   IRConsistencyAnalytics,
   IRAuditLogResponse,
   EmployeeIncidentItem,
+  InvestigationInterview,
+  InvestigationInterviewCreateRequest,
+  BatchInvestigationResult,
+  InvestigationInviteInfo,
   // Policy types
   Policy,
   PolicyCreate,
@@ -1436,6 +1440,29 @@ export const outreach = {
   },
 };
 
+// Investigation Interview API (public endpoints - no auth required)
+export const investigationInvite = {
+  getInfo: async (token: string): Promise<InvestigationInviteInfo> => {
+    const response = await fetch(`${API_BASE}/investigation/${token}`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to load' }));
+      throw new Error(error.detail || 'Failed to load');
+    }
+    return response.json();
+  },
+
+  start: async (token: string): Promise<{ interview_id: string; websocket_url: string; ws_auth_token: string; status: string }> => {
+    const response = await fetch(`${API_BASE}/investigation/${token}/start`, {
+      method: 'POST',
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Failed to start interview' }));
+      throw new Error(error.detail || 'Failed to start interview');
+    }
+    return response.json();
+  },
+};
+
 // Screening API (direct screening invites - requires auth to start)
 export const screening = {
   getInfo: async (token: string): Promise<ScreeningPublicInfo> => {
@@ -2082,6 +2109,29 @@ export const irIncidents = {
   disableAnonymousReporting: (): Promise<{ token: null; enabled: false }> =>
     request<{ token: null; enabled: false }>('/ir/incidents/anonymous-reporting/disable', {
       method: 'DELETE',
+    }),
+
+  // Investigation Interviews
+  listInvestigationInterviews: (incidentId: string): Promise<InvestigationInterview[]> =>
+    request<InvestigationInterview[]>(`/ir/incidents/${incidentId}/investigation-interviews`),
+
+  createInvestigationInterviews: (
+    incidentId: string,
+    interviews: InvestigationInterviewCreateRequest[]
+  ): Promise<BatchInvestigationResult> =>
+    request<BatchInvestigationResult>(`/ir/incidents/${incidentId}/investigation-interviews/batch`, {
+      method: 'POST',
+      body: JSON.stringify(interviews),
+    }),
+
+  cancelInvestigationInterview: (incidentId: string, interviewId: string): Promise<{ status: string }> =>
+    request<{ status: string }>(`/ir/incidents/${incidentId}/investigation-interviews/${interviewId}`, {
+      method: 'DELETE',
+    }),
+
+  resendInvestigationInvite: (incidentId: string, interviewId: string): Promise<{ status: string }> =>
+    request<{ status: string }>(`/ir/incidents/${incidentId}/investigation-interviews/${interviewId}/resend-invite`, {
+      method: 'POST',
     }),
 };
 

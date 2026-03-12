@@ -2289,6 +2289,19 @@ async def generate_suggested_guidance(
             case_id,
         )
 
+        # Check for linked incident witnesses and investigation transcript count
+        linked_incident = await conn.fetchrow(
+            "SELECT witnesses FROM ir_incidents WHERE er_case_id = $1 LIMIT 1",
+            case_id,
+        )
+        completed_investigation_transcript_count = await conn.fetchval(
+            """
+            SELECT COUNT(*) FROM ir_investigation_interviews
+            WHERE er_case_id = $1 AND status IN ('completed', 'analyzed')
+            """,
+            case_id,
+        ) or 0
+
     analysis_map: dict[str, dict[str, Any]] = {}
     for row in analysis_rows:
         analysis_type = str(row["analysis_type"])
@@ -2321,28 +2334,13 @@ async def generate_suggested_guidance(
     ]
     can_run_discrepancies = len(completed_non_policy_docs) >= 2
 
-    # Check for linked incident witnesses and investigation transcript count
     linked_incident_has_witnesses = False
-    completed_investigation_transcript_count = 0
-    async with get_connection() as conn:
-        linked_incident = await conn.fetchrow(
-            "SELECT witnesses FROM ir_incidents WHERE er_case_id = $1 LIMIT 1",
-            case_id,
-        )
-        if linked_incident:
-            witnesses = linked_incident["witnesses"]
-            if isinstance(witnesses, str):
-                witnesses = json.loads(witnesses)
-            if isinstance(witnesses, list) and len(witnesses) > 0:
-                linked_incident_has_witnesses = True
-
-        completed_investigation_transcript_count = await conn.fetchval(
-            """
-            SELECT COUNT(*) FROM ir_investigation_interviews
-            WHERE er_case_id = $1 AND status IN ('completed', 'analyzed')
-            """,
-            case_id,
-        ) or 0
+    if linked_incident:
+        witnesses = linked_incident["witnesses"]
+        if isinstance(witnesses, str):
+            witnesses = json.loads(witnesses)
+        if isinstance(witnesses, list) and len(witnesses) > 0:
+            linked_incident_has_witnesses = True
 
     fallback_payload = _build_fallback_guidance_payload(
         timeline_data=timeline_data,

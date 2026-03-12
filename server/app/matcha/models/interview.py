@@ -255,8 +255,10 @@ class InvestigationInterviewCreate(BaseModel):
     """Request to create an investigation interview from an IR incident."""
     interviewee_name: str
     interviewee_email: Optional[str] = None
-    interviewee_role: str  # complainant, respondent, witness
+    interviewee_role: str  # complainant, respondent, witness, manager
     er_case_id: Optional[UUID] = None
+    send_invite: bool = False
+    custom_message: Optional[str] = None
 
 
 class InvestigationInterviewResponse(BaseModel):
@@ -272,6 +274,8 @@ class InvestigationInterviewResponse(BaseModel):
     status: str
     has_transcript: bool = False
     investigation_analysis: Optional[InvestigationAnalysis] = None
+    invite_token: Optional[str] = None
+    invite_sent_at: Optional[datetime] = None
     created_at: datetime
     completed_at: Optional[datetime] = None
 
@@ -283,6 +287,7 @@ class InvestigationInterviewStart(BaseModel):
     websocket_url: str
     ws_auth_token: str
     questions_generated: list[dict]
+    invite_sent: bool = False
 
 
 class TutorSessionCreate(BaseModel):

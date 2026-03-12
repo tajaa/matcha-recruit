@@ -10,12 +10,14 @@ import type {
   IRRecommendationsAnalysis,
   IRPrecedentAnalysis,
   ERCaseCategory,
+  InvestigationInterview,
 } from '../types';
 import { RootCauseAnalysisModal } from '../components/ir/RootCauseAnalysisModal';
 import { RecommendationsAnalysisModal } from '../components/ir/RecommendationsAnalysisModal';
 import { SimilarIncidentsAnalysisModal } from '../components/ir/SimilarIncidentsAnalysisModal';
 import { ConsistencyGuidancePanel } from '../components/ir/ConsistencyGuidancePanel';
 import { AnalysisTerminalModal } from '../components/ir/AnalysisTerminalModal';
+import { ScheduleInterviewsModal } from '../components/ir/ScheduleInterviewsModal';
 import { useIRAnalysisStream } from '../hooks/ir/useIRAnalysisStream';
 import type { AnalysisType } from '../hooks/ir/useIRAnalysisStream';
 import { useIsLightMode } from '../hooks/useIsLightMode';
@@ -143,6 +145,11 @@ export function IRDetail() {
   const [escalating, setEscalating] = useState(false);
   const [escalateForm, setEscalateForm] = useState({ title: '', description: '', category: 'other' as ERCaseCategory });
 
+  const [investigationInterviews, setInvestigationInterviews] = useState<InvestigationInterview[]>([]);
+  const [loadingInterviews, setLoadingInterviews] = useState(false);
+  const [showScheduleModal, setShowScheduleModal] = useState(false);
+  const [showAnalysisModal, setShowAnalysisModal] = useState<InvestigationInterview | null>(null);
+
   const fetchIncident = useCallback(async () => {
     if (!id) return;
     try {
@@ -162,9 +169,23 @@ export function IRDetail() {
     }
   }, [id]);
 
+  const fetchInvestigationInterviews = useCallback(async () => {
+    if (!id) return;
+    setLoadingInterviews(true);
+    try {
+      const data = await irIncidents.listInvestigationInterviews(id);
+      setInvestigationInterviews(data);
+    } catch (e) {
+      // silent fail - not critical
+    } finally {
+      setLoadingInterviews(false);
+    }
+  }, [id]);
+
   useEffect(() => {
     fetchIncident();
-  }, [fetchIncident]);
+    fetchInvestigationInterviews();
+  }, [fetchIncident, fetchInvestigationInterviews]);
 
   // Fetch employee names when incident has involved employees
   useEffect(() => {
@@ -199,6 +220,18 @@ export function IRDetail() {
     } finally {
       setUpdating(false);
     }
+  };
+
+  const handleResendInvite = async (interviewId: string) => {
+    if (!id) return;
+    await irIncidents.resendInvestigationInvite(id, interviewId);
+    await fetchInvestigationInterviews();
+  };
+
+  const handleCancelInterview = async (interviewId: string) => {
+    if (!id) return;
+    await irIncidents.cancelInvestigationInterview(id, interviewId);
+    await fetchInvestigationInterviews();
   };
 
   const runAnalysis = (type: string) => {
@@ -488,6 +521,74 @@ export function IRDetail() {
             </div>
           )}
 
+          {/* Investigation Interviews */}
+          {(incident.status === 'investigating' || incident.status === 'action_required' || investigationInterviews.length > 0) && (
+            <div className={`${t.card} p-6`}>
+              <div className="flex items-center justify-between mb-4">
+                <div className={t.label}>Investigation Interviews</div>
+                {(incident.status === 'investigating' || incident.status === 'action_required') && (
+                  <button
+                    onClick={() => setShowScheduleModal(true)}
+                    className={`text-[10px] ${t.btnPrimary} px-3 py-1.5 uppercase tracking-wider font-bold`}
+                  >
+                    Schedule Interviews
+                  </button>
+                )}
+              </div>
+
+              {investigationInterviews.length === 0 ? (
+                <p className={`text-xs ${t.textMuted}`}>No investigation interviews scheduled yet.</p>
+              ) : (
+                <div className="space-y-3">
+                  {investigationInterviews.map((inv) => (
+                    <div key={inv.id} className={`flex items-center justify-between gap-3 py-2 border-b ${t.border} last:border-0`}>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-xs font-medium ${t.textMain} truncate`}>{inv.interviewee_name}</div>
+                        <div className={`text-[10px] ${t.textMuted} truncate`}>{inv.interviewee_email}</div>
+                      </div>
+                      <div className={`text-[10px] px-2 py-0.5 rounded-full border ${
+                        inv.status === 'analyzed' ? 'border-blue-500/30 text-blue-400' :
+                        inv.status === 'completed' ? 'border-green-500/30 text-green-400' :
+                        inv.status === 'in_progress' ? 'border-yellow-500/30 text-yellow-400' :
+                        inv.status === 'cancelled' ? 'border-red-500/30 text-red-400' :
+                        'border-zinc-600 text-zinc-500'
+                      } uppercase tracking-wider font-bold`}>
+                        {inv.status}
+                      </div>
+                      <div className="text-[10px] uppercase tracking-wider text-zinc-500 font-bold">{inv.interviewee_role}</div>
+                      <div className="flex gap-2 shrink-0">
+                        {inv.status === 'analyzed' && (
+                          <button
+                            onClick={() => setShowAnalysisModal(inv)}
+                            className={`text-[10px] ${t.btnGhost} uppercase tracking-wider font-bold`}
+                          >
+                            View Analysis
+                          </button>
+                        )}
+                        {inv.status === 'pending' && inv.invite_token && (
+                          <button
+                            onClick={() => handleResendInvite(inv.id)}
+                            className={`text-[10px] ${t.btnGhost} uppercase tracking-wider font-bold`}
+                          >
+                            Resend
+                          </button>
+                        )}
+                        {inv.status === 'pending' && (
+                          <button
+                            onClick={() => handleCancelInterview(inv.id)}
+                            className={`text-[10px] text-red-500 hover:text-red-400 uppercase tracking-wider font-bold`}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Root Cause & Actions */}
           <div className={`${t.card} p-6 space-y-6`}>
             <div>
@@ -729,6 +830,67 @@ export function IRDetail() {
         error={stream.error}
         analysisType={stream.analysisType}
       />
+
+      {/* Investigation Analysis Modal */}
+      {showAnalysisModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60" onClick={() => setShowAnalysisModal(null)} />
+          <div className={`relative ${t.modalBg} w-full max-w-2xl p-6 space-y-4 max-h-[80vh] overflow-y-auto`}>
+            <div className="flex justify-between items-start">
+              <h3 className={`text-sm font-medium ${t.textMain}`}>Interview Analysis — {showAnalysisModal.interviewee_name}</h3>
+              <button onClick={() => setShowAnalysisModal(null)} className={`text-xs ${t.btnGhost}`}>✕</button>
+            </div>
+            {showAnalysisModal.investigation_analysis && (
+              <div className="space-y-4 text-sm">
+                {showAnalysisModal.investigation_analysis.key_facts.length > 0 && (
+                  <div>
+                    <div className={`${t.label} mb-2`}>Key Facts</div>
+                    <ul className={`space-y-1 ${t.textSecondary ?? t.textMain}`}>
+                      {showAnalysisModal.investigation_analysis.key_facts.map((f, i) => <li key={i} className="flex gap-2"><span className="shrink-0">•</span>{f}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {showAnalysisModal.investigation_analysis.gaps_identified.length > 0 && (
+                  <div>
+                    <div className={`${t.label} mb-2`}>Gaps Identified</div>
+                    <ul className={`space-y-1 ${t.textMuted}`}>
+                      {showAnalysisModal.investigation_analysis.gaps_identified.map((g, i) => <li key={i} className="flex gap-2"><span className="shrink-0">•</span>{g}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {showAnalysisModal.investigation_analysis.credibility_notes.length > 0 && (
+                  <div>
+                    <div className={`${t.label} mb-2`}>Credibility Notes</div>
+                    <ul className={`space-y-1 ${t.textMuted}`}>
+                      {showAnalysisModal.investigation_analysis.credibility_notes.map((n, i) => <li key={i} className="flex gap-2"><span className="shrink-0">•</span>{n}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {showAnalysisModal.investigation_analysis.interview_summary && (
+                  <div>
+                    <div className={`${t.label} mb-2`}>Summary</div>
+                    <p className={t.textMuted}>{showAnalysisModal.investigation_analysis.interview_summary}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Schedule Investigation Interviews Modal */}
+      {incident && (
+        <ScheduleInterviewsModal
+          isOpen={showScheduleModal}
+          onClose={() => setShowScheduleModal(false)}
+          incidentId={id || ''}
+          witnesses={incident.witnesses || []}
+          onSuccess={(_count) => {
+            setShowScheduleModal(false);
+            fetchInvestigationInterviews();
+          }}
+        />
+      )}
 
       {/* Escalate to ER Case Modal */}
       {showEscalateModal && (

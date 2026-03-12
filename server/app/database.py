@@ -1949,6 +1949,17 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_irii_interview_id ON ir_investigation_interviews(interview_id)
         """)
+        await conn.execute("""
+            ALTER TABLE ir_investigation_interviews ADD COLUMN IF NOT EXISTS invite_token VARCHAR(64)
+        """)
+        await conn.execute("""
+            ALTER TABLE ir_investigation_interviews ADD COLUMN IF NOT EXISTS invite_sent_at TIMESTAMP
+        """)
+        await conn.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_irii_invite_token
+            ON ir_investigation_interviews(invite_token)
+            WHERE invite_token IS NOT NULL
+        """)
 
         # ===========================================
         # Leads Agent Tables (Executive Lead Generation)

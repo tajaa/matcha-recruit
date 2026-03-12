@@ -2140,6 +2140,58 @@ export interface IRIncidentListResponse {
   total: number;
 }
 
+export interface InvestigationInterview {
+  id: string;
+  incident_id: string;
+  interview_id: string;
+  er_case_id: string | null;
+  interviewee_role: string | null;
+  interviewee_name: string | null;
+  interviewee_email: string | null;
+  questions_generated: Record<string, unknown>[] | null;
+  status: string;
+  has_transcript: boolean;
+  investigation_analysis: {
+    key_facts: string[];
+    credibility_notes: string[];
+    gaps_identified: string[];
+    suggested_followup_questions: string[];
+    interview_summary: string;
+    analyzed_at: string;
+  } | null;
+  invite_token: string | null;
+  invite_sent_at: string | null;
+  created_at: string;
+  completed_at: string | null;
+}
+
+export interface InvestigationInterviewCreateRequest {
+  interviewee_name: string;
+  interviewee_email: string;
+  interviewee_role: 'witness' | 'complainant' | 'respondent' | 'manager';
+  send_invite: boolean;
+  custom_message?: string;
+}
+
+export interface BatchInvestigationResult {
+  created: number;
+  failed: number;
+  interviews: Array<{
+    investigation_interview_id: string;
+    interview_id: string;
+    invite_sent: boolean;
+  }>;
+  errors: Array<{ interviewee_name: string; error: string }>;
+}
+
+export interface InvestigationInviteInfo {
+  interviewee_name: string;
+  interviewee_role: string;
+  company_name: string;
+  incident_type: string;
+  status: string;
+}
+
 export interface IRDocument {
   id: string;
   incident_id: string;

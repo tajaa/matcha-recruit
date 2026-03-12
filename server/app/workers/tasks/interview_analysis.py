@@ -233,7 +233,7 @@ async def _link_to_er_case_and_upload_transcript(
     )
     if not er_case_id:
         er_case_id = await conn.fetchval(
-            "SELECT er_case_id FROM ir_incidents WHERE id = $1", incident_id,
+            "SELECT er_case_id FROM ir_incidents WHERE id = $1", _UUID(incident_id),
         )
 
     if not er_case_id:
@@ -243,7 +243,7 @@ async def _link_to_er_case_and_upload_transcript(
             SELECT title, description, incident_type, involved_employee_ids, company_id, created_by
             FROM ir_incidents WHERE id = $1
             """,
-            incident_id,
+            _UUID(incident_id),
         )
         if not incident:
             return
@@ -260,7 +260,9 @@ async def _link_to_er_case_and_upload_transcript(
 
         # Generate case number
         import secrets
-        case_number = f"ER-{secrets.token_hex(3).upper()}"
+        from datetime import datetime as _datetime, timezone as _timezone
+        _now = _datetime.now(_timezone.utc)
+        case_number = f"ER-{_now.year}-{_now.month:02d}-{secrets.token_hex(2).upper()}"
 
         # Build involved_employees JSONB from involved_employee_ids
         involved_employees = json.dumps(
@@ -270,7 +272,7 @@ async def _link_to_er_case_and_upload_transcript(
         er_case_id = await conn.fetchval(
             """
             INSERT INTO er_cases (case_number, title, description, category, company_id, created_by, involved_employees)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
             RETURNING id
             """,
             case_number,
