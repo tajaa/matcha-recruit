@@ -6094,7 +6094,7 @@ async def get_employee_admin(employee_id: UUID):
                 "malpractice_carrier": creds["malpractice_carrier"],
                 "malpractice_policy_number": creds["malpractice_policy_number"],
                 "malpractice_expiration": creds["malpractice_expiration"].isoformat() if creds["malpractice_expiration"] else None,
-                "health_clearances": dict(creds["health_clearances"] or {}),
+                "health_clearances": creds["health_clearances"] or {},
             } if creds else None,
         }
         return result
