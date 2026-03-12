@@ -811,7 +811,7 @@ export function Layout() {
     }
   }, [themeMode]);
 
-  const isMatchaRoute = location.pathname.startsWith('/app/matcha') || location.pathname.startsWith('/app/ir') || location.pathname === '/app';
+  const isMatchaRoute = location.pathname.startsWith('/app/matcha') || location.pathname.startsWith('/app/ir') || location.pathname === '/app' || location.pathname.includes('/notifications');
   const shouldInvertPages = themeMode === 'light' && !isMatchaRoute;
 
   const toggleSection = (title: string) => {
