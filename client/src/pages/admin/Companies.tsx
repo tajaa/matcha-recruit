@@ -269,7 +269,7 @@ function CompanyDrawer({
                   <div key={u.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
                     <div className="flex-1 min-w-0">
                       <div className={`text-sm font-medium ${DK.textMain} truncate`}>
-                        {[u.first_name, u.last_name].filter(Boolean).join(' ') || u.email}
+                        {u.name || u.email}
                       </div>
                       <div className={`text-[11px] ${DK.textFaint} truncate`}>{u.email}</div>
                     </div>

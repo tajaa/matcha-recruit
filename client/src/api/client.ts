@@ -2325,8 +2325,7 @@ export interface AdminCompanyDetail extends AdminCompany {
   users: {
     id: string;
     email: string;
-    first_name: string | null;
-    last_name: string | null;
+    name: string;
     role: string;
     job_title: string | null;
     created_at: string | null;

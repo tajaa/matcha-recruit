@@ -5938,8 +5938,8 @@ async def get_company_admin(company_id: UUID):
             raise HTTPException(status_code=404, detail="Company not found")
 
         users = await conn.fetch("""
-            SELECT u.id, u.email, u.first_name, u.last_name, u.role,
-                   u.created_at, cl.job_title
+            SELECT u.id, u.email, u.role, u.created_at,
+                   cl.name, cl.job_title
             FROM clients cl
             JOIN users u ON u.id = cl.user_id
             WHERE cl.company_id = $1
@@ -5961,8 +5961,7 @@ async def get_company_admin(company_id: UUID):
                 {
                     "id": str(u["id"]),
                     "email": u["email"],
-                    "first_name": u["first_name"],
-                    "last_name": u["last_name"],
+                    "name": u["name"],
                     "role": u["role"],
                     "job_title": u["job_title"],
                     "created_at": u["created_at"].isoformat() if u["created_at"] else None,
