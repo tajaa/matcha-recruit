@@ -99,3 +99,4 @@ Pods/
 # Xcode build output
 desktop/Matcha/build/
 .claude/worktrees/
+.claude/
