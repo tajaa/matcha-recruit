@@ -100,3 +100,4 @@ Pods/
 desktop/Matcha/build/
 .claude/worktrees/
 .claude/
+/soc/
