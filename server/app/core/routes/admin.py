@@ -5902,7 +5902,8 @@ async def list_companies_admin():
                 c.id, c.name, c.industry, c.healthcare_specialties,
                 c.size, c.status, c.headquarters_state, c.headquarters_city,
                 c.created_at,
-                (SELECT COUNT(*) FROM employees e WHERE e.org_id = c.id AND e.termination_date IS NULL) AS user_count
+                (SELECT COUNT(*) FROM employees e WHERE e.org_id = c.id AND e.termination_date IS NULL) AS user_count,
+                (SELECT COUNT(*) FROM business_locations bl WHERE bl.company_id = c.id) AS location_count
             FROM companies c
             ORDER BY c.name
         """)
@@ -5918,6 +5919,7 @@ async def list_companies_admin():
                 "headquarters_city": r["headquarters_city"],
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 "user_count": r["user_count"],
+                "location_count": r["location_count"],
             }
             for r in rows
         ]

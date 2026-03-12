@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminCompanies } from '../../api/client';
 import type { AdminCompany, AdminCompanyDetail } from '../../api/client';
-import { Building2, Users, Copy, Check, X, Pencil, ChevronRight } from 'lucide-react';
+import { Building2, Users, Copy, Check, X, Pencil, ChevronRight, MapPin } from 'lucide-react';
 
 const DK = {
   pageBg: 'bg-zinc-950',
@@ -389,9 +389,10 @@ export function Companies() {
               <thead>
                 <tr className={`border-b ${DK.border}`}>
                   <th className={`px-4 py-3 text-left ${DK.label}`}>Company</th>
-                  <th className={`px-4 py-3 text-left ${DK.label}`}>Industry</th>
+                  <th className={`px-4 py-3 text-left ${DK.label}`}>Industry / Specialties</th>
                   <th className={`px-4 py-3 text-left ${DK.label}`}>Size</th>
                   <th className={`px-4 py-3 text-left ${DK.label}`}>Status</th>
+                  <th className={`px-4 py-3 text-right ${DK.label}`}>Jurisdictions</th>
                   <th className={`px-4 py-3 text-right ${DK.label}`}>Employees</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -426,6 +427,14 @@ export function Companies() {
                     <td className={`px-4 py-3 ${DK.textMuted}`}>{c.size ?? '—'}</td>
                     <td className="px-4 py-3">
                       <span className={statusBadge(c.status)}>{c.status}</span>
+                    </td>
+                    <td className={`px-4 py-3 text-right ${DK.textMuted}`}>
+                      {c.location_count > 0 ? (
+                        <span className="flex items-center justify-end gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {c.location_count}
+                        </span>
+                      ) : <span className={DK.textFaint}>—</span>}
                     </td>
                     <td className={`px-4 py-3 text-right ${DK.textMuted}`}>
                       <span className="flex items-center justify-end gap-1">

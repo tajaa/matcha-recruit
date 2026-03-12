@@ -2318,6 +2318,7 @@ export interface AdminCompany {
   headquarters_city: string | null;
   created_at: string | null;
   user_count: number;
+  location_count: number;
 }
 
 export interface AdminCompanyDetail extends AdminCompany {
