@@ -34,6 +34,8 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
     "handbook_green_flags",
     "handbook_jurisdiction_summaries",
     "handbook_analysis_generated_at",
+    "handbook_strength_score",
+    "handbook_strength_label",
 }
 HANDBOOK_FIELDS = [
     field_name for field_name in HandbookDocument.model_fields.keys()
