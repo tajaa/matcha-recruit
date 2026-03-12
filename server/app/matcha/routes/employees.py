@@ -4406,7 +4406,7 @@ async def upsert_employee_credentials(
                 $12,
                 $13, $14,
                 $15, $16, $17,
-                $18,
+                $18::jsonb,
                 NOW()
             )
             ON CONFLICT (employee_id) DO UPDATE SET
