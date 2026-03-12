@@ -5878,3 +5878,119 @@ async def research_jurisdiction(jurisdiction_id: UUID):
         media_type="text/event-stream",
         headers={"X-Accel-Buffering": "no"},
     )
+
+
+# ---------------------------------------------------------------------------
+# Company Management
+# ---------------------------------------------------------------------------
+
+class CompanyProfileUpdate(BaseModel):
+    name: Optional[str] = None
+    industry: Optional[str] = None
+    healthcare_specialties: Optional[list[str]] = None
+    size: Optional[str] = None
+    headquarters_state: Optional[str] = None
+    headquarters_city: Optional[str] = None
+
+
+@router.get("/companies", dependencies=[Depends(require_admin)])
+async def list_companies_admin():
+    """List all companies with user counts."""
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT
+                c.id, c.name, c.industry, c.healthcare_specialties,
+                c.size, c.status, c.headquarters_state, c.headquarters_city,
+                c.created_at,
+                COUNT(cl.id) AS user_count
+            FROM companies c
+            LEFT JOIN clients cl ON cl.company_id = c.id
+            GROUP BY c.id
+            ORDER BY c.name
+        """)
+        return [
+            {
+                "id": str(r["id"]),
+                "name": r["name"],
+                "industry": r["industry"],
+                "healthcare_specialties": list(r["healthcare_specialties"] or []),
+                "size": r["size"],
+                "status": r["status"] or "approved",
+                "headquarters_state": r["headquarters_state"],
+                "headquarters_city": r["headquarters_city"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+                "user_count": r["user_count"],
+            }
+            for r in rows
+        ]
+
+
+@router.get("/companies/{company_id}", dependencies=[Depends(require_admin)])
+async def get_company_admin(company_id: UUID):
+    """Get full company details including users."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow("""
+            SELECT id, name, industry, healthcare_specialties, size, status,
+                   headquarters_state, headquarters_city, created_at, enabled_features
+            FROM companies WHERE id = $1
+        """, company_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        users = await conn.fetch("""
+            SELECT u.id, u.email, u.first_name, u.last_name, u.role,
+                   u.created_at, cl.job_title
+            FROM clients cl
+            JOIN users u ON u.id = cl.user_id
+            WHERE cl.company_id = $1
+            ORDER BY u.created_at
+        """, company_id)
+
+        return {
+            "id": str(row["id"]),
+            "name": row["name"],
+            "industry": row["industry"],
+            "healthcare_specialties": list(row["healthcare_specialties"] or []),
+            "size": row["size"],
+            "status": row["status"] or "approved",
+            "headquarters_state": row["headquarters_state"],
+            "headquarters_city": row["headquarters_city"],
+            "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+            "enabled_features": dict(row["enabled_features"] or {}),
+            "users": [
+                {
+                    "id": str(u["id"]),
+                    "email": u["email"],
+                    "first_name": u["first_name"],
+                    "last_name": u["last_name"],
+                    "role": u["role"],
+                    "job_title": u["job_title"],
+                    "created_at": u["created_at"].isoformat() if u["created_at"] else None,
+                }
+                for u in users
+            ],
+        }
+
+
+@router.patch("/companies/{company_id}", dependencies=[Depends(require_admin)])
+async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate):
+    """Update company profile fields."""
+    fields = body.model_dump(exclude_none=True)
+    if not fields:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    set_clauses = []
+    values = []
+    for i, (key, val) in enumerate(fields.items(), start=1):
+        set_clauses.append(f"{key} = ${i}")
+        values.append(val)
+    values.append(company_id)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"UPDATE companies SET {', '.join(set_clauses)} WHERE id = ${len(values)} RETURNING id",
+            *values,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Company not found")
+    return {"ok": True}

@@ -62,6 +62,7 @@ const ClientNotifications = lazy(() => import('./pages/ClientNotifications'));
 const AdminNotifications = lazy(() => import('./pages/admin/AdminNotifications'));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
+const Companies = lazy(() => import('./pages/admin/Companies').then(m => ({ default: m.Companies })));
 const BrokerManagement = lazy(() => import('./pages/admin/BrokerManagement'));
 const Jurisdictions = lazy(() => import('./pages/admin/Jurisdictions'));
 const JurisdictionData = lazy(() => import('./pages/admin/JurisdictionData'));
@@ -716,6 +717,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <CompanyFeatures />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="admin/companies"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <Companies />
                   </ProtectedRoute>
                 }
               />

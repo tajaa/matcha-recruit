@@ -2306,6 +2306,47 @@ export const adminCompanyFeatures = {
     }),
 };
 
+// Admin Company Management
+export interface AdminCompany {
+  id: string;
+  name: string;
+  industry: string | null;
+  healthcare_specialties: string[];
+  size: string | null;
+  status: string;
+  headquarters_state: string | null;
+  headquarters_city: string | null;
+  created_at: string | null;
+  user_count: number;
+}
+
+export interface AdminCompanyDetail extends AdminCompany {
+  enabled_features: Record<string, boolean>;
+  users: {
+    id: string;
+    email: string;
+    first_name: string | null;
+    last_name: string | null;
+    role: string;
+    job_title: string | null;
+    created_at: string | null;
+  }[];
+}
+
+export const adminCompanies = {
+  list: (): Promise<AdminCompany[]> =>
+    request<AdminCompany[]>('/admin/companies'),
+
+  get: (id: string): Promise<AdminCompanyDetail> =>
+    request<AdminCompanyDetail>(`/admin/companies/${id}`),
+
+  update: (id: string, data: Partial<Pick<AdminCompany, 'name' | 'industry' | 'healthcare_specialties' | 'size' | 'headquarters_state' | 'headquarters_city'>>): Promise<{ ok: boolean }> =>
+    request<{ ok: boolean }>(`/admin/companies/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+};
+
 // Admin Broker Management
 export interface AdminBroker {
   id: string;
