@@ -191,20 +191,20 @@ export function ClientNotifications() {
 
   if (loading) {
     return (
-      <div className="max-w-5xl mx-auto space-y-8 py-4">
-        <div className={`border-b ${t.border} pb-6 md:pb-8`}>
-          <div className={`h-8 w-64 ${t.skeleton} animate-pulse rounded`} />
-          <div className={`h-4 w-96 ${t.skeletonFaint} animate-pulse mt-3 rounded`} />
+      <div className="max-w-4xl mx-auto space-y-6 py-8 px-4 sm:px-6">
+        <div className={`border-b ${t.border} pb-6`}>
+          <div className={`h-8 w-64 ${t.skeleton} animate-pulse rounded-md`} />
+          <div className={`h-4 w-48 ${t.skeletonFaint} animate-pulse mt-3 rounded-md`} />
         </div>
         <div className="space-y-3">
           {Array.from({ length: 8 }).map((_, i) => (
-            <div key={i} className={`border ${t.border} ${t.card} p-4 flex items-center gap-4`}>
-              <div className={`w-8 h-8 ${t.skeleton} animate-pulse shrink-0 rounded`} />
-              <div className="flex-1 space-y-2">
-                <div className={`h-4 w-48 ${t.skeleton} animate-pulse rounded`} />
-                <div className={`h-3 w-32 ${t.skeletonFaint} animate-pulse rounded`} />
+            <div key={i} className={`border ${t.border} ${t.card} p-5 flex items-start gap-4`}>
+              <div className={`w-8 h-8 ${t.skeleton} animate-pulse shrink-0 rounded-md`} />
+              <div className="flex-1 space-y-2.5 mt-0.5">
+                <div className={`h-4 w-3/4 ${t.skeleton} animate-pulse rounded-md`} />
+                <div className={`h-3 w-1/3 ${t.skeletonFaint} animate-pulse rounded-md`} />
               </div>
-              <div className={`h-3 w-16 ${t.skeletonFaint} animate-pulse rounded`} />
+              <div className={`h-3 w-16 ${t.skeletonFaint} animate-pulse rounded-md mt-1`} />
             </div>
           ))}
         </div>
@@ -213,13 +213,18 @@ export function ClientNotifications() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-8 py-4">
+    <div className="max-w-4xl mx-auto space-y-6 py-8 px-4 sm:px-6">
       {/* Header */}
-      <div className={`border-b ${t.border} pb-6 md:pb-8`}>
-        <h1 className={`text-3xl font-bold tracking-tight ${t.textMain}`}>Notifications</h1>
-        <p className={`text-[11px] ${t.textMuted} mt-1.5`}>
-          Recent activity &mdash; {total} total
-        </p>
+      <div className={`border-b ${t.border} pb-6 flex items-end justify-between`}>
+        <div>
+          <h1 className={`text-2xl font-bold tracking-tight ${t.textMain}`}>Notifications</h1>
+          <p className={`text-xs ${t.textMuted} mt-1.5`}>
+            Recent activity
+          </p>
+        </div>
+        <div className={`text-xs ${t.textMuted} font-mono`}>
+          {total} total
+        </div>
       </div>
 
         {/* Error */}
@@ -231,69 +236,76 @@ export function ClientNotifications() {
 
         {/* Feed */}
         {items.length === 0 && !error ? (
-          <div className={`${t.emptyBg} text-center py-24`}>
-            <Bell size={24} className={`${t.emptyIcon} mx-auto mb-3`} />
-            <div className={`${t.emptyText} font-mono text-sm uppercase tracking-wider`}>
-              No notifications yet
+          <div className={`${t.emptyBg} text-center py-20`}>
+            <div className={`w-12 h-12 rounded-full ${t.skeletonFaint} flex items-center justify-center mx-auto mb-4`}>
+              <Bell size={20} className={t.emptyIcon} />
             </div>
+            <div className={`text-sm font-medium ${t.textMain} mb-1`}>No notifications</div>
+            <div className={`text-xs ${t.textMuted}`}>You're all caught up.</div>
           </div>
         ) : (
-          <div className={`${t.card} divide-y ${t.divide} overflow-hidden shadow-sm`}>
-            {items.map((item) => (
-              <div
-                key={item.id}
-                onClick={() => item.link && navigate(item.link)}
-                className={`p-4 md:px-5 md:py-4 ${t.rowHover} transition-colors cursor-pointer active:opacity-80 flex items-start gap-3 md:gap-4`}
-              >
-                {/* Type Icon */}
-                <div className={`w-8 h-8 border flex items-center justify-center shrink-0 mt-0.5 rounded-lg ${t.typeBg[item.type]}`}>
-                  {TYPE_ICONS[item.type]}
-                </div>
-
-                {/* Content */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className={`text-sm ${t.textMain} font-semibold truncate`}>{item.title}</div>
-                      {item.subtitle && (
-                        <div className={`text-[11px] ${t.subtitleMono} font-mono mt-0.5 truncate opacity-70`}>{item.subtitle}</div>
-                      )}
-                    </div>
-                    <div className={`text-[10px] ${t.textFaint} font-mono whitespace-nowrap shrink-0 mt-0.5`}>
-                      {relativeTime(item.created_at)}
-                    </div>
+          <div className={`${t.card} overflow-hidden shadow-sm`}>
+            <div className={`divide-y ${t.divide}`}>
+              {items.map((item) => (
+                <div
+                  key={item.id}
+                  onClick={() => item.link && navigate(item.link)}
+                  className={`p-4 md:p-5 ${t.rowHover} transition-colors cursor-pointer group flex items-start gap-4`}
+                >
+                  {/* Type Icon */}
+                  <div className={`w-9 h-9 border flex items-center justify-center shrink-0 rounded-lg ${t.typeBg[item.type]}`}>
+                    {TYPE_ICONS[item.type]}
                   </div>
 
-                  <div className="flex items-center gap-2 mt-2 flex-wrap">
-                    {/* Severity badge */}
-                    {item.severity && (
-                      <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] font-semibold rounded-md ${t.severity[item.severity] || t.badgeBg}`}>
-                        {item.severity}
-                      </span>
-                    )}
+                  {/* Content */}
+                  <div className="flex-1 min-w-0 pt-0.5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className={`text-sm ${t.textMain} font-medium group-hover:text-emerald-500 transition-colors truncate`}>
+                          {item.title}
+                        </div>
+                        {item.subtitle && (
+                          <div className={`text-xs ${t.textMuted} mt-1 truncate`}>{item.subtitle}</div>
+                        )}
+                      </div>
+                      <div className={`text-[11px] ${t.textFaint} font-medium shrink-0`}>
+                        {relativeTime(item.created_at)}
+                      </div>
+                    </div>
 
-                    {/* Status badge */}
-                    {item.status && (
-                      <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] font-semibold rounded-md ${t.status[item.status] || t.badgeBg}`}>
-                        {item.status}
-                      </span>
+                    {(item.severity || item.status) && (
+                      <div className="flex items-center gap-2 mt-2.5">
+                        {/* Severity badge */}
+                        {item.severity && (
+                          <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] font-semibold rounded-md ${t.severity[item.severity] || t.badgeBg}`}>
+                            {item.severity.charAt(0).toUpperCase() + item.severity.slice(1)}
+                          </span>
+                        )}
+
+                        {/* Status badge */}
+                        {item.status && (
+                          <span className={`inline-flex items-center px-2 py-0.5 border text-[10px] font-semibold rounded-md ${t.status[item.status] || t.badgeBg}`}>
+                            {item.status.charAt(0).toUpperCase() + item.status.slice(1).replace('_', ' ')}
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
         )}
 
         {/* Load More */}
         {hasMore && (
-          <div className="flex justify-center pt-2">
+          <div className="flex justify-center pt-4">
             <button
               onClick={handleLoadMore}
               disabled={loadingMore}
-              className={`px-6 py-2 border text-[10px] font-bold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${t.btnPrimary}`}
+              className={`px-6 py-2 border text-xs font-semibold rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${t.btnPrimary}`}
             >
-              {loadingMore ? 'Loading...' : `Load More (${items.length} of ${total})`}
+              {loadingMore ? 'Loading...' : 'Load More'}
             </button>
           </div>
         )}
