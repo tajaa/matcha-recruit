@@ -5939,21 +5939,31 @@ async def get_company_admin(company_id: UUID):
             raise HTTPException(status_code=404, detail="Company not found")
 
         admins = await conn.fetch("""
-            SELECT u.id, u.email, u.role, u.created_at,
-                   cl.name, cl.job_title
+            SELECT u.id, u.email, u.role, u.created_at, cl.name, cl.job_title
             FROM clients cl
             JOIN users u ON u.id = cl.user_id
             WHERE cl.company_id = $1
             ORDER BY u.created_at
         """, company_id)
 
-        employees = await conn.fetch("""
-            SELECT id, email, first_name, last_name, employment_type,
-                   start_date, termination_date, created_at
-            FROM employees
-            WHERE org_id = $1
-            ORDER BY first_name, last_name
+        jurisdictions = await conn.fetch("""
+            SELECT
+                bl.state,
+                array_agg(DISTINCT bl.city ORDER BY bl.city) AS cities,
+                COUNT(DISTINCT e.id) AS employee_count
+            FROM business_locations bl
+            LEFT JOIN employees e ON e.org_id = bl.company_id
+                AND e.work_state = bl.state
+                AND e.termination_date IS NULL
+            WHERE bl.company_id = $1
+            GROUP BY bl.state
+            ORDER BY bl.state
         """, company_id)
+
+        employee_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM employees WHERE org_id = $1 AND termination_date IS NULL",
+            company_id,
+        )
 
         return {
             "id": str(row["id"]),
@@ -5966,6 +5976,7 @@ async def get_company_admin(company_id: UUID):
             "headquarters_city": row["headquarters_city"],
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
             "enabled_features": row["enabled_features"] or {},
+            "employee_count": employee_count,
             "users": [
                 {
                     "id": str(u["id"]),
@@ -5977,20 +5988,41 @@ async def get_company_admin(company_id: UUID):
                 }
                 for u in admins
             ],
-            "employees": [
+            "jurisdictions": [
                 {
-                    "id": str(e["id"]),
-                    "email": e["email"],
-                    "name": f"{e['first_name']} {e['last_name']}".strip(),
-                    "employment_type": e["employment_type"],
-                    "start_date": e["start_date"].isoformat() if e["start_date"] else None,
-                    "termination_date": e["termination_date"].isoformat() if e["termination_date"] else None,
-                    "active": e["termination_date"] is None,
+                    "state": j["state"],
+                    "cities": list(j["cities"]),
+                    "employee_count": j["employee_count"],
                 }
-                for e in employees
+                for j in jurisdictions
             ],
-            "employee_count": sum(1 for e in employees if e["termination_date"] is None),
         }
+
+
+@router.get("/companies/{company_id}/employees", dependencies=[Depends(require_admin)])
+async def get_company_employees_admin(company_id: UUID):
+    """Lazy-load full employee list for a company."""
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT id, email, first_name, last_name, employment_type,
+                   work_state, start_date, termination_date
+            FROM employees
+            WHERE org_id = $1
+            ORDER BY termination_date NULLS FIRST, first_name, last_name
+        """, company_id)
+        return [
+            {
+                "id": str(r["id"]),
+                "email": r["email"],
+                "name": f"{r['first_name']} {r['last_name']}".strip(),
+                "employment_type": r["employment_type"],
+                "work_state": r["work_state"],
+                "start_date": r["start_date"].isoformat() if r["start_date"] else None,
+                "termination_date": r["termination_date"].isoformat() if r["termination_date"] else None,
+                "active": r["termination_date"] is None,
+            }
+            for r in rows
+        ]
 
 
 @router.patch("/companies/{company_id}", dependencies=[Depends(require_admin)])

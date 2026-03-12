@@ -2332,15 +2332,22 @@ export interface AdminCompanyDetail extends AdminCompany {
     job_title: string | null;
     created_at: string | null;
   }[];
-  employees: {
-    id: string;
-    email: string;
-    name: string;
-    employment_type: string | null;
-    start_date: string | null;
-    termination_date: string | null;
-    active: boolean;
+  jurisdictions: {
+    state: string;
+    cities: string[];
+    employee_count: number;
   }[];
+}
+
+export interface AdminCompanyEmployee {
+  id: string;
+  email: string;
+  name: string;
+  employment_type: string | null;
+  work_state: string | null;
+  start_date: string | null;
+  termination_date: string | null;
+  active: boolean;
 }
 
 export const adminCompanies = {
@@ -2358,6 +2365,9 @@ export const adminCompanies = {
 
   delete: (id: string): Promise<{ ok: boolean }> =>
     request<{ ok: boolean }>(`/admin/companies/${id}`, { method: 'DELETE' }),
+
+  getEmployees: (id: string): Promise<AdminCompanyEmployee[]> =>
+    request<AdminCompanyEmployee[]>(`/admin/companies/${id}/employees`),
 };
 
 // Admin Broker Management

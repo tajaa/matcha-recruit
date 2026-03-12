@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { adminCompanies } from '../../api/client';
-import type { AdminCompany, AdminCompanyDetail } from '../../api/client';
-import { Building2, Users, Copy, Check, X, Pencil, ChevronRight, MapPin, Trash2 } from 'lucide-react';
+import type { AdminCompany, AdminCompanyDetail, AdminCompanyEmployee } from '../../api/client';
+import { Building2, Users, Copy, Check, X, Pencil, ChevronRight, MapPin, Trash2, ChevronDown } from 'lucide-react';
 
 const DK = {
   pageBg: 'bg-zinc-950',
@@ -101,6 +101,9 @@ function CompanyDrawer({
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [employeesOpen, setEmployeesOpen] = useState(false);
+  const [employees, setEmployees] = useState<AdminCompanyEmployee[] | null>(null);
+  const [employeesLoading, setEmployeesLoading] = useState(false);
   const [form, setForm] = useState({
     name: company.name ?? '',
     industry: company.industry ?? '',
@@ -117,6 +120,17 @@ function CompanyDrawer({
         ? f.healthcare_specialties.filter(s => s !== val)
         : [...f.healthcare_specialties, val],
     }));
+  };
+
+  const loadEmployees = async () => {
+    if (employees !== null) { setEmployeesOpen(o => !o); return; }
+    setEmployeesOpen(true);
+    setEmployeesLoading(true);
+    try {
+      setEmployees(await adminCompanies.getEmployees(company.id));
+    } finally {
+      setEmployeesLoading(false);
+    }
   };
 
   const deleteCompany = async () => {
@@ -156,10 +170,18 @@ function CompanyDrawer({
     }
   };
 
+  const industryLabel = company.industry
+    ? INDUSTRY_OPTIONS.find(o => o.value === company.industry)?.label ?? company.industry
+    : null;
+
+  const activeEmployees = employees?.filter(e => e.active) ?? [];
+  const terminatedEmployees = employees?.filter(e => !e.active) ?? [];
+
   return (
     <div className="fixed inset-0 z-50 flex">
       <div className="flex-1 bg-black/50" onClick={onClose} />
-      <div className={`w-[480px] h-full overflow-y-auto ${DK.pageBg} border-l ${DK.border} flex flex-col`}>
+      <div className={`w-[500px] h-full overflow-y-auto ${DK.pageBg} border-l ${DK.border} flex flex-col`}>
+
         {/* Header */}
         <div className={`flex items-start justify-between gap-3 p-5 border-b ${DK.border}`}>
           <div className="min-w-0">
@@ -183,11 +205,48 @@ function CompanyDrawer({
           </div>
         </div>
 
-        <div className="p-5 space-y-6 flex-1">
-          {/* Profile */}
-          <section className="space-y-3">
-            <div className={DK.label}>Profile</div>
-            {editing ? (
+        <div className="p-5 space-y-5 flex-1">
+
+          {/* Snapshot card */}
+          {!editing && (
+            <div className={`${DK.innerEl} p-4`}>
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="text-center">
+                  <div className={`text-2xl font-bold ${DK.textMain}`}>{company.employee_count}</div>
+                  <div className={`text-[10px] ${DK.textFaint} mt-0.5`}>Active Employees</div>
+                </div>
+                <div className="text-center">
+                  <div className={`text-2xl font-bold ${DK.textMain}`}>{company.jurisdictions.length}</div>
+                  <div className={`text-[10px] ${DK.textFaint} mt-0.5`}>Jurisdictions</div>
+                </div>
+                <div className="text-center">
+                  <div className={`text-2xl font-bold ${DK.textMain}`}>{company.users.length}</div>
+                  <div className={`text-[10px] ${DK.textFaint} mt-0.5`}>Admin Users</div>
+                </div>
+              </div>
+              <div className={`border-t ${DK.border} pt-3 space-y-2`}>
+                <Row label="Industry" value={
+                  <span className="flex items-center gap-1.5 justify-end flex-wrap">
+                    {industryLabel ?? <span className={DK.textFaint}>—</span>}
+                    {company.industry === 'healthcare' && company.healthcare_specialties.map(s => (
+                      <span key={s} className="text-[10px] px-1.5 py-0.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300">
+                        {HEALTHCARE_SPECIALTIES.find(x => x.value === s)?.label ?? s}
+                      </span>
+                    ))}
+                  </span>
+                } />
+                <Row label="Size" value={company.size ?? '—'} />
+                <Row label="HQ" value={[company.headquarters_city, company.headquarters_state].filter(Boolean).join(', ') || '—'} />
+                <Row label="Status" value={<span className={statusBadge(company.status)}>{company.status}</span>} />
+                <Row label="Onboarded" value={company.created_at ? new Date(company.created_at).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'} />
+              </div>
+            </div>
+          )}
+
+          {/* Edit form */}
+          {editing && (
+            <section className="space-y-3">
+              <div className={DK.label}>Edit Profile</div>
               <div className="space-y-3">
                 <div>
                   <label className={`${DK.label} mb-1 block`}>Company Name</label>
@@ -205,18 +264,13 @@ function CompanyDrawer({
                     <label className={`${DK.label} mb-2 block`}>Healthcare Specialties</label>
                     <div className="flex flex-wrap gap-2">
                       {HEALTHCARE_SPECIALTIES.map(s => (
-                        <button
-                          key={s.value}
-                          type="button"
-                          onClick={() => toggleSpecialty(s.value)}
+                        <button key={s.value} type="button" onClick={() => toggleSpecialty(s.value)}
                           className={`text-[11px] px-2.5 py-1 rounded-full border transition ${
                             form.healthcare_specialties.includes(s.value)
                               ? 'border-violet-500/50 bg-violet-500/15 text-violet-300'
                               : 'border-white/10 text-zinc-500 hover:border-white/20 hover:text-zinc-300'
                           }`}
-                        >
-                          {s.label}
-                        </button>
+                        >{s.label}</button>
                       ))}
                     </div>
                   </div>
@@ -239,92 +293,122 @@ function CompanyDrawer({
                   </div>
                 </div>
                 <div className="flex gap-2 pt-1">
-                  <button onClick={save} disabled={saving} className={DK.btnPrimary}>
-                    {saving ? 'Saving...' : 'Save'}
-                  </button>
+                  <button onClick={save} disabled={saving} className={DK.btnPrimary}>{saving ? 'Saving...' : 'Save'}</button>
                   <button onClick={() => setEditing(false)} className={DK.btn}>Cancel</button>
                 </div>
               </div>
-            ) : (
-              <div className={`${DK.innerEl} p-4 space-y-3`}>
-                <Row label="Industry" value={
-                  company.industry
-                    ? INDUSTRY_OPTIONS.find(o => o.value === company.industry)?.label ?? company.industry
-                    : '—'
-                } />
-                {company.industry === 'healthcare' && company.healthcare_specialties.length > 0 && (
-                  <div>
-                    <div className={`text-[10px] ${DK.textFaint} mb-1.5`}>Specialties</div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {company.healthcare_specialties.map(s => (
-                        <span key={s} className="text-[11px] px-2 py-0.5 rounded-full border border-violet-500/30 bg-violet-500/10 text-violet-300">
-                          {HEALTHCARE_SPECIALTIES.find(x => x.value === s)?.label ?? s}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <Row label="Size" value={company.size ?? '—'} />
-                <Row label="HQ" value={[company.headquarters_city, company.headquarters_state].filter(Boolean).join(', ') || '—'} />
-                <Row label="Status" value={
-                  <span className={statusBadge(company.status)}>{company.status}</span>
-                } />
-                <Row label="Created" value={company.created_at ? new Date(company.created_at).toLocaleDateString() : '—'} />
+            </section>
+          )}
+
+          {/* Jurisdictions */}
+          {!editing && (
+            <section className="space-y-2">
+              <div className={`${DK.label} flex items-center gap-1.5`}>
+                <MapPin className="w-3 h-3" />
+                Jurisdictions ({company.jurisdictions.length})
               </div>
-            )}
-          </section>
+              {company.jurisdictions.length === 0 ? (
+                <p className={`text-xs ${DK.textFaint}`}>No locations on record.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {company.jurisdictions.map(j => (
+                    <div key={j.state} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-semibold ${DK.textMain}`}>{j.state}</div>
+                        <div className={`text-[11px] ${DK.textFaint} truncate`}>{j.cities.join(', ')}</div>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <Users className={`w-3 h-3 ${DK.textFaint}`} />
+                        <span className={`text-sm ${j.employee_count > 0 ? DK.textDim : DK.textFaint}`}>{j.employee_count}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
           {/* Admin Users */}
-          <section className="space-y-3">
-            <div className={`${DK.label} flex items-center gap-2`}>
-              <Users className="w-3 h-3" />
-              Admins ({company.users.length})
-            </div>
-            {company.users.length === 0 ? (
-              <p className={`text-xs ${DK.textFaint}`}>No admin users linked to this company.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {company.users.map(u => (
-                  <div key={u.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium ${DK.textMain} truncate`}>{u.name || u.email}</div>
-                      <div className={`text-[11px] ${DK.textFaint} truncate`}>{u.email}</div>
-                    </div>
-                    <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                      {u.job_title && <span className={`text-[10px] ${DK.textMuted}`}>{u.job_title}</span>}
-                      <span className={`${DK.badge} border-zinc-700 text-zinc-400`}>{u.role}</span>
-                    </div>
-                  </div>
-                ))}
+          {!editing && (
+            <section className="space-y-2">
+              <div className={`${DK.label} flex items-center gap-1.5`}>
+                <Users className="w-3 h-3" />
+                Admin Users ({company.users.length})
               </div>
-            )}
-          </section>
+              {company.users.length === 0 ? (
+                <p className={`text-xs ${DK.textFaint}`}>No admin users.</p>
+              ) : (
+                <div className="space-y-1.5">
+                  {company.users.map(u => (
+                    <div key={u.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-medium ${DK.textMain} truncate`}>{u.name || u.email}</div>
+                        <div className={`text-[11px] ${DK.textFaint} truncate`}>{u.email}</div>
+                      </div>
+                      <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                        {u.job_title && <span className={`text-[10px] ${DK.textMuted}`}>{u.job_title}</span>}
+                        <span className={`${DK.badge} border-zinc-700 text-zinc-400`}>{u.role}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
 
-          {/* Employees */}
-          <section className="space-y-3">
-            <div className={`${DK.label} flex items-center gap-2`}>
-              <Users className="w-3 h-3" />
-              Employees ({company.employee_count} active{company.employees.length > company.employee_count ? `, ${company.employees.length - company.employee_count} terminated` : ''})
-            </div>
-            {company.employees.length === 0 ? (
-              <p className={`text-xs ${DK.textFaint}`}>No employees on record.</p>
-            ) : (
-              <div className="space-y-1.5">
-                {company.employees.map(e => (
-                  <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium ${e.active ? DK.textMain : DK.textFaint} truncate`}>{e.name || e.email}</div>
-                      <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
-                    </div>
-                    <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
-                      {e.employment_type && <span className={`text-[10px] ${DK.textMuted}`}>{e.employment_type}</span>}
-                      {!e.active && <span className={`${DK.badge} border-red-800 text-red-400`}>terminated</span>}
-                    </div>
+          {/* Employees — lazy */}
+          {!editing && (
+            <section className="space-y-2">
+              <button
+                onClick={loadEmployees}
+                className={`w-full flex items-center justify-between ${DK.label} hover:text-zinc-300 transition`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <Users className="w-3 h-3" />
+                  Employees ({company.employee_count} active)
+                </span>
+                <ChevronDown className={`w-3 h-3 transition-transform ${employeesOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {employeesOpen && (
+                employeesLoading ? (
+                  <p className={`text-xs ${DK.textFaint} py-2`}>Loading employees...</p>
+                ) : employees && employees.length === 0 ? (
+                  <p className={`text-xs ${DK.textFaint}`}>No employees on record.</p>
+                ) : employees ? (
+                  <div className="space-y-1.5">
+                    {activeEmployees.map(e => (
+                      <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm font-medium ${DK.textMain} truncate`}>{e.name || e.email}</div>
+                          <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
+                        </div>
+                        <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                          {e.work_state && <span className={`text-[10px] ${DK.textMuted}`}>{e.work_state}</span>}
+                          {e.employment_type && <span className={`text-[10px] ${DK.textFaint}`}>{e.employment_type}</span>}
+                        </div>
+                      </div>
+                    ))}
+                    {terminatedEmployees.length > 0 && (
+                      <div className={`text-[10px] ${DK.textFaint} uppercase tracking-wider pt-1 pb-0.5`}>
+                        Terminated ({terminatedEmployees.length})
+                      </div>
+                    )}
+                    {terminatedEmployees.map(e => (
+                      <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3 opacity-50`}>
+                        <div className="flex-1 min-w-0">
+                          <div className={`text-sm ${DK.textFaint} truncate`}>{e.name || e.email}</div>
+                          <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
+                        </div>
+                        {e.work_state && <span className={`text-[10px] ${DK.textMuted} flex-shrink-0`}>{e.work_state}</span>}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-            )}
-          </section>
+                ) : null
+              )}
+            </section>
+          )}
+
         </div>
       </div>
     </div>
