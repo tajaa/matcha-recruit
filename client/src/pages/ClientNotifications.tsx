@@ -403,10 +403,10 @@ export function ClientNotifications() {
       {filtered.length === 0 && !error && (
         <div className={`${tk.cardDark} rounded-sm text-center py-12`}>
           <div className={`w-8 h-8 rounded-sm ${tk.innerEl} flex items-center justify-center mx-auto mb-3`}>
-            <Bell size={14} className={tk.emptyIcon} />
+            <Bell size={14} className={tk.cardDarkMuted} />
           </div>
-          <p className={`text-sm font-semibold ${tk.textMain} mb-1`}>No notifications</p>
-          <p className={`text-xs ${tk.emptyText}`}>
+          <p className={`text-sm font-semibold ${tk.cardDarkText} mb-1`}>No notifications</p>
+          <p className={`text-xs ${tk.cardDarkMuted}`}>
             {filter === 'all' ? "You're all caught up." : `No ${TYPE_LABEL[filter as ClientNotificationItem['type']] ?? filter} activity.`}
           </p>
         </div>
@@ -448,15 +448,15 @@ export function ClientNotifications() {
                     {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
-                        <span className={`text-[9px] font-bold font-mono uppercase tracking-widest ${tk.typeLabel}`}>
+                        <span className={`text-[9px] font-bold font-mono uppercase tracking-widest ${tk.cardDarkMuted}`}>
                           {TYPE_LABEL[item.type]}
                         </span>
                       </div>
-                      <div className={`text-[12px] font-semibold leading-tight truncate ${tk.textMain}`}>
+                      <div className={`text-[12px] font-semibold leading-tight truncate ${tk.cardDarkText}`}>
                         {item.title}
                       </div>
                       {item.subtitle && (
-                        <div className={`text-[11px] ${tk.subtitle} truncate mt-0.5`}>
+                        <div className={`text-[11px] ${tk.cardDarkMuted} truncate mt-0.5`}>
                           {item.subtitle}
                         </div>
                       )}
@@ -480,11 +480,11 @@ export function ClientNotifications() {
 
                     {/* Time + chevron */}
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className={`text-[10px] font-mono tabular-nums ${tk.time}`}>
+                      <span className={`text-[10px] font-mono tabular-nums ${tk.cardDarkMuted}`}>
                         {relativeTime(item.created_at)}
                       </span>
                       {item.link && (
-                        <ChevronRight size={12} className={`${tk.typeLabel} opacity-0 group-hover:opacity-100`} />
+                        <ChevronRight size={12} className={`${tk.cardDarkMuted} opacity-0 group-hover:opacity-100`} />
                       )}
                     </div>
                   </div>
