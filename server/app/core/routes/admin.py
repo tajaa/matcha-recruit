@@ -5902,10 +5902,8 @@ async def list_companies_admin():
                 c.id, c.name, c.industry, c.healthcare_specialties,
                 c.size, c.status, c.headquarters_state, c.headquarters_city,
                 c.created_at,
-                COUNT(cl.id) AS user_count
+                (SELECT COUNT(*) FROM employees e WHERE e.org_id = c.id AND e.termination_date IS NULL) AS user_count
             FROM companies c
-            LEFT JOIN clients cl ON cl.company_id = c.id
-            GROUP BY c.id
             ORDER BY c.name
         """)
         return [
@@ -5937,13 +5935,21 @@ async def get_company_admin(company_id: UUID):
         if not row:
             raise HTTPException(status_code=404, detail="Company not found")
 
-        users = await conn.fetch("""
+        admins = await conn.fetch("""
             SELECT u.id, u.email, u.role, u.created_at,
                    cl.name, cl.job_title
             FROM clients cl
             JOIN users u ON u.id = cl.user_id
             WHERE cl.company_id = $1
             ORDER BY u.created_at
+        """, company_id)
+
+        employees = await conn.fetch("""
+            SELECT id, email, first_name, last_name, employment_type,
+                   start_date, termination_date, created_at
+            FROM employees
+            WHERE org_id = $1
+            ORDER BY first_name, last_name
         """, company_id)
 
         return {
@@ -5966,8 +5972,21 @@ async def get_company_admin(company_id: UUID):
                     "job_title": u["job_title"],
                     "created_at": u["created_at"].isoformat() if u["created_at"] else None,
                 }
-                for u in users
+                for u in admins
             ],
+            "employees": [
+                {
+                    "id": str(e["id"]),
+                    "email": e["email"],
+                    "name": f"{e['first_name']} {e['last_name']}".strip(),
+                    "employment_type": e["employment_type"],
+                    "start_date": e["start_date"].isoformat() if e["start_date"] else None,
+                    "termination_date": e["termination_date"].isoformat() if e["termination_date"] else None,
+                    "active": e["termination_date"] is None,
+                }
+                for e in employees
+            ],
+            "employee_count": sum(1 for e in employees if e["termination_date"] is None),
         }
 
 

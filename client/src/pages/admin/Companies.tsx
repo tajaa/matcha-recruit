@@ -255,27 +255,51 @@ function CompanyDrawer({
             )}
           </section>
 
-          {/* Users */}
+          {/* Admin Users */}
           <section className="space-y-3">
             <div className={`${DK.label} flex items-center gap-2`}>
               <Users className="w-3 h-3" />
-              Users ({company.users.length})
+              Admins ({company.users.length})
             </div>
             {company.users.length === 0 ? (
-              <p className={`text-xs ${DK.textFaint}`}>No users linked to this company.</p>
+              <p className={`text-xs ${DK.textFaint}`}>No admin users linked to this company.</p>
             ) : (
               <div className="space-y-1.5">
                 {company.users.map(u => (
                   <div key={u.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
                     <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium ${DK.textMain} truncate`}>
-                        {u.name || u.email}
-                      </div>
+                      <div className={`text-sm font-medium ${DK.textMain} truncate`}>{u.name || u.email}</div>
                       <div className={`text-[11px] ${DK.textFaint} truncate`}>{u.email}</div>
                     </div>
                     <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
                       {u.job_title && <span className={`text-[10px] ${DK.textMuted}`}>{u.job_title}</span>}
                       <span className={`${DK.badge} border-zinc-700 text-zinc-400`}>{u.role}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Employees */}
+          <section className="space-y-3">
+            <div className={`${DK.label} flex items-center gap-2`}>
+              <Users className="w-3 h-3" />
+              Employees ({company.employee_count} active{company.employees.length > company.employee_count ? `, ${company.employees.length - company.employee_count} terminated` : ''})
+            </div>
+            {company.employees.length === 0 ? (
+              <p className={`text-xs ${DK.textFaint}`}>No employees on record.</p>
+            ) : (
+              <div className="space-y-1.5">
+                {company.employees.map(e => (
+                  <div key={e.id} className={`${DK.innerEl} px-3 py-2.5 flex items-center gap-3`}>
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-medium ${e.active ? DK.textMain : DK.textFaint} truncate`}>{e.name || e.email}</div>
+                      <div className={`text-[11px] ${DK.textFaint} truncate`}>{e.email}</div>
+                    </div>
+                    <div className="flex flex-col items-end gap-0.5 flex-shrink-0">
+                      {e.employment_type && <span className={`text-[10px] ${DK.textMuted}`}>{e.employment_type}</span>}
+                      {!e.active && <span className={`${DK.badge} border-red-800 text-red-400`}>terminated</span>}
                     </div>
                   </div>
                 ))}
@@ -368,7 +392,7 @@ export function Companies() {
                   <th className={`px-4 py-3 text-left ${DK.label}`}>Industry</th>
                   <th className={`px-4 py-3 text-left ${DK.label}`}>Size</th>
                   <th className={`px-4 py-3 text-left ${DK.label}`}>Status</th>
-                  <th className={`px-4 py-3 text-right ${DK.label}`}>Users</th>
+                  <th className={`px-4 py-3 text-right ${DK.label}`}>Employees</th>
                   <th className="px-4 py-3" />
                 </tr>
               </thead>

@@ -2322,6 +2322,7 @@ export interface AdminCompany {
 
 export interface AdminCompanyDetail extends AdminCompany {
   enabled_features: Record<string, boolean>;
+  employee_count: number;
   users: {
     id: string;
     email: string;
@@ -2329,6 +2330,15 @@ export interface AdminCompanyDetail extends AdminCompany {
     role: string;
     job_title: string | null;
     created_at: string | null;
+  }[];
+  employees: {
+    id: string;
+    email: string;
+    name: string;
+    employment_type: string | null;
+    start_date: string | null;
+    termination_date: string | null;
+    active: boolean;
   }[];
 }
 
