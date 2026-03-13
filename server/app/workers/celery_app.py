@@ -19,7 +19,6 @@ celery_app = Celery(
     backend=celery_result_backend,
     include=[
         "app.workers.tasks.interview_analysis",
-        "app.workers.tasks.culture_aggregation",
         "app.workers.tasks.er_document_processing",
         "app.workers.tasks.er_analysis",
         "app.workers.tasks.compliance_checks",

@@ -12,10 +12,8 @@ from ..core.services.gemini_session import GeminiLiveSession
 
 # Matcha services
 from ..matcha.services.culture_analyzer import CultureAnalyzer
-from ..matcha.services.candidate_matcher import CandidateMatcher
 
 __all__ = [
     "GeminiLiveSession",
     "CultureAnalyzer",
-    "CandidateMatcher",
 ]

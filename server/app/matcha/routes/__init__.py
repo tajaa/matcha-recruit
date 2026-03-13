@@ -3,14 +3,12 @@
 from fastapi import APIRouter, Depends
 
 from .companies import router as companies_router
-from .positions import router as positions_router
 from .interviews import router as interviews_router
 from .employees import router as employees_router, pto_admin_router, leave_admin_router
 from .employee_portal import router as employee_portal_router
 from .onboarding import router as onboarding_router
 from .invitations import router as invitations_router
 from .offer_letters import router as offer_letters_router, candidate_router as offer_letters_candidate_router
-from .openings import router as openings_router
 from .er_copilot import router as er_copilot_router, public_router as er_copilot_public_router
 from .ir_incidents import router as ir_incidents_router
 from .accommodations import router as accommodations_router
@@ -35,7 +33,6 @@ matcha_router = APIRouter()
 
 # Mount sub-routers
 matcha_router.include_router(companies_router, prefix="/companies", tags=["companies"])
-matcha_router.include_router(positions_router, prefix="/positions", tags=["positions"])
 matcha_router.include_router(interviews_router, tags=["interviews"])
 matcha_router.include_router(employees_router, prefix="/employees", tags=["employees"],
                              dependencies=[Depends(require_feature("employees"))])
@@ -50,7 +47,6 @@ matcha_router.include_router(offer_letters_router, prefix="/offer-letters", tags
                              dependencies=[Depends(require_feature("offer_letters"))])
 # Public candidate endpoints — no auth, no feature gate
 matcha_router.include_router(offer_letters_candidate_router, prefix="/offer-letters", tags=["offer-letters-public"])
-matcha_router.include_router(openings_router, prefix="/openings", tags=["openings"])
 matcha_router.include_router(er_copilot_router, prefix="/er/cases", tags=["er-copilot"],
                              dependencies=[Depends(require_feature("er_copilot"))])
 matcha_router.include_router(
@@ -137,7 +133,6 @@ matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting
 __all__ = [
     "matcha_router",
     "companies_router",
-    "positions_router",
     "interviews_router",
     "employees_router",
     "pto_admin_router",
@@ -146,7 +141,6 @@ __all__ = [
     "onboarding_router",
     "invitations_router",
     "offer_letters_router",
-    "openings_router",
     "er_copilot_router",
     "er_copilot_public_router",
     "ir_incidents_router",

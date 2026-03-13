@@ -13,13 +13,9 @@ import { Unauthorized } from './pages/Unauthorized';
 import { ForCandidates } from './pages/ForCandidates';
 import { TopangaResearch } from './pages/TopangaResearch';
 import { WorkWithUs } from './pages/WorkWithUs';
-import { OutreachLanding } from './pages/OutreachLanding';
-import { OutreachScreening } from './pages/OutreachScreening';
-import { ScreeningLanding } from './pages/ScreeningLanding';
 
 // Lazy load all other pages
 const Interview = lazy(() => import('./pages/Interview'));
-const InterviewAnalysis = lazy(() => import('./pages/InterviewAnalysis'));
 const Settings = lazy(() => import('./pages/Settings'));
 const Tutor = lazy(() => import('./pages/Tutor'));
 const TutorMetrics = lazy(() => import('./pages/TutorMetrics'));
@@ -27,7 +23,6 @@ const TutorSessionDetail = lazy(() => import('./pages/TutorSessionDetail'));
 const ERCopilot = lazy(() => import('./pages/ERCopilot'));
 const ERCaseDetail = lazy(() => import('./pages/ERCaseDetail'));
 const OfferLetters = lazy(() => import('./pages/OfferLetters'));
-const CandidateOffer = lazy(() => import('./pages/CandidateOffer'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Policies = lazy(() => import('./pages/Policies'));
 const Handbooks = lazy(() => import('./pages/Handbooks'));
@@ -44,10 +39,6 @@ const IRConsistencyAnalytics = lazy(() => import('./pages/IRConsistencyAnalytics
 const IRList = lazy(() => import('./pages/IRList'));
 const IRCreate = lazy(() => import('./pages/IRCreate'));
 const IRDetail = lazy(() => import('./pages/IRDetail'));
-const InterviewPrepAdmin = lazy(() => import('./pages/InterviewPrepAdmin'));
-const PublicJobs = lazy(() => import('./pages/PublicJobs'));
-const PublicJobDetail = lazy(() => import('./pages/PublicJobDetail'));
-const PublicJobApply = lazy(() => import('./pages/PublicJobApply'));
 const PublicBlogList = lazy(() => import('./pages/PublicBlogList'));
 const PublicBlogDetail = lazy(() => import('./pages/PublicBlogDetail'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
@@ -70,7 +61,6 @@ const HRNews = lazy(() => import('./pages/admin/HRNews'));
 const LegislativeTracker = lazy(() => import('./pages/admin/LegislativeTracker'));
 const IndustryHandbooks = lazy(() => import('./pages/admin/IndustryHandbooks'));
 const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
-const BulkImport = lazy(() => import('./pages/BulkImport'));
 const InternalMobility = lazy(() => import('./pages/InternalMobility'));
 const MatchaWork = lazy(() => import('./pages/MatchaWork'));
 const MatchaWorkChats = lazy(() => import('./pages/MatchaWorkChats'));
@@ -111,7 +101,6 @@ const PortalVibeCheck = lazy(() => import('./pages/portal/PortalVibeCheck'));
 const PortalENPS = lazy(() => import('./pages/portal/PortalENPS'));
 const PortalReviews = lazy(() => import('./pages/portal/PortalReviews'));
 const PortalUnavailable = lazy(() => import('./pages/portal/PortalUnavailable'));
-const CandidateRankings = lazy(() => import('./pages/CandidateRankings'));
 const RegisterBrokerClient = lazy(() => import('./pages/RegisterBrokerClient'));
 const BrokerClients = lazy(() => import('./pages/broker/BrokerClients'));
 const BrokerReporting = lazy(() => import('./pages/broker/BrokerReporting'));
@@ -212,22 +201,12 @@ function App() {
             <Route path="/blog" element={<PublicBlogList />} />
             <Route path="/blog/:slug" element={<PublicBlogDetail />} />
 
-            {/* Public outreach routes (token-based access) */}
-            <Route path="/outreach/:token" element={<OutreachLanding />} />
-            <Route path="/outreach/:token/screening" element={<OutreachScreening />} />
-
 
             {/* Admin Shortcuts */}
             <Route path="/admin/blogs/drafts" element={<Navigate to="/app/admin/blog?status=draft" replace />} />
 
-            {/* Direct screening invite (handles auth internally) */}
-            <Route path="/screening/:token" element={<ScreeningLanding />} />
-
             {/* Employee invitation acceptance (public) */}
             <Route path="/invite/:token" element={<AcceptInvitation />} />
-
-            {/* Candidate salary range negotiation (public, token-based) */}
-            <Route path="/offer/:token" element={<CandidateOffer />} />
 
             {/* Policy signature (public, token-based) */}
             <Route path="/sign/:token" element={<PolicySign />} />
@@ -241,11 +220,6 @@ function App() {
             {/* ER Export download (public, password-based) */}
             <Route path="/shared/er-export/:token" element={<ERExportDownload />} />
             <Route path="/review-request/:token" element={<MatchaWorkReviewRequest />} />
-
-            {/* Public job board */}
-            <Route path="/careers" element={<PublicJobs />} />
-            <Route path="/careers/:jobId" element={<PublicJobDetail />} />
-            <Route path="/careers/:jobId/apply" element={<PublicJobApply />} />
 
             {/* Redirects for old routes */}
             <Route path="/companies/:id" element={<CompanyRedirect />} />
@@ -699,14 +673,6 @@ function App() {
                 }
               />
               <Route
-                path="admin/interview-prep"
-                element={
-                  <ProtectedRoute roles={['admin']}>
-                    <InterviewPrepAdmin />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
                 path="admin/business-registrations"
                 element={
                   <ProtectedRoute roles={['admin']}>
@@ -813,24 +779,6 @@ function App() {
 
 
 
-              <Route
-                path="matcha/rankings"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <CandidateRankings />
-                  </ProtectedRoute>
-                }
-              />
-
-
-              <Route
-                path="import"
-                element={
-                  <ProtectedRoute roles={['admin']}>
-                    <BulkImport />
-                  </ProtectedRoute>
-                }
-              />
 
               {/* Interview Prep Routes */}
               <Route
@@ -888,14 +836,6 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="incidents">
                     <IRDetail />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="analysis/:id"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <InterviewAnalysis />
                   </ProtectedRoute>
                 }
               />
