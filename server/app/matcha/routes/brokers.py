@@ -28,14 +28,10 @@ KNOWN_FEATURES = {
     "compliance",
     "compliance_plus",
     "employees",
-    "vibe_checks",
-    "enps",
-    "performance_reviews",
     "er_copilot",
     "incidents",
     "time_off",
     "accommodations",
-    "internal_mobility",
 }
 
 EDITABLE_SETUP_STATUSES = {"draft", "invited"}

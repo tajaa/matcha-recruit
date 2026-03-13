@@ -5,7 +5,6 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "offer_letters": True,
     "offer_letters_plus": False,
     "handbooks": True,
-    "internal_mobility": False,
     "matcha_work": False,
     "risk_assessment": True,
     "training": False,

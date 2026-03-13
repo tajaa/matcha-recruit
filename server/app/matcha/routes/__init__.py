@@ -15,7 +15,6 @@ from .accommodations import router as accommodations_router
 from .dashboard import router as dashboard_router
 from .brokers import router as brokers_router
 from .provisioning import router as provisioning_router
-from .internal_mobility import router as internal_mobility_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router
 from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
 from .risk_assessment import router as risk_assessment_router
@@ -60,12 +59,6 @@ matcha_router.include_router(accommodations_router, prefix="/accommodations", ta
 matcha_router.include_router(dashboard_router, prefix="/dashboard", tags=["dashboard"])
 matcha_router.include_router(brokers_router, prefix="/brokers", tags=["brokers"])
 matcha_router.include_router(provisioning_router, prefix="/provisioning", tags=["provisioning"])
-matcha_router.include_router(
-    internal_mobility_router,
-    prefix="/internal-mobility",
-    tags=["internal-mobility"],
-    dependencies=[Depends(require_feature("internal_mobility"))],
-)
 matcha_router.include_router(
     matcha_work_router,
     prefix="/matcha-work",
@@ -146,7 +139,6 @@ __all__ = [
     "accommodations_router",
     "brokers_router",
     "provisioning_router",
-    "internal_mobility_router",
     "matcha_work_router",
     "matcha_work_public_router",
     "matcha_work_billing_router",

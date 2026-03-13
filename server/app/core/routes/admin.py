@@ -48,8 +48,7 @@ KNOWN_PLATFORM_ITEMS = {
     "admin_overview", "client_management", "company_features", "industry_handbooks", "admin_import",
     "projects", "interviewer", "candidate_metrics", "interview_prep", "test_bot",
     "onboarding", "employees", "offer_letters", "policies", "handbooks", "time_off",
-    "accommodations", "internal_mobility", "er_copilot", "incidents", "risk_assessment",
-    "xp_dashboard", "vibe_checks", "enps", "performance_reviews",
+    "accommodations", "er_copilot", "incidents", "risk_assessment",
     "compliance", "jurisdictions", "blog", "hr_news", "matcha_work",
 }
 
@@ -191,9 +190,9 @@ async def admin_overview():
 # Known feature keys that can be toggled
 KNOWN_FEATURES = {
     "offer_letters", "offer_letters_plus", "policies", "handbooks", "compliance", "compliance_plus",
-    "employees", "vibe_checks", "enps", "performance_reviews",
+    "employees",
     "er_copilot", "incidents", "time_off", "accommodations", "interview_prep",
-    "internal_mobility", "matcha_work", "risk_assessment",
+    "matcha_work", "risk_assessment",
     "training", "i9", "cobra", "separation_agreements",
 }
 

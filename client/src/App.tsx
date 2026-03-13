@@ -61,7 +61,6 @@ const HRNews = lazy(() => import('./pages/admin/HRNews'));
 const LegislativeTracker = lazy(() => import('./pages/admin/LegislativeTracker'));
 const IndustryHandbooks = lazy(() => import('./pages/admin/IndustryHandbooks'));
 const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
-const InternalMobility = lazy(() => import('./pages/InternalMobility'));
 const MatchaWork = lazy(() => import('./pages/MatchaWork'));
 const MatchaWorkChats = lazy(() => import('./pages/MatchaWorkChats'));
 const MatchaWorkElements = lazy(() => import('./pages/MatchaWorkElements'));
@@ -95,7 +94,6 @@ const PortalPTO = lazy(() => import('./pages/portal/PortalPTO'));
 const PortalLeave = lazy(() => import('./pages/portal/PortalLeave'));
 const PortalPolicies = lazy(() => import('./pages/portal/PortalPolicies'));
 const PortalProfile = lazy(() => import('./pages/portal/PortalProfile'));
-const PortalMobility = lazy(() => import('./pages/portal/PortalMobility'));
 const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
 const PortalUnavailable = lazy(() => import('./pages/portal/PortalUnavailable'));
 const RegisterBrokerClient = lazy(() => import('./pages/RegisterBrokerClient'));
@@ -521,14 +519,6 @@ function App() {
                 }
               />
               <Route
-                path="matcha/internal-mobility"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="internal_mobility">
-                    <InternalMobility />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
                 path="matcha/risk-assessment"
                 element={
                   <ProtectedRoute roles={['admin', 'client']} requiredFeature="risk_assessment">
@@ -875,14 +865,6 @@ function App() {
                 element={
                   <ProtectedRoute roles={['employee']} requiredFeature="employees">
                     <PortalProfile />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="portal/mobility"
-                element={
-                  <ProtectedRoute roles={['employee']} requiredFeature="internal_mobility">
-                    <PortalMobility />
                   </ProtectedRoute>
                 }
               />
