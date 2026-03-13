@@ -24,11 +24,14 @@ import type {
 } from '../types';
 import {
   ChevronLeft, Upload, Trash2, Search,
-  AlertTriangle, CheckCircle, Clock, X, RefreshCw, Download, Scale, Link
+  AlertTriangle, CheckCircle, Clock, X, RefreshCw, Download, Scale, Link,
+  Eye, EyeOff
 } from 'lucide-react';
 import { AnalysisConsole } from '../components/er/AnalysisConsole';
 import { useERSimilarCasesStream } from '../hooks/er/useERSimilarCasesStream';
 import { SimilarCasesAnalysisModal } from '../components/er/SimilarCasesAnalysisModal';
+import { useBlindedMode } from '../hooks/er/useBlindedMode';
+import { BlindedModeLegend } from '../components/er/BlindedModeLegend';
 
 function normalizeDiscrepancyStatement(
   value: unknown,
@@ -549,6 +552,10 @@ export function ERCaseDetail() {
     reset: resetSimilar,
   } = useERSimilarCasesStream();
   const [showSimilarModal, setShowSimilarModal] = useState(false);
+
+  const { isBlinded, toggleBlinded, blindText, getPseudonym, legend } = useBlindedMode(
+    id || '', erCase?.involved_employees || [], companyEmployees
+  );
 
   const handleExport = useCallback(async () => {
     if (!id || exportPassword.length < 4) return;
@@ -1552,9 +1559,20 @@ export function ERCaseDetail() {
               </span>
             )}
           </div>
-          <h1 className={`text-3xl font-light ${t.textMain} tracking-tight`}>{erCase.title}</h1>
+          <h1 className={`text-3xl font-light ${t.textMain} tracking-tight`}>{blindText(erCase.title)}</h1>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            onClick={toggleBlinded}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs uppercase tracking-wider transition-colors border rounded-lg ${
+              isBlinded
+                ? 'bg-zinc-900 text-zinc-100 border-zinc-700'
+                : `${t.textMuted} hover:${t.textMain} ${t.border} hover:border-current`
+            }`}
+          >
+            {isBlinded ? <EyeOff size={12} /> : <Eye size={12} />}
+            {isBlinded ? 'Blinded' : 'Blind Mode'}
+          </button>
           <button
             onClick={() => {
               if (id) {
@@ -1562,8 +1580,9 @@ export function ERCaseDetail() {
                 setShowSimilarModal(true);
               }
             }}
-            disabled={similarStreaming}
-            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${t.textMuted} hover:${t.textMain} uppercase tracking-wider transition-colors border ${t.border} hover:border-current rounded-lg ${similarStreaming ? 'opacity-50' : ''}`}
+            disabled={similarStreaming || isBlinded}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs ${t.textMuted} hover:${t.textMain} uppercase tracking-wider transition-colors border ${t.border} hover:border-current rounded-lg ${similarStreaming || isBlinded ? 'opacity-50' : ''}`}
+            title={isBlinded ? 'Disable blinded mode to use Similar Cases' : undefined}
           >
             <Scale size={12} />
             {similarStreaming ? 'Analyzing...' : 'Similar Cases'}
@@ -1604,6 +1623,12 @@ export function ERCaseDetail() {
         </div>
       </div>
 
+      {isBlinded && legend.length > 0 && (
+        <div className="mt-3">
+          <BlindedModeLegend legend={legend} t={t} />
+        </div>
+      )}
+
       {/* Involved Employees */}
       {(erCase.involved_employees?.length > 0 || editingPeople) && (
         <div className="flex items-center gap-3 flex-wrap mt-3">
@@ -1616,7 +1641,7 @@ export function ERCaseDetail() {
                 key={ie.employee_id}
                 className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider ${t.btnPrimary} rounded-xl`}
               >
-                {emp ? `${emp.first_name} ${emp.last_name}` : ie.employee_id.slice(0, 8)}
+                {getPseudonym(ie.employee_id) || (emp ? `${emp.first_name} ${emp.last_name}` : ie.employee_id.slice(0, 8))}
                 <span className="opacity-60 font-normal normal-case">({roleLabel})</span>
                 {editingPeople && (
                   <button
@@ -1723,12 +1748,12 @@ export function ERCaseDetail() {
               </div>
               <div>
                 <span className={`text-xs ${t.textFaint} uppercase tracking-wide`}>Witnesses</span>
-                <p className="mt-1">{assistanceAnswers.witnesses || 'Not provided'}</p>
+                <p className="mt-1">{blindText(assistanceAnswers.witnesses || 'Not provided')}</p>
               </div>
             </div>
           )}
           {assistanceAnswers?.additional_notes && (
-            <p className={`text-sm ${t.textDim}`}>Notes: {assistanceAnswers.additional_notes}</p>
+            <p className={`text-sm ${t.textDim}`}>Notes: {blindText(assistanceAnswers.additional_notes)}</p>
           )}
           {autoAssistStatus === 'running' && (
             <AnalysisConsole
@@ -1804,7 +1829,7 @@ export function ERCaseDetail() {
                           <span className="text-[10px] text-red-500">Failed</span>
                         )}
                       </div>
-                      <p className={`text-sm ${t.textMain} truncate`} title={doc.filename}>{doc.filename}</p>
+                      <p className={`text-sm ${t.textMain} truncate`} title={blindText(doc.filename)}>{blindText(doc.filename)}</p>
                       {doc.processing_error && (
                         <p className="text-xs text-red-500 truncate mt-0.5" title={doc.processing_error}>{doc.processing_error}</p>
                       )}
@@ -1907,7 +1932,7 @@ export function ERCaseDetail() {
                       {outcomeAnalysis.case_summary && (
                         <div className={`${t.noteCard} p-2.5 animate-fade-in-up`} style={{ animationDelay: '0ms' }}>
                           <p className={`text-xs uppercase tracking-wide ${t.textMuted} mb-1`}>Case Summary</p>
-                          <p className={`text-sm ${t.textMain} leading-relaxed`}>{outcomeAnalysis.case_summary}</p>
+                          <p className={`text-sm ${t.textMain} leading-relaxed`}>{blindText(outcomeAnalysis.case_summary)}</p>
                         </div>
                       )}
 
@@ -1953,20 +1978,20 @@ export function ERCaseDetail() {
                                 </span>
                               </div>
                             </div>
-                            <p className={`text-sm ${t.textMain} leading-relaxed`}>{outcome.reasoning}</p>
+                            <p className={`text-sm ${t.textMain} leading-relaxed`}>{blindText(outcome.reasoning)}</p>
                             {isSelected && (
                               <div className={`pt-2 border-t ${t.borderLight} space-y-1.5`}>
                                 <div>
                                   <span className={`text-xs uppercase tracking-wide ${t.textMuted}`}>Policy Basis</span>
-                                  <p className={`text-sm ${t.textDim} mt-0.5`}>{outcome.policy_basis}</p>
+                                  <p className={`text-sm ${t.textDim} mt-0.5`}>{blindText(outcome.policy_basis)}</p>
                                 </div>
                                 <div>
                                   <span className={`text-xs uppercase tracking-wide ${t.textMuted}`}>HR Considerations</span>
-                                  <p className={`text-sm ${t.textDim} mt-0.5`}>{outcome.hr_considerations}</p>
+                                  <p className={`text-sm ${t.textDim} mt-0.5`}>{blindText(outcome.hr_considerations)}</p>
                                 </div>
                                 <div>
                                   <span className={`text-xs uppercase tracking-wide ${t.textMuted}`}>Precedent</span>
-                                  <p className={`text-sm ${t.textDim} mt-0.5`}>{outcome.precedent_note}</p>
+                                  <p className={`text-sm ${t.textDim} mt-0.5`}>{blindText(outcome.precedent_note)}</p>
                                 </div>
                               </div>
                             )}
@@ -2149,7 +2174,7 @@ export function ERCaseDetail() {
                           </div>
                         </div>
                         <p className="text-sm text-zinc-100 leading-relaxed">
-                          {latestGuidancePayload?.summary || latestGuidanceNote.content}
+                          {blindText(latestGuidancePayload?.summary || latestGuidanceNote.content)}
                         </p>
                         {latestGuidancePayload && (
                           <p className="mt-3 text-xs text-zinc-600 font-mono">
@@ -2168,13 +2193,13 @@ export function ERCaseDetail() {
                                 state === 'done' || state === 'dismissed' ? 'opacity-50' : ''
                               }`}>
                                 <div className="flex items-start justify-between gap-2">
-                                  <p className={`text-sm font-bold ${t.textMain} leading-snug`}>{card.title}</p>
+                                  <p className={`text-sm font-bold ${t.textMain} leading-snug`}>{blindText(card.title)}</p>
                                   <span className={`flex-shrink-0 px-2 py-0.5 text-[10px] uppercase tracking-wide font-bold rounded-lg ${guidancePriorityStyle(card.priority, t)}`}>
                                     {card.priority}
                                   </span>
                                 </div>
-                                <p className={`text-sm ${t.textDim} leading-relaxed`}>{card.recommendation}</p>
-                                <p className={`text-xs ${t.textMuted} leading-relaxed`}>{card.rationale}</p>
+                                <p className={`text-sm ${t.textDim} leading-relaxed`}>{blindText(card.recommendation)}</p>
+                                <p className={`text-xs ${t.textMuted} leading-relaxed`}>{blindText(card.rationale)}</p>
                                 {card.blockers.length > 0 && (
                                   <p className={`text-xs ${t.textFaint}`}>Blocked by: {card.blockers.join('; ')}</p>
                                 )}
@@ -2246,7 +2271,7 @@ export function ERCaseDetail() {
                           })}
                         </span>
                       </div>
-                      <p className={`text-sm ${t.textMain} whitespace-pre-wrap leading-relaxed`}>{note.content}</p>
+                      <p className={`text-sm ${t.textMain} whitespace-pre-wrap leading-relaxed`}>{blindText(note.content)}</p>
                     </div>
                   ))}
                 </div>
@@ -2272,7 +2297,7 @@ export function ERCaseDetail() {
                         })}
                       </span>
                     </div>
-                    <p className={`text-sm ${t.textMain} whitespace-pre-wrap leading-relaxed`}>{note.content}</p>
+                    <p className={`text-sm ${t.textMain} whitespace-pre-wrap leading-relaxed`}>{blindText(note.content)}</p>
                   </div>
                 ))}
               </div>
@@ -2373,7 +2398,7 @@ export function ERCaseDetail() {
                 {timelineSummary && (
                   <div className="bg-zinc-900 rounded-2xl px-5 py-4">
                     <div className="text-base text-zinc-300 leading-relaxed font-serif">
-                      {timelineSummary}
+                      {blindText(timelineSummary)}
                     </div>
                   </div>
                 )}
@@ -2418,13 +2443,13 @@ export function ERCaseDetail() {
                             {event.confidence}
                           </span>
                         </div>
-                        <p className={`${t.textMain} text-sm leading-relaxed mb-2`}>{event.description}</p>
+                        <p className={`${t.textMain} text-sm leading-relaxed mb-2`}>{blindText(event.description)}</p>
 
                         {event.participants.length > 0 && (
                           <div className="flex flex-wrap gap-1.5 mb-2">
                             {event.participants.map(p => (
                               <span key={p} className={`text-[10px] ${t.textMuted} uppercase tracking-wide px-1.5 py-0.5 border ${t.border} rounded`}>
-                                {p}
+                                {blindText(p)}
                               </span>
                             ))}
                           </div>
@@ -2432,7 +2457,7 @@ export function ERCaseDetail() {
 
                         {event.evidence_quote && (
                           <div className={`text-sm ${t.textDim} italic pl-3 border-l-2 ${t.borderLight} leading-relaxed`}>
-                            "{event.evidence_quote}"
+                            "{blindText(event.evidence_quote)}"
                           </div>
                         )}
                       </div>
@@ -2447,7 +2472,7 @@ export function ERCaseDetail() {
                       {timelineGaps.map((gap, i) => (
                         <li key={i} className={`text-sm ${t.textDim} flex items-start gap-2`}>
                           <span className="text-amber-500 mt-0.5">•</span>
-                          {gap}
+                          {blindText(gap)}
                         </li>
                       ))}
                     </ul>
@@ -2472,7 +2497,7 @@ export function ERCaseDetail() {
                 {discrepancySummary && (
                   <div className="bg-zinc-900 rounded-2xl px-5 py-4">
                     <div className="text-base text-zinc-300 leading-relaxed font-serif">
-                      {discrepancySummary}
+                      {blindText(discrepancySummary)}
                     </div>
                   </div>
                 )}
@@ -2528,29 +2553,29 @@ export function ERCaseDetail() {
                           <span className={`text-[10px] ${t.textMuted} uppercase tracking-wide`}>{disc.type}</span>
                         </div>
 
-                        <p className={`${t.textMain} text-sm font-semibold leading-snug`}>{disc.description}</p>
+                        <p className={`${t.textMain} text-sm font-semibold leading-snug`}>{blindText(disc.description)}</p>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div className={`border-l-2 ${t.borderLight} pl-3`}>
                             <p className={`text-[10px] ${t.textMuted} mb-1 uppercase tracking-wide font-semibold`}>
-                              {disc.statement_1?.speaker || 'Source 1'}
+                              {blindText(disc.statement_1?.speaker || 'Source 1')}
                             </p>
                             <p className={`text-sm ${t.textDim} italic leading-relaxed`}>
-                              "{disc.statement_1?.quote || 'No quote provided.'}"
+                              "{blindText(disc.statement_1?.quote || 'No quote provided.')}"
                             </p>
                           </div>
                           <div className={`border-l-2 ${t.borderLight} pl-3`}>
                             <p className={`text-[10px] ${t.textMuted} mb-1 uppercase tracking-wide font-semibold`}>
-                              {disc.statement_2?.speaker || 'Source 2'}
+                              {blindText(disc.statement_2?.speaker || 'Source 2')}
                             </p>
                             <p className={`text-sm ${t.textDim} italic leading-relaxed`}>
-                              "{disc.statement_2?.quote || 'No quote provided.'}"
+                              "{blindText(disc.statement_2?.quote || 'No quote provided.')}"
                             </p>
                           </div>
                         </div>
 
                         <p className={`text-xs ${t.textDim} leading-relaxed`}>
-                          {disc.analysis}
+                          {blindText(disc.analysis)}
                         </p>
                       </div>
                     ))}
@@ -2635,14 +2660,14 @@ export function ERCaseDetail() {
                         <div className="space-y-2.5">
                           {v.evidence.map((e, j) => (
                             <div key={j} className={`border-l-2 ${t.borderLight} pl-3`}>
-                              <p className={`text-sm ${t.textMain} leading-relaxed`}>"{e.quote}"</p>
-                              <p className={`text-xs ${t.textDim} mt-1`}>→ {e.how_it_violates}</p>
+                              <p className={`text-sm ${t.textMain} leading-relaxed`}>"{blindText(e.quote)}"</p>
+                              <p className={`text-xs ${t.textDim} mt-1`}>→ {blindText(e.how_it_violates)}</p>
                               {e.source_document_id && (() => {
                                 const doc = documents.find(d => d.id === e.source_document_id);
                                 const label = doc?.filename || e.source_document_id.slice(0, 8);
                                 return (
                                   <p className={`text-[10px] ${t.textMuted} font-mono mt-1`}>
-                                    Source: {label}{e.location ? ` · ${e.location}` : ''}
+                                    Source: {blindText(label)}{e.location ? ` · ${e.location}` : ''}
                                   </p>
                                 );
                               })()}
@@ -2651,7 +2676,7 @@ export function ERCaseDetail() {
                         </div>
 
                         <p className={`text-xs ${t.textDim} leading-relaxed`}>
-                          {v.analysis}
+                          {blindText(v.analysis)}
                         </p>
                       </div>
                     ))}
@@ -2692,18 +2717,18 @@ export function ERCaseDetail() {
                           <span className={`px-1.5 py-0.5 text-[10px] uppercase tracking-wider font-semibold rounded border ${t.border} ${DOC_TYPE_COLORS[result.document_type]}`}>
                             {result.document_type}
                           </span>
-                          <span className={`text-sm ${t.textMain} font-medium`}>{result.source_file}</span>
+                          <span className={`text-sm ${t.textMain} font-medium`}>{blindText(result.source_file)}</span>
                           <span className={`text-[10px] ${t.textMuted} ml-auto font-mono uppercase tracking-wide`}>
                             {(result.similarity * 100).toFixed(0)}% Match
                           </span>
                         </div>
                         
                         {result.speaker && (
-                          <p className={`text-xs ${t.textDim} mb-1 font-medium uppercase tracking-wide`}>{result.speaker}</p>
+                          <p className={`text-xs ${t.textDim} mb-1 font-medium uppercase tracking-wide`}>{blindText(result.speaker)}</p>
                         )}
                         
                         <div className={`text-sm ${t.textMain} leading-relaxed ${t.cardBg} p-3 rounded border ${t.border}`}>
-                          {result.content}
+                          {blindText(result.content)}
                         </div>
                         
                         {result.line_range && (
