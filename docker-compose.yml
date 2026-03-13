@@ -7,7 +7,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-matcha_redis_dev}
     restart: unless-stopped
     networks:
       - matcha-network
@@ -16,7 +16,7 @@ services:
         limits:
           memory: 128M
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-matcha_redis_dev}", "--no-auth-warning", "ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -34,9 +34,9 @@ services:
     env_file:
       - .env.backend
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-matcha_redis_dev}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-matcha_redis_dev}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-matcha_redis_dev}@redis:6379/0
     volumes:
       - uploads:/app/uploads
       - ./credentials:/app/credentials:ro
@@ -73,9 +73,9 @@ services:
     env_file:
       - .env.backend
     environment:
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-matcha_redis_dev}@redis:6379/0
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-matcha_redis_dev}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-matcha_redis_dev}@redis:6379/0
     volumes:
       - uploads:/app/uploads
       - ./credentials:/app/credentials:ro

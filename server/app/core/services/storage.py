@@ -107,6 +107,7 @@ class StorageService:
                     Bucket=self.bucket,
                     Key=key,
                     Body=file_bytes,
+                    ServerSideEncryption="AES256",
                     **extra_args,
                 )
                 return self._get_cloudfront_url(key)

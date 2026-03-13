@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 from ...database import get_connection
 from ..dependencies import require_admin
+from ..services.credential_crypto import decrypt_credential_fields
 from ..feature_flags import merge_company_features
 from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings
@@ -6055,6 +6056,27 @@ async def get_employee_admin(employee_id: UUID):
         """, employee_id)
 
         ec = dict(row["emergency_contact"] or {})
+        creds_data = None
+        if creds:
+            dc = decrypt_credential_fields(dict(creds))
+            creds_data = {
+                "license_type": dc["license_type"],
+                "license_number": dc["license_number"],
+                "license_state": dc["license_state"],
+                "license_expiration": creds["license_expiration"].isoformat() if creds["license_expiration"] else None,
+                "npi_number": dc["npi_number"],
+                "dea_number": dc["dea_number"],
+                "dea_expiration": creds["dea_expiration"].isoformat() if creds["dea_expiration"] else None,
+                "board_certification": dc["board_certification"],
+                "board_certification_expiration": creds["board_certification_expiration"].isoformat() if creds["board_certification_expiration"] else None,
+                "clinical_specialty": dc["clinical_specialty"],
+                "oig_last_checked": creds["oig_last_checked"].isoformat() if creds["oig_last_checked"] else None,
+                "oig_status": dc["oig_status"],
+                "malpractice_carrier": dc["malpractice_carrier"],
+                "malpractice_policy_number": dc["malpractice_policy_number"],
+                "malpractice_expiration": creds["malpractice_expiration"].isoformat() if creds["malpractice_expiration"] else None,
+                "health_clearances": creds["health_clearances"] or {},
+            }
         result = {
             "id": str(row["id"]),
             "org_id": str(row["org_id"]),
@@ -6078,24 +6100,7 @@ async def get_employee_admin(employee_id: UUID):
             "manager_name": row["manager_name"],
             "emergency_contact": ec,
             "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-            "credentials": {
-                "license_type": creds["license_type"],
-                "license_number": creds["license_number"],
-                "license_state": creds["license_state"],
-                "license_expiration": creds["license_expiration"].isoformat() if creds["license_expiration"] else None,
-                "npi_number": creds["npi_number"],
-                "dea_number": creds["dea_number"],
-                "dea_expiration": creds["dea_expiration"].isoformat() if creds["dea_expiration"] else None,
-                "board_certification": creds["board_certification"],
-                "board_certification_expiration": creds["board_certification_expiration"].isoformat() if creds["board_certification_expiration"] else None,
-                "clinical_specialty": creds["clinical_specialty"],
-                "oig_last_checked": creds["oig_last_checked"].isoformat() if creds["oig_last_checked"] else None,
-                "oig_status": creds["oig_status"],
-                "malpractice_carrier": creds["malpractice_carrier"],
-                "malpractice_policy_number": creds["malpractice_policy_number"],
-                "malpractice_expiration": creds["malpractice_expiration"].isoformat() if creds["malpractice_expiration"] else None,
-                "health_clearances": creds["health_clearances"] or {},
-            } if creds else None,
+            "credentials": creds_data,
         }
         return result
 

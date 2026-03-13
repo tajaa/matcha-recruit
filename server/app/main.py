@@ -1,9 +1,10 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import get_settings, load_settings
 from .database import close_pool, get_connection, init_db, init_pool
@@ -25,7 +26,7 @@ async def lifespan(app: FastAPI):
     )
 
     # Initialize database
-    await init_pool(settings.database_url)
+    await init_pool(settings.database_url, ssl_mode=settings.database_ssl)
     await init_db()
     print("[Matcha] Database initialized")
 
@@ -85,6 +86,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Trusted hosts — reject requests with spoofed Host headers
+app.add_middleware(
+    TrustedHostMiddleware,
+    allowed_hosts=[
+        "hey-matcha.com",
+        "www.hey-matcha.com",
+        "localhost",
+        "127.0.0.1",
+        "matcha-backend",
+    ],
+)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
+
 
 # Import and include domain routers
 from .core.routes import core_router, chat_ws_router

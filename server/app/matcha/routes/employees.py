@@ -23,6 +23,7 @@ from ...core.dependencies import get_current_user
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
 from ...core.models.auth import CurrentUser
 from ...core.services.compliance_service import ensure_location_for_employee
+from ...core.services.credential_crypto import encrypt_credential_fields, decrypt_credential_fields
 from ...core.services.email import get_email_service
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
@@ -1909,6 +1910,12 @@ async def bulk_upload_employees_csv(
                         cred_malpractice_carrier, cred_malpractice_policy_number, cred_malpractice_expiration,
                     ]
                     if any(v is not None for v in scalar_cred_fields) or cred_health_clearances:
+                        enc_creds = encrypt_credential_fields({
+                            "license_number": cred_license_number,
+                            "npi_number": cred_npi_number,
+                            "dea_number": cred_dea_number,
+                            "malpractice_policy_number": cred_malpractice_policy_number,
+                        })
                         await conn.execute("""
                             INSERT INTO employee_credentials (
                                 employee_id, org_id,
@@ -1951,11 +1958,11 @@ async def bulk_upload_employees_csv(
                                 updated_at = NOW()
                         """,
                             employee['id'], company_id,
-                            cred_license_type, cred_license_number, cred_license_state, cred_license_expiration,
-                            cred_npi_number, cred_dea_number, cred_dea_expiration,
+                            cred_license_type, enc_creds["license_number"], cred_license_state, cred_license_expiration,
+                            enc_creds["npi_number"], enc_creds["dea_number"], cred_dea_expiration,
                             cred_board_certification, cred_board_certification_expiration, cred_clinical_specialty,
                             None, None,
-                            cred_malpractice_carrier, cred_malpractice_policy_number, cred_malpractice_expiration,
+                            cred_malpractice_carrier, enc_creds["malpractice_policy_number"], cred_malpractice_expiration,
                             json.dumps(cred_health_clearances) if cred_health_clearances else None,
                         )
                         credentials_created += 1
@@ -2146,6 +2153,12 @@ async def bulk_upload_credentials_csv(
                     except json.JSONDecodeError:
                         logger.warning("[BulkCredentials] Row %d: invalid health_clearances JSON for %s, storing {}", row_num, email)
 
+                enc_creds = encrypt_credential_fields({
+                    "license_number": row.get('license_number', '').strip() or None,
+                    "npi_number": row.get('npi_number', '').strip() or None,
+                    "dea_number": row.get('dea_number', '').strip() or None,
+                    "malpractice_policy_number": row.get('malpractice_policy_number', '').strip() or None,
+                })
                 await conn.execute("""
                     INSERT INTO employee_credentials (
                         employee_id, org_id,
@@ -2189,18 +2202,18 @@ async def bulk_upload_credentials_csv(
                 """,
                     emp_id, company_id,
                     row.get('license_type', '').strip() or None,
-                    row.get('license_number', '').strip() or None,
+                    enc_creds["license_number"],
                     row.get('license_state', '').strip() or None,
                     _parse_csv_date(row.get('license_expiration', '')),
-                    row.get('npi_number', '').strip() or None,
-                    row.get('dea_number', '').strip() or None,
+                    enc_creds["npi_number"],
+                    enc_creds["dea_number"],
                     _parse_csv_date(row.get('dea_expiration', '')),
                     row.get('board_certification', '').strip() or None,
                     _parse_csv_date(row.get('board_certification_expiration', '')),
                     row.get('clinical_specialty', '').strip() or None,
                     None, None,
                     row.get('malpractice_carrier', '').strip() or None,
-                    row.get('malpractice_policy_number', '').strip() or None,
+                    enc_creds["malpractice_policy_number"],
                     _parse_csv_date(row.get('malpractice_expiration', '')),
                     json.dumps(health_clearances) if health_clearances else None,
                 )
@@ -4651,6 +4664,8 @@ async def get_employee_credentials(
         if not row:
             return EmployeeCredentialsResponse(employee_id=employee_id)
 
+        decrypted = decrypt_credential_fields(dict(row))
+
         def _date_str(val):
             return val.isoformat() if val else None
 
@@ -4658,11 +4673,11 @@ async def get_employee_credentials(
             id=row["id"],
             employee_id=row["employee_id"],
             license_type=row["license_type"],
-            license_number=row["license_number"],
+            license_number=decrypted["license_number"],
             license_state=row["license_state"],
             license_expiration=_date_str(row["license_expiration"]),
-            npi_number=row["npi_number"],
-            dea_number=row["dea_number"],
+            npi_number=decrypted["npi_number"],
+            dea_number=decrypted["dea_number"],
             dea_expiration=_date_str(row["dea_expiration"]),
             board_certification=row["board_certification"],
             board_certification_expiration=_date_str(row["board_certification_expiration"]),
@@ -4670,7 +4685,7 @@ async def get_employee_credentials(
             oig_last_checked=_date_str(row["oig_last_checked"]),
             oig_status=row["oig_status"],
             malpractice_carrier=row["malpractice_carrier"],
-            malpractice_policy_number=row["malpractice_policy_number"],
+            malpractice_policy_number=decrypted["malpractice_policy_number"],
             malpractice_expiration=_date_str(row["malpractice_expiration"]),
             health_clearances=dict(row["health_clearances"]) if row["health_clearances"] else None,
         )
@@ -4697,6 +4712,13 @@ async def upsert_employee_credentials(
             if not val:
                 return None
             return date.fromisoformat(val)
+
+        encrypted = encrypt_credential_fields({
+            "license_number": body.license_number,
+            "npi_number": body.npi_number,
+            "dea_number": body.dea_number,
+            "malpractice_policy_number": body.malpractice_policy_number,
+        })
 
         await conn.execute("""
             INSERT INTO employee_credentials (
@@ -4740,12 +4762,12 @@ async def upsert_employee_credentials(
                 updated_at = NOW()
         """,
             employee_id, company_id,
-            body.license_type, body.license_number, body.license_state, _parse_date(body.license_expiration),
-            body.npi_number, body.dea_number, _parse_date(body.dea_expiration),
+            body.license_type, encrypted["license_number"], body.license_state, _parse_date(body.license_expiration),
+            encrypted["npi_number"], encrypted["dea_number"], _parse_date(body.dea_expiration),
             body.board_certification, _parse_date(body.board_certification_expiration),
             body.clinical_specialty,
             _parse_date(body.oig_last_checked), body.oig_status or "not_checked",
-            body.malpractice_carrier, body.malpractice_policy_number, _parse_date(body.malpractice_expiration),
+            body.malpractice_carrier, encrypted["malpractice_policy_number"], _parse_date(body.malpractice_expiration),
             json.dumps(body.health_clearances) if body.health_clearances else "{}",
         )
 

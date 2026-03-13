@@ -37,6 +37,9 @@ class Settings:
     chat_jwt_access_token_expire_minutes: int = 1440  # 24 hours
     chat_jwt_refresh_token_expire_days: int = 30
 
+    # Database SSL
+    database_ssl: str = "disable"  # disable | require | verify-full
+
     # S3 Storage
     s3_bucket: Optional[str] = None
     s3_region: str = "us-east-1"
@@ -127,6 +130,7 @@ def load_settings() -> Settings:
 
     _settings = Settings(
         database_url=database_url.strip().strip('"'),
+        database_ssl=os.getenv("DATABASE_SSL", "disable"),
         gemini_api_key=api_key if api_key else None,
         vertex_project=vertex_project,
         vertex_location=os.getenv("VERTEX_LOCATION", "us-central1"),

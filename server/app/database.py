@@ -1,5 +1,6 @@
 import contextvars
 import json
+import ssl as _ssl
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -43,16 +44,32 @@ def get_is_admin() -> bool:
     return _is_admin_var.get()
 
 
-async def init_pool(database_url: str):
+def _make_ssl_context(mode: str):
+    """Build an SSL context for asyncpg based on the requested mode."""
+    if mode == "disable":
+        return None
+    if mode == "require":
+        ctx = _ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = _ssl.CERT_NONE
+        return ctx
+    if mode == "verify-full":
+        return _ssl.create_default_context()
+    return None
+
+
+async def init_pool(database_url: str, *, ssl_mode: str = "disable"):
     """Initialize the connection pool."""
     global _pool
     if _pool is None:
+        ssl_ctx = _make_ssl_context(ssl_mode)
         _pool = await asyncpg.create_pool(
             database_url,
             min_size=2,
             max_size=10,
             max_inactive_connection_lifetime=60,
             command_timeout=30,
+            ssl=ssl_ctx,
         )
     return _pool
 
