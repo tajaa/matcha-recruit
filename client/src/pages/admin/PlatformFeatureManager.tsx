@@ -27,13 +27,11 @@ const SECTION_MAP: Record<string, string> = {
   handbooks: 'HR', time_off: 'HR', accommodations: 'HR', internal_mobility: 'HR',
   matcha_work: 'HR',
   er_copilot: 'HR', incidents: 'HR', risk_assessment: 'HR',
-  xp_dashboard: 'Employee XP', vibe_checks: 'Employee XP', enps: 'Employee XP',
-  performance_reviews: 'Employee XP',
   compliance: 'Compliance', jurisdictions: 'Compliance',
   blog: 'Content', hr_news: 'Content',
 };
 
-const SIDEBAR_SECTIONS = ['Platform', 'Recruiting', 'HR', 'Employee XP', 'Compliance', 'Content'];
+const SIDEBAR_SECTIONS = ['Platform', 'Recruiting', 'HR', 'Compliance', 'Content'];
 
 const ALL_FEATURES = Object.keys(SECTION_MAP);
 
@@ -60,10 +58,6 @@ const FEATURE_META: Record<string, { label: string; clientGated: boolean }> = {
   er_copilot: { label: 'ER Copilot', clientGated: true },
   incidents: { label: 'Incidents', clientGated: true },
   risk_assessment: { label: 'Risk Assessment', clientGated: true },
-  xp_dashboard: { label: 'XP Dashboard', clientGated: false },
-  vibe_checks: { label: 'Vibe Checks', clientGated: true },
-  enps: { label: 'eNPS Surveys', clientGated: true },
-  performance_reviews: { label: 'Performance Reviews', clientGated: true },
   compliance: { label: 'Compliance', clientGated: true },
   jurisdictions: { label: 'Jurisdictions', clientGated: false },
   blog: { label: 'Blog', clientGated: false },

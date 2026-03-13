@@ -97,9 +97,6 @@ const PortalPolicies = lazy(() => import('./pages/portal/PortalPolicies'));
 const PortalProfile = lazy(() => import('./pages/portal/PortalProfile'));
 const PortalMobility = lazy(() => import('./pages/portal/PortalMobility'));
 const PortalOnboarding = lazy(() => import('./pages/portal/PortalOnboarding'));
-const PortalVibeCheck = lazy(() => import('./pages/portal/PortalVibeCheck'));
-const PortalENPS = lazy(() => import('./pages/portal/PortalENPS'));
-const PortalReviews = lazy(() => import('./pages/portal/PortalReviews'));
 const PortalUnavailable = lazy(() => import('./pages/portal/PortalUnavailable'));
 const RegisterBrokerClient = lazy(() => import('./pages/RegisterBrokerClient'));
 const BrokerClients = lazy(() => import('./pages/broker/BrokerClients'));
@@ -115,12 +112,6 @@ const ChatRoom = lazy(() => import('./pages/chat/ChatRoom'));
 
 // AI Chat
 const AIChat = lazy(() => import('./pages/AIChat'));
-
-// Employee Experience (XP) Pages
-const XPDashboard = lazy(() => import('./pages/xp/Dashboard'));
-const VibeChecks = lazy(() => import('./pages/xp/VibeChecks'));
-const ENPS = lazy(() => import('./pages/xp/ENPS'));
-const PerformanceReviews = lazy(() => import('./pages/xp/Reviews'));
 
 // Loading fallback
 function PageLoader() {
@@ -556,40 +547,6 @@ function App() {
                 }
               />
 
-              {/* Employee Experience (XP) Routes */}
-              <Route
-                path="xp/dashboard"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']} anyRequiredFeature={['vibe_checks', 'enps', 'performance_reviews']}>
-                    <XPDashboard />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="xp/vibe-checks"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="vibe_checks">
-                    <VibeChecks />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="xp/enps"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="enps">
-                    <ENPS />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="xp/reviews"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']} requiredFeature="performance_reviews">
-                    <PerformanceReviews />
-                  </ProtectedRoute>
-                }
-              />
-
               <Route
                 path="matcha/er-copilot"
                 element={
@@ -934,30 +891,6 @@ function App() {
                 element={
                   <ProtectedRoute roles={['employee']} requiredFeature="employees">
                     <PortalOnboarding />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="portal/vibe-check"
-                element={
-                  <ProtectedRoute roles={['employee']} requiredFeature="vibe_checks">
-                    <PortalVibeCheck />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="portal/enps"
-                element={
-                  <ProtectedRoute roles={['employee']} requiredFeature="enps">
-                    <PortalENPS />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="portal/reviews"
-                element={
-                  <ProtectedRoute roles={['employee']} requiredFeature="performance_reviews">
-                    <PortalReviews />
                   </ProtectedRoute>
                 }
               />
