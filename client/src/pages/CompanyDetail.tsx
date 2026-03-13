@@ -1,11 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Button, Card, CardHeader, CardContent, Modal, PositionCard, PositionForm } from '../components';
-import { companies as companiesApi, interviews as interviewsApi, matching as matchingApi, positions as positionsApi } from '../api/client';
+import { Button, Card, CardHeader, CardContent, Modal } from '../components';
+import { companies as companiesApi, interviews as interviewsApi } from '../api/client';
 import { complianceAPI } from '../api/compliance';
 import type { BusinessLocation, LocationCreate, JurisdictionOption } from '../api/compliance';
 import { useAuth } from '../context/AuthContext';
-import type { Company, Interview, MatchResult, Position } from '../types';
+import type { Company, Interview } from '../types';
 import { MapPin, Plus, Edit2, Trash2, Shield } from 'lucide-react';
 
 const US_STATES = [
@@ -45,17 +45,12 @@ export function CompanyDetail() {
   const { hasFeature } = useAuth();
   const [company, setCompany] = useState<Company | null>(null);
   const [interviews, setInterviews] = useState<Interview[]>([]);
-  const [matches, setMatches] = useState<MatchResult[]>([]);
-  const [positions, setPositions] = useState<Position[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInterviewModal, setShowInterviewModal] = useState(false);
   const [showTranscriptModal, setShowTranscriptModal] = useState(false);
-  const [showPositionModal, setShowPositionModal] = useState(false);
   const [selectedInterview, setSelectedInterview] = useState<Interview | null>(null);
   const [interviewForm, setInterviewForm] = useState({ interviewer_name: '', interviewer_role: '' });
   const [aggregating, setAggregating] = useState(false);
-  const [matching, setMatching] = useState(false);
-  const [creatingPosition, setCreatingPosition] = useState(false);
 
   // IR Guidance Blurb state
   const [editingIRGuidance, setEditingIRGuidance] = useState(false);
@@ -102,17 +97,13 @@ export function CompanyDetail() {
   const fetchData = async () => {
     if (!id) return;
     try {
-      const [companyData, interviewsData, matchesData, positionsData, shopsData] = await Promise.all([
+      const [companyData, interviewsData, shopsData] = await Promise.all([
         companiesApi.get(id),
         interviewsApi.list(id),
-        matchingApi.list(id).catch(() => []),
-        positionsApi.listByCompany(id).catch(() => []),
         complianceAPI.getLocations(id).catch(() => []),
       ]);
       setCompany(companyData);
       setInterviews(interviewsData);
-      setMatches(matchesData);
-      setPositions(positionsData);
       setShops(shopsData);
       setIrGuidanceBlurb(companyData.ir_guidance_blurb || '');
     } catch (err) {
@@ -157,32 +148,6 @@ export function CompanyDetail() {
       console.error('Failed to aggregate:', err);
     } finally {
       setAggregating(false);
-    }
-  };
-
-  const handleRunMatching = async () => {
-    if (!id) return;
-    setMatching(true);
-    try {
-      await matchingApi.run(id);
-      fetchData();
-    } catch (err) {
-      console.error('Failed to run matching:', err);
-    } finally {
-      setMatching(false);
-    }
-  };
-
-  const handleCreatePosition = async (data: Parameters<typeof positionsApi.create>[0]) => {
-    setCreatingPosition(true);
-    try {
-      await positionsApi.create(data);
-      setShowPositionModal(false);
-      fetchData();
-    } catch (err) {
-      console.error('Failed to create position:', err);
-    } finally {
-      setCreatingPosition(false);
     }
   };
 
@@ -543,34 +508,6 @@ export function CompanyDetail() {
         </CardContent>
       </Card>
 
-      {/* Positions Section */}
-      <Card>
-        <CardHeader className="flex justify-between items-center border-zinc-800">
-          <h2 className="text-lg font-semibold text-zinc-100">Open Positions</h2>
-          <Button size="sm" onClick={() => setShowPositionModal(true)}>
-            Add Position
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {positions.length === 0 ? (
-            <p className="text-zinc-500 text-center py-8">
-              No positions yet. Add your first position to start matching candidates.
-            </p>
-          ) : (
-            <div className="grid gap-4 md:grid-cols-2 mt-2">
-              {positions.map((position) => (
-                <PositionCard
-                  key={position.id}
-                  position={position}
-                  showCompany={false}
-                  onClick={() => navigate(`/positions/${position.id}`)}
-                />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* Shops Section */}
       <Card>
         <CardHeader className="flex justify-between items-center border-zinc-800">
@@ -665,55 +602,6 @@ export function CompanyDetail() {
         </CardContent>
       </Card>
 
-      {/* Matches Section */}
-      {company.culture_profile && (
-        <Card>
-          <CardHeader className="flex justify-between items-center border-zinc-800">
-            <h2 className="text-lg font-semibold text-zinc-100">Candidate Matches</h2>
-            <Button size="sm" onClick={handleRunMatching} disabled={matching}>
-              {matching ? 'Matching...' : 'Run Matching'}
-            </Button>
-          </CardHeader>
-          <CardContent>
-            {matches.length === 0 ? (
-              <p className="text-zinc-500 text-center py-8">
-                No matches yet. Upload candidates and run matching.
-              </p>
-            ) : (
-              <div className="space-y-4 mt-2">
-                {matches.map((match) => (
-                  <div
-                    key={match.id}
-                    className="flex items-center justify-between p-4 bg-zinc-800/30 rounded-lg border border-zinc-800/50 hover:border-zinc-700 transition-colors"
-                  >
-                    <div className="flex-1 pr-4">
-                      <p className="font-medium text-zinc-200 text-lg mb-1">{match.candidate_name || 'Unknown'}</p>
-                      <p className="text-sm text-zinc-400 line-clamp-2 leading-relaxed">
-                        {match.match_reasoning}
-                      </p>
-                    </div>
-                    <div className="ml-4 text-center min-w-[80px]">
-                      <div
-                        className={`text-3xl font-bold ${
-                          match.match_score >= 80
-                            ? 'text-white'
-                            : match.match_score >= 60
-                            ? 'text-yellow-400'
-                            : 'text-red-400'
-                        }`}
-                      >
-                        {Math.round(match.match_score)}
-                      </div>
-                      <div className="text-xs text-zinc-500 mt-1 uppercase tracking-wide font-medium">Match Score</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
-
       {/* Interview Modal */}
       <Modal
         isOpen={showInterviewModal}
@@ -792,21 +680,6 @@ export function CompanyDetail() {
             Close
           </Button>
         </div>
-      </Modal>
-
-      {/* Position Modal */}
-      <Modal
-        isOpen={showPositionModal}
-        onClose={() => setShowPositionModal(false)}
-        title="Add New Position"
-      >
-        <PositionForm
-          companies={company ? [company] : []}
-          initialCompanyId={id}
-          onSubmit={handleCreatePosition}
-          onCancel={() => setShowPositionModal(false)}
-          isLoading={creatingPosition}
-        />
       </Modal>
 
       {/* Shop Modal */}

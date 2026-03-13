@@ -1,14 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { policies, candidates } from '../api/client';
+import { policies } from '../api/client';
 import type { Policy, PolicySignature, SignatureRequest } from '../types';
 import { ChevronLeft, Trash2, Plus, X, FileText, ExternalLink, Pencil, CheckCircle, Archive } from 'lucide-react';
-
-interface CandidateOption {
-  id: string;
-  name: string;
-  email: string;
-}
 
 const parseRecipient = (text: string): { name: string; email: string } | null => {
   const line = text.trim();
@@ -37,8 +31,6 @@ export function PolicyDetail() {
   const [signers, setSigners] = useState<SignatureRequest[]>([
     { name: '', email: '', type: 'candidate' as const }
   ]);
-  const [candidateList, setCandidateList] = useState<CandidateOption[]>([]);
-  const [showCandidateSelector, setShowCandidateSelector] = useState(false);
   const [showSignatureModal, setShowSignatureModal] = useState(false);
 
   const loadPolicy = useCallback(async () => {
@@ -61,15 +53,6 @@ export function PolicyDetail() {
       console.error('Failed to load signatures:', error);
     }
   }, [id]);
-
-  const loadCandidates = async () => {
-    try {
-      const data = await candidates.listForCompany();
-      if (data) setCandidateList(data);
-    } catch (error) {
-      console.error('Failed to load candidates:', error);
-    }
-  };
 
   useEffect(() => {
     loadPolicy();
@@ -114,18 +97,6 @@ export function PolicyDetail() {
     else if (field === 'email') signer.email = value;
     else if (field === 'type') signer.type = value as 'candidate' | 'external';
     setSigners(newSigners);
-  };
-
-  const handleCandidateSelect = (candidate: CandidateOption) => {
-    const exists = signers.some(s => s.email === candidate.email);
-    if (!exists) {
-      if (signers.length === 1 && !signers[0].name && !signers[0].email) {
-        setSigners([{ name: candidate.name, email: candidate.email, type: 'candidate' as const, id: candidate.id }]);
-      } else {
-        setSigners([...signers, { name: candidate.name, email: candidate.email, type: 'candidate' as const, id: candidate.id }]);
-      }
-    }
-    setShowCandidateSelector(false);
   };
 
   const handleSendSignatures = async () => {
@@ -250,7 +221,7 @@ export function PolicyDetail() {
             </button>
           )}
           <button
-            onClick={() => { loadCandidates(); setShowSignatureModal(true); }}
+            onClick={() => { setShowSignatureModal(true); }}
             className="bg-zinc-900 hover:bg-zinc-800 text-white text-[10px] uppercase tracking-wider font-medium px-4 py-2 transition-colors"
           >
             Send Signatures
@@ -426,34 +397,7 @@ export function PolicyDetail() {
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <label className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Add Recipients</label>
-                  <button onClick={() => setShowCandidateSelector(!showCandidateSelector)} className="text-[10px] text-zinc-900 hover:underline uppercase tracking-widest font-medium">
-                    {showCandidateSelector ? 'Hide Candidates' : 'Select Candidates'}
-                  </button>
                 </div>
-
-                {showCandidateSelector && (
-                  <div className="p-4 bg-zinc-50 border border-zinc-200 rounded-sm max-h-48 overflow-y-auto">
-                    {candidateList.length === 0 ? (
-                      <p className="text-xs text-zinc-400 text-center py-4">No candidates found</p>
-                    ) : (
-                      <div className="space-y-1">
-                        {candidateList.map((candidate) => {
-                          const isSelected = signers.some(s => s.email === candidate.email);
-                          return (
-                            <button
-                              key={candidate.id}
-                              onClick={() => handleCandidateSelect(candidate)}
-                              disabled={isSelected}
-                              className={`w-full text-left px-3 py-2 rounded-sm text-xs transition-colors ${isSelected ? 'text-emerald-600 cursor-default opacity-50' : 'text-zinc-600 hover:bg-zinc-100'}`}
-                            >
-                              {candidate.name} <span className="text-zinc-400 font-mono ml-1">[{candidate.email}]</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
 
                 <textarea 
                   className="w-full px-0 py-2 bg-transparent border-b border-zinc-200 text-zinc-900 text-sm focus:outline-none focus:border-zinc-900 transition-colors h-20 placeholder:text-zinc-300 resize-none"

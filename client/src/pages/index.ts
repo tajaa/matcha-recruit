@@ -2,7 +2,6 @@ export { Landing } from './Landing';
 export { Companies } from './Companies';
 export { CompanyDetail } from './CompanyDetail';
 export { Interview } from './Interview';
-export { InterviewAnalysis } from './InterviewAnalysis';
 export { TestBot } from './TestBot';
 export { Login } from './Login';
 export { Register } from './Register';
