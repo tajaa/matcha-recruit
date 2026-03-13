@@ -57,13 +57,6 @@ const navSections: NavSection[] = [
     roles: ['admin'],
     items: [
       {
-        path: '/app/admin/notifications',
-        label: 'Notifications',
-        roles: ['admin'],
-        helpText: 'Recent activity feed across all companies.',
-        icon: <Bell className="w-4 h-4" />,
-      },
-      {
         path: '/app/admin/error-logs',
         label: 'Error Logs',
         roles: ['admin'],

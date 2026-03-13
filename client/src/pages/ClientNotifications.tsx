@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { clientNotifications } from '../api/client';
-import type { ClientNotificationItem } from '../api/client';
+import { clientNotifications, adminNotifications } from '../api/client';
+import type { ClientNotificationItem, AdminNotificationItem } from '../api/client';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { useAuth } from '../context/AuthContext';
 import {
   AlertTriangle,
   UserPlus,
@@ -10,6 +11,7 @@ import {
   Scale,
   BookOpen,
   AlertCircle,
+  Building2,
   Bell,
   CheckCheck,
   ChevronRight,
@@ -17,60 +19,68 @@ import {
 
 // ─── Type metadata ────────────────────────────────────────────────────────────
 
-const TYPE_ICONS: Record<ClientNotificationItem['type'], React.ReactNode> = {
+type AllTypes = ClientNotificationItem['type'] | 'registration';
+
+const TYPE_ICONS: Record<AllTypes, React.ReactNode> = {
   incident:         <AlertTriangle size={14} />,
   employee:         <UserPlus size={14} />,
   offer_letter:     <FileText size={14} />,
   er_case:          <Scale size={14} />,
   handbook:         <BookOpen size={14} />,
   compliance_alert: <AlertCircle size={14} />,
+  registration:     <Building2 size={14} />,
 };
 
-const TYPE_LABEL: Record<ClientNotificationItem['type'], string> = {
+const TYPE_LABEL: Record<AllTypes, string> = {
   incident:         'Incident',
   employee:         'HR',
   offer_letter:     'Offer Letter',
   er_case:          'ER Case',
   handbook:         'Policy',
   compliance_alert: 'Compliance',
+  registration:     'Registration',
 };
 
 // Icon colors
-const TYPE_ICON_COLOR_DK: Record<ClientNotificationItem['type'], string> = {
+const TYPE_ICON_COLOR_DK: Record<AllTypes, string> = {
   incident:         'text-zinc-300',
   employee:         'text-zinc-500',
   offer_letter:     'text-zinc-500',
   er_case:          'text-zinc-300',
   handbook:         'text-zinc-500',
   compliance_alert: 'text-zinc-300',
+  registration:     'text-zinc-500',
 };
 
-const TYPE_ICON_COLOR_LT: Record<ClientNotificationItem['type'], string> = {
+const TYPE_ICON_COLOR_LT: Record<AllTypes, string> = {
   incident:         'text-stone-700',
   employee:         'text-stone-500',
   offer_letter:     'text-stone-500',
   er_case:          'text-stone-700',
   handbook:         'text-stone-500',
   compliance_alert: 'text-stone-700',
+  registration:     'text-stone-500',
 };
 
 // Left accent strip color
-const TYPE_STRIP_DK: Record<ClientNotificationItem['type'], string> = {
+const TYPE_STRIP_DK: Record<AllTypes, string> = {
   incident:         'bg-zinc-400',
   employee:         'bg-zinc-700',
   offer_letter:     'bg-zinc-700',
   er_case:          'bg-zinc-400',
   handbook:         'bg-zinc-700',
   compliance_alert: 'bg-zinc-400',
+  registration:     'bg-zinc-700',
 };
 
-const TYPE_STRIP_LT: Record<ClientNotificationItem['type'], string> = {
+const TYPE_STRIP_LT: Record<AllTypes, string> = {
   incident:         'bg-stone-500',
   employee:         'bg-stone-300',
   offer_letter:     'bg-stone-300',
   er_case:          'bg-stone-500',
   handbook:         'bg-stone-300',
   compliance_alert: 'bg-stone-500',
+  registration:     'bg-stone-300',
 };
 
 // ─── Badge color maps ─────────────────────────────────────────────────────────
@@ -117,7 +127,7 @@ const STATUS_LT: Record<string, string> = {
   open:          'bg-stone-100 text-stone-400',
 };
 
-// ─── Theme tokens (Matched to Dashboard.tsx) ──────────────────────────────────────────────────
+// ─── Theme tokens (Matched to Dashboard.tsx) ──────────────────────────────────
 
 const LT = {
   pageBg: 'bg-stone-300',
@@ -161,6 +171,8 @@ const LT = {
   strip: TYPE_STRIP_LT,
   severity: SEVERITY_LT,
   status: STATUS_LT,
+  companyBadge: 'bg-stone-200 text-stone-500',
+  companyIcon: 'text-stone-400',
 } as const;
 
 const DK = {
@@ -205,13 +217,15 @@ const DK = {
   strip: TYPE_STRIP_DK,
   severity: SEVERITY_DK,
   status: STATUS_DK,
+  companyBadge: 'bg-zinc-800 text-zinc-400',
+  companyIcon: 'text-zinc-500',
 } as const;
 
 // ─── Filters ──────────────────────────────────────────────────────────────────
 
-type FilterType = ClientNotificationItem['type'] | 'all';
+type FilterType = AllTypes | 'all';
 
-const FILTERS: { key: FilterType; label: string }[] = [
+const CLIENT_FILTERS: { key: FilterType; label: string }[] = [
   { key: 'all',             label: 'All' },
   { key: 'incident',        label: 'Incidents' },
   { key: 'compliance_alert',label: 'Compliance' },
@@ -219,6 +233,11 @@ const FILTERS: { key: FilterType; label: string }[] = [
   { key: 'employee',        label: 'HR' },
   { key: 'offer_letter',    label: 'Offers' },
   { key: 'handbook',        label: 'Policies' },
+];
+
+const ADMIN_FILTERS: { key: FilterType; label: string }[] = [
+  ...CLIENT_FILTERS,
+  { key: 'registration',    label: 'Registrations' },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -248,9 +267,22 @@ function getTimeGroup(dateStr: string): string {
   return 'Earlier';
 }
 
-function groupItems(items: ClientNotificationItem[]) {
+// Unified item shape for rendering
+interface UnifiedItem {
+  id: string;
+  type: AllTypes;
+  title: string;
+  subtitle: string | null;
+  severity: string | null;
+  status: string | null;
+  created_at: string;
+  link: string | null;
+  company_name?: string;
+}
+
+function groupItems(items: UnifiedItem[]) {
   const order = ['Today', 'Yesterday', 'This Week', 'Earlier'];
-  const map: Record<string, ClientNotificationItem[]> = {};
+  const map: Record<string, UnifiedItem[]> = {};
   for (const item of items) {
     const g = getTimeGroup(item.created_at);
     if (!map[g]) map[g] = [];
@@ -261,44 +293,95 @@ function groupItems(items: ClientNotificationItem[]) {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
+type TabValue = 'company' | 'platform';
 const PAGE_SIZE = 30;
 
 export function ClientNotifications() {
   const navigate    = useNavigate();
   const isLight     = useIsLightMode();
+  const { hasRole } = useAuth();
+  const isAdmin     = hasRole('admin');
   const tk          = isLight ? LT : DK;
 
-  const [items,       setItems]       = useState<ClientNotificationItem[]>([]);
-  const [total,       setTotal]       = useState(0);
-  const [loading,     setLoading]     = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error,       setError]       = useState<string | null>(null);
-  const [filter,      setFilter]      = useState<FilterType>('all');
+  const [tab, setTab] = useState<TabValue>('company');
 
-  const fetchNotifications = useCallback(async (offset = 0, append = false) => {
+  // Company state
+  const [clientItems,       setClientItems]       = useState<ClientNotificationItem[]>([]);
+  const [clientTotal,       setClientTotal]       = useState(0);
+  const [clientLoading,     setClientLoading]     = useState(true);
+  const [clientLoadingMore, setClientLoadingMore] = useState(false);
+  const [clientError,       setClientError]       = useState<string | null>(null);
+
+  // Platform state
+  const [adminItems,       setAdminItems]       = useState<AdminNotificationItem[]>([]);
+  const [adminTotal,       setAdminTotal]       = useState(0);
+  const [adminLoading,     setAdminLoading]     = useState(true);
+  const [adminLoadingMore, setAdminLoadingMore] = useState(false);
+  const [adminError,       setAdminError]       = useState<string | null>(null);
+  const [adminLoaded,      setAdminLoaded]      = useState(false);
+
+  const [filter, setFilter] = useState<FilterType>('all');
+
+  const fetchClient = useCallback(async (offset = 0, append = false) => {
     try {
-      if (append) setLoadingMore(true);
-      else        setLoading(true);
+      if (append) setClientLoadingMore(true);
+      else        setClientLoading(true);
       const data = await clientNotifications.get(PAGE_SIZE, offset);
-      if (append) setItems(prev => [...prev, ...data.items]);
-      else        setItems(data.items);
-      setTotal(data.total);
-    } catch (err) {
-      console.error('Failed to fetch notifications:', err);
-      setError('Failed to load notifications');
+      if (append) setClientItems(prev => [...prev, ...data.items]);
+      else        setClientItems(data.items);
+      setClientTotal(data.total);
+    } catch {
+      setClientError('Failed to load notifications');
     } finally {
-      setLoading(false);
-      setLoadingMore(false);
+      setClientLoading(false);
+      setClientLoadingMore(false);
     }
   }, []);
 
-  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
+  const fetchAdmin = useCallback(async (offset = 0, append = false) => {
+    try {
+      if (append) setAdminLoadingMore(true);
+      else        setAdminLoading(true);
+      const data = await adminNotifications.get(PAGE_SIZE, offset);
+      if (append) setAdminItems(prev => [...prev, ...data.items]);
+      else        setAdminItems(data.items);
+      setAdminTotal(data.total);
+      setAdminLoaded(true);
+    } catch {
+      setAdminError('Failed to load notifications');
+    } finally {
+      setAdminLoading(false);
+      setAdminLoadingMore(false);
+    }
+  }, []);
 
-  const handleLoadMore = () => fetchNotifications(items.length, true);
+  useEffect(() => { fetchClient(); }, [fetchClient]);
+
+  // Lazy-load admin tab on first switch
+  useEffect(() => {
+    if (tab === 'platform' && isAdmin && !adminLoaded) fetchAdmin();
+  }, [tab, isAdmin, adminLoaded, fetchAdmin]);
+
+  // Reset filter when switching tabs
+  useEffect(() => { setFilter('all'); }, [tab]);
+
+  // Current tab data
+  const isCompany   = tab === 'company';
+  const items: UnifiedItem[] = isCompany ? clientItems : adminItems;
+  const total       = isCompany ? clientTotal : adminTotal;
+  const loading     = isCompany ? clientLoading : adminLoading;
+  const loadingMore = isCompany ? clientLoadingMore : adminLoadingMore;
+  const error       = isCompany ? clientError : adminError;
+  const hasMore     = items.length < total;
+  const filters     = isCompany ? CLIENT_FILTERS : ADMIN_FILTERS;
+
+  const handleLoadMore = () => {
+    if (isCompany) fetchClient(clientItems.length, true);
+    else           fetchAdmin(adminItems.length, true);
+  };
 
   const filtered = filter === 'all' ? items : items.filter(i => i.type === filter);
   const groups   = groupItems(filtered);
-  const hasMore  = items.length < total;
 
   // ── Loading skeleton ──────────────────────────────────────────────────────
 
@@ -354,7 +437,7 @@ export function ClientNotifications() {
               )}
             </div>
             <p className={`text-xs ${tk.textMuted}`}>
-              Compliance alerts, incidents, and activity log
+              {isCompany ? 'Compliance alerts, incidents, and activity log' : 'Activity across all companies'}
             </p>
           </div>
           <button
@@ -366,9 +449,26 @@ export function ClientNotifications() {
           </button>
         </div>
 
+        {/* Tab switcher (only show if admin) */}
+        {isAdmin && (
+          <div className="flex items-center gap-1 mt-3">
+            {(['company', 'platform'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`px-2 py-1 text-[10px] font-bold font-mono uppercase tracking-wider rounded-sm border transition-colors ${
+                  tab === t ? tk.filterActive : tk.filterIdle
+                }`}
+              >
+                {t === 'company' ? 'Company' : 'Platform'}
+              </button>
+            ))}
+          </div>
+        )}
+
         {/* Filter tabs */}
-        <div className="flex items-center gap-1 mt-4 flex-wrap">
-          {FILTERS.map(({ key, label }) => {
+        <div className="flex items-center gap-1 mt-3 flex-wrap">
+          {filters.map(({ key, label }) => {
             const count = key === 'all'
               ? items.length
               : items.filter(i => i.type === key).length;
@@ -407,7 +507,7 @@ export function ClientNotifications() {
           </div>
           <p className={`text-sm font-semibold ${tk.cardDarkText} mb-1`}>No notifications</p>
           <p className={`text-xs ${tk.cardDarkMuted}`}>
-            {filter === 'all' ? "You're all caught up." : `No ${TYPE_LABEL[filter as ClientNotificationItem['type']] ?? filter} activity.`}
+            {filter === 'all' ? "You're all caught up." : `No ${TYPE_LABEL[filter as AllTypes] ?? filter} activity.`}
           </p>
         </div>
       )}
@@ -451,6 +551,13 @@ export function ClientNotifications() {
                         <span className={`text-[9px] font-bold font-mono uppercase tracking-widest ${tk.cardDarkMuted}`}>
                           {TYPE_LABEL[item.type]}
                         </span>
+                        {/* Company badge for platform tab */}
+                        {!isCompany && item.company_name && (
+                          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold font-mono rounded-sm ${tk.companyBadge}`}>
+                            <Building2 size={9} className={tk.companyIcon} />
+                            {item.company_name}
+                          </span>
+                        )}
                       </div>
                       <div className={`text-[12px] font-semibold leading-tight truncate ${tk.cardDarkText}`}>
                         {item.title}
