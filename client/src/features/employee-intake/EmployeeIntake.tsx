@@ -1824,6 +1824,14 @@ export function EmployeeIntake({ onCreated }: EmployeeIntakeProps) {
                         <div className={`text-xs ${t.textMuted} uppercase tracking-wider mt-1`}>Total</div>
                       </div>
                     </div>
+                    {uploadResult.credentials_created > 0 && (
+                      <div className={`flex items-center gap-2 mt-4 px-1`}>
+                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                        <p className={`text-xs ${t.textMuted}`}>
+                          <span className="font-semibold text-emerald-600">{uploadResult.credentials_created}</span> credential record{uploadResult.credentials_created !== 1 ? 's' : ''} created
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {uploadResult.errors && uploadResult.errors.length > 0 && (

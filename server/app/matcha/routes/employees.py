@@ -75,6 +75,16 @@ def _exception_message(exc: Exception) -> str:
     return str(exc)
 
 
+def _parse_csv_date(val: str) -> Optional[date]:
+    """Parse a YYYY-MM-DD date string from a CSV cell; return None if blank or invalid."""
+    if not val or not val.strip():
+        return None
+    try:
+        return datetime.strptime(val.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
 async def _column_exists(conn, table_name: str, column_name: str) -> bool:
     return bool(
         await conn.fetchval(
@@ -313,6 +323,16 @@ class BulkEmployeeCSVUpload(BaseModel):
     failed: int
     errors: list[dict]  # [{row: int, email: str, error: str}]
     employee_ids: list[UUID]
+    credentials_created: int = 0
+
+
+class BulkCredentialsUploadResponse(BaseModel):
+    """Model for credential-only CSV upload response."""
+    total_rows: int
+    updated: int
+    failed: int
+    not_found: int
+    errors: list[dict]
 
 
 class BulkInviteResponse(BaseModel):
@@ -1560,13 +1580,18 @@ async def download_bulk_upload_template(
     writer = csv.DictWriter(output, fieldnames=[
         'email', 'personal_email', 'first_name', 'last_name', 'work_state',
         'employment_type', 'start_date', 'manager_email', 'job_title', 'department',
-        'phone', 'pay_classification', 'pay_rate', 'work_city'
+        'phone', 'pay_classification', 'pay_rate', 'work_city',
+        'license_type', 'license_number', 'license_state', 'license_expiration',
+        'npi_number', 'dea_number', 'dea_expiration',
+        'board_certification', 'board_certification_expiration', 'clinical_specialty',
+        'malpractice_carrier', 'malpractice_policy_number', 'malpractice_expiration',
+        'health_clearances',
     ])
     writer.writeheader()
 
-    # Add example row
+    # Add example row (medical employee)
     writer.writerow({
-        'email': 'jane.doe@energyco.com',
+        'email': 'jane.doe@medcenter.com',
         'personal_email': 'jane.doe@gmail.com',
         'first_name': 'Jane',
         'last_name': 'Doe',
@@ -1574,12 +1599,26 @@ async def download_bulk_upload_template(
         'employment_type': 'full_time',
         'start_date': '2026-02-01',
         'manager_email': 'manager@example.com',
-        'job_title': 'Software Engineer',
-        'department': 'Engineering',
+        'job_title': 'Registered Nurse',
+        'department': 'Emergency',
         'phone': '555-1234',
         'pay_classification': 'hourly',
-        'pay_rate': '18.50',
-        'work_city': 'San Francisco'
+        'pay_rate': '45.00',
+        'work_city': 'San Francisco',
+        'license_type': 'RN',
+        'license_number': 'RN123456',
+        'license_state': 'CA',
+        'license_expiration': '2027-06-30',
+        'npi_number': '1234567890',
+        'dea_number': '',
+        'dea_expiration': '',
+        'board_certification': '',
+        'board_certification_expiration': '',
+        'clinical_specialty': 'Emergency Medicine',
+        'malpractice_carrier': '',
+        'malpractice_policy_number': '',
+        'malpractice_expiration': '',
+        'health_clearances': '{"tb_test": "2026-01-10", "hep_b": "cleared"}',
     })
 
     output.seek(0)
@@ -1647,6 +1686,7 @@ async def bulk_upload_employees_csv(
     # Process rows
     created = 0
     failed = 0
+    credentials_created = 0
     errors = []
     employee_ids = []
 
@@ -1837,6 +1877,97 @@ async def bulk_upload_employees_csv(
                 created += 1
                 logger.info("[BulkUpload] Row %d: created employee %s (%s)", row_num, employee['id'], email)
 
+                # Process credential fields if any are present in the CSV row
+                try:
+                    cred_license_type = row.get('license_type', '').strip() or None
+                    cred_license_number = row.get('license_number', '').strip() or None
+                    cred_license_state = row.get('license_state', '').strip() or None
+                    cred_license_expiration = _parse_csv_date(row.get('license_expiration', ''))
+                    cred_npi_number = row.get('npi_number', '').strip() or None
+                    cred_dea_number = row.get('dea_number', '').strip() or None
+                    cred_dea_expiration = _parse_csv_date(row.get('dea_expiration', ''))
+                    cred_board_certification = row.get('board_certification', '').strip() or None
+                    cred_board_certification_expiration = _parse_csv_date(row.get('board_certification_expiration', ''))
+                    cred_clinical_specialty = row.get('clinical_specialty', '').strip() or None
+                    cred_malpractice_carrier = row.get('malpractice_carrier', '').strip() or None
+                    cred_malpractice_policy_number = row.get('malpractice_policy_number', '').strip() or None
+                    cred_malpractice_expiration = _parse_csv_date(row.get('malpractice_expiration', ''))
+
+                    health_clearances_str = row.get('health_clearances', '').strip()
+                    cred_health_clearances: dict = {}
+                    if health_clearances_str:
+                        try:
+                            parsed_hc = json.loads(health_clearances_str)
+                            cred_health_clearances = parsed_hc if isinstance(parsed_hc, dict) else {}
+                        except json.JSONDecodeError:
+                            logger.warning("[BulkUpload] Row %d: invalid health_clearances JSON for %s, storing {}", row_num, email)
+
+                    scalar_cred_fields = [
+                        cred_license_type, cred_license_number, cred_license_state, cred_license_expiration,
+                        cred_npi_number, cred_dea_number, cred_dea_expiration,
+                        cred_board_certification, cred_board_certification_expiration, cred_clinical_specialty,
+                        cred_malpractice_carrier, cred_malpractice_policy_number, cred_malpractice_expiration,
+                    ]
+                    if any(v is not None for v in scalar_cred_fields) or cred_health_clearances:
+                        await conn.execute("""
+                            INSERT INTO employee_credentials (
+                                employee_id, org_id,
+                                license_type, license_number, license_state, license_expiration,
+                                npi_number, dea_number, dea_expiration,
+                                board_certification, board_certification_expiration,
+                                clinical_specialty,
+                                oig_last_checked, oig_status,
+                                malpractice_carrier, malpractice_policy_number, malpractice_expiration,
+                                health_clearances,
+                                updated_at
+                            ) VALUES (
+                                $1, $2,
+                                $3, $4, $5, $6,
+                                $7, $8, $9,
+                                $10, $11,
+                                $12,
+                                $13, $14,
+                                $15, $16, $17,
+                                $18::jsonb,
+                                NOW()
+                            )
+                            ON CONFLICT (employee_id) DO UPDATE SET
+                                license_type = COALESCE(EXCLUDED.license_type, employee_credentials.license_type),
+                                license_number = COALESCE(EXCLUDED.license_number, employee_credentials.license_number),
+                                license_state = COALESCE(EXCLUDED.license_state, employee_credentials.license_state),
+                                license_expiration = COALESCE(EXCLUDED.license_expiration, employee_credentials.license_expiration),
+                                npi_number = COALESCE(EXCLUDED.npi_number, employee_credentials.npi_number),
+                                dea_number = COALESCE(EXCLUDED.dea_number, employee_credentials.dea_number),
+                                dea_expiration = COALESCE(EXCLUDED.dea_expiration, employee_credentials.dea_expiration),
+                                board_certification = COALESCE(EXCLUDED.board_certification, employee_credentials.board_certification),
+                                board_certification_expiration = COALESCE(EXCLUDED.board_certification_expiration, employee_credentials.board_certification_expiration),
+                                clinical_specialty = COALESCE(EXCLUDED.clinical_specialty, employee_credentials.clinical_specialty),
+                                oig_last_checked = COALESCE(EXCLUDED.oig_last_checked, employee_credentials.oig_last_checked),
+                                oig_status = COALESCE(EXCLUDED.oig_status, employee_credentials.oig_status),
+                                malpractice_carrier = COALESCE(EXCLUDED.malpractice_carrier, employee_credentials.malpractice_carrier),
+                                malpractice_policy_number = COALESCE(EXCLUDED.malpractice_policy_number, employee_credentials.malpractice_policy_number),
+                                malpractice_expiration = COALESCE(EXCLUDED.malpractice_expiration, employee_credentials.malpractice_expiration),
+                                health_clearances = COALESCE(EXCLUDED.health_clearances, employee_credentials.health_clearances),
+                                updated_at = NOW()
+                        """,
+                            employee['id'], company_id,
+                            cred_license_type, cred_license_number, cred_license_state, cred_license_expiration,
+                            cred_npi_number, cred_dea_number, cred_dea_expiration,
+                            cred_board_certification, cred_board_certification_expiration, cred_clinical_specialty,
+                            None, None,
+                            cred_malpractice_carrier, cred_malpractice_policy_number, cred_malpractice_expiration,
+                            json.dumps(cred_health_clearances) if cred_health_clearances else None,
+                        )
+                        credentials_created += 1
+                        logger.info("[BulkUpload] Row %d: created credentials for employee %s", row_num, employee['id'])
+                except Exception as e:
+                    logger.warning("[BulkUpload] Row %d: employee %s created but credential save failed: %s", row_num, email, e)
+                    errors.append({
+                        "row": row_num,
+                        "email": email,
+                        "error": f"Employee created but credentials failed: {_exception_message(e)}"
+                    })
+
                 await _sync_employee_location_for_compliance(
                     conn,
                     company_id=company_id,
@@ -1908,7 +2039,187 @@ async def bulk_upload_employees_csv(
         created=created,
         failed=failed,
         errors=errors,
-        employee_ids=employee_ids
+        employee_ids=employee_ids,
+        credentials_created=credentials_created,
+    )
+
+
+@router.get("/bulk-upload/credentials-template")
+async def download_bulk_credentials_template(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Download CSV template for credential-only bulk upload (for existing employees)."""
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=[
+        'email',
+        'license_type', 'license_number', 'license_state', 'license_expiration',
+        'npi_number', 'dea_number', 'dea_expiration',
+        'board_certification', 'board_certification_expiration', 'clinical_specialty',
+        'malpractice_carrier', 'malpractice_policy_number', 'malpractice_expiration',
+        'health_clearances',
+    ])
+    writer.writeheader()
+    writer.writerow({
+        'email': 'jane.doe@medcenter.com',
+        'license_type': 'RN',
+        'license_number': 'RN123456',
+        'license_state': 'CA',
+        'license_expiration': '2027-06-30',
+        'npi_number': '1234567890',
+        'dea_number': '',
+        'dea_expiration': '',
+        'board_certification': '',
+        'board_certification_expiration': '',
+        'clinical_specialty': 'Emergency Medicine',
+        'malpractice_carrier': '',
+        'malpractice_policy_number': '',
+        'malpractice_expiration': '',
+        'health_clearances': '{"tb_test": "2026-01-10", "hep_b": "cleared"}',
+    })
+    output.seek(0)
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=employee_credentials_template.csv"}
+    )
+
+
+@router.post("/bulk-upload/credentials", response_model=BulkCredentialsUploadResponse)
+async def bulk_upload_credentials_csv(
+    file: UploadFile = File(..., description="CSV file with email + credential columns"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """
+    Upload a CSV to create or update credentials for existing employees.
+
+    Requires an 'email' column to identify each employee, plus any credential columns.
+    Use this to load credentialing data from a credentialing software export without
+    re-creating employee records.
+    """
+    company_id = await get_client_company_id(current_user)
+
+    if not file.filename.endswith('.csv'):
+        raise HTTPException(status_code=400, detail="File must be a CSV")
+
+    contents = await file.read()
+    if len(contents) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 10MB)")
+
+    try:
+        csv_content = contents.decode('utf-8')
+        csv_reader = csv.DictReader(io.StringIO(csv_content))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid CSV format: {str(e)}")
+
+    if not csv_reader.fieldnames or 'email' not in csv_reader.fieldnames:
+        raise HTTPException(status_code=400, detail="CSV must include an 'email' column")
+
+    updated = 0
+    failed = 0
+    not_found = 0
+    errors = []
+
+    async with get_connection() as conn:
+        for row_num, row in enumerate(csv_reader, start=2):
+            email = row.get('email', '').strip()
+            if not email:
+                errors.append({"row": row_num, "email": "", "error": "Email is required"})
+                failed += 1
+                continue
+
+            emp_id = await conn.fetchval(
+                "SELECT id FROM employees WHERE org_id = $1 AND email = $2",
+                company_id, email,
+            )
+            if not emp_id:
+                errors.append({"row": row_num, "email": email, "error": "Employee not found"})
+                not_found += 1
+                continue
+
+            try:
+                health_clearances_str = row.get('health_clearances', '').strip()
+                health_clearances: dict = {}
+                if health_clearances_str:
+                    try:
+                        parsed_hc = json.loads(health_clearances_str)
+                        health_clearances = parsed_hc if isinstance(parsed_hc, dict) else {}
+                    except json.JSONDecodeError:
+                        logger.warning("[BulkCredentials] Row %d: invalid health_clearances JSON for %s, storing {}", row_num, email)
+
+                await conn.execute("""
+                    INSERT INTO employee_credentials (
+                        employee_id, org_id,
+                        license_type, license_number, license_state, license_expiration,
+                        npi_number, dea_number, dea_expiration,
+                        board_certification, board_certification_expiration,
+                        clinical_specialty,
+                        oig_last_checked, oig_status,
+                        malpractice_carrier, malpractice_policy_number, malpractice_expiration,
+                        health_clearances,
+                        updated_at
+                    ) VALUES (
+                        $1, $2,
+                        $3, $4, $5, $6,
+                        $7, $8, $9,
+                        $10, $11,
+                        $12,
+                        $13, $14,
+                        $15, $16, $17,
+                        $18::jsonb,
+                        NOW()
+                    )
+                    ON CONFLICT (employee_id) DO UPDATE SET
+                        license_type = COALESCE(EXCLUDED.license_type, employee_credentials.license_type),
+                        license_number = COALESCE(EXCLUDED.license_number, employee_credentials.license_number),
+                        license_state = COALESCE(EXCLUDED.license_state, employee_credentials.license_state),
+                        license_expiration = COALESCE(EXCLUDED.license_expiration, employee_credentials.license_expiration),
+                        npi_number = COALESCE(EXCLUDED.npi_number, employee_credentials.npi_number),
+                        dea_number = COALESCE(EXCLUDED.dea_number, employee_credentials.dea_number),
+                        dea_expiration = COALESCE(EXCLUDED.dea_expiration, employee_credentials.dea_expiration),
+                        board_certification = COALESCE(EXCLUDED.board_certification, employee_credentials.board_certification),
+                        board_certification_expiration = COALESCE(EXCLUDED.board_certification_expiration, employee_credentials.board_certification_expiration),
+                        clinical_specialty = COALESCE(EXCLUDED.clinical_specialty, employee_credentials.clinical_specialty),
+                        oig_last_checked = COALESCE(EXCLUDED.oig_last_checked, employee_credentials.oig_last_checked),
+                        oig_status = COALESCE(EXCLUDED.oig_status, employee_credentials.oig_status),
+                        malpractice_carrier = COALESCE(EXCLUDED.malpractice_carrier, employee_credentials.malpractice_carrier),
+                        malpractice_policy_number = COALESCE(EXCLUDED.malpractice_policy_number, employee_credentials.malpractice_policy_number),
+                        malpractice_expiration = COALESCE(EXCLUDED.malpractice_expiration, employee_credentials.malpractice_expiration),
+                        health_clearances = COALESCE(EXCLUDED.health_clearances, employee_credentials.health_clearances),
+                        updated_at = NOW()
+                """,
+                    emp_id, company_id,
+                    row.get('license_type', '').strip() or None,
+                    row.get('license_number', '').strip() or None,
+                    row.get('license_state', '').strip() or None,
+                    _parse_csv_date(row.get('license_expiration', '')),
+                    row.get('npi_number', '').strip() or None,
+                    row.get('dea_number', '').strip() or None,
+                    _parse_csv_date(row.get('dea_expiration', '')),
+                    row.get('board_certification', '').strip() or None,
+                    _parse_csv_date(row.get('board_certification_expiration', '')),
+                    row.get('clinical_specialty', '').strip() or None,
+                    None, None,
+                    row.get('malpractice_carrier', '').strip() or None,
+                    row.get('malpractice_policy_number', '').strip() or None,
+                    _parse_csv_date(row.get('malpractice_expiration', '')),
+                    json.dumps(health_clearances) if health_clearances else None,
+                )
+                updated += 1
+            except Exception as e:
+                errors.append({"row": row_num, "email": email, "error": str(e)})
+                failed += 1
+
+    if updated == 0 and failed == 0 and not_found == 0:
+        raise HTTPException(status_code=400, detail="No data rows found in CSV")
+
+    logger.info("[BulkCredentials] Complete: %d updated, %d not_found, %d failed", updated, not_found, failed)
+
+    return BulkCredentialsUploadResponse(
+        total_rows=updated + failed + not_found,
+        updated=updated,
+        failed=failed,
+        not_found=not_found,
+        errors=errors,
     )
 
 
