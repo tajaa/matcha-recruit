@@ -4475,7 +4475,7 @@ async def get_employee_incidents(
                       i.reported_by_name
                FROM ir_incidents i
                WHERE i.company_id = $1
-                 AND $2::text = ANY(i.involved_employee_ids)
+                 AND $2::uuid = ANY(i.involved_employee_ids)
                ORDER BY i.occurred_at DESC""",
             company_id, str(employee_id),
         )
@@ -4687,7 +4687,7 @@ async def get_employee_credentials(
             malpractice_carrier=row["malpractice_carrier"],
             malpractice_policy_number=decrypted["malpractice_policy_number"],
             malpractice_expiration=_date_str(row["malpractice_expiration"]),
-            health_clearances=dict(row["health_clearances"]) if row["health_clearances"] else None,
+            health_clearances=row["health_clearances"] if isinstance(row["health_clearances"], dict) else None,
         )
 
 

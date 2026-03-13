@@ -5465,11 +5465,11 @@ class AdminNotificationsResponse(BaseModel):
 
 
 _NOTIFICATION_LINK_MAP: dict[str, str] = {
-    "incident": "/app/matcha/ir/{id}",
+    "incident": "/app/ir/incidents/{id}",
     "employee": "/app/matcha/employees/{id}",
     "offer_letter": "/app/matcha/offer-letters",
     "er_case": "/app/matcha/er-copilot/{id}",
-    "handbook": "/app/matcha/handbooks/{id}",
+    "handbook": "/app/matcha/handbook/{id}",
     "compliance_alert": "/app/matcha/compliance",
     "registration": "/app/admin/business-registrations",
 }
