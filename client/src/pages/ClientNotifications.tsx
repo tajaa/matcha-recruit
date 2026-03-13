@@ -451,16 +451,22 @@ export function ClientNotifications() {
 
         {/* Tab switcher (only show if admin) */}
         {isAdmin && (
-          <div className="flex items-center gap-1 mt-3">
-            {(['company', 'platform'] as const).map((t) => (
+          <div className="flex items-center gap-2 mt-3">
+            {([
+              { key: 'company' as const, label: 'Company', hint: 'Your company' },
+              { key: 'platform' as const, label: 'Platform', hint: 'All companies' },
+            ]).map((t) => (
               <button
-                key={t}
-                onClick={() => setTab(t)}
-                className={`px-2 py-1 text-[10px] font-bold font-mono uppercase tracking-wider rounded-sm border transition-colors ${
-                  tab === t ? tk.filterActive : tk.filterIdle
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={`flex items-center gap-1.5 px-2 py-1 text-[10px] font-bold font-mono uppercase tracking-wider rounded-sm border transition-colors ${
+                  tab === t.key ? tk.filterActive : tk.filterIdle
                 }`}
               >
-                {t === 'company' ? 'Company' : 'Platform'}
+                {t.label}
+                <span className={`font-normal normal-case tracking-normal ${tab === t.key ? 'opacity-50' : 'opacity-40'}`}>
+                  {t.hint}
+                </span>
               </button>
             ))}
           </div>
