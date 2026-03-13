@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { BusinessLocation, LocationCreate } from '../../api/compliance';
 import { complianceAPI } from '../../api/compliance';
 
+const FIVE_MIN = 1000 * 60 * 5;
 const ONE_HOUR = 1000 * 60 * 60;
 
 export function useCompliance(companyId: string | null, selectedLocationId: string | null, isAdmin = false) {
@@ -36,37 +37,37 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
     enabled: !isAdmin || !!companyId,
   });
 
-  // --- Detail data: fetched only when a location is selected, cached 1hr ---
+  // --- Detail data: fetched only when a location is selected, cached 5min ---
   const { data: requirements, isLoading: loadingRequirements } = useQuery({
     queryKey: ['compliance-requirements', selectedLocationId, companyId],
     queryFn: () => complianceAPI.getRequirements(selectedLocationId!, undefined, companyId || undefined),
     enabled: !!selectedLocationId,
-    staleTime: ONE_HOUR,
-    gcTime: ONE_HOUR,
+    staleTime: FIVE_MIN,
+    gcTime: FIVE_MIN,
   });
 
   const { data: alerts, isLoading: loadingAlerts } = useQuery({
     queryKey: ['compliance-alerts', companyId],
     queryFn: () => complianceAPI.getAlerts(undefined, companyId || undefined),
     enabled: !!selectedLocationId,
-    staleTime: ONE_HOUR,
-    gcTime: ONE_HOUR,
+    staleTime: FIVE_MIN,
+    gcTime: FIVE_MIN,
   });
 
   const { data: upcomingLegislation } = useQuery({
     queryKey: ['compliance-upcoming', selectedLocationId, companyId],
     queryFn: () => complianceAPI.getUpcomingLegislation(selectedLocationId!, companyId || undefined),
     enabled: !!selectedLocationId,
-    staleTime: ONE_HOUR,
-    gcTime: ONE_HOUR,
+    staleTime: FIVE_MIN,
+    gcTime: FIVE_MIN,
   });
 
   const { data: checkLog } = useQuery({
     queryKey: ['compliance-check-log', selectedLocationId, companyId],
     queryFn: () => complianceAPI.getCheckLog(selectedLocationId!, 20, companyId || undefined),
     enabled: !!selectedLocationId,
-    staleTime: ONE_HOUR,
-    gcTime: ONE_HOUR,
+    staleTime: FIVE_MIN,
+    gcTime: FIVE_MIN,
   });
 
   // Jurisdictions: only needed when add modal is open
