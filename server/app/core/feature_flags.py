@@ -2,8 +2,6 @@ import json
 from typing import Any
 
 DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
-    "offer_letters": True,
-    "offer_letters_plus": False,
     "handbooks": True,
     "matcha_work": False,
     "risk_assessment": True,

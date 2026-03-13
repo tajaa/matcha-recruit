@@ -39,8 +39,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 TEST_ACCOUNT_FEATURES = {
-    "offer_letters": True,
-    "offer_letters_plus": True,
     "policies": True,
     "handbooks": True,
     "compliance": True,
