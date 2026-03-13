@@ -309,6 +309,32 @@ async def list_discipline_records(
         return [_to_discipline_response(r) for r in rows]
 
 
+@router.get("/discipline/search", response_model=List[DisciplineResponse])
+async def search_discipline_by_name(
+    q: str = Query(..., min_length=1, description="Employee name to search"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Search discipline records by employee name (first or last)."""
+    company_id = await get_client_company_id(current_user)
+    pattern = f"%{q.strip()}%"
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT d.* FROM progressive_discipline d
+            JOIN employees e ON e.id = d.employee_id
+            WHERE d.company_id = $1
+              AND (e.first_name ILIKE $2 OR e.last_name ILIKE $2
+                   OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $2)
+            ORDER BY d.issued_date DESC
+            LIMIT 100
+            """,
+            company_id,
+            pattern,
+        )
+        return [_to_discipline_response(r) for r in rows]
+
+
 @router.get("/discipline/{record_id}", response_model=DisciplineResponse)
 async def get_discipline_record(
     record_id: UUID,
@@ -484,6 +510,32 @@ async def list_agency_charges(
             """,
             employee_id,
             company_id,
+        )
+        return [_to_charge_response(r) for r in rows]
+
+
+@router.get("/agency-charges/search", response_model=List[AgencyChargeResponse])
+async def search_charges_by_name(
+    q: str = Query(..., min_length=1, description="Employee name to search"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Search agency charges by employee name (first or last)."""
+    company_id = await get_client_company_id(current_user)
+    pattern = f"%{q.strip()}%"
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT c.* FROM agency_charges c
+            JOIN employees e ON e.id = c.employee_id
+            WHERE c.company_id = $1
+              AND (e.first_name ILIKE $2 OR e.last_name ILIKE $2
+                   OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $2)
+            ORDER BY c.filing_date DESC
+            LIMIT 100
+            """,
+            company_id,
+            pattern,
         )
         return [_to_charge_response(r) for r in rows]
 

@@ -3580,6 +3580,9 @@ export const preTermination = {
   getEmployeeDiscipline: (employeeId: string): Promise<ProgressiveDiscipline[]> =>
     request<ProgressiveDiscipline[]>(`/pre-termination/discipline/employee/${employeeId}`),
 
+  searchDiscipline: (query: string): Promise<ProgressiveDiscipline[]> =>
+    request<ProgressiveDiscipline[]>(`/pre-termination/discipline/search?q=${encodeURIComponent(query)}`),
+
   getDiscipline: (recordId: string): Promise<ProgressiveDiscipline> =>
     request<ProgressiveDiscipline>(`/pre-termination/discipline/${recordId}`),
 
@@ -3595,6 +3598,9 @@ export const preTermination = {
 
   getEmployeeCharges: (employeeId: string): Promise<AgencyCharge[]> =>
     request<AgencyCharge[]>(`/pre-termination/agency-charges/employee/${employeeId}`),
+
+  searchCharges: (query: string): Promise<AgencyCharge[]> =>
+    request<AgencyCharge[]>(`/pre-termination/agency-charges/search?q=${encodeURIComponent(query)}`),
 
   getCharge: (chargeId: string): Promise<AgencyCharge> =>
     request<AgencyCharge>(`/pre-termination/agency-charges/${chargeId}`),

@@ -187,7 +187,7 @@ export default function PreTermination() {
     setLoading(true);
     setError(null);
     try {
-      const data = await preTermination.getEmployeeDiscipline(trimmed);
+      const data = await preTermination.searchDiscipline(trimmed);
       setDisciplineRecords(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load discipline records');
@@ -208,7 +208,7 @@ export default function PreTermination() {
     setLoading(true);
     setError(null);
     try {
-      const data = await preTermination.getEmployeeCharges(trimmed);
+      const data = await preTermination.searchCharges(trimmed);
       setCharges(data);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load agency charges');
@@ -448,13 +448,13 @@ export default function PreTermination() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[200px]">
-          <label className={`block mb-1 ${t.label}`}>Employee ID</label>
+          <label className={`block mb-1 ${t.label}`}>Employee</label>
           <div className="flex gap-2">
             <input
               value={disciplineSearch}
               onChange={(e) => setDisciplineSearch(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && loadDiscipline()}
-              placeholder="Enter employee ID to search..."
+              placeholder="Search by employee name..."
               className={`flex-1 px-3 py-2 text-sm ${t.input}`}
             />
             <button
@@ -479,7 +479,7 @@ export default function PreTermination() {
       </div>
 
       {loading ? renderLoading() : disciplineRecords.length === 0 ? (
-        renderEmpty(disciplineSearch.trim() ? 'No discipline records found for this employee.' : 'Enter an employee ID to search for discipline records.')
+        renderEmpty(disciplineSearch.trim() ? 'No discipline records found.' : 'Search by employee name to find discipline records.')
       ) : (
         <div data-tour="pretermination-list" className={`${t.card} overflow-hidden`}>
           <div className="overflow-x-auto">
@@ -547,13 +547,13 @@ export default function PreTermination() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <div className="flex-1 min-w-[200px]">
-          <label className={`block mb-1 ${t.label}`}>Employee ID</label>
+          <label className={`block mb-1 ${t.label}`}>Employee</label>
           <div className="flex gap-2">
             <input
               value={chargeSearch}
               onChange={(e) => setChargeSearch(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && loadCharges()}
-              placeholder="Enter employee ID to search..."
+              placeholder="Search by employee name..."
               className={`flex-1 px-3 py-2 text-sm ${t.input}`}
             />
             <button
@@ -577,7 +577,7 @@ export default function PreTermination() {
       </div>
 
       {loading ? renderLoading() : charges.length === 0 ? (
-        renderEmpty(chargeSearch.trim() ? 'No agency charges found for this employee.' : 'Enter an employee ID to search for agency charges.')
+        renderEmpty(chargeSearch.trim() ? 'No agency charges found.' : 'Search by employee name to find agency charges.')
       ) : (
         <div className={`${t.card} overflow-hidden`}>
           <div className="overflow-x-auto">
