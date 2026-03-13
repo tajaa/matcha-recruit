@@ -2566,6 +2566,22 @@ export interface PosterOrderUpdate {
   tracking_number?: string;
 }
 
+// Cost of Risk
+export interface CostLineItem {
+  key: string;
+  label: string;
+  low: number;
+  high: number;
+  affected_count: number;
+  basis: string;
+}
+
+export interface CostOfRisk {
+  line_items: CostLineItem[];
+  total_low: number;
+  total_high: number;
+}
+
 // Risk Assessment
 export interface DimensionResult {
   score: number;

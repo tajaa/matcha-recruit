@@ -10,6 +10,7 @@ Computes a live risk score across 5 dimensions for a company:
 
 import json
 import logging
+import math
 from dataclasses import dataclass, field, asdict
 from datetime import date, datetime, timezone, timedelta
 from typing import Any, Optional
@@ -169,7 +170,171 @@ async def _collect_minimum_wage_violation_metrics(
         "locations_with_minimum_wage_violations": len(location_summaries),
         "top_minimum_wage_violation_locations": location_summaries[:5],
         "employee_violations": employee_violations[:10],
+        "all_employee_violations": employee_violations,
     }
+
+
+def compute_compliance_cost_of_risk(
+    all_violations: list[dict[str, Any]],
+    employee_count: int,
+    is_healthcare: bool,
+) -> dict[str, Any]:
+    """Estimate dollar exposure from compliance violations."""
+    line_items: list[dict[str, Any]] = []
+
+    hourly = [v for v in all_violations if v.get("pay_classification") == "hourly"]
+    if hourly:
+        low = sum((v.get("shortfall") or 0) * 2080 * 2 * 2 for v in hourly)
+        high = sum((v.get("shortfall") or 0) * 2080 * 3 * 2 for v in hourly)
+        line_items.append({
+            "key": "hourly_wage_shortfall",
+            "label": "Hourly Wage Shortfall",
+            "low": round(low),
+            "high": round(high),
+            "affected_count": len(hourly),
+            "basis": "FLSA \u00a7 216(b), 2\u20133yr lookback + liquidated damages",
+        })
+
+    exempt = [v for v in all_violations if v.get("pay_classification") == "exempt"]
+    if exempt:
+        low = 0
+        high = 0
+        for v in exempt:
+            pay_rate = v.get("pay_rate") or 0
+            effective_hourly = pay_rate / 2080 if pay_rate > 0 else 0
+            ot_rate = effective_hourly * 1.5
+            low += ot_rate * 5 * 52 * 2 * 2
+            high += ot_rate * 10 * 52 * 3 * 2
+        line_items.append({
+            "key": "exempt_misclassification",
+            "label": "Exempt Misclassification",
+            "low": round(low),
+            "high": round(high),
+            "affected_count": len(exempt),
+            "basis": "FLSA \u00a7 207, overtime liability for misclassified exempt employees",
+        })
+
+    if is_healthcare and employee_count > 0:
+        line_items.append({
+            "key": "hipaa_breach_exposure",
+            "label": "HIPAA Breach Exposure",
+            "low": employee_count * 145,
+            "high": employee_count * 1452,
+            "affected_count": employee_count,
+            "basis": "HIPAA penalty tiers, Tier 1\u2013Tier 2 (inflation-adjusted)",
+        })
+        at_risk = math.ceil(employee_count * 0.10)
+        line_items.append({
+            "key": "lapsed_credential_risk",
+            "label": "Lapsed Credential Risk",
+            "low": at_risk * 1000,
+            "high": at_risk * 10000,
+            "affected_count": at_risk,
+            "basis": "State licensing board penalties + CMS Conditions of Participation",
+        })
+
+    total_low = sum(item["low"] for item in line_items)
+    total_high = sum(item["high"] for item in line_items)
+    return {"line_items": line_items, "total_low": total_low, "total_high": total_high}
+
+
+def compute_er_cost_of_risk(
+    pending: int,
+    in_review: int,
+    open_count: int,
+    has_policy_violation: bool,
+    has_discrepancy: bool,
+) -> dict[str, Any]:
+    """Estimate dollar exposure from open ER cases."""
+    line_items: list[dict[str, Any]] = []
+    merit_prob = 0.17
+
+    if pending > 0:
+        low = round(75_000 * merit_prob * pending)
+        high = round(200_000 * merit_prob * pending)
+        line_items.append({
+            "key": "pending_determination",
+            "label": "Pending Determination Cases",
+            "low": low,
+            "high": high,
+            "affected_count": pending,
+            "basis": "EEOC median resolution \u00d7 17% merit probability",
+        })
+
+    if in_review > 0:
+        low = round(50_000 * merit_prob * in_review)
+        high = round(150_000 * merit_prob * in_review)
+        line_items.append({
+            "key": "in_review",
+            "label": "In-Review Cases",
+            "low": low,
+            "high": high,
+            "affected_count": in_review,
+            "basis": "EEOC median resolution \u00d7 17% merit probability",
+        })
+
+    if open_count > 0:
+        low = round(25_000 * merit_prob * open_count)
+        high = round(75_000 * merit_prob * open_count)
+        line_items.append({
+            "key": "open_cases",
+            "label": "Open Cases",
+            "low": low,
+            "high": high,
+            "affected_count": open_count,
+            "basis": "EEOC median resolution \u00d7 17% merit probability",
+        })
+
+    if line_items and (has_policy_violation or has_discrepancy):
+        for item in line_items:
+            item["high"] = round(item["high"] * 1.5)
+
+    total_low = sum(item["low"] for item in line_items)
+    total_high = sum(item["high"] for item in line_items)
+    return {"line_items": line_items, "total_low": total_low, "total_high": total_high}
+
+
+def compute_incident_cost_of_risk(
+    open_critical: int,
+    open_high: int,
+    open_medium: int,
+) -> dict[str, Any]:
+    """Estimate dollar exposure from open IR incidents using OSHA 2025 penalty ranges."""
+    line_items: list[dict[str, Any]] = []
+
+    if open_critical > 0:
+        line_items.append({
+            "key": "critical_incidents",
+            "label": "Critical Incidents",
+            "low": 16_550 * open_critical,
+            "high": 165_514 * open_critical,
+            "affected_count": open_critical,
+            "basis": "OSHA willful/repeat violation penalty range (2025)",
+        })
+
+    if open_high > 0:
+        line_items.append({
+            "key": "high_incidents",
+            "label": "High Severity Incidents",
+            "low": 5_000 * open_high,
+            "high": 50_000 * open_high,
+            "affected_count": open_high,
+            "basis": "OSHA serious violation penalty range (2025)",
+        })
+
+    if open_medium > 0:
+        line_items.append({
+            "key": "medium_incidents",
+            "label": "Medium Severity Incidents",
+            "low": 1_000 * open_medium,
+            "high": 16_550 * open_medium,
+            "affected_count": open_medium,
+            "basis": "OSHA other-than-serious violation penalty range (2025)",
+        })
+
+    total_low = sum(item["low"] for item in line_items)
+    total_high = sum(item["high"] for item in line_items)
+    return {"line_items": line_items, "total_low": total_low, "total_high": total_high}
 
 
 async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResult:
@@ -179,10 +344,9 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
         SELECT
           COUNT(*) FILTER (WHERE ca.severity = 'critical' AND ca.status = 'unread') AS critical_unread,
           COUNT(*) FILTER (WHERE ca.severity = 'warning'  AND ca.status = 'unread') AS warning_unread,
-          MAX(cl.completed_at) AS last_check
+          (SELECT MAX(completed_at) FROM compliance_check_log WHERE company_id = $1) AS last_check
         FROM compliance_alerts ca
         JOIN business_locations bl ON bl.id = ca.location_id
-        LEFT JOIN compliance_check_log cl ON cl.company_id = $1
         WHERE ca.company_id = $1
         """,
         company_id,
@@ -191,7 +355,10 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
     critical_unread = int(row["critical_unread"] or 0)
     warning_unread = int(row["warning_unread"] or 0)
     last_check: Optional[datetime] = row["last_check"]
+    from ...core.services.compliance_service import _get_company_canonical_industry
+
     wage_violation_metrics = await _collect_minimum_wage_violation_metrics(company_id, conn)
+    all_violations = wage_violation_metrics.pop("all_employee_violations", [])
     total_wage_violations = int(
         wage_violation_metrics["minimum_wage_violation_employee_count"] or 0
     )
@@ -274,6 +441,16 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
     if not factors:
         factors.append("No compliance issues detected")
 
+    canonical_industry = await _get_company_canonical_industry(conn, company_id)
+    is_healthcare = canonical_industry == "healthcare"
+    total_employees = await conn.fetchval(
+        "SELECT COUNT(*) FROM employees WHERE org_id = $1 AND termination_date IS NULL",
+        company_id,
+    )
+    compliance_cost = compute_compliance_cost_of_risk(
+        all_violations, int(total_employees or 0), is_healthcare
+    )
+
     return DimensionResult(
         score=score,
         band=_band(score),
@@ -283,6 +460,8 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
             "warning_unread": warning_unread,
             "last_check": last_check.isoformat() if last_check else None,
             **wage_violation_metrics,
+            "cost_of_risk": compliance_cost,
+            "is_healthcare": is_healthcare,
         },
     )
 
@@ -309,7 +488,6 @@ async def compute_incident_dimension(company_id: UUID, conn) -> DimensionResult:
     score = 0
     factors = []
 
-    points = min(critical * 25, 100)
     if critical > 0:
         score += min(critical * 25, 100 - score)
         factors.append(f"{critical} open critical incident{'s' if critical != 1 else ''} (+{critical * 25})")
@@ -333,6 +511,8 @@ async def compute_incident_dimension(company_id: UUID, conn) -> DimensionResult:
     if not factors:
         factors.append("No open incidents")
 
+    incident_cost = compute_incident_cost_of_risk(critical, high, medium)
+
     return DimensionResult(
         score=score,
         band=_band(score),
@@ -342,6 +522,7 @@ async def compute_incident_dimension(company_id: UUID, conn) -> DimensionResult:
             "open_high": high,
             "open_medium": medium,
             "open_low": low,
+            "cost_of_risk": incident_cost,
         },
     )
 
@@ -456,6 +637,11 @@ async def compute_er_dimension(company_id: UUID, conn) -> DimensionResult:
         for row in case_rows
     ]
 
+    er_cost = compute_er_cost_of_risk(
+        pending, in_review, open_cases,
+        has_major_policy_violation, has_high_discrepancy,
+    )
+
     return DimensionResult(
         score=score,
         band=_band(score),
@@ -467,6 +653,7 @@ async def compute_er_dimension(company_id: UUID, conn) -> DimensionResult:
             "major_policy_violation": has_major_policy_violation,
             "high_discrepancy": has_high_discrepancy,
             "open_cases": open_case_details,
+            "cost_of_risk": er_cost,
         },
     )
 

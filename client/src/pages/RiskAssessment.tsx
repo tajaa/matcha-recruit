@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock, Play, ShieldAlert, TrendingUp, TrendingDown } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList, AreaChart, Area, Line, ReferenceArea } from 'recharts';
-import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser, RiskHistoryEntry, PreTermAnalytics } from '../types';
+import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser, RiskHistoryEntry, PreTermAnalytics, CostOfRisk } from '../types';
 import { riskAssessment, erCopilot, companies as companiesApi, preTermination, ApiRequestError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -153,10 +153,47 @@ function ScoreBar({ score, band }: { score: number; band: Band }) {
   );
 }
 
+function getCostOfRisk(dim: DimensionResult): CostOfRisk | null {
+  const cost = dim.raw_data?.cost_of_risk as CostOfRisk | undefined;
+  if (!cost?.line_items?.length) return null;
+  return cost;
+}
+
+function CostOfRiskCard({ cost }: { cost: CostOfRisk }) {
+  return (
+    <div className="border border-white/10 bg-black/20 p-3 flex flex-col gap-3 rounded-xl">
+      <div className="flex items-center justify-between">
+        <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Estimated Exposure</div>
+        <div className="text-[11px] font-mono text-red-400">
+          {formatCurrency(cost.total_low)} – {formatCurrency(cost.total_high)}
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {cost.line_items.map((item) => (
+          <div key={item.key} className="flex flex-col gap-0.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] text-zinc-400">{item.label}</span>
+              <span className="text-[10px] font-mono text-red-400/80">
+                {formatCurrency(item.low)} – {formatCurrency(item.high)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[9px] text-zinc-600">{item.basis}</span>
+              <span className="text-[9px] text-zinc-600 font-mono shrink-0">{item.affected_count} affected</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DimensionCard({ dimensionKey, dim, weight }: { dimensionKey: string; dim: DimensionResult; weight?: string }) {
   const meta = DIMENSION_META[dimensionKey] ?? { label: dimensionKey };
   const c = BAND_COLOR[dim.band];
   const complianceMetrics = dimensionKey === 'compliance' ? getComplianceAlertMetrics(dim) : null;
+  const costOfRisk = getCostOfRisk(dim);
 
   return (
     <div className="bg-zinc-900 border border-white/10 p-6 flex flex-col gap-5 rounded-2xl">
@@ -219,6 +256,8 @@ function DimensionCard({ dimensionKey, dim, weight }: { dimensionKey: string; di
           )}
         </div>
       )}
+
+      {costOfRisk && <CostOfRiskCard cost={costOfRisk} />}
     </div>
   );
 }
