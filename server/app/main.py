@@ -1,10 +1,15 @@
+import logging
 import os
+import traceback as tb_module
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+
+logger = logging.getLogger(__name__)
 
 from .config import get_settings, load_settings
 from .database import close_pool, get_connection, init_db, init_pool
@@ -108,6 +113,68 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     return response
+
+
+@app.middleware("http")
+async def capture_errors(request: Request, call_next):
+    """Log unhandled exceptions to the error_logs table."""
+    if request.url.path in ("/health", "/api/admin/error-logs"):
+        return await call_next(request)
+    try:
+        response = await call_next(request)
+        return response
+    except Exception as exc:
+        # Extract user info from request state if auth middleware set it
+        user_id = getattr(request.state, "user_id", None)
+        user_role = getattr(request.state, "user_role", None)
+        company_id = getattr(request.state, "company_id", None)
+        traceback_str = tb_module.format_exc()
+        try:
+            async with get_connection() as conn:
+                await conn.execute(
+                    """INSERT INTO error_logs
+                       (method, path, status_code, error_type, error_message,
+                        traceback, user_id, user_role, company_id, query_params)
+                       VALUES ($1, $2, 500, $3, $4, $5, $6, $7, $8, $9)""",
+                    request.method,
+                    str(request.url.path),
+                    type(exc).__name__,
+                    str(exc)[:2000],
+                    traceback_str[:8000],
+                    user_id,
+                    user_role,
+                    company_id,
+                    str(request.url.query) if request.url.query else None,
+                )
+        except Exception:
+            logger.warning("Failed to persist error log", exc_info=True)
+        raise
+
+
+# Global exception handler — catches errors that FastAPI handles internally
+# (e.g. route handler exceptions) before they become 500 responses.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Persist unhandled exceptions to error_logs and return 500."""
+    traceback_str = tb_module.format_exc()
+    logger.error("Unhandled %s on %s %s: %s", type(exc).__name__, request.method, request.url.path, exc)
+    try:
+        async with get_connection() as conn:
+            await conn.execute(
+                """INSERT INTO error_logs
+                   (method, path, status_code, error_type, error_message,
+                    traceback, query_params)
+                   VALUES ($1, $2, 500, $3, $4, $5, $6)""",
+                request.method,
+                str(request.url.path),
+                type(exc).__name__,
+                str(exc)[:2000],
+                traceback_str[:8000],
+                str(request.url.query) if request.url.query else None,
+            )
+    except Exception:
+        logger.warning("Failed to persist error log", exc_info=True)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # Import and include domain routers

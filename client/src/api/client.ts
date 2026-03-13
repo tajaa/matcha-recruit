@@ -2529,6 +2529,38 @@ export const adminNotifications = {
     request<AdminNotificationsResponse>(`/admin/notifications?limit=${limit}&offset=${offset}`),
 };
 
+// Error Logs API
+export interface ErrorLogItem {
+  id: string;
+  timestamp: string;
+  method: string;
+  path: string;
+  status_code: number;
+  error_type: string;
+  error_message: string;
+  traceback: string | null;
+  user_id: string | null;
+  user_role: string | null;
+  company_id: string | null;
+  query_params: string | null;
+}
+
+export interface ErrorLogsResponse {
+  items: ErrorLogItem[];
+  total: number;
+}
+
+export const errorLogs = {
+  get: (limit = 50, offset = 0, pathFilter?: string, errorType?: string): Promise<ErrorLogsResponse> => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (pathFilter) params.set('path_filter', pathFilter);
+    if (errorType) params.set('error_type', errorType);
+    return request<ErrorLogsResponse>(`/admin/error-logs?${params}`);
+  },
+  clear: (): Promise<{ deleted: number }> =>
+    request<{ deleted: number }>('/admin/error-logs', { method: 'DELETE' }),
+};
+
 // Client Notifications API
 export interface ClientNotificationItem {
   id: string;

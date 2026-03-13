@@ -6140,3 +6140,97 @@ async def delete_company_admin(company_id: UUID):
         if not row:
             raise HTTPException(status_code=404, detail="Company not found or already deleted")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Error Logs
+# ---------------------------------------------------------------------------
+
+class ErrorLogItem(BaseModel):
+    id: str
+    timestamp: datetime
+    method: str
+    path: str
+    status_code: int
+    error_type: str
+    error_message: str
+    traceback: Optional[str] = None
+    user_id: Optional[str] = None
+    user_role: Optional[str] = None
+    company_id: Optional[str] = None
+    query_params: Optional[str] = None
+
+
+class ErrorLogsResponse(BaseModel):
+    items: list[ErrorLogItem]
+    total: int
+
+
+@router.get(
+    "/error-logs",
+    response_model=ErrorLogsResponse,
+    dependencies=[Depends(require_admin)],
+)
+async def get_error_logs(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    path_filter: Optional[str] = Query(None, description="Filter by path substring"),
+    error_type: Optional[str] = Query(None, description="Filter by error type"),
+):
+    """Return recent application error logs."""
+    async with get_connection() as conn:
+        where_clauses = []
+        params: list = []
+        idx = 1
+
+        if path_filter:
+            where_clauses.append(f"path ILIKE ${idx}")
+            params.append(f"%{path_filter}%")
+            idx += 1
+        if error_type:
+            where_clauses.append(f"error_type = ${idx}")
+            params.append(error_type)
+            idx += 1
+
+        where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM error_logs {where_sql}", *params
+        )
+
+        rows = await conn.fetch(
+            f"""SELECT id, timestamp, method, path, status_code,
+                       error_type, error_message, traceback,
+                       user_id, user_role, company_id, query_params
+                FROM error_logs {where_sql}
+                ORDER BY timestamp DESC
+                LIMIT ${idx} OFFSET ${idx + 1}""",
+            *params, limit, offset,
+        )
+
+    items = [
+        ErrorLogItem(
+            id=str(r["id"]),
+            timestamp=r["timestamp"],
+            method=r["method"],
+            path=r["path"],
+            status_code=r["status_code"],
+            error_type=r["error_type"],
+            error_message=r["error_message"],
+            traceback=r["traceback"],
+            user_id=str(r["user_id"]) if r["user_id"] else None,
+            user_role=r["user_role"],
+            company_id=str(r["company_id"]) if r["company_id"] else None,
+            query_params=r["query_params"],
+        )
+        for r in rows
+    ]
+    return ErrorLogsResponse(items=items, total=total or 0)
+
+
+@router.delete("/error-logs", dependencies=[Depends(require_admin)])
+async def clear_error_logs():
+    """Delete all error logs."""
+    async with get_connection() as conn:
+        count = await conn.fetchval("DELETE FROM error_logs RETURNING COUNT(*)")
+    return {"deleted": count or 0}

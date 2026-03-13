@@ -98,6 +98,7 @@ class IRIncidentUpdate(BaseModel):
     category_data: Optional[dict[str, Any]] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
+    involved_employee_ids: Optional[list[UUID]] = None
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
 

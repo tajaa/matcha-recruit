@@ -4704,4 +4704,31 @@ async def init_db():
             ON separation_agreements(status)
         """)
 
+        # ── Error Logs ───────────────────────────────────────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS error_logs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                timestamp TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                method VARCHAR(10) NOT NULL,
+                path TEXT NOT NULL,
+                status_code INTEGER NOT NULL,
+                error_type VARCHAR(255) NOT NULL,
+                error_message TEXT NOT NULL,
+                traceback TEXT,
+                user_id UUID,
+                user_role VARCHAR(20),
+                company_id UUID,
+                request_body TEXT,
+                query_params TEXT
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS ix_error_logs_timestamp
+            ON error_logs(timestamp DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS ix_error_logs_path
+            ON error_logs(path)
+        """)
+
         print("[DB] Tables initialized")

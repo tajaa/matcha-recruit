@@ -60,6 +60,7 @@ const TestBot = lazy(() => import('./pages/TestBot').then(m => ({ default: m.Tes
 const AdminOverview = lazy(() => import('./pages/admin/AdminOverview'));
 const ClientNotifications = lazy(() => import('./pages/ClientNotifications'));
 const AdminNotifications = lazy(() => import('./pages/admin/AdminNotifications'));
+const ErrorLogs = lazy(() => import('./pages/admin/ErrorLogs'));
 const BusinessRegistrations = lazy(() => import('./pages/admin/BusinessRegistrations'));
 const CompanyFeatures = lazy(() => import('./pages/admin/CompanyFeatures'));
 const Companies = lazy(() => import('./pages/admin/Companies').then(m => ({ default: m.Companies })));
@@ -653,6 +654,14 @@ function App() {
                 element={
                   <ProtectedRoute roles={['admin']}>
                     <AdminNotifications />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="admin/error-logs"
+                element={
+                  <ProtectedRoute roles={['admin']}>
+                    <ErrorLogs />
                   </ProtectedRoute>
                 }
               />

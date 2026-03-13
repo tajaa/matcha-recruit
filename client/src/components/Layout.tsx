@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
 import type { MWThread } from '../types/matcha-work';
 import { matchaWork } from '../api/client';
-import { HelpCircle, X, ChevronDown, Sliders, Sun, Moon, Bell } from 'lucide-react';
+import { HelpCircle, X, ChevronDown, Sliders, Sun, Moon, Bell, AlertTriangle } from 'lucide-react';
 import { PendingApproval } from './PendingApproval';
 import { PlatformFeatureManager } from '../pages/admin/PlatformFeatureManager';
 
@@ -62,6 +62,13 @@ const navSections: NavSection[] = [
         roles: ['admin'],
         helpText: 'Recent activity feed across all companies.',
         icon: <Bell className="w-4 h-4" />,
+      },
+      {
+        path: '/app/admin/error-logs',
+        label: 'Error Logs',
+        roles: ['admin'],
+        helpText: 'Application errors captured from the backend.',
+        icon: <AlertTriangle className="w-4 h-4" />,
       },
       {
         path: '/app/admin/overview',
