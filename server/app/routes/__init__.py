@@ -19,28 +19,20 @@ from ..core.routes import (
     chat_router,
     chat_ws_router,
     contact_router,
-    projects_router,
-    outreach_router,
     leads_agent_router,
 )
 
 # Matcha routes
 from ..matcha.routes import (
     companies_router,
-    positions_router,
-    candidates_router,
     interviews_router,
     employees_router,
     employee_portal_router,
     onboarding_router,
     invitations_router,
     offer_letters_router,
-    openings_router,
-    matching_router,
     er_copilot_router,
     ir_incidents_router,
-    job_search_router,
-    public_jobs_router,
     provisioning_router,
 )
 
@@ -56,24 +48,16 @@ __all__ = [
     "chat_router",
     "chat_ws_router",
     "contact_router",
-    "projects_router",
-    "outreach_router",
     "leads_agent_router",
     # Matcha
     "companies_router",
-    "positions_router",
-    "candidates_router",
     "interviews_router",
     "employees_router",
     "employee_portal_router",
     "onboarding_router",
     "invitations_router",
     "offer_letters_router",
-    "openings_router",
-    "matching_router",
     "er_copilot_router",
     "ir_incidents_router",
-    "job_search_router",
-    "public_jobs_router",
     "provisioning_router",
 ]
