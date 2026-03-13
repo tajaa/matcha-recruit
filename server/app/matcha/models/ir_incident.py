@@ -121,6 +121,8 @@ class IRIncidentResponse(BaseModel):
     category_data: dict[str, Any] = {}
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
+    involved_employee_ids: list[UUID] = []
+    er_case_id: Optional[UUID] = None
     document_count: int = 0
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None

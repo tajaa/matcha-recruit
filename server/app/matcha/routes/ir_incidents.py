@@ -277,6 +277,7 @@ def row_to_response(row, document_count: int = 0) -> IRIncidentResponse:
         root_cause=row["root_cause"],
         corrective_actions=row["corrective_actions"],
         involved_employee_ids=row.get("involved_employee_ids") or [],
+        er_case_id=row.get("er_case_id"),
         document_count=document_count,
         company_id=row.get("company_id"),
         location_id=row.get("location_id"),
