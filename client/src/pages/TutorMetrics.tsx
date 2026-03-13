@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { tutorMetrics, api } from '../api/client';
+import { tutorMetrics } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import type { TutorSessionSummary, TutorMetricsAggregate, TutorProgressDataPoint, TutorVocabularyStats } from '../types';
 import { Activity, BarChart2, Book, Trash2, Clock, CheckCircle2 } from 'lucide-react';
@@ -231,12 +231,6 @@ function VocabularySection({ vocab }: { vocab: TutorVocabularyStats }) {
   );
 }
 
-function scoreColor(score: number | null) {
-  if (score === null) return 'text-zinc-500';
-  if (score >= 80) return 'text-emerald-400';
-  if (score >= 60) return 'text-amber-400';
-  return 'text-red-400';
-}
 
 
 export function TutorMetrics() {

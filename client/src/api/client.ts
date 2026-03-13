@@ -3469,7 +3469,6 @@ export const api = {
   aiChat,
   adminPosters,
   posters,
-  internalMobilityAdmin,
   adminNews,
   adminLegislativeTracker,
   riskAssessment,
