@@ -2486,6 +2486,11 @@ async def init_db():
             ALTER TABLE compliance_requirements
             ADD COLUMN IF NOT EXISTS applicable_industries TEXT[]
         """)
+        # Add is_pinned for dashboard pinning
+        await conn.execute("""
+            ALTER TABLE compliance_requirements
+            ADD COLUMN IF NOT EXISTS is_pinned BOOLEAN NOT NULL DEFAULT false
+        """)
 
         # Compliance alerts table
         await conn.execute("""

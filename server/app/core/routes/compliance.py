@@ -24,6 +24,7 @@ from ..models.compliance import (
     CheckLogEntry,
     UpcomingLegislationResponse,
     ComplianceSummary,
+    PinRequirementRequest,
 )
 from ..services.compliance_service import (
     create_location,
@@ -45,6 +46,8 @@ from ..services.compliance_service import (
     record_verification_feedback,
     get_calibration_stats,
     _missing_required_categories,
+    set_requirement_pinned,
+    get_pinned_requirements,
 )
 
 router = APIRouter()
@@ -783,3 +786,38 @@ async def get_assignable_users_endpoint(
         {"id": str(row["id"]), "name": row["name"], "email": row["email"], "role": row["role"]}
         for row in rows
     ]
+
+
+@router.post("/requirements/{requirement_id}/pin")
+async def pin_requirement_endpoint(
+    requirement_id: str,
+    data: PinRequirementRequest,
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        req_uuid = UUID(requirement_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid requirement ID")
+
+    result = await set_requirement_pinned(req_uuid, company_id, data.is_pinned)
+    if not result:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    return result
+
+
+@router.get("/pinned-requirements")
+async def get_pinned_requirements_endpoint(
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    return await get_pinned_requirements(company_id)

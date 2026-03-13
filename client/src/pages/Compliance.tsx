@@ -13,7 +13,7 @@ import {
     MapPin, Trash2, Edit2, X,
     ChevronDown, AlertTriangle, Bell, CheckCircle,
     ExternalLink, Building2, Loader2, Clock, Calendar,
-    History, Eye, Zap, Info, ShieldCheck, Users, Layers, LayoutList
+    History, Eye, Zap, Info, ShieldCheck, Users, Layers, LayoutList, Pin
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
@@ -709,6 +709,14 @@ export function Compliance() {
                                                         Enforced: {new Date(req.effective_date).toLocaleDateString()}
                                                     </div>
                                                 )}
+                                                <button
+                                                    onClick={() => complianceHook.pinRequirementMutation.mutate({ id: req.id, isPinned: !req.is_pinned })}
+                                                    title={req.is_pinned ? 'Unpin from dashboard' : 'Pin to dashboard'}
+                                                    className={`flex items-center gap-1.5 text-[8px] uppercase tracking-widest font-mono transition-colors ${req.is_pinned ? 'text-amber-500' : `${t.textFaint} hover:text-amber-500`}`}
+                                                >
+                                                    <Pin size={10} className={req.is_pinned ? 'fill-amber-500' : 'opacity-40'} />
+                                                    {req.is_pinned ? 'Pinned' : 'Pin'}
+                                                </button>
                                             </div>
                                             {req.source_url && (
                                                 <a

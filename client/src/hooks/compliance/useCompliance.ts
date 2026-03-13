@@ -147,6 +147,16 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
     onError: () => setMutationError('Failed to dismiss alert'),
   });
 
+  const pinRequirementMutation = useMutation({
+    mutationFn: ({ id, isPinned }: { id: string; isPinned: boolean }) =>
+      complianceAPI.pinRequirement(id, isPinned, companyId || undefined),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['compliance-requirements', selectedLocationId, companyId] });
+      queryClient.invalidateQueries({ queryKey: ['pinned-requirements'] });
+    },
+    onError: () => setMutationError('Failed to pin requirement'),
+  });
+
   const handleSubmitLocation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.city || !formData.state) return;
@@ -205,6 +215,7 @@ export function useCompliance(companyId: string | null, selectedLocationId: stri
     deleteLocationMutation,
     markAlertReadMutation,
     dismissAlertMutation,
+    pinRequirementMutation,
     handleSubmitLocation,
     openEditModal,
   };

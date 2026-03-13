@@ -4844,6 +4844,7 @@ async def get_location_requirements(
                 affected_employee_count=total_affected,
                 affected_employee_names=employee_names or None,
                 min_wage_violation_count=_violation_count_for_row(row),
+                is_pinned=row.get("is_pinned", False),
             )
             for row in filtered
         ]
@@ -6686,3 +6687,69 @@ async def research_jurisdiction_repo_only(
             "updated": 0,
             "alerts": 0,
         }
+
+
+async def set_requirement_pinned(
+    requirement_id: UUID, company_id: UUID, is_pinned: bool
+) -> dict | None:
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE compliance_requirements cr
+            SET is_pinned = $1
+            FROM business_locations bl
+            WHERE cr.id = $2
+              AND cr.location_id = bl.id
+              AND bl.company_id = $3
+            RETURNING cr.id, cr.title, cr.is_pinned
+            """,
+            is_pinned,
+            requirement_id,
+            company_id,
+        )
+    if not row:
+        return None
+    return {"id": str(row["id"]), "title": row["title"], "is_pinned": row["is_pinned"]}
+
+
+async def get_pinned_requirements(company_id: UUID) -> list[dict]:
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT cr.id, cr.category, cr.jurisdiction_level, cr.jurisdiction_name,
+                   cr.title, cr.description, cr.current_value, cr.effective_date,
+                   cr.source_url, cr.is_pinned,
+                   bl.name AS location_name, bl.city, bl.state
+            FROM compliance_requirements cr
+            JOIN business_locations bl ON cr.location_id = bl.id
+            WHERE bl.company_id = $1
+              AND cr.is_pinned = true
+              AND bl.is_active = true
+            ORDER BY cr.category, cr.jurisdiction_level
+            """,
+            company_id,
+        )
+    return [
+        {
+            "id": str(row["id"]),
+            "category": row["category"],
+            "jurisdiction_level": row["jurisdiction_level"],
+            "jurisdiction_name": row["jurisdiction_name"],
+            "title": row["title"],
+            "description": row["description"],
+            "current_value": row["current_value"],
+            "effective_date": row["effective_date"].isoformat()
+            if row["effective_date"]
+            else None,
+            "source_url": row["source_url"],
+            "is_pinned": row["is_pinned"],
+            "location_name": row["location_name"],
+            "city": row["city"],
+            "state": row["state"],
+        }
+        for row in rows
+    ]

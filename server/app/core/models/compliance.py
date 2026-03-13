@@ -177,6 +177,11 @@ class RequirementResponse(BaseModel):
     affected_employee_count: Optional[int] = None
     affected_employee_names: Optional[List[str]] = None
     min_wage_violation_count: Optional[int] = None
+    is_pinned: bool = False
+
+
+class PinRequirementRequest(BaseModel):
+    is_pinned: bool = True
 
 
 class AlertResponse(BaseModel):

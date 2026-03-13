@@ -68,6 +68,23 @@ export interface ComplianceRequirement {
     affected_employee_count: number | null;
     affected_employee_names?: string[] | null;
     min_wage_violation_count: number | null;
+    is_pinned?: boolean;
+}
+
+export interface PinnedRequirement {
+    id: string;
+    category: string;
+    jurisdiction_level: string;
+    jurisdiction_name: string;
+    title: string;
+    description: string | null;
+    current_value: string | null;
+    effective_date: string | null;
+    source_url: string | null;
+    is_pinned: boolean;
+    location_name: string | null;
+    city: string;
+    state: string;
 }
 
 export interface VerificationSource {
@@ -434,6 +451,29 @@ export const complianceAPI = {
             body: JSON.stringify(data),
         });
         if (!response.ok) throw new Error('Failed to assign legislation');
+        return response.json();
+    },
+
+    async pinRequirement(id: string, isPinned: boolean, companyId?: string): Promise<{ id: string; title: string; is_pinned: boolean }> {
+        const response = await fetch(companyParam(`/api/compliance/requirements/${id}/pin`, companyId), {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ is_pinned: isPinned }),
+        });
+        if (!response.ok) throw new Error('Failed to pin requirement');
+        return response.json();
+    },
+
+    async getPinnedRequirements(companyId?: string): Promise<PinnedRequirement[]> {
+        const response = await fetch(companyParam('/api/compliance/pinned-requirements', companyId), {
+            headers: {
+                'Authorization': `Bearer ${getAccessToken()}`,
+            },
+        });
+        if (!response.ok) throw new Error('Failed to fetch pinned requirements');
         return response.json();
     },
 };

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink, Sparkles, Circle, Check } from 'lucide-react';
+import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink, Sparkles, Circle, Check, Pin } from 'lucide-react';
 import { useIsLightMode } from '../hooks/useIsLightMode';
 import { getAccessToken, credentialExpirations } from '../api/client';
 import type { CredentialExpiration, CredentialExpirationSummary } from '../api/client';
@@ -9,7 +9,7 @@ import { Collapsible } from '../components/Collapsible';
 import { Tabs } from '../components/Tabs';
 import { WidgetContainer } from '../components/WidgetContainer';
 import { complianceAPI, COMPLIANCE_CATEGORY_LABELS } from '../api/compliance';
-import type { ComplianceDashboard, ComplianceDashboardItem, ComplianceActionPlanUpdate, AssignableUser } from '../api/compliance';
+import type { ComplianceDashboard, ComplianceDashboardItem, ComplianceActionPlanUpdate, AssignableUser, PinnedRequirement } from '../api/compliance';
 import { useAuth } from '../context/AuthContext';
 import type { ClientProfile } from '../types';
 
@@ -367,6 +367,88 @@ function GettingStartedChecklist() {
             </button>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function PinnedComplianceWidget() {
+  const navigate = useNavigate();
+  const t = useIsLightMode() ? LT : DK;
+  const [items, setItems] = useState<PinnedRequirement[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = () => {
+    setLoading(true);
+    complianceAPI.getPinnedRequirements()
+      .then(setItems)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  const unpin = (id: string) => {
+    complianceAPI.pinRequirement(id, false)
+      .then(() => load())
+      .catch(() => {});
+  };
+
+  const categoryLabel = (cat: string) => COMPLIANCE_CATEGORY_LABELS[cat] ?? cat.replace(/_/g, ' ');
+  const levelLabel = (lv: string) => ({ federal: 'Federal', state: 'State', county: 'County', city: 'City' }[lv] ?? lv);
+
+  return (
+    <div className={`${t.cardLight} overflow-hidden`}>
+      <div className={`p-4 border-b ${t.border} flex justify-between items-center`}>
+        <div className={t.label}>Pinned Compliance</div>
+        <Pin className={`w-4 h-4 ${t.icon}`} />
+      </div>
+      <div className="p-4">
+        {loading ? (
+          <div className="flex justify-center py-6">
+            <div className={`w-5 h-5 border-2 rounded-full animate-spin ${t.spinner}`} />
+          </div>
+        ) : items.length === 0 ? (
+          <p className={`text-xs ${t.textMuted} text-center py-6`}>No pinned requirements — pin items from the Compliance page</p>
+        ) : (
+          <div className="space-y-3">
+            {items.map(item => (
+              <div key={item.id} className={`${t.innerEl} p-3`}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-xs font-medium ${t.textMain} truncate`}>{item.title}</p>
+                    <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${t.innerHover} ${t.textMuted} font-mono uppercase tracking-wider`}>
+                        {categoryLabel(item.category)}
+                      </span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${t.innerHover} ${t.textMuted} font-mono uppercase tracking-wider`}>
+                        {levelLabel(item.jurisdiction_level)}
+                      </span>
+                    </div>
+                    {item.current_value && (
+                      <p className={`text-[10px] font-mono mt-1.5 ${t.textDim}`}>{item.current_value}</p>
+                    )}
+                    <p className={`text-[9px] mt-1 ${t.textFaint}`}>
+                      {item.location_name || `${item.city}, ${item.state}`}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => unpin(item.id)}
+                    title="Unpin from dashboard"
+                    className="text-amber-500 hover:text-amber-400 transition-colors shrink-0 mt-0.5"
+                  >
+                    <Pin size={12} className="fill-amber-500" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className={`px-4 py-3 ${t.footerBg}`}>
+        <button onClick={() => navigate('/app/matcha/compliance')} className={`text-[10px] ${t.footerLink} font-medium uppercase tracking-wider`}>
+          View all compliance →
+        </button>
       </div>
     </div>
   );
@@ -1014,6 +1096,7 @@ export function Dashboard() {
   const dashboardWidgets = [
     { id: 'stats', label: 'Key Metrics', icon: Activity },
     { id: 'compliance', label: 'Compliance Health', icon: ShieldAlert },
+    { id: 'pinned_compliance', label: 'Pinned Compliance', icon: Pin },
     { id: 'compliance_impact', label: 'Compliance Impact', icon: ShieldAlert },
     { id: 'actions', label: 'Pending Actions', icon: Clock },
     ...(isHealthcare ? [{ id: 'credential_alerts', label: 'Credential Alerts', icon: AlertTriangle }] : []),
@@ -1373,6 +1456,12 @@ export function Dashboard() {
                           </div>
                         )}
                       </div>
+
+                      {visibleWidgets.has('pinned_compliance') && (
+                        <div className="lg:col-span-3">
+                          <PinnedComplianceWidget />
+                        </div>
+                      )}
 
                       {visibleWidgets.has('compliance_impact') && showComplianceImpact && (
                         <div className="lg:col-span-3">
