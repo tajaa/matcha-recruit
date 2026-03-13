@@ -1,5 +1,6 @@
 import { useIsLightMode } from '../hooks/useIsLightMode';
 import { FeatureGuideTrigger } from '../features/feature-guides';
+import type { GuideKey } from '../features/feature-guides/types';
 
 // ─── Theme tokens (superset of OnboardingCenter + PreTermination) ────────────
 
@@ -103,7 +104,7 @@ export function useTk(): ThemeTokens {
 interface PageShellProps {
   title: string;
   subtitle: string;
-  guideId?: string;
+  guideId?: GuideKey;
   guideTourAttr?: string;
   children: React.ReactNode;
 }

@@ -11,7 +11,7 @@ import OnboardingPriorities from './OnboardingPriorities';
 import CompanyProfile from './CompanyProfile';
 import { LifecycleWizard } from '../components/LifecycleWizard';
 import { PageShell, TabBar, useTk } from '../components/PageShell';
-import type { ThemeTokens } from '../components/PageShell';
+
 
 type Tab = 'workspace' | 'employees' | 'templates' | 'priorities' | 'notifications' | 'runs' | 'profile';
 
