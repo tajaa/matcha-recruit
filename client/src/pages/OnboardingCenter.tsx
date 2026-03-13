@@ -1,7 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { onboarding, provisioning, getAccessToken } from '../api/client';
-import { FeatureGuideTrigger } from '../features/feature-guides';
 import { useIsLightMode } from '../hooks/useIsLightMode';
 import { Mail, CheckCircle, UserX, Clock, ChevronRight } from 'lucide-react';
 import type { GoogleWorkspaceConnectionStatus, OnboardingAnalytics, ProvisioningRunListItem, SlackConnectionStatus } from '../types';
@@ -11,90 +10,10 @@ import OnboardingNotificationSettings from './OnboardingNotificationSettings';
 import OnboardingPriorities from './OnboardingPriorities';
 import CompanyProfile from './CompanyProfile';
 import { LifecycleWizard } from '../components/LifecycleWizard';
+import { PageShell, TabBar, useTk } from '../components/PageShell';
+import type { ThemeTokens } from '../components/PageShell';
 
 type Tab = 'workspace' | 'employees' | 'templates' | 'priorities' | 'notifications' | 'runs' | 'profile';
-
-const LT = {
-  pageBg: 'bg-stone-300',
-  card: 'bg-stone-100 rounded-2xl',
-  cardLight: 'bg-stone-100 rounded-2xl',
-  cardDark: 'bg-zinc-900 rounded-2xl',
-  cardDarkHover: 'hover:bg-zinc-800',
-  cardDarkGhost: 'text-zinc-800',
-  cardBorder: 'border border-stone-200 bg-stone-100 rounded-2xl',
-  innerEl: 'bg-stone-200 rounded-xl',
-  textMain: 'text-zinc-900',
-  textMuted: 'text-stone-500',
-  textFaint: 'text-stone-400',
-  textDim: 'text-stone-600',
-  border: 'border-stone-200',
-  borderTab: 'border-stone-400/40',
-  divide: 'divide-stone-200',
-  tabActive: 'border-zinc-900 text-zinc-900',
-  tabInactive: 'border-transparent text-stone-500 hover:text-stone-700 hover:border-stone-400',
-  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
-  btnDisabled: 'border border-stone-300 text-stone-400 cursor-not-allowed',
-  selectCls: 'bg-white border border-stone-300 text-xs text-zinc-900 px-3 py-1.5 rounded-xl focus:outline-none focus:border-stone-400',
-  rowHover: 'hover:bg-stone-50',
-  alertInfo: 'border border-stone-200 bg-stone-100 rounded-xl',
-  alertWarn: 'border border-amber-300 bg-amber-50 text-amber-700',
-  alertError: 'border border-red-300 bg-red-50 text-red-700',
-  emptyBorder: 'border border-dashed border-stone-300 bg-stone-100',
-  badgeDefault: 'border-stone-300 bg-stone-200 text-stone-600',
-  badgeConnected: 'border-emerald-300 bg-emerald-50 text-emerald-700',
-  badgeError: 'border-red-300 bg-red-50 text-red-700',
-  badgeAmber: 'border-amber-300 bg-amber-50 text-amber-700',
-  statusCompleted: 'bg-emerald-50 text-emerald-700 border-emerald-300',
-  statusFailed: 'bg-red-50 text-red-700 border-red-300',
-  statusAmber: 'bg-amber-50 text-amber-700 border-amber-300',
-  statusRunning: 'bg-blue-50 text-blue-700 border-blue-300',
-  statusDefault: 'bg-stone-200 text-stone-600 border-stone-300',
-  comingSoon: 'opacity-75',
-  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
-  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
-  livePill: 'bg-stone-200 text-stone-600',
-};
-
-const DK = {
-  pageBg: 'bg-zinc-950',
-  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
-  cardLight: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
-  cardDark: 'bg-zinc-800 rounded-2xl',
-  cardDarkHover: 'hover:bg-zinc-700',
-  cardDarkGhost: 'text-zinc-700',
-  cardBorder: 'border border-white/10 bg-zinc-900/50 rounded-2xl',
-  innerEl: 'bg-zinc-800 rounded-xl',
-  textMain: 'text-zinc-100',
-  textMuted: 'text-zinc-500',
-  textFaint: 'text-zinc-600',
-  textDim: 'text-zinc-400',
-  border: 'border-white/10',
-  borderTab: 'border-white/10',
-  divide: 'divide-white/10',
-  tabActive: 'border-zinc-100 text-zinc-100',
-  tabInactive: 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-600',
-  btnPrimary: 'bg-zinc-100 text-zinc-900 hover:bg-white',
-  btnDisabled: 'border border-white/10 text-zinc-600 cursor-not-allowed',
-  selectCls: 'bg-zinc-800 border border-white/10 text-xs text-zinc-100 px-3 py-1.5 rounded-xl focus:outline-none focus:border-white/20',
-  rowHover: 'hover:bg-white/5',
-  alertInfo: 'border border-white/10 bg-zinc-900/50 rounded-xl',
-  alertWarn: 'border border-amber-500/30 bg-amber-950/30 text-amber-400',
-  alertError: 'border border-red-500/30 bg-red-950/30 text-red-400',
-  emptyBorder: 'border border-dashed border-white/10 bg-zinc-900/30',
-  badgeDefault: 'border-zinc-700 bg-zinc-800 text-zinc-400',
-  badgeConnected: 'border-emerald-500/30 bg-emerald-950/40 text-emerald-400',
-  badgeError: 'border-red-500/30 bg-red-950/40 text-red-400',
-  badgeAmber: 'border-amber-500/30 bg-amber-950/40 text-amber-400',
-  statusCompleted: 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30',
-  statusFailed: 'bg-red-950/40 text-red-400 border-red-500/30',
-  statusAmber: 'bg-amber-950/40 text-amber-400 border-amber-500/30',
-  statusRunning: 'bg-blue-950/40 text-blue-400 border-blue-500/30',
-  statusDefault: 'bg-zinc-800 text-zinc-400 border-zinc-700',
-  comingSoon: 'opacity-50',
-  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
-  labelOnDark: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
-  livePill: 'bg-zinc-800 text-zinc-400',
-};
 
 const ONBOARDING_CYCLE_STEPS = [
   {
@@ -188,7 +107,7 @@ interface OnboardingProgressItem {
 
 function RecentHires({ refreshKey }: { refreshKey: number }) {
   const isLight = useIsLightMode();
-  const t = isLight ? LT : DK;
+  const t = useTk();
   const navigate = useNavigate();
   const [employees, setEmployees] = useState<RecentEmployee[]>([]);
   const [progress, setProgress] = useState<Record<string, OnboardingProgressItem>>({});
@@ -346,9 +265,19 @@ function RecentHires({ refreshKey }: { refreshKey: number }) {
   );
 }
 
+const ONBOARDING_TABS: { id: Tab; label: string }[] = [
+  { id: 'workspace', label: 'Workspace' },
+  { id: 'employees', label: 'Add Employees' },
+  { id: 'templates', label: 'Templates' },
+  { id: 'priorities', label: 'Priorities' },
+  { id: 'notifications', label: 'Notifications' },
+  { id: 'runs', label: 'Activity' },
+  { id: 'profile', label: 'Company Profile' },
+];
+
 export default function OnboardingCenter() {
   const isLight = useIsLightMode();
-  const t = isLight ? LT : DK;
+  const t = useTk();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<Tab>('workspace');
@@ -508,27 +437,12 @@ export default function OnboardingCenter() {
   }
 
   return (
-    <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
-      <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in duration-500">
-      <div className="flex justify-between items-start mb-12 pb-8">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className={`text-4xl font-bold tracking-tighter ${t.textMain} uppercase`}>
-              Onboarding Center
-            </h1>
-            <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] uppercase tracking-widest font-bold rounded-full`}>
-              Live
-            </div>
-            <div data-tour="onboarding-center-guide">
-              <FeatureGuideTrigger guideId="onboarding-center" />
-            </div>
-          </div>
-          <p className={`text-xs ${t.textMuted} mt-2 font-mono tracking-wide uppercase`}>
-            Manage integrations, new hires, and onboarding workflows.
-          </p>
-        </div>
-      </div>
-
+    <PageShell
+      title="Onboarding Center"
+      subtitle="Manage integrations, new hires, and onboarding workflows."
+      guideId="onboarding-center"
+      guideTourAttr="onboarding-center-guide"
+    >
       <LifecycleWizard
         steps={ONBOARDING_CYCLE_STEPS}
         activeStep={activeCycleStep}
@@ -647,31 +561,7 @@ export default function OnboardingCenter() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div className={`border-b ${t.borderTab} -mx-4 px-4 sm:mx-0 sm:px-0`}>
-        <nav className="-mb-px flex space-x-8 overflow-x-auto pb-px no-scrollbar">
-          {[
-            { id: 'workspace', label: 'Workspace' },
-            { id: 'employees', label: 'Add Employees' },
-            { id: 'templates', label: 'Templates' },
-            { id: 'priorities', label: 'Priorities' },
-            { id: 'notifications', label: 'Notifications' },
-            { id: 'runs', label: 'Activity' },
-            { id: 'profile', label: 'Company Profile' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => handleTabChange(tab.id as Tab)}
-              data-tour={`onboarding-tab-${tab.id}`}
-              className={`pb-4 px-1 border-b-2 text-xs font-bold uppercase tracking-wider transition-colors whitespace-nowrap ${
-                activeTab === tab.id ? t.tabActive : t.tabInactive
-              }`}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-      </div>
+      <TabBar tabs={ONBOARDING_TABS} activeTab={activeTab} onTabChange={handleTabChange} tourPrefix="onboarding-tab" />
 
       {/* Tab Content */}
       <div className="py-6">
@@ -927,7 +817,6 @@ export default function OnboardingCenter() {
           </div>
         )}
       </div>
-      </div>
-    </div>
+    </PageShell>
   );
 }

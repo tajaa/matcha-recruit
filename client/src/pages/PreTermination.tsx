@@ -2,14 +2,10 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   AlertTriangle,
   CheckCircle,
-  FileWarning,
-  Gavel,
   Plus,
   RefreshCw,
   Save,
-  Scale,
   Search,
-  ShieldAlert,
   Trash2,
   X,
 } from 'lucide-react';
@@ -30,77 +26,17 @@ import type {
   PostTermClaimUpdateRequest,
   ClaimStatus,
 } from '../types';
-import { useIsLightMode } from '../hooks/useIsLightMode';
-import { FeatureGuideTrigger } from '../features/feature-guides';
-
-// ─── theme ────────────────────────────────────────────────────────────────────
-
-const LT = {
-  pageBg: 'bg-stone-300',
-  card: 'bg-stone-100 rounded-2xl',
-  textMain: 'text-zinc-900',
-  textMuted: 'text-stone-500',
-  textFaint: 'text-stone-400',
-  border: 'border-stone-200',
-  divide: 'divide-stone-200',
-  rowHover: 'hover:bg-stone-50',
-  label: 'text-[10px] text-stone-500 uppercase tracking-wider',
-  input: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:border-stone-400',
-  select: 'bg-white border border-stone-300 rounded-xl text-zinc-900 focus:border-stone-400',
-  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
-  btnGhost: 'text-stone-500 hover:text-zinc-900',
-  btnDanger: 'border border-red-300 text-red-700 hover:bg-red-50',
-  modalBg: 'bg-stone-100 rounded-2xl',
-  modalHeader: 'border-b border-stone-200',
-  modalFooter: 'border-t border-stone-200',
-  tabActive: 'border-zinc-900 text-zinc-900',
-  tabInactive: 'border-transparent text-stone-400 hover:text-stone-600',
-  tabBorder: 'border-b border-stone-200',
-  badgeGreen: 'bg-emerald-100 text-emerald-800 border-emerald-200',
-  badgeYellow: 'bg-amber-100 text-amber-800 border-amber-200',
-  badgeRed: 'bg-red-100 text-red-800 border-red-200',
-  badgeBlue: 'bg-blue-100 text-blue-800 border-blue-200',
-  badgeGray: 'bg-stone-200 text-stone-600 border-stone-300',
-  badgePurple: 'bg-violet-100 text-violet-800 border-violet-200',
-};
-
-const DK = {
-  pageBg: 'bg-zinc-950',
-  card: 'bg-zinc-900/50 border border-white/10 rounded-2xl',
-  textMain: 'text-zinc-100',
-  textMuted: 'text-zinc-500',
-  textFaint: 'text-zinc-600',
-  border: 'border-white/10',
-  divide: 'divide-white/10',
-  rowHover: 'hover:bg-white/5',
-  label: 'text-[10px] text-zinc-500 uppercase tracking-wider',
-  input: 'bg-zinc-800 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
-  select: 'bg-zinc-800 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
-  btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600',
-  btnGhost: 'text-zinc-600 hover:text-zinc-100',
-  btnDanger: 'border border-red-500/30 text-red-300 hover:bg-red-500/10',
-  modalBg: 'bg-zinc-900 border border-white/10 rounded-2xl',
-  modalHeader: 'border-b border-white/10',
-  modalFooter: 'border-t border-white/10',
-  tabActive: 'border-zinc-100 text-zinc-100',
-  tabInactive: 'border-transparent text-zinc-600 hover:text-zinc-400',
-  tabBorder: 'border-b border-white/10',
-  badgeGreen: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
-  badgeYellow: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  badgeRed: 'bg-red-500/10 text-red-400 border-red-500/20',
-  badgeBlue: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  badgeGray: 'bg-zinc-600/20 text-zinc-300 border-zinc-600/30',
-  badgePurple: 'bg-violet-500/10 text-violet-400 border-violet-500/20',
-};
+import { PageShell, TabBar, useTk } from '../components/PageShell';
+import type { ThemeTokens } from '../components/PageShell';
 
 // ─── constants ────────────────────────────────────────────────────────────────
 
 type TabKey = 'discipline' | 'charges' | 'claims';
 
-const TABS: { key: TabKey; label: string; icon: typeof ShieldAlert }[] = [
-  { key: 'discipline', label: 'Progressive Discipline', icon: FileWarning },
-  { key: 'charges', label: 'Agency Charges', icon: Gavel },
-  { key: 'claims', label: 'Post-Termination Claims', icon: Scale },
+const TABS: { id: TabKey; label: string }[] = [
+  { id: 'discipline', label: 'Progressive Discipline' },
+  { id: 'charges', label: 'Agency Charges' },
+  { id: 'claims', label: 'Post-Termination Claims' },
 ];
 
 const DISCIPLINE_TYPES: DisciplineType[] = ['verbal_warning', 'written_warning', 'pip', 'final_warning', 'suspension'];
@@ -118,7 +54,7 @@ function formatLabel(value: string): string {
     .join(' ');
 }
 
-function statusBadge(status: string, t: typeof LT): string {
+function statusBadge(status: string, t: ThemeTokens): string {
   switch (status) {
     case 'completed':
     case 'resolved':
@@ -146,7 +82,7 @@ function statusBadge(status: string, t: typeof LT): string {
   }
 }
 
-function typeBadge(type: string, t: typeof LT): string {
+function typeBadge(type: string, t: ThemeTokens): string {
   switch (type) {
     case 'verbal_warning':
       return t.badgeBlue;
@@ -184,8 +120,7 @@ function todayISO(): string {
 // ─── component ────────────────────────────────────────────────────────────────
 
 export default function PreTermination() {
-  const isLight = useIsLightMode();
-  const t = isLight ? LT : DK;
+  const t = useTk();
 
   const [activeTab, setActiveTab] = useState<TabKey>('discipline');
   const [loading, setLoading] = useState(false);
@@ -550,7 +485,7 @@ export default function PreTermination() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className={`${t.tabBorder}`}>
+                <tr className={`${t.borderTab}`}>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Employee ID</th>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Type</th>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Issued Date</th>
@@ -648,7 +583,7 @@ export default function PreTermination() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className={t.tabBorder}>
+                <tr className={t.borderTab}>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Employee ID</th>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Charge Type</th>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Charge Number</th>
@@ -739,7 +674,7 @@ export default function PreTermination() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className={t.tabBorder}>
+                <tr className={t.borderTab}>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Employee ID</th>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Claim Type</th>
                   <th className={`px-4 py-3 text-left ${t.label}`}>Filed Date</th>
@@ -833,26 +768,17 @@ export default function PreTermination() {
   // ─── MAIN RENDER ────────────────────────────────────────────────────────────
 
   return (
-    <div className={`max-w-7xl mx-auto space-y-6 ${t.pageBg} min-h-screen p-6`}>
-      {/* Header */}
-      <div data-tour="pretermination-context" className={`flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 pb-6 ${t.tabBorder}`}>
-        <div>
-          <div className="flex items-center gap-3">
-            <ShieldAlert size={28} className={t.textMain} />
-            <h1 className={`text-4xl font-bold tracking-tighter uppercase ${t.textMain}`}>Pre-Termination</h1>
-            <FeatureGuideTrigger guideId="pre-termination" />
-          </div>
-          <p className={`text-xs mt-2 font-mono tracking-wide uppercase ${t.textMuted}`}>
-            Progressive discipline, agency charges, and post-termination claims
-          </p>
-        </div>
-      </div>
-
+    <PageShell
+      title="Pre-Termination"
+      subtitle="Progressive discipline, agency charges, and post-termination claims"
+      guideId="pre-termination"
+      guideTourAttr="pretermination-context"
+    >
       {/* Alerts */}
       {error && (
-        <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-4 flex items-center gap-3">
-          <AlertTriangle className="text-red-400" size={16} />
-          <p className="text-sm text-red-300">{error}</p>
+        <div className={`${t.alertError} rounded-xl p-4 flex items-center gap-3`}>
+          <AlertTriangle size={16} />
+          <p className="text-sm">{error}</p>
         </div>
       )}
 
@@ -863,26 +789,18 @@ export default function PreTermination() {
         </div>
       )}
 
-      {/* Tabs */}
-      <div data-tour="pretermination-tabs" className={`flex gap-6 ${t.tabBorder}`}>
-        {TABS.map(({ key, label, icon: Icon }) => (
-          <button
-            key={key}
-            onClick={() => { setActiveTab(key); setError(null); }}
-            className={`inline-flex items-center gap-2 pb-3 text-xs uppercase tracking-wider border-b-2 transition-colors ${
-              activeTab === key ? t.tabActive : t.tabInactive
-            }`}
-          >
-            <Icon size={14} />
-            {label}
-          </button>
-        ))}
-      </div>
+      <TabBar
+        tabs={TABS}
+        activeTab={activeTab}
+        onTabChange={(tab) => { setActiveTab(tab); setError(null); }}
+        tourPrefix="pretermination-tab"
+      />
 
       {/* Tab content */}
-      {activeTab === 'discipline' && renderDisciplineTab()}
-      {activeTab === 'charges' && renderChargesTab()}
-      {activeTab === 'claims' && renderClaimsTab()}
+      <div className="py-6">
+        {activeTab === 'discipline' && renderDisciplineTab()}
+        {activeTab === 'charges' && renderChargesTab()}
+        {activeTab === 'claims' && renderClaimsTab()}
 
       {/* ── Create Discipline Modal ──────────────────────────────────────────── */}
       {renderModal(
@@ -1245,6 +1163,7 @@ export default function PreTermination() {
           </div>
         </>,
       )}
-    </div>
+      </div>
+    </PageShell>
   );
 }
