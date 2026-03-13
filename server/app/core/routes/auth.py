@@ -42,7 +42,6 @@ TEST_ACCOUNT_FEATURES = {
     "policies": True,
     "handbooks": True,
     "compliance": True,
-    "compliance_plus": True,
     "employees": True,
     "er_copilot": True,
     "incidents": True,

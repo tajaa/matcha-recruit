@@ -212,7 +212,7 @@ export default function LeaveManagement() {
   const [noticeType, setNoticeType] = useState<typeof NOTICE_TYPES[number]>('fmla_eligibility_notice');
   const [noticeMessage, setNoticeMessage] = useState<string | null>(null);
 
-  const compliancePlusEnabled = hasFeature('compliance_plus');
+  const compliancePlusEnabled = hasFeature('compliance');
   const requestedLeaveId = searchParams.get('leaveId');
   const parsedEligibility = useMemo(() => parseEligibilitySnapshot(eligibility), [eligibility]);
 

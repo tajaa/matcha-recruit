@@ -4161,7 +4161,7 @@ async def return_checkin(
 
 
 @leave_admin_router.get("/requests/{leave_id}/eligibility",
-                         dependencies=[Depends(require_feature("compliance_plus"))])
+                         dependencies=[Depends(require_feature("compliance"))])
 async def get_leave_eligibility(
     leave_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -4224,7 +4224,7 @@ class LeaveDeadlineActionRequest(BaseModel):
 
 
 @leave_admin_router.get("/requests/{leave_id}/deadlines",
-                         dependencies=[Depends(require_feature("compliance_plus"))],
+                         dependencies=[Depends(require_feature("compliance"))],
                          response_model=List[LeaveDeadlineResponse])
 async def list_leave_deadlines(
     leave_id: UUID,
@@ -4252,7 +4252,7 @@ async def list_leave_deadlines(
 
 
 @leave_admin_router.patch("/requests/{leave_id}/deadlines/{deadline_id}",
-                           dependencies=[Depends(require_feature("compliance_plus"))],
+                           dependencies=[Depends(require_feature("compliance"))],
                            response_model=LeaveDeadlineResponse)
 async def update_leave_deadline(
     leave_id: UUID,
@@ -4294,7 +4294,7 @@ class LeaveNoticeRequest(BaseModel):
 
 
 @leave_admin_router.post("/requests/{leave_id}/notices",
-                          dependencies=[Depends(require_feature("compliance_plus"))])
+                          dependencies=[Depends(require_feature("compliance"))])
 async def create_leave_notice(
     leave_id: UUID,
     request: LeaveNoticeRequest,

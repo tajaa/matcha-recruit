@@ -9,7 +9,6 @@ const FEATURE_CONFIG: { key: string; label: string; section: string }[] = [
   { key: 'policies', label: 'Policies', section: 'Recruiting' },
   { key: 'handbooks', label: 'Handbooks', section: 'Recruiting' },
   { key: 'compliance', label: 'Compliance', section: 'Recruiting' },
-  { key: 'compliance_plus', label: 'Compliance Plus', section: 'HR Tools' },
   { key: 'employees', label: 'Employees', section: 'Recruiting' },
   { key: 'er_copilot', label: 'ER Copilot', section: 'HR Tools' },
   { key: 'incidents', label: 'Incidents', section: 'HR Tools' },

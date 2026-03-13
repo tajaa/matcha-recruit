@@ -207,7 +207,7 @@ export default function PortalLeave() {
   const [eligibility, setEligibility] = useState<Record<string, unknown> | null>(null);
   const [eligibilityLoading, setEligibilityLoading] = useState(false);
 
-  const compliancePlusEnabled = hasFeature('compliance_plus');
+  const compliancePlusEnabled = hasFeature('compliance');
 
   const visibleRequests = useMemo(() => {
     if (!statusFilter) return requests;

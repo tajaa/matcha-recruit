@@ -526,7 +526,7 @@ async def cancel_pto_request(
 
 LEAVE_TYPES = {"fmla", "state_pfml", "parental", "bereavement", "jury_duty", "medical", "military", "unpaid_loa"}
 
-_compliance_plus_dep = [Depends(require_feature("compliance_plus"))]
+_compliance_plus_dep = [Depends(require_feature("compliance"))]
 
 
 @router.get("/me/leave", response_model=LeaveRequestListResponse, dependencies=_pto_dep)

@@ -24,7 +24,6 @@ KNOWN_FEATURES = {
     "policies",
     "handbooks",
     "compliance",
-    "compliance_plus",
     "employees",
     "er_copilot",
     "incidents",

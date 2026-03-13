@@ -402,8 +402,8 @@ def require_feature(feature_name: str):
 
         # Platform-level visibility check (non-admins blocked if feature is a known
         # platform item and has been shelved by the admin).
-        # Sub-flags like compliance_plus / offer_letters_plus are not platform items
-        # and bypass this check — they are governed solely by company feature flags.
+        # Sub-flags that are not platform items bypass this check —
+        # they are governed solely by company feature flags.
         from ..core.routes.admin import KNOWN_PLATFORM_ITEMS
         if feature_name in KNOWN_PLATFORM_ITEMS:
             import json as _json
