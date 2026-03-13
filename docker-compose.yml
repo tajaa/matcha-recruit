@@ -1,14 +1,17 @@
 services:
   # Redis for Celery broker, result backend, and caching
-  # Requires REDIS_PASSWORD to be set in .env (docker-compose reads it automatically)
+  # REDIS_PASSWORD is read from .env.backend (shared with all services)
   redis:
     image: redis:7-alpine
     container_name: matcha-redis
+    env_file:
+      - .env.backend
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set}
+    command: >
+      sh -c 'redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"'
     restart: unless-stopped
     networks:
       - matcha-network
@@ -17,7 +20,7 @@ services:
         limits:
           memory: 128M
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD must be set}", "--no-auth-warning", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -34,10 +37,6 @@ services:
       - "127.0.0.1:8002:8002"
     env_file:
       - .env.backend
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
-      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
     volumes:
       - uploads:/app/uploads
       - ./credentials:/app/credentials:ro
@@ -73,10 +72,6 @@ services:
       - worker
     env_file:
       - .env.backend
-    environment:
-      - REDIS_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
-      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:?REDIS_PASSWORD must be set}@redis:6379/0
     volumes:
       - uploads:/app/uploads
       - ./credentials:/app/credentials:ro
