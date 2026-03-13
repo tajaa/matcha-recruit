@@ -159,6 +159,57 @@ function getCostOfRisk(dim: DimensionResult): CostOfRisk | null {
   return cost;
 }
 
+function CostLineItemDetail({ label, text }: { label: string; text: string }) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="text-[8px] text-zinc-600 uppercase tracking-widest font-bold">{label}</div>
+      <div className="text-[10px] text-zinc-500 leading-relaxed">{text}</div>
+    </div>
+  );
+}
+
+function CostLineItemRow({ item }: { item: import('../types').CostLineItem }) {
+  const [expanded, setExpanded] = useState(false);
+  const hasDetails = item.formula || item.statute || item.risk_context || item.benchmark;
+
+  return (
+    <div className="flex flex-col">
+      <button
+        type="button"
+        onClick={() => hasDetails && setExpanded(!expanded)}
+        className={`flex flex-col gap-0.5 text-left ${hasDetails ? 'cursor-pointer' : 'cursor-default'}`}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10px] text-zinc-400 flex items-center gap-1">
+            {hasDetails && (
+              expanded
+                ? <ChevronDown className="w-2.5 h-2.5 text-zinc-600" />
+                : <ChevronRight className="w-2.5 h-2.5 text-zinc-600" />
+            )}
+            {item.label}
+          </span>
+          <span className="text-[10px] font-mono text-red-400/80">
+            {formatCurrency(item.low)} – {formatCurrency(item.high)}
+          </span>
+        </div>
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[9px] text-zinc-600">{item.basis}</span>
+          <span className="text-[9px] text-zinc-600 font-mono shrink-0">{item.affected_count} affected</span>
+        </div>
+      </button>
+
+      {expanded && (
+        <div className="mt-2 ml-3.5 pl-2.5 border-l border-white/5 flex flex-col gap-2.5 pb-1">
+          {item.formula && <CostLineItemDetail label="Calculation" text={item.formula} />}
+          {item.statute && <CostLineItemDetail label="Legal basis" text={item.statute} />}
+          {item.risk_context && <CostLineItemDetail label="Risk context" text={item.risk_context} />}
+          {item.benchmark && <CostLineItemDetail label="Benchmarks" text={item.benchmark} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CostOfRiskCard({ cost }: { cost: CostOfRisk }) {
   return (
     <div className="border border-white/10 bg-black/20 p-3 flex flex-col gap-3 rounded-xl">
@@ -171,18 +222,7 @@ function CostOfRiskCard({ cost }: { cost: CostOfRisk }) {
 
       <div className="flex flex-col gap-2">
         {cost.line_items.map((item) => (
-          <div key={item.key} className="flex flex-col gap-0.5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[10px] text-zinc-400">{item.label}</span>
-              <span className="text-[10px] font-mono text-red-400/80">
-                {formatCurrency(item.low)} – {formatCurrency(item.high)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-[9px] text-zinc-600">{item.basis}</span>
-              <span className="text-[9px] text-zinc-600 font-mono shrink-0">{item.affected_count} affected</span>
-            </div>
-          </div>
+          <CostLineItemRow key={item.key} item={item} />
         ))}
       </div>
     </div>

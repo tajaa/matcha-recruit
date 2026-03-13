@@ -2574,6 +2574,10 @@ export interface CostLineItem {
   high: number;
   affected_count: number;
   basis: string;
+  formula?: string;
+  statute?: string;
+  risk_context?: string;
+  benchmark?: string;
 }
 
 export interface CostOfRisk {
