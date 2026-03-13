@@ -847,7 +847,7 @@ FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
 
 def _parse_json_response(text: str) -> Any:
-    """Parse JSON from LLM response, handling markdown code blocks."""
+    """Parse JSON from LLM response, handling markdown fences and trailing text."""
     text = text.strip()
     if text.startswith("```json"):
         text = text[7:]
@@ -855,7 +855,14 @@ def _parse_json_response(text: str) -> Any:
         text = text[3:]
     if text.endswith("```"):
         text = text[:-3]
-    return json.loads(text.strip())
+    text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Gemini sometimes appends extra text after valid JSON — extract first object
+        decoder = json.JSONDecoder()
+        result, _ = decoder.raw_decode(text)
+        return result
 
 
 def _is_model_unavailable_error(error: Exception) -> bool:
@@ -874,17 +881,12 @@ async def generate_recommendations(result: RiskAssessmentResult, settings) -> di
     """Generate executive report and strategic HR consulting recommendations via Gemini."""
     empty = {"report": None, "recommendations": []}
     try:
-        if settings.use_vertex:
-            client = genai.Client(
-                vertexai=True,
-                project=settings.vertex_project,
-                location=settings.vertex_location,
-            )
-        elif settings.gemini_api_key:
-            client = genai.Client(api_key=settings.gemini_api_key)
-        else:
-            logger.warning("No Gemini credentials configured — skipping recommendations")
+        import os
+        api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+        if not api_key:
+            logger.warning("No Gemini API key configured — skipping recommendations")
             return empty
+        client = genai.Client(api_key=api_key)
 
         assessment_dict = {
             "overall_score": result.overall_score,
