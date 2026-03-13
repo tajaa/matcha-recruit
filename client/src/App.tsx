@@ -13,7 +13,6 @@ import { Unauthorized } from './pages/Unauthorized';
 import { ForCandidates } from './pages/ForCandidates';
 import { TopangaResearch } from './pages/TopangaResearch';
 import { WorkWithUs } from './pages/WorkWithUs';
-import { ResumeOnboarding } from './pages/ResumeOnboarding';
 import { OutreachLanding } from './pages/OutreachLanding';
 import { OutreachScreening } from './pages/OutreachScreening';
 import { ScreeningLanding } from './pages/ScreeningLanding';
@@ -49,7 +48,6 @@ const InterviewPrepAdmin = lazy(() => import('./pages/InterviewPrepAdmin'));
 const PublicJobs = lazy(() => import('./pages/PublicJobs'));
 const PublicJobDetail = lazy(() => import('./pages/PublicJobDetail'));
 const PublicJobApply = lazy(() => import('./pages/PublicJobApply'));
-const PublicProjectApply = lazy(() => import('./pages/PublicProjectApply'));
 const PublicBlogList = lazy(() => import('./pages/PublicBlogList'));
 const PublicBlogDetail = lazy(() => import('./pages/PublicBlogDetail'));
 const TermsOfService = lazy(() => import('./pages/TermsOfService'));
@@ -114,8 +112,6 @@ const PortalENPS = lazy(() => import('./pages/portal/PortalENPS'));
 const PortalReviews = lazy(() => import('./pages/portal/PortalReviews'));
 const PortalUnavailable = lazy(() => import('./pages/portal/PortalUnavailable'));
 const CandidateRankings = lazy(() => import('./pages/CandidateRankings'));
-const Projects = lazy(() => import('./pages/Projects').then(m => ({ default: m.Projects })));
-const ProjectDetail = lazy(() => import('./pages/ProjectDetail').then(m => ({ default: m.ProjectDetail })));
 const RegisterBrokerClient = lazy(() => import('./pages/RegisterBrokerClient'));
 const BrokerClients = lazy(() => import('./pages/broker/BrokerClients'));
 const BrokerReporting = lazy(() => import('./pages/broker/BrokerReporting'));
@@ -200,7 +196,6 @@ function App() {
               <Route path="/register" element={<Register />} />
               <Route path="/register/invite/:token" element={<RegisterInvite />} />
               <Route path="/register/broker-client/:token" element={<RegisterBrokerClient />} />
-              <Route path="/onboarding/resume" element={<ResumeOnboarding />} />
               <Route path="/unauthorized" element={<Unauthorized />} />
               <Route path="/terms" element={<TermsOfService />} />
               <Route path="/tos" element={<Navigate to="/terms" replace />} />
@@ -221,8 +216,6 @@ function App() {
             <Route path="/outreach/:token" element={<OutreachLanding />} />
             <Route path="/outreach/:token/screening" element={<OutreachScreening />} />
 
-            {/* Public project apply page */}
-            <Route path="/apply/:projectId" element={<PublicProjectApply />} />
 
             {/* Admin Shortcuts */}
             <Route path="/admin/blogs/drafts" element={<Navigate to="/app/admin/blog?status=draft" replace />} />
@@ -829,23 +822,6 @@ function App() {
                 }
               />
 
-              {/* Recruiting Projects */}
-              <Route
-                path="projects"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <Projects />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="projects/:id"
-                element={
-                  <ProtectedRoute roles={['admin', 'client']}>
-                    <ProjectDetail />
-                  </ProtectedRoute>
-                }
-              />
 
               <Route
                 path="import"

@@ -159,19 +159,6 @@ const navSections: NavSection[] = [
     roles: ['admin', 'client', 'candidate'],
     items: [
       {
-        path: '/app/projects',
-        label: 'Projects',
-        roles: ['admin', 'client'],
-        platformKey: 'projects',
-        helpText: 'Create recruiting pipelines, add candidates, send interview invites, and track pipeline stages.',
-        icon: (
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7a2 2 0 012-2h14a2 2 0 012 2v10a2 2 0 01-2 2H5a2 2 0 01-2-2V7z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7l9 6 9-6" />
-          </svg>
-        ),
-      },
-      {
         path: '/app/interviewer',
         label: 'Interviewer',
         roles: ['admin', 'client'],
