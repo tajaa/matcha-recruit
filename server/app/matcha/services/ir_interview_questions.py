@@ -4,9 +4,14 @@ Generates role-specific questions for IR investigation interviews using Gemini A
 """
 
 import json
+import logging
 from typing import Optional, Any
 
 from google import genai
+
+logger = logging.getLogger(__name__)
+
+FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-2.0-flash")
 
 
 QUESTION_GENERATION_PROMPT = """You are an expert workplace investigator. Generate questions for an investigation interview.
@@ -73,14 +78,19 @@ async def generate_investigation_questions(
     Returns:
         List of question dicts with question, category, rationale
     """
-    if vertex_project:
+    # Prefer GEMINI_API_KEY (direct API) over Vertex AI — matches compliance service pattern
+    import os
+    direct_api_key = os.getenv("GEMINI_API_KEY")
+    if direct_api_key:
+        client = genai.Client(api_key=direct_api_key)
+    elif api_key:
+        client = genai.Client(api_key=api_key)
+    elif vertex_project:
         client = genai.Client(
             vertexai=True,
             project=vertex_project,
             location=vertex_location,
         )
-    elif api_key:
-        client = genai.Client(api_key=api_key)
     else:
         raise ValueError("Either api_key or vertex_project must be provided")
 
@@ -107,10 +117,22 @@ async def generate_investigation_questions(
         prior_context=prior_context,
     )
 
-    response = await client.aio.models.generate_content(
-        model=model,
-        contents=prompt,
-    )
+    candidates = [model] + [m for m in FALLBACK_MODELS if m != model]
+    response = None
+    for candidate in candidates:
+        try:
+            response = await client.aio.models.generate_content(
+                model=candidate,
+                contents=prompt,
+            )
+            break
+        except Exception as exc:
+            if "404" in str(exc) or "NOT_FOUND" in str(exc):
+                logger.warning("Model %s unavailable, trying next: %s", candidate, exc)
+                continue
+            raise
+    if response is None:
+        raise RuntimeError(f"All models unavailable: {candidates}")
 
     text = response.text.strip()
     if text.startswith("```json"):
