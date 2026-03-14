@@ -46,6 +46,17 @@ class WageAlertSummary(BaseModel):
     locations_affected: int
 
 
+class ERCaseSummary(BaseModel):
+    open_cases: int
+    investigating: int
+    pending_action: int
+
+
+class StalePolicySummary(BaseModel):
+    stale_count: int
+    oldest_days: int
+
+
 class DashboardStats(BaseModel):
     active_policies: int
     pending_signatures: int
@@ -55,6 +66,11 @@ class DashboardStats(BaseModel):
     recent_activity: List[ActivityItem]
     incident_summary: Optional[IncidentSummary] = None
     wage_alerts: Optional[WageAlertSummary] = None
+    # New HR-admin focused fields
+    critical_compliance_alerts: int = 0
+    warning_compliance_alerts: int = 0
+    er_case_summary: Optional[ERCaseSummary] = None
+    stale_policies: Optional[StalePolicySummary] = None
 
 
 @router.get("/stats", response_model=DashboardStats)
@@ -182,6 +198,71 @@ async def get_dashboard_stats(
                 )
             )
 
+    # Compliance alerts (critical + warning)
+    critical_compliance_alerts = 0
+    warning_compliance_alerts = 0
+    try:
+        async with get_connection() as conn3:
+            alert_rows = await conn3.fetch(
+                """SELECT severity, COUNT(*) AS cnt
+                   FROM compliance_alerts
+                   WHERE company_id = $1
+                     AND status != 'dismissed'
+                     AND COALESCE(confidence_score, 1.0) >= 0.6
+                   GROUP BY severity""",
+                company_id,
+            )
+            for row in alert_rows:
+                if row["severity"] == "critical":
+                    critical_compliance_alerts = row["cnt"]
+                elif row["severity"] == "warning":
+                    warning_compliance_alerts = row["cnt"]
+    except Exception:
+        logger.exception("Failed to fetch compliance alerts for dashboard")
+
+    # ER Copilot open cases
+    er_case_summary = None
+    try:
+        async with get_connection() as conn4:
+            er_rows = await conn4.fetch(
+                """SELECT status, COUNT(*) AS cnt
+                   FROM er_cases
+                   WHERE company_id = $1 AND status NOT IN ('closed', 'resolved')
+                   GROUP BY status""",
+                company_id,
+            )
+            if er_rows:
+                total_open = sum(r["cnt"] for r in er_rows)
+                status_map = {r["status"]: r["cnt"] for r in er_rows}
+                er_case_summary = ERCaseSummary(
+                    open_cases=total_open,
+                    investigating=status_map.get("investigating", 0),
+                    pending_action=status_map.get("action_required", 0) + status_map.get("pending", 0),
+                )
+    except Exception:
+        logger.exception("Failed to fetch ER case summary for dashboard")
+
+    # Stale policies (not updated in 180+ days)
+    stale_policies = None
+    try:
+        async with get_connection() as conn5:
+            stale_row = await conn5.fetchrow(
+                """SELECT COUNT(*) AS cnt,
+                          EXTRACT(DAY FROM NOW() - MIN(updated_at))::int AS oldest_days
+                   FROM policies
+                   WHERE company_id = $1
+                     AND status = 'active'
+                     AND updated_at < NOW() - INTERVAL '180 days'""",
+                company_id,
+            )
+            if stale_row and stale_row["cnt"] > 0:
+                stale_policies = StalePolicySummary(
+                    stale_count=stale_row["cnt"],
+                    oldest_days=stale_row["oldest_days"] or 0,
+                )
+    except Exception:
+        logger.exception("Failed to fetch stale policies for dashboard")
+
     # Employee wage violation alerts across all locations
     wage_alerts = None
     try:
@@ -222,6 +303,10 @@ async def get_dashboard_stats(
         recent_activity=recent_activity,
         incident_summary=incident_summary,
         wage_alerts=wage_alerts,
+        critical_compliance_alerts=critical_compliance_alerts,
+        warning_compliance_alerts=warning_compliance_alerts,
+        er_case_summary=er_case_summary,
+        stale_policies=stale_policies,
     )
 
 

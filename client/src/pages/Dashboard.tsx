@@ -174,6 +174,17 @@ interface WageAlertSummary {
   locations_affected: number;
 }
 
+interface ERCaseSummary {
+  open_cases: number;
+  investigating: number;
+  pending_action: number;
+}
+
+interface StalePolicySummary {
+  stale_count: number;
+  oldest_days: number;
+}
+
 interface DashboardStats {
   active_policies: number;
   pending_signatures: number;
@@ -183,6 +194,10 @@ interface DashboardStats {
   recent_activity: ActivityItem[];
   incident_summary?: IncidentSummary;
   wage_alerts?: WageAlertSummary;
+  critical_compliance_alerts: number;
+  warning_compliance_alerts: number;
+  er_case_summary?: ERCaseSummary;
+  stale_policies?: StalePolicySummary;
 }
 
 type HorizonDays = 30 | 60 | 90;
@@ -1060,34 +1075,59 @@ export function Dashboard() {
       });
   }, [showComplianceImpact]);
 
+  const totalAlerts = (dashStats?.critical_compliance_alerts ?? 0) + (dashStats?.warning_compliance_alerts ?? 0);
+  const erOpen = dashStats?.er_case_summary?.open_cases ?? 0;
+  const irOpen = dashStats?.incident_summary?.total_open ?? 0;
+  const staleCount = dashStats?.stale_policies?.stale_count ?? 0;
+
   const stats = [
     {
-      label: 'Active Policies',
-      value: dashStats ? String(dashStats.active_policies) : '-',
-      change: dashStats?.active_policies === 0 ? 'No policies yet' : 'Active',
-      icon: FileText,
-      path: '/app/matcha/policies'
+      label: 'Compliance Alerts',
+      value: dashStats ? String(totalAlerts) : '-',
+      change: dashStats
+        ? totalAlerts === 0
+          ? 'All clear'
+          : `${dashStats.critical_compliance_alerts} critical · ${dashStats.warning_compliance_alerts} warning`
+        : '',
+      icon: ShieldAlert,
+      path: '/app/matcha/compliance',
+      urgent: (dashStats?.critical_compliance_alerts ?? 0) > 0,
     },
     {
-      label: 'Pending Signatures',
-      value: dashStats ? String(dashStats.pending_signatures) : '-',
-      change: dashStats?.pending_signatures === 0 ? 'All signed' : 'Action required',
-      icon: Clock,
-      path: '/app/matcha/policies'
-    },
-    {
-      label: 'Total Employees',
-      value: dashStats ? String(dashStats.total_employees) : '-',
-      change: dashStats?.total_employees === 0 ? 'No employees yet' : 'Active',
+      label: 'Open ER Cases',
+      value: dashStats ? String(erOpen) : '-',
+      change: dashStats
+        ? erOpen === 0
+          ? 'No open cases'
+          : `${dashStats.er_case_summary?.investigating ?? 0} investigating · ${dashStats.er_case_summary?.pending_action ?? 0} pending`
+        : '',
       icon: Users,
-      path: '/app/matcha/employees'
+      path: '/app/matcha/er-copilot',
+      urgent: erOpen > 0,
     },
     {
-      label: 'Policy Signature Rate',
-      value: dashStats ? `${dashStats.compliance_rate}%` : '-',
-      change: dashStats?.compliance_rate === 0 ? 'No data yet' : 'Current',
-      icon: CheckCircle2,
-      path: '/app/matcha/compliance'
+      label: 'Open Incidents',
+      value: dashStats ? String(irOpen) : '-',
+      change: dashStats
+        ? irOpen === 0
+          ? 'No open incidents'
+          : `${dashStats.incident_summary?.critical ?? 0} critical · ${dashStats.incident_summary?.high ?? 0} high`
+        : '',
+      icon: AlertTriangle,
+      path: '/app/ir/incidents',
+      urgent: (dashStats?.incident_summary?.critical ?? 0) > 0,
+    },
+    {
+      label: 'Stale Policies',
+      value: dashStats ? String(staleCount) : '-',
+      change: dashStats
+        ? staleCount === 0
+          ? 'All up to date'
+          : `Oldest: ${dashStats.stale_policies?.oldest_days ?? 0}d ago`
+        : '',
+      icon: FileText,
+      path: '/app/matcha/policies',
+      urgent: staleCount > 0,
     },
   ];
 
@@ -1152,16 +1192,16 @@ export function Dashboard() {
                   <button
                     key={stat.label}
                     onClick={() => navigate(stat.path)}
-                    className={`${t.cardDark} p-5 ${t.cardDarkHover} transition-all group relative overflow-hidden text-left`}
+                    className={`${t.cardDark} p-5 ${t.cardDarkHover} transition-all group relative overflow-hidden text-left ${stat.urgent ? 'ring-1 ring-red-500/30' : ''}`}
                   >
-                    <div className={`absolute top-0 right-0 p-3 ${t.cardDarkGhost} group-hover:scale-110 transition-all duration-500`}>
+                    <div className={`absolute top-0 right-0 p-3 ${stat.urgent ? 'text-red-500/20' : t.cardDarkGhost} group-hover:scale-110 transition-all duration-500`}>
                        <stat.icon className="w-8 h-8" strokeWidth={0.5} />
                     </div>
 
                     <div className="relative z-10">
                       <div className={`${t.labelOnDark} mb-2`}>{stat.label}</div>
-                      <div className="text-3xl font-light font-mono text-zinc-50 mb-0.5 tabular-nums">{stat.value}</div>
-                      <div className={`text-[9px] ${t.textMuted} font-mono`}>
+                      <div className={`text-3xl font-light font-mono mb-0.5 tabular-nums ${stat.urgent ? 'text-red-400' : 'text-zinc-50'}`}>{stat.value}</div>
+                      <div className={`text-[9px] ${stat.urgent ? 'text-red-400/70' : t.textMuted} font-mono`}>
                          {stat.change}
                       </div>
                     </div>
