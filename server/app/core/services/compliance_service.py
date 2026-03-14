@@ -59,73 +59,13 @@ VALID_LEGISLATION_STATUSES = {
     "dismissed",
 }
 
-REQUIRED_LABOR_CATEGORIES = {
-    "minimum_wage",
-    "overtime",
-    "sick_leave",
-    "meal_breaks",
-    "pay_frequency",
-    "final_pay",
-    "minor_work_permit",
-    "scheduling_reporting",
-    "leave",
-    "workplace_safety",
-    "workers_comp",
-    "anti_discrimination",
-}
-
-# Healthcare categories are researched via a background Celery worker to
-# avoid blocking the SSE stream. They're stored in jurisdiction_requirements
-# with applicable_industries=["healthcare"] and filtered at sync time.
-HEALTHCARE_CATEGORIES = {
-    "hipaa_privacy",
-    "billing_integrity",
-    "clinical_safety",
-    "healthcare_workforce",
-    "corporate_integrity",
-    "research_consent",
-    "state_licensing",
-    "emergency_preparedness",
-}
-
-ONCOLOGY_CATEGORIES = {
-    "radiation_safety",
-    "chemotherapy_handling",
-    "tumor_registry",
-    "oncology_clinical_trials",
-    "oncology_patient_rights",
-}
-
-MEDICAL_COMPLIANCE_CATEGORIES = {
-    "health_it",
-    "quality_reporting",
-    "cybersecurity",
-    "environmental_safety",
-    "pharmacy_drugs",
-    "payer_relations",
-    "reproductive_behavioral",
-    "pediatric_vulnerable",
-    "telehealth",
-    "medical_devices",
-    "transplant_organ",
-    "antitrust",
-    "tax_exempt",
-    "language_access",
-    "records_retention",
-    "marketing_comms",
-    "emerging_regulatory",
-}
-
-MEDICAL_COMPLIANCE_INDUSTRY_TAGS = {
-    "pharmacy_drugs": "healthcare:pharmacy",
-    "payer_relations": "healthcare:managed_care",
-    "reproductive_behavioral": "healthcare:behavioral_health",
-    "pediatric_vulnerable": "healthcare:pediatric",
-    "telehealth": "healthcare:telehealth",
-    "medical_devices": "healthcare:devices",
-    "transplant_organ": "healthcare:transplant",
-    "tax_exempt": "healthcare:nonprofit",
-}
+from ..compliance_registry import (
+    LABOR_CATEGORIES as REQUIRED_LABOR_CATEGORIES,
+    HEALTHCARE_CATEGORIES,
+    ONCOLOGY_CATEGORIES,
+    MEDICAL_COMPLIANCE_CATEGORIES,
+    INDUSTRY_TAGS as MEDICAL_COMPLIANCE_INDUSTRY_TAGS,
+)
 
 # Map free-text company.industry values to canonical industry profile names.
 # Reuses the same aliases as handbook_service.GUIDED_INDUSTRY_ALIASES.

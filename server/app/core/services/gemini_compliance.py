@@ -13,6 +13,17 @@ from ..models.compliance import ComplianceCategory, JurisdictionLevel, Verificat
 from .rate_limiter import get_rate_limiter, RateLimitExceeded
 from .search_strategy import build_search_strategy_prompt
 from .platform_settings import get_jurisdiction_research_model_mode
+from ..compliance_registry import (
+    CATEGORY_KEYS as VALID_CATEGORIES,
+    SPECIALTY_CATEGORIES as _HEALTHCARE_ONLY_CATEGORIES,
+    DEFAULT_RESEARCH_CATEGORIES,
+    CATEGORY_ALIASES as _CATEGORY_ALIASES,
+    RESEARCH_PROMPTS,
+    HEALTHCARE_CATEGORIES as _HC_CATS,
+    ONCOLOGY_CATEGORIES as _ONC_CATS,
+    MEDICAL_COMPLIANCE_CATEGORIES as _MC_CATS,
+    INDUSTRY_TAGS as _MC_INDUSTRY_TAGS,
+)
 
 # Timeout for individual Gemini API calls (seconds)
 GEMINI_CALL_TIMEOUT = 30
@@ -22,44 +33,8 @@ DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
 DEFAULT_HEAVY_MODEL = "gemini-3.1-pro-preview"
 DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
 
-VALID_CATEGORIES = {
-    "minimum_wage",
-    "overtime",
-    "sick_leave",
-    "meal_breaks",
-    "pay_frequency",
-    "final_pay",
-    "minor_work_permit",
-    "scheduling_reporting",
-    "leave",
-    "workplace_safety",
-    "workers_comp",
-    "anti_discrimination",
-    "hipaa_privacy",
-    "billing_integrity",
-    "clinical_safety",
-    "healthcare_workforce",
-    "corporate_integrity",
-    "research_consent",
-    "state_licensing",
-    "emergency_preparedness",
-    # Oncology specialty categories
-    "radiation_safety",
-    "chemotherapy_handling",
-    "tumor_registry",
-    "oncology_clinical_trials",
-    "oncology_patient_rights",
-}
 # Healthcare and oncology categories are researched via dedicated specialty
 # research functions, so they should NOT be included in the default sweep.
-_HEALTHCARE_ONLY_CATEGORIES = {
-    "hipaa_privacy", "billing_integrity", "clinical_safety",
-    "healthcare_workforce", "corporate_integrity", "research_consent",
-    "state_licensing", "emergency_preparedness",
-    "radiation_safety", "chemotherapy_handling", "tumor_registry",
-    "oncology_clinical_trials", "oncology_patient_rights",
-}
-DEFAULT_RESEARCH_CATEGORIES = sorted(VALID_CATEGORIES - _HEALTHCARE_ONLY_CATEGORIES)
 
 VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
 VALID_RATE_TYPES = {
@@ -71,83 +46,6 @@ VALID_RATE_TYPES = {
     "healthcare",
     "large_employer",
     "small_employer",
-}
-
-_CATEGORY_ALIASES = {
-    "meal_rest_breaks": "meal_breaks",
-    "meal_and_rest_breaks": "meal_breaks",
-    "meal_periods": "meal_breaks",
-    "rest_breaks": "meal_breaks",
-    "payday_frequency": "pay_frequency",
-    "pay_day_frequency": "pay_frequency",
-    "final_wage": "final_pay",
-    "final_wages": "final_pay",
-    "final_paycheck": "final_pay",
-    "final_paychecks": "final_pay",
-    "minor_work_permits": "minor_work_permit",
-    "work_permit": "minor_work_permit",
-    "work_permits": "minor_work_permit",
-    "youth_employment": "minor_work_permit",
-    "youth_work_permit": "minor_work_permit",
-    "scheduling_and_reporting_time": "scheduling_reporting",
-    "reporting_time": "scheduling_reporting",
-    "predictive_scheduling": "scheduling_reporting",
-    "fair_workweek": "scheduling_reporting",
-    "leave_of_absence": "leave",
-    "family_leave": "leave",
-    "medical_leave": "leave",
-    "pfml": "leave",
-    "paid_family_leave": "leave",
-    "family_medical_leave": "leave",
-    "osha": "workplace_safety",
-    "occupational_safety": "workplace_safety",
-    "safety": "workplace_safety",
-    "workplace_health": "workplace_safety",
-    "workers_compensation": "workers_comp",
-    "worker_comp": "workers_comp",
-    "workman_comp": "workers_comp",
-    "workmen_comp": "workers_comp",
-    "discrimination": "anti_discrimination",
-    "harassment": "anti_discrimination",
-    "equal_pay": "anti_discrimination",
-    "pay_equity": "anti_discrimination",
-    "ada": "anti_discrimination",
-    "ada_accommodations": "anti_discrimination",
-    # Healthcare categories
-    "hipaa": "hipaa_privacy",
-    "hipaa_security": "hipaa_privacy",
-    "hitech": "hipaa_privacy",
-    "phi": "hipaa_privacy",
-    "42_cfr_part_2": "hipaa_privacy",
-    "part_2": "hipaa_privacy",
-    "substance_use_records": "hipaa_privacy",
-    "false_claims": "billing_integrity",
-    "anti_kickback": "billing_integrity",
-    "stark_law": "billing_integrity",
-    "medicare_billing": "billing_integrity",
-    "mhpaea": "billing_integrity",
-    "mental_health_parity": "billing_integrity",
-    "joint_commission": "clinical_safety",
-    "cms_conditions": "clinical_safety",
-    "infection_control": "clinical_safety",
-    "bloodborne_pathogens": "clinical_safety",
-    "medical_waste": "clinical_safety",
-    "epa_medical_waste": "clinical_safety",
-    "credentialing": "healthcare_workforce",
-    "oig_exclusion": "healthcare_workforce",
-    "mandatory_reporter": "healthcare_workforce",
-    "oig_compliance": "corporate_integrity",
-    "qui_tam": "corporate_integrity",
-    "irb": "research_consent",
-    "gcp": "research_consent",
-    "facility_licensure": "state_licensing",
-    "telehealth": "state_licensing",
-    "abortion": "state_licensing",
-    "dobbs": "state_licensing",
-    "ada_accessibility": "state_licensing",
-    "emtala": "emergency_preparedness",
-    "nfpa": "emergency_preparedness",
-    "life_safety_code": "emergency_preparedness",
 }
 
 _JURISDICTION_LEVEL_ALIASES = {
@@ -300,27 +198,17 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
             normalized["numeric_value"] = meta["max_weeks"]
 
     # Auto-tag healthcare categories with applicable_industries
-    _HEALTHCARE_CATEGORIES = {
-        "hipaa_privacy", "billing_integrity", "clinical_safety",
-        "healthcare_workforce", "corporate_integrity", "research_consent",
-        "state_licensing", "emergency_preparedness",
-    }
-    if normalized.get("category") in _HEALTHCARE_CATEGORIES:
+    if normalized.get("category") in _HC_CATS:
         if not normalized.get("applicable_industries"):
             normalized["applicable_industries"] = ["healthcare"]
 
-    _ONCOLOGY_CATEGORIES = {
-        "radiation_safety", "chemotherapy_handling", "tumor_registry",
-        "oncology_clinical_trials", "oncology_patient_rights",
-    }
-    if normalized.get("category") in _ONCOLOGY_CATEGORIES:
+    if normalized.get("category") in _ONC_CATS:
         if not normalized.get("applicable_industries"):
             normalized["applicable_industries"] = ["healthcare:oncology"]
 
-    from ..services.compliance_service import MEDICAL_COMPLIANCE_CATEGORIES, MEDICAL_COMPLIANCE_INDUSTRY_TAGS
-    if normalized.get("category") in MEDICAL_COMPLIANCE_CATEGORIES:
+    if normalized.get("category") in _MC_CATS:
         if not normalized.get("applicable_industries"):
-            tag = MEDICAL_COMPLIANCE_INDUSTRY_TAGS.get(normalized["category"], "healthcare")
+            tag = _MC_INDUSTRY_TAGS.get(normalized["category"], "healthcare")
             normalized["applicable_industries"] = [tag]
 
     # Clamp numeric_value to fit DECIMAL(10,4) — max absolute value 999999.9999
@@ -456,325 +344,11 @@ def _build_category_prompt(
 ) -> str:
     """Build a focused prompt for a single compliance category."""
 
-    category_instructions = {
-        "minimum_wage": """Research MINIMUM WAGE requirements.
-Always include the STATE baseline minimum wage.
-If a county/city minimum wage ordinance exists (and is allowed), also include the local override.
-Return SEPARATE requirements for each rate type that exists at each applicable level:
-- "general" - standard minimum wage (ALWAYS include for state baseline)
-- "tipped" - if tip credits allowed
-- "exempt_salary" - minimum exempt salary threshold for overtime exemption (ALWAYS include; if only federal applies, explicitly say so)
-- "hotel", "fast_food", "healthcare" - if special rates exist
-- "large_employer" / "small_employer" - if rates differ by size
-For tipped requirements, explicitly describe whether tip crediting is allowed and how it works (cash wage + tip credit structure).
-Provide numeric_value for rates/salary thresholds when possible.""",
-
-        "overtime": """Research OVERTIME requirements.
-Always include the STATE baseline overtime rules.
-If a county/city overtime ordinance exists (and is allowed), also include the local override.
-Include daily/weekly overtime thresholds and multipliers.""",
-
-        "sick_leave": """Research PAID SICK LEAVE requirements.
-Always include the STATE baseline sick leave rules.
-If a county/city sick leave ordinance exists (and is allowed), also include the local override.
-Include accrual rate, cap, and usage rules.""",
-
-        "meal_breaks": """Research MEAL AND REST BREAK requirements.
-Always include the STATE baseline meal/rest break rules.
-If a county/city ordinance exists (and is allowed), also include the local override.
-Include timing, duration, and waiver conditions.""",
-
-        "pay_frequency": """Research PAY FREQUENCY requirements.
-Always include the STATE baseline pay frequency rules.
-If a county/city ordinance exists (and is allowed), also include the local override.
-Include required pay periods and final pay rules.""",
-
-        "final_pay": """Research FINAL PAY requirements.
-Always include the STATE baseline final paycheck rules.
-If local (county/city) final-pay rules exist and are allowed, include local overrides.
-Cover BOTH voluntary resignations and involuntary terminations, including timing and payout method requirements.
-Explicitly state whether accrued vacation/PTO must be paid out, and whether accrued sick leave must be paid out at separation.""",
-
-        "minor_work_permit": """Research MINOR WORK PERMIT / YOUTH EMPLOYMENT requirements.
-Always include the STATE baseline minor-work authorization rules.
-If local (county/city) rules exist and are allowed, include local overrides.
-Include whether work permits are required, age thresholds, hour limits (school-day/non-school-day), prohibited occupations, and who issues permits.""",
-
-        "scheduling_reporting": """Research SCHEDULING AND REPORTING TIME requirements.
-Always include the STATE baseline rules.
-If local fair-workweek/predictive-scheduling ordinances exist (and are allowed), include local overrides.
-Include advance-schedule notice windows, penalties for schedule changes, reporting/show-up pay rules, on-call restrictions, and spread-of-hours pay if applicable.
-If no specific scheduling/reporting-time law applies, explicitly say so.""",
-
-        "leave": """Research LEAVE OF ABSENCE programs and entitlements.
-Return EACH qualifying leave program as a SEPARATE requirement.
-Common programs: state paid family/medical leave (PFML), state disability insurance (SDI/TDI),
-state family leave acts, pregnancy disability leave.
-Do NOT include federal FMLA (handled separately).
-
-For EACH program, include these additional JSON fields:
-- "paid": true or false
-- "max_weeks": integer (maximum weeks of leave)
-- "wage_replacement_pct": number or null (e.g., 60 for 60%)
-- "job_protection": true or false
-- "employer_size_threshold": integer or null (minimum employees)
-- "employee_tenure_months": integer or null (minimum months employed)
-- "employee_hours_threshold": integer or null (minimum hours worked)
-
-Set numeric_value to max_weeks. Set current_value to a SHORT summary (under 80 chars) like "8 weeks, 60% pay, job protected".
-Set description to a longer explanation of the program if needed.""",
-
-        "workplace_safety": """Research WORKPLACE SAFETY requirements (OSHA and state equivalents).
-Always include federal OSHA applicability (employers with 1+ employees).
-If the state operates its own OSHA-approved State Plan, include state-specific requirements.
-Cover: injury/illness recording (OSHA 300 log), reporting requirements (fatalities, hospitalizations),
-mandatory safety training, hazard communication (GHS/SDS), required workplace posters,
-bloodborne pathogen standards if applicable, and any industry-specific safety rules.
-Include employee count thresholds where they apply (e.g., OSHA 300 log exemptions for <10 employees).
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "workers_comp": """Research WORKERS' COMPENSATION INSURANCE requirements.
-Always include the STATE baseline workers' comp requirements.
-Cover: whether coverage is mandatory or elective, employee count thresholds for mandatory coverage,
-exempt categories (e.g., sole proprietors, independent contractors, domestic workers, agricultural),
-state fund vs. private insurance options, penalty for non-compliance,
-and any special industry requirements (e.g., construction must cover all workers).
-Include the state agency that administers the program.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "anti_discrimination": """Research ANTI-DISCRIMINATION AND EQUAL EMPLOYMENT requirements.
-Always include the STATE baseline anti-discrimination laws.
-If local (county/city) human rights ordinances add protections, include local overrides.
-Cover: protected classes beyond federal Title VII (e.g., sexual orientation, gender identity, marital status),
-employer size thresholds for state law applicability, harassment prevention training requirements,
-pay equity/transparency laws, reasonable accommodation requirements (disability, pregnancy, religion),
-mandatory anti-harassment policy requirements, and complaint filing agencies/deadlines.
-Do NOT duplicate federal Title VII or ADA — focus on state and local additions.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "hipaa_privacy": """Research HIPAA PRIVACY AND SECURITY requirements as they apply in this jurisdiction.
-Cover: HIPAA Privacy Rule (45 CFR Part 164 Subpart E), HIPAA Security Rule (45 CFR Part 164 Subpart C),
-HITECH Act breach notification requirements (timing, state AG notification),
-42 CFR Part 2 requirements for substance use disorder records where applicable,
-and any STATE health privacy laws that EXCEED federal HIPAA protections
-(e.g., CA CMIA, TX HB 300, NY SHIELD Act health data provisions).
-Include stricter consent, redisclosure, segregation, and patient-access rules for Part 2 records
-when they go beyond standard HIPAA handling.
-Include state-specific breach notification timelines if shorter than HIPAA's 60-day window.
-Include penalties for non-compliance at both federal and state levels.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "billing_integrity": """Research BILLING AND FINANCIAL INTEGRITY requirements for healthcare entities in this jurisdiction.
-Cover: Federal False Claims Act (31 U.S.C. §§ 3729–3733), Anti-Kickback Statute (42 U.S.C. § 1320a-7b),
-Physician Self-Referral Law (Stark Law, 42 U.S.C. § 1395nn), Medicare/Medicaid billing requirements,
-Mental Health Parity and Addiction Equity Act (MHPAEA) obligations as enforced through payer coverage,
-utilization management, medical necessity, and reimbursement rules,
-and any STATE false claims acts, anti-kickback laws, parity laws, or fee-splitting prohibitions.
-Include state-specific billing fraud statutes and qui tam provisions.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "clinical_safety": """Research CLINICAL AND PATIENT SAFETY requirements for healthcare facilities in this jurisdiction.
-Cover: CMS Conditions of Participation (42 CFR Parts 482-485), Joint Commission accreditation standards,
-medication management and DEA controlled substance requirements,
-OSHA Bloodborne Pathogens Standard (29 CFR 1910.1030), infection control and prevention requirements,
-EPA and STATE medical waste disposal / regulated medical waste handling requirements,
-and any STATE patient safety reporting requirements (e.g., adverse event reporting, sentinel events).
-Include state health department inspection and survey requirements.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "healthcare_workforce": """Research HEALTHCARE WORKFORCE compliance requirements in this jurisdiction.
-Cover: provider credentialing and privileging requirements, OIG List of Excluded Individuals/Entities (LEIE) screening obligations,
-mandatory reporter obligations (child abuse, elder abuse, domestic violence),
-healthcare-specific labor rules (nurse staffing ratios, mandatory overtime bans for healthcare workers),
-and state-specific scope-of-practice rules for nurses, PAs, and allied health.
-Include frequency requirements for OIG exclusion screening and credentialing verification.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "corporate_integrity": """Research CORPORATE INTEGRITY AND ETHICS requirements for healthcare organizations in this jurisdiction.
-Cover: OIG Compliance Program Guidance for hospitals/healthcare entities,
-corporate integrity agreement (CIA) common requirements, code of conduct mandates,
-conflict of interest disclosure requirements, whistleblower protections and qui tam provisions
-(federal False Claims Act qui tam + state equivalents),
-and any STATE healthcare compliance program requirements.
-Include state-specific whistleblower protections for healthcare workers.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "research_consent": """Research RESEARCH AND INFORMED CONSENT requirements in this jurisdiction.
-Cover: IRB oversight requirements (45 CFR Part 46 — Common Rule), Good Clinical Practice (ICH-GCP) standards,
-FDA investigational regulations (21 CFR Parts 50, 56, 312, 812),
-21 CFR Part 11 (electronic records/signatures), and any STATE-specific informed consent requirements,
-research subject protections, or bioethics laws that exceed federal standards.
-Include state requirements for genetic testing consent and biospecimen research.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "state_licensing": """Research STATE LICENSING AND SCOPE OF PRACTICE requirements for healthcare in this jurisdiction.
-Cover: facility licensure requirements (hospitals, clinics, ASCs, nursing facilities),
-provider licensing and renewal requirements (physicians, nurses, allied health),
-telehealth and cross-state practice regulations (interstate compacts like IMLC, NLC),
-post-Dobbs abortion-service restrictions or protections that affect providers or facilities,
-ADA physical accessibility and plant/facility standards enforced through health facility rules,
-and any recent changes to scope-of-practice laws (e.g., NP independent practice authority).
-Include state health department facility licensing categories and renewal timelines.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "emergency_preparedness": """Research EMERGENCY PREPAREDNESS requirements for healthcare facilities in this jurisdiction.
-Cover: EMTALA (Emergency Medical Treatment and Labor Act, 42 U.S.C. § 1395dd) — screening, stabilization, and transfer requirements;
-CMS Emergency Preparedness Rule (42 CFR § 482.15) — emergency plan, communication plan, policies/procedures, training/testing;
-NFPA fire and life safety code requirements adopted through CMS, accrediting bodies, or STATE health/facility regulators;
-and any STATE-specific emergency preparedness requirements for healthcare facilities.
-Include penalties for EMTALA violations and state emergency management mandates.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "health_it": """Research HEALTH INFORMATION TECHNOLOGY requirements for healthcare in this jurisdiction.
-Cover: 21st Century Cures Act information blocking rules (ONC Final Rule),
-ONC Health IT Certification Program (§ 170.315),
-TEFCA (Trusted Exchange Framework and Common Agreement) participation requirements,
-state health information exchange (HIE) participation mandates,
-EHR meaningful use / Promoting Interoperability requirements,
-and state-specific health IT interoperability or data sharing laws.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "quality_reporting": """Research QUALITY REPORTING AND VALUE-BASED CARE requirements for healthcare in this jurisdiction.
-Cover: MIPS (Merit-based Incentive Payment System) and QPP (Quality Payment Program) requirements,
-HEDIS (Healthcare Effectiveness Data and Information Set) measures,
-Hospital Value-Based Purchasing (VBP) program,
-Hospital-Acquired Condition (HAC) Reduction Program,
-Hospital Readmissions Reduction Program (HRRP),
-CMS Star Ratings, and state-specific quality reporting mandates.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "cybersecurity": """Research HEALTHCARE CYBERSECURITY requirements for healthcare in this jurisdiction.
-Cover: NIST Cybersecurity Framework (CSF) as applied to healthcare,
-Health Care Industry Cybersecurity (HCIC) Act (Public Law 116-321),
-HIPAA Security Rule technical safeguards (45 CFR § 164.312),
-state data breach notification laws specific to healthcare/PHI,
-and any state-specific cybersecurity requirements for healthcare entities.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "environmental_safety": """Research ENVIRONMENTAL AND FACILITY SAFETY requirements for healthcare facilities in this jurisdiction.
-Cover: NFPA 101 (Life Safety Code) and NFPA 99 (Health Care Facilities Code) as adopted by CMS,
-OSHA healthcare-specific standards (bloodborne pathogens 29 CFR 1910.1030, hazard communication),
-EPA medical waste management (RCRA regulated medical waste),
-state medical waste disposal and tracking requirements,
-and CMS/Joint Commission environment of care standards.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "pharmacy_drugs": """Research PHARMACY AND CONTROLLED SUBSTANCES requirements in this jurisdiction.
-Cover: DEA registration and Schedule II-V prescribing/dispensing requirements (21 CFR Parts 1301-1321),
-state PDMP (Prescription Drug Monitoring Program) mandates and interstate data sharing,
-340B Drug Pricing Program compliance for covered entities,
-DSCSA (Drug Supply Chain Security Act) serialization and verification requirements,
-USP compounding standards (USP <795>, <797>, <800>),
-and state pharmacy practice act requirements.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "payer_relations": """Research PAYER RELATIONS AND MANAGED CARE requirements in this jurisdiction.
-Cover: Medicare Advantage (MA) regulatory requirements (42 CFR Part 422),
-Medicaid managed care organization (MCO) requirements (42 CFR Part 438),
-No Surprises Act (NSA) requirements including independent dispute resolution (IDR),
-state surprise billing protections,
-network adequacy requirements,
-and state-specific managed care regulations and prompt payment laws.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "reproductive_behavioral": """Research REPRODUCTIVE AND BEHAVIORAL HEALTH requirements in this jurisdiction.
-Cover: post-Dobbs state abortion laws (restrictions, protections, shield laws),
-42 CFR Part 2 (Confidentiality of Substance Use Disorder Patient Records),
-Mental Health Parity and Addiction Equity Act (MHPAEA) compliance,
-state behavioral health licensure and practice requirements,
-state reproductive health privacy protections,
-and any state-specific mental health or substance abuse treatment mandates.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "pediatric_vulnerable": """Research PEDIATRIC AND VULNERABLE POPULATION requirements in this jurisdiction.
-Cover: CAPTA (Child Abuse Prevention and Treatment Act) mandatory reporting requirements,
-Elder Justice Act provisions for healthcare settings,
-state mandatory reporting laws for child/elder abuse,
-emancipated minor and mature minor consent rules,
-pediatric-specific consent and privacy requirements,
-and state-specific protections for vulnerable populations in healthcare.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "telehealth": """Research TELEHEALTH AND DIGITAL HEALTH requirements in this jurisdiction.
-Cover: Interstate Medical Licensure Compact (IMLC) participation,
-Nurse Licensure Compact (NLC) participation,
-remote patient monitoring (RPM) reimbursement and licensure rules,
-state telehealth parity laws (coverage and reimbursement),
-state-specific telehealth prescribing rules (especially controlled substances),
-and state requirements for provider-patient relationship establishment via telehealth.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "medical_devices": """Research MEDICAL DEVICE AND EQUIPMENT requirements in this jurisdiction.
-Cover: FDA Medical Device Reporting (MDR) requirements (21 CFR Part 803),
-Unique Device Identification (UDI) system requirements,
-radiation-emitting product standards (21 CFR Parts 1000-1050),
-state radiation machine registration and inspection requirements,
-and state-specific medical device or equipment safety regulations.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "transplant_organ": """Research TRANSPLANT AND ORGAN PROCUREMENT requirements in this jurisdiction.
-Cover: National Organ Transplant Act (NOTA, 42 U.S.C. § 274),
-OPTN (Organ Procurement and Transplantation Network) bylaws and policies,
-CMS transplant program Conditions of Participation (42 CFR § 482.68-104),
-state anatomical gift acts (based on Revised Uniform Anatomical Gift Act),
-and state-specific organ/tissue donation and transplant regulations.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "antitrust": """Research HEALTHCARE ANTITRUST AND COMPETITION requirements in this jurisdiction.
-Cover: Sherman Antitrust Act application to healthcare (price fixing, market allocation),
-FTC and DOJ healthcare merger enforcement and guidelines,
-state Certificate of Need (CON) laws and requirements,
-state antitrust exemptions or immunities for healthcare entities,
-and any state-specific healthcare competition regulations.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "tax_exempt": """Research TAX-EXEMPT HEALTHCARE ORGANIZATION requirements in this jurisdiction.
-Cover: IRC § 501(r) requirements for charitable hospitals (community benefit, financial assistance policies, billing/collections limitations),
-Community Health Needs Assessment (CHNA) requirements,
-IRS Schedule H reporting obligations,
-state property tax exemptions for healthcare organizations,
-and state-specific charitable organization requirements for healthcare entities.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "language_access": """Research LANGUAGE ACCESS AND CIVIL RIGHTS requirements for healthcare in this jurisdiction.
-Cover: Title VI of the Civil Rights Act (language access for LEP patients),
-Section 1557 of the ACA (nondiscrimination in health programs),
-ADA Title III requirements for healthcare facilities,
-state language access laws for healthcare settings,
-and state-specific civil rights protections in healthcare.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "records_retention": """Research MEDICAL RECORDS RETENTION requirements in this jurisdiction.
-Cover: state medical records retention periods (adult and minor patients),
-HIPAA 6-year retention requirement for policies and documentation (45 CFR § 164.530(j)),
-EMTALA log retention requirements,
-state-specific requirements for electronic health record retention and destruction,
-and any profession-specific records retention requirements.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "marketing_comms": """Research HEALTHCARE MARKETING AND COMMUNICATIONS requirements in this jurisdiction.
-Cover: HIPAA marketing authorization requirements (45 CFR § 164.508(a)(3)),
-Medicare Communications and Marketing Guidelines (MCMG),
-TCPA (Telephone Consumer Protection Act) as applied to healthcare communications,
-state anti-kickback and fee-splitting laws as they relate to marketing,
-and state-specific healthcare advertising regulations.
-Set current_value to a SHORT summary (under 80 chars).""",
-
-        "emerging_regulatory": """Research EMERGING REGULATORY requirements for healthcare in this jurisdiction.
-Cover: AI and Software as a Medical Device (SaMD) regulations (FDA framework),
-Social Determinants of Health (SDOH) screening and reporting requirements,
-ESG (Environmental, Social, Governance) reporting requirements for healthcare,
-state genomic data privacy laws,
-state cannabis/marijuana laws affecting healthcare employers and drug testing,
-and any other emerging healthcare regulatory trends in this jurisdiction.
-Set current_value to a SHORT summary (under 80 chars).""",
-    }
-
     return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
 {context_section}
 {preemption_context}
 {industry_context}
-{category_instructions.get(category, "")}
+{RESEARCH_PROMPTS.get(category, "")}
 If there is no distinct rule beyond federal/state baseline, still return one state-level requirement that explicitly says no additional jurisdiction-specific rule applies.
 Do NOT return an empty requirements list.
 

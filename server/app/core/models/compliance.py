@@ -6,6 +6,7 @@ from datetime import datetime, date
 
 
 class ComplianceCategory(str, Enum):
+    # Labor
     minimum_wage = "minimum_wage"
     overtime = "overtime"
     sick_leave = "sick_leave"
@@ -21,6 +22,7 @@ class ComplianceCategory(str, Enum):
     leave = "leave"
     workplace_safety = "workplace_safety"
     anti_discrimination = "anti_discrimination"
+    # Healthcare
     hipaa_privacy = "hipaa_privacy"
     billing_integrity = "billing_integrity"
     clinical_safety = "clinical_safety"
@@ -29,6 +31,30 @@ class ComplianceCategory(str, Enum):
     research_consent = "research_consent"
     state_licensing = "state_licensing"
     emergency_preparedness = "emergency_preparedness"
+    # Oncology
+    radiation_safety = "radiation_safety"
+    chemotherapy_handling = "chemotherapy_handling"
+    tumor_registry = "tumor_registry"
+    oncology_clinical_trials = "oncology_clinical_trials"
+    oncology_patient_rights = "oncology_patient_rights"
+    # Medical compliance
+    health_it = "health_it"
+    quality_reporting = "quality_reporting"
+    cybersecurity = "cybersecurity"
+    environmental_safety = "environmental_safety"
+    pharmacy_drugs = "pharmacy_drugs"
+    payer_relations = "payer_relations"
+    reproductive_behavioral = "reproductive_behavioral"
+    pediatric_vulnerable = "pediatric_vulnerable"
+    telehealth = "telehealth"
+    medical_devices = "medical_devices"
+    transplant_organ = "transplant_organ"
+    antitrust = "antitrust"
+    tax_exempt = "tax_exempt"
+    language_access = "language_access"
+    records_retention = "records_retention"
+    marketing_comms = "marketing_comms"
+    emerging_regulatory = "emerging_regulatory"
 
 
 class JurisdictionLevel(str, Enum):

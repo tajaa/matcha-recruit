@@ -10,6 +10,7 @@ from google.genai import types
 
 from ...config import get_settings
 from ...database import get_connection
+from ..compliance_registry import CATEGORY_KEYS
 
 
 @dataclass
@@ -20,7 +21,10 @@ class PolicyDraftRequest:
 
 logger = logging.getLogger(__name__)
 
-POLICY_TYPES = [
+# ---------------------------------------------------------------------------
+# Generic policy types — always shown regardless of company industry
+# ---------------------------------------------------------------------------
+_GENERIC_POLICY_TYPES: List[dict] = [
     {"value": "pto_sick_leave", "label": "PTO and Sick Leave", "categories": ["sick_leave"]},
     {"value": "meal_rest_breaks", "label": "Meal and Rest Break", "categories": ["meal_breaks"]},
     {"value": "overtime", "label": "Overtime and Hours Worked", "categories": ["overtime"]},
@@ -39,6 +43,12 @@ POLICY_TYPES = [
      "scope_guidance": "Focus on professional ethics, integrity, conflicts of interest, confidentiality, workplace respect, anti-bribery/corruption, use of company resources, social media conduct, and the disciplinary process. DO NOT include leave laws (FMLA, state family/medical leave, disability leave), meal breaks, minimum wage, overtime, scheduling, PTO accrual rules, or other labor law compliance topics — those belong in separate dedicated policies."},
     {"value": "whistleblower", "label": "Whistleblower Protection", "categories": [],
      "scope_guidance": "Focus on protected activities, internal and external reporting channels, anti-retaliation protections, investigation procedures, and confidentiality of whistleblower identity. DO NOT include meal breaks, minimum wage, overtime, or scheduling regulations."},
+]
+
+# ---------------------------------------------------------------------------
+# Industry-specific policy types — shown only when company industry matches
+# ---------------------------------------------------------------------------
+_INDUSTRY_POLICY_TYPES: List[dict] = [
     # Healthcare-specific policy types
     {"value": "hipaa_privacy", "label": "HIPAA Privacy and Security", "categories": ["hipaa_privacy"], "industries": ["healthcare"]},
     {"value": "bloodborne_pathogens", "label": "Bloodborne Pathogens Exposure Control", "categories": ["clinical_safety"], "industries": ["healthcare"]},
@@ -70,6 +80,18 @@ POLICY_TYPES = [
     {"value": "marketing_comms_compliance", "label": "Healthcare Marketing & Communications", "categories": ["marketing_comms"], "industries": ["healthcare"]},
     {"value": "emerging_regulatory_compliance", "label": "Emerging Regulatory Compliance", "categories": ["emerging_regulatory"], "industries": ["healthcare"]},
 ]
+
+POLICY_TYPES = _GENERIC_POLICY_TYPES + _INDUSTRY_POLICY_TYPES
+
+# ---------------------------------------------------------------------------
+# Validate that every policy type's categories exist in the compliance registry
+# ---------------------------------------------------------------------------
+for _pt in POLICY_TYPES:
+    for _cat in _pt.get("categories", []):
+        assert _cat in CATEGORY_KEYS, (
+            f"Policy type '{_pt['value']}' references unknown category '{_cat}'. "
+            f"Add it to compliance_registry.CATEGORIES or fix the policy type."
+        )
 
 # Map free-text industry values to canonical names for filtering.
 _INDUSTRY_ALIASES: Dict[str, str] = {

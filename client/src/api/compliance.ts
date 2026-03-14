@@ -478,20 +478,8 @@ export const complianceAPI = {
     },
 };
 
-export const COMPLIANCE_CATEGORY_LABELS: Record<string, string> = {
-    minimum_wage: 'Minimum Wage',
-    overtime: 'Overtime',
-    sick_leave: 'Sick Leave',
-    meal_breaks: 'Meal & Rest Breaks',
-    pay_frequency: 'Pay Frequency',
-    final_pay: 'Final Pay',
-    minor_work_permit: 'Minor Work Permits',
-    scheduling_reporting: 'Scheduling & Reporting Time',
-    workers_comp: "Workers' Comp",
-    business_license: 'Business License',
-    tax_rate: 'Tax Rate',
-    posting_requirements: 'Posting Requirements',
-};
+import { CATEGORY_LABELS } from '../generated/complianceCategories';
+export const COMPLIANCE_CATEGORY_LABELS = CATEGORY_LABELS;
 
 export const JURISDICTION_LEVEL_LABELS: Record<string, string> = {
     federal: 'Federal',

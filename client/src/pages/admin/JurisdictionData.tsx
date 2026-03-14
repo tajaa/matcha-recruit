@@ -93,68 +93,16 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'bookmarks', label: 'Bookmarks' },
 ];
 
-const CAT_LABELS: Record<string, string> = {
-  minimum_wage: 'Min Wage',
-  overtime: 'OT',
-  sick_leave: 'Sick',
-  meal_breaks: 'Meals',
-  pay_frequency: 'Pay Freq',
-  final_pay: 'Final Pay',
-  minor_work_permit: 'Minor',
-  scheduling_reporting: 'Sched',
-  // Healthcare
-  hipaa_privacy: 'HIPAA Privacy',
-  billing_integrity: 'Billing Integrity',
-  clinical_safety: 'Clinical Safety',
-  healthcare_workforce: 'HC Workforce',
-  corporate_integrity: 'Corp Integrity',
-  research_consent: 'Research Consent',
-  state_licensing: 'State Licensing',
-  emergency_preparedness: 'Emergency Prep',
-  // Oncology
-  radiation_safety: 'Radiation Safety',
-  chemotherapy_handling: 'Chemo Handling',
-  tumor_registry: 'Tumor Registry',
-  oncology_clinical_trials: 'Onc Trials',
-  oncology_patient_rights: 'Onc Patient Rights',
-  // Medical compliance
-  health_it: 'Health IT',
-  quality_reporting: 'Quality Reporting',
-  cybersecurity: 'Cybersecurity',
-  environmental_safety: 'Env Safety',
-  pharmacy_drugs: 'Pharmacy',
-  payer_relations: 'Payer Relations',
-  reproductive_behavioral: 'Repro & Behavioral',
-  pediatric_vulnerable: 'Pediatric & Vulnerable',
-  telehealth: 'Telehealth',
-  medical_devices: 'Medical Devices',
-  transplant_organ: 'Transplant',
-  antitrust: 'Antitrust',
-  tax_exempt: 'Tax-Exempt',
-  language_access: 'Language Access',
-  records_retention: 'Records Retention',
-  marketing_comms: 'Marketing',
-  emerging_regulatory: 'Emerging',
-};
+import {
+  CATEGORY_SHORT_LABELS as CAT_LABELS,
+  HEALTHCARE_CATEGORIES,
+  ONCOLOGY_CATEGORIES,
+  MEDICAL_COMPLIANCE_CATEGORIES,
+  ALL_CATEGORY_KEYS,
+} from '../../generated/complianceCategories';
 
-const ALL_CATEGORIES = Object.keys(CAT_LABELS);
+const ALL_CATEGORIES = ALL_CATEGORY_KEYS;
 const VALID_RATE_TYPES = ['general', 'tipped', 'exempt_salary', 'hotel', 'fast_food', 'healthcare'];
-
-const HEALTHCARE_CATEGORIES = new Set([
-  'hipaa_privacy', 'billing_integrity', 'clinical_safety', 'healthcare_workforce',
-  'corporate_integrity', 'research_consent', 'state_licensing', 'emergency_preparedness',
-]);
-const ONCOLOGY_CATEGORIES = new Set([
-  'radiation_safety', 'chemotherapy_handling', 'tumor_registry',
-  'oncology_clinical_trials', 'oncology_patient_rights',
-]);
-const MEDICAL_COMPLIANCE_CATEGORIES = new Set([
-  'health_it', 'quality_reporting', 'cybersecurity', 'environmental_safety',
-  'pharmacy_drugs', 'payer_relations', 'reproductive_behavioral', 'pediatric_vulnerable',
-  'telehealth', 'medical_devices', 'transplant_organ', 'antitrust',
-  'tax_exempt', 'language_access', 'records_retention', 'marketing_comms',
-  'emerging_regulatory',
-]);
 type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology' | 'medical';
 
 const INDUSTRY_SPECIFIC_RATE_TYPES = ['tipped', 'hotel', 'fast_food', 'healthcare'];

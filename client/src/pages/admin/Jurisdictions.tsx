@@ -51,61 +51,17 @@ function displayCity(city: string): string {
     .replace(/\b\w/g, c => c.toUpperCase());
 }
 
-const categoryLabel: Record<string, string> = {
-  minimum_wage: 'Minimum Wage',
-  overtime: 'Overtime',
-  sick_leave: 'Sick Leave',
-  meal_breaks: 'Meal & Rest Breaks',
-  pay_frequency: 'Pay Frequency',
-  final_pay: 'Final Pay',
-  minor_work_permit: 'Minor Work Permits',
-  scheduling_reporting: 'Scheduling & Reporting Time',
-  leave: 'Leave',
-  workers_comp: "Workers' Comp",
-  workplace_safety: 'Workplace Safety',
-  anti_discrimination: 'Anti-Discrimination',
-  business_license: 'Business License',
-  tax_rate: 'Tax Rate',
-  posting_requirements: 'Posting Reqs',
-  hipaa_privacy: 'HIPAA Privacy & Security',
-  billing_integrity: 'Billing & Financial Integrity',
-  clinical_safety: 'Clinical & Patient Safety',
-  healthcare_workforce: 'Healthcare Workforce',
-  corporate_integrity: 'Corporate Integrity & Ethics',
-  research_consent: 'Research & Informed Consent',
-  state_licensing: 'State Licensing & Scope',
-  emergency_preparedness: 'Emergency Preparedness',
-  // Medical compliance
-  health_it: 'Health IT & Interoperability',
-  quality_reporting: 'Quality Reporting',
-  cybersecurity: 'Cybersecurity',
-  environmental_safety: 'Environmental Safety',
-  pharmacy_drugs: 'Pharmacy & Drugs',
-  payer_relations: 'Payer Relations',
-  reproductive_behavioral: 'Reproductive & Behavioral',
-  pediatric_vulnerable: 'Pediatric & Vulnerable',
-  telehealth: 'Telehealth',
-  medical_devices: 'Medical Devices',
-  transplant_organ: 'Transplant & Organ',
-  antitrust: 'Antitrust',
-  tax_exempt: 'Tax-Exempt Compliance',
-  language_access: 'Language Access',
-  records_retention: 'Records Retention',
-  marketing_comms: 'Marketing & Comms',
-  emerging_regulatory: 'Emerging Regulatory',
-};
+import {
+  CATEGORY_LABELS as categoryLabel,
+  HEALTHCARE_CATEGORIES,
+  ONCOLOGY_CATEGORIES,
+  MEDICAL_COMPLIANCE_CATEGORIES,
+} from '../../generated/complianceCategories';
 
 const medicalCategories = new Set([
-  'workers_comp', 'workplace_safety',
-  'hipaa_privacy', 'billing_integrity', 'clinical_safety',
-  'healthcare_workforce', 'corporate_integrity', 'research_consent',
-  'state_licensing', 'emergency_preparedness',
-  // Medical compliance
-  'health_it', 'quality_reporting', 'cybersecurity', 'environmental_safety',
-  'pharmacy_drugs', 'payer_relations', 'reproductive_behavioral', 'pediatric_vulnerable',
-  'telehealth', 'medical_devices', 'transplant_organ', 'antitrust',
-  'tax_exempt', 'language_access', 'records_retention', 'marketing_comms',
-  'emerging_regulatory',
+  ...HEALTHCARE_CATEGORIES,
+  ...ONCOLOGY_CATEGORIES,
+  ...MEDICAL_COMPLIANCE_CATEGORIES,
 ]);
 
 const levelColor: Record<string, string> = {
