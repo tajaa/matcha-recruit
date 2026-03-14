@@ -7,8 +7,6 @@ AI-powered recruiting and HR platform. Two domains:
 - **Matcha** — Recruiting (candidates, interviews, matching, offer letters) and HR ops (employees, onboarding, PTO, experience analytics)
 - **Core** — Auth, admin, compliance monitoring, AI chat, policies, leads agent
 
-This is the matcha app (`server/` + `client/`). A second app, Gummfit Agency (creator economy platform), lives in `gummfit-agency/` with its own server and client. See `ARCHITECTURE.md` for how the dual-app system works, and `gummfit-agency/CLAUDE.md` for gummfit-specific docs.
-
 ## Stack
 
 - **Framework**: FastAPI + uvicorn (async)
@@ -59,7 +57,59 @@ server/
 │       └── workers/
 ├── tests/
 └── alembic/
+
+client/src/
+├── api/                            # API client layer
+│   ├── client.ts                   # Main fetch wrapper, auth, all API calls
+│   ├── compliance.ts               # Compliance-specific API calls
+│   ├── chatClient.ts               # Chat WebSocket/API client
+│   ├── portal.ts                   # Portal API calls
+│   └── leave.ts                    # Leave/PTO API calls
+├── components/                     # Shared UI components
+│   ├── chat/                       # Chat UI components
+│   ├── er/                         # ER Copilot components
+│   ├── ir/                         # IR incident components
+│   ├── matcha-work/                # Recruiting-specific components
+│   └── video/                      # Video interview components
+├── context/
+│   ├── AuthContext.tsx             # Auth state, user/role/feature access
+│   └── ChatAuthContext.tsx         # Separate JWT context for chat
+├── features/                       # Feature-based modules (preferred pattern)
+│   ├── employee-intake/
+│   ├── feature-guides/
+│   └── handbook-wizard/
+├── hooks/                          # Domain-specific custom hooks
+│   ├── compliance/
+│   ├── employees/
+│   ├── er/
+│   ├── ir/
+│   └── offer-letters/
+├── pages/                          # Route-level page components
+│   ├── admin/
+│   ├── broker/
+│   ├── chat/
+│   ├── landing/
+│   └── portal/
+├── types/                          # Shared TypeScript types
+├── utils/                          # Pure utility functions
+├── data/                           # Static/seed data
+└── generated/                      # Auto-generated types (do not edit)
 ```
+
+## Frontend ↔ Backend Connection
+
+**API base URL**: `VITE_API_URL` env var, falls back to `/api` (proxied in dev via Vite).
+
+**Auth flow**:
+1. Login/register POSTs to `/api/auth/*` → returns `access_token` + `refresh_token`
+2. Tokens stored in `localStorage` as `matcha_access_token` / `matcha_refresh_token`
+3. All requests attach `Authorization: Bearer <access_token>` header
+4. On 401, `client.ts` automatically refreshes via `/api/auth/refresh` and retries
+5. `AuthContext.tsx` wraps the app — provides `user`, `hasRole()`, `hasFeature()`, `companyFeatures`
+
+**Chat uses a separate JWT** (`ChatAuthContext.tsx`) — different secret, different token lifecycle.
+
+**WebSocket**: Chat connects via WebSocket (not HTTP) — handled in `api/chatClient.ts`.
 
 ## User Roles
 
@@ -112,3 +162,8 @@ python3 run.py
 ./scripts/dev.sh
 # Matcha on :8001/:5174, Gummfit on :8003/:5175
 ```
+
+## Code Modification Rules
+
+- Before modifying any function, component, or class, you MUST identify and read all files that import or depend on it.
+- If a task involves data fetching, database schemas, or global state, you are required to load the entire schema and all relevant model files into your context *before* proposing or executing changes.
