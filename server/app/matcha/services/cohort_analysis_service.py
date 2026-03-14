@@ -37,9 +37,9 @@ def _quarter_label(dt: date) -> str:
     return f"Q{q}-{dt.year}"
 
 
-def _tenure_band(hire_date: date, today: date) -> str:
+def _tenure_band(start_date: date, today: date) -> str:
     """Classify tenure into bands."""
-    months = (today.year - hire_date.year) * 12 + (today.month - hire_date.month)
+    months = (today.year - start_date.year) * 12 + (today.month - start_date.month)
     if months < 6:
         return "0-6mo"
     elif months < 12:
@@ -69,7 +69,7 @@ async def compute_cohort_analysis(
         # Fetch all active employees
         employees = await conn.fetch(
             """
-            SELECT id, department, work_state, hire_date, employment_type
+            SELECT id, department, work_state, start_date, employment_type
             FROM employees
             WHERE org_id = $1 AND termination_date IS NULL
             """,
@@ -89,7 +89,7 @@ async def compute_cohort_analysis(
             elif dimension == "location":
                 key = emp["work_state"] or "Unknown"
             elif dimension == "hire_quarter":
-                hd = emp["hire_date"]
+                hd = emp["start_date"]
                 if hd is None:
                     key = "Unknown"
                 else:
@@ -97,7 +97,7 @@ async def compute_cohort_analysis(
                         hd = hd.date()
                     key = _quarter_label(hd)
             elif dimension == "tenure":
-                hd = emp["hire_date"]
+                hd = emp["start_date"]
                 if hd is None:
                     key = "Unknown"
                 else:
