@@ -95,6 +95,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 import {
   CATEGORY_SHORT_LABELS as CAT_LABELS,
+  CATEGORY_LABELS,
   HEALTHCARE_CATEGORIES,
   ONCOLOGY_CATEGORIES,
   MEDICAL_COMPLIANCE_CATEGORIES,
@@ -103,7 +104,19 @@ import {
 
 const ALL_CATEGORIES = ALL_CATEGORY_KEYS;
 const VALID_RATE_TYPES = ['general', 'tipped', 'exempt_salary', 'hotel', 'fast_food', 'healthcare'];
-type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology' | 'medical';
+
+function matchesSpecialtyFilter(category: string, filter: string): boolean {
+  if (filter === 'all') return true;
+  if (filter === 'general') return !HEALTHCARE_CATEGORIES.has(category) && !ONCOLOGY_CATEGORIES.has(category) && !MEDICAL_COMPLIANCE_CATEGORIES.has(category);
+  if (filter === 'healthcare') return HEALTHCARE_CATEGORIES.has(category) || ONCOLOGY_CATEGORIES.has(category);
+  if (filter === 'oncology') return ONCOLOGY_CATEGORIES.has(category);
+  if (filter === 'medical') return MEDICAL_COMPLIANCE_CATEGORIES.has(category);
+  return category === filter;
+}
+
+const HEALTHCARE_CATS_SORTED = [...HEALTHCARE_CATEGORIES].sort((a, b) => (CATEGORY_LABELS[a] || a).localeCompare(CATEGORY_LABELS[b] || b));
+const ONCOLOGY_CATS_SORTED = [...ONCOLOGY_CATEGORIES].sort((a, b) => (CATEGORY_LABELS[a] || a).localeCompare(CATEGORY_LABELS[b] || b));
+const MEDICAL_CATS_SORTED = [...MEDICAL_COMPLIANCE_CATEGORIES].sort((a, b) => (CATEGORY_LABELS[a] || a).localeCompare(CATEGORY_LABELS[b] || b));
 
 const INDUSTRY_SPECIFIC_RATE_TYPES = ['tipped', 'hotel', 'fast_food', 'healthcare'];
 
@@ -915,7 +928,7 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
   onDetailUpdate: (updated: JurisdictionDetail) => void;
 }) {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [specialtyFilter, setSpecialtyFilter] = useState<SpecialtyFilter>('all');
+  const [specialtyFilter, setSpecialtyFilter] = useState('all');
   const [drawerTab, setDrawerTab] = useState<'requirements' | 'hierarchy'>('requirements');
   const [editingReqId, setEditingReqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: '', description: '', current_value: '', effective_date: '', source_url: '', source_name: '' });
@@ -1006,14 +1019,8 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
     let reqs = selectedProfile?.rate_types?.length
       ? detail.requirements.filter(r => matchesProfileRateTypes(r.requirement_key, new Set(selectedProfile.rate_types)))
       : detail.requirements;
-    if (specialtyFilter === 'healthcare') {
-      reqs = reqs.filter(r => HEALTHCARE_CATEGORIES.has(r.category) || ONCOLOGY_CATEGORIES.has(r.category));
-    } else if (specialtyFilter === 'oncology') {
-      reqs = reqs.filter(r => ONCOLOGY_CATEGORIES.has(r.category));
-    } else if (specialtyFilter === 'medical') {
-      reqs = reqs.filter(r => MEDICAL_COMPLIANCE_CATEGORIES.has(r.category));
-    } else if (specialtyFilter === 'general') {
-      reqs = reqs.filter(r => !HEALTHCARE_CATEGORIES.has(r.category) && !ONCOLOGY_CATEGORIES.has(r.category) && !MEDICAL_COMPLIANCE_CATEGORIES.has(r.category));
+    if (specialtyFilter !== 'all') {
+      reqs = reqs.filter(r => matchesSpecialtyFilter(r.category, specialtyFilter));
     }
     const map: Record<string, JurisdictionDetail['requirements']> = {};
     for (const req of reqs) {
@@ -1058,14 +1065,8 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
     let reqs = selectedProfile?.rate_types?.length
       ? detail.requirements.filter(r => matchesProfileRateTypes(r.requirement_key, new Set(selectedProfile.rate_types)))
       : detail.requirements;
-    if (specialtyFilter === 'healthcare') {
-      reqs = reqs.filter(r => HEALTHCARE_CATEGORIES.has(r.category) || ONCOLOGY_CATEGORIES.has(r.category));
-    } else if (specialtyFilter === 'oncology') {
-      reqs = reqs.filter(r => ONCOLOGY_CATEGORIES.has(r.category));
-    } else if (specialtyFilter === 'medical') {
-      reqs = reqs.filter(r => MEDICAL_COMPLIANCE_CATEGORIES.has(r.category));
-    } else if (specialtyFilter === 'general') {
-      reqs = reqs.filter(r => !HEALTHCARE_CATEGORIES.has(r.category) && !ONCOLOGY_CATEGORIES.has(r.category) && !MEDICAL_COMPLIANCE_CATEGORIES.has(r.category));
+    if (specialtyFilter !== 'all') {
+      reqs = reqs.filter(r => matchesSpecialtyFilter(r.category, specialtyFilter));
     }
     const map: Record<string, Record<string, JurisdictionDetail['requirements']>> = {};
     for (const req of reqs) {
@@ -1150,14 +1151,28 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                     </select>
                     <select
                       value={specialtyFilter}
-                      onChange={e => setSpecialtyFilter(e.target.value as SpecialtyFilter)}
+                      onChange={e => setSpecialtyFilter(e.target.value)}
                       className={`${t.select} text-xs px-2.5 py-1`}
                     >
                       <option value="all">All Specialties</option>
-                      <option value="general">General Labor</option>
-                      <option value="healthcare">Healthcare</option>
-                      <option value="oncology">Oncology</option>
-                      <option value="medical">Medical Compliance</option>
+                      <option value="general">General / Labor</option>
+                      <option value="healthcare">All Healthcare</option>
+                      <option value="medical">All Medical Compliance</option>
+                      <optgroup label="Healthcare">
+                        {HEALTHCARE_CATS_SORTED.map(k => (
+                          <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Oncology">
+                        {ONCOLOGY_CATS_SORTED.map(k => (
+                          <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="Medical Compliance">
+                        {MEDICAL_CATS_SORTED.map(k => (
+                          <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
+                        ))}
+                      </optgroup>
                     </select>
                     <button
                       onClick={onOpenProfileEditor}

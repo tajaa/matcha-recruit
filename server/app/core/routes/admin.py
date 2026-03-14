@@ -4696,77 +4696,73 @@ async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
                 failed_categories: List[str] = []
                 category_counts: Dict[str, int] = {}
 
-                batch_size = 4
-                batches = [missing[i:i + batch_size] for i in range(0, len(missing), batch_size)]
+                # Mark all as researching — they run in parallel inside
+                # research_location_compliance (concurrency 6-8, timeout+retry built in)
+                for cat in missing:
+                    yield _to_sse({
+                        "type": "category_status",
+                        "category": cat,
+                        "status": "researching",
+                    })
 
-                for batch_idx, batch in enumerate(batches, start=1):
-                    # Mark batch categories as researching
-                    for cat in batch:
-                        yield _to_sse({
-                            "type": "category_status",
-                            "category": cat,
-                            "status": "researching",
-                        })
+                try:
+                    reqs = await service.research_location_compliance(
+                        city=city,
+                        state=state,
+                        county=county,
+                        categories=missing,
+                        source_context=source_context,
+                        corrections_context=corrections_context,
+                        preemption_rules=preemption_rules,
+                        has_local_ordinance=has_local_ordinance,
+                    )
+                    reqs = reqs or []
 
-                    try:
-                        reqs = await service.research_location_compliance(
-                            city=city,
-                            state=state,
-                            county=county,
-                            categories=batch,
-                            source_context=source_context,
-                            corrections_context=corrections_context,
-                            preemption_rules=preemption_rules,
-                            has_local_ordinance=has_local_ordinance,
-                        )
-                        reqs = reqs or []
+                    for req in reqs:
+                        _clamp_varchar_fields(req)
+                        cat = req.get("category", "")
+                        if not req.get("applicable_industries"):
+                            tag = MC_INDUSTRY_TAGS.get(cat, "healthcare")
+                            req["applicable_industries"] = [tag]
 
-                        for req in reqs:
-                            _clamp_varchar_fields(req)
-                            cat = req.get("category", "")
-                            if not req.get("applicable_industries"):
-                                tag = MC_INDUSTRY_TAGS.get(cat, "healthcare")
-                                req["applicable_industries"] = [tag]
+                    # Count results per category
+                    for r in reqs:
+                        c = r.get("category", "unknown")
+                        category_counts[c] = category_counts.get(c, 0) + 1
 
-                        # Count results per category in this batch
-                        batch_cat_counts: Dict[str, int] = {}
-                        for r in reqs:
-                            c = r.get("category", "unknown")
-                            batch_cat_counts[c] = batch_cat_counts.get(c, 0) + 1
+                    if reqs:
+                        await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                        total_new = len(reqs)
 
-                        if reqs:
-                            await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
-                            total_new += len(reqs)
+                    # Emit per-category status
+                    for cat in missing:
+                        count = category_counts.get(cat, 0)
+                        if count > 0:
+                            yield _to_sse({
+                                "type": "category_status",
+                                "category": cat,
+                                "status": "complete",
+                                "count": count,
+                            })
+                        else:
+                            yield _to_sse({
+                                "type": "category_status",
+                                "category": cat,
+                                "status": "empty",
+                            })
+                            failed_categories.append(cat)
 
-                        # Emit per-category status
-                        for cat in batch:
-                            count = batch_cat_counts.get(cat, 0)
-                            category_counts[cat] = count
-                            if count > 0:
-                                yield _to_sse({
-                                    "type": "category_status",
-                                    "category": cat,
-                                    "status": "complete",
-                                    "count": count,
-                                })
-                            else:
-                                yield _to_sse({
-                                    "type": "category_status",
-                                    "category": cat,
-                                    "status": "empty",
-                                })
-                                failed_categories.append(cat)
-
-                    except Exception as e:
-                        logger.warning("Medical compliance batch %d failed: %s", batch_idx, e)
-                        for cat in batch:
+                except Exception as e:
+                    logger.warning("Medical compliance research failed: %s", e)
+                    for cat in missing:
+                        if cat not in category_counts:
                             yield _to_sse({
                                 "type": "category_status",
                                 "category": cat,
                                 "status": "failed",
                                 "error": str(e),
                             })
-                        failed_categories.extend(batch)
+                    failed_categories = [c for c in missing if c not in category_counts]
 
                 # Sync to linked locations
                 linked = await conn.fetch(

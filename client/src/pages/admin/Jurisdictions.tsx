@@ -1445,53 +1445,19 @@ export function Jurisdictions() {
                                     </div>
 
                                     {Object.keys(categoryProgress).length > 0 && (
-                                      <div className="px-4 py-3 border-b border-white/5 bg-zinc-900/40">
-                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1">
-                                          {Object.entries(categoryProgress).map(([key, cat]) => {
-                                            const isResearching = cat.status === 'researching';
-                                            const isComplete = cat.status === 'complete';
-                                            const isFailed = cat.status === 'failed';
-                                            const isEmpty = cat.status === 'empty';
-
-                                            let bg = 'bg-zinc-800/50 border-zinc-700/30';
-                                            let textColor = 'text-zinc-500';
-                                            let statusText = '\u2014';
-                                            let statusColor = 'text-zinc-600';
-
-                                            if (isResearching) {
-                                              bg = 'bg-blue-500/5 border-blue-500/20';
-                                              textColor = 'text-blue-300';
-                                              statusText = '...';
-                                              statusColor = 'text-blue-400';
-                                            } else if (isComplete) {
-                                              bg = 'bg-emerald-500/5 border-emerald-500/20';
-                                              textColor = 'text-emerald-300';
-                                              statusText = `${cat.count}`;
-                                              statusColor = 'text-emerald-400';
-                                            } else if (isFailed) {
-                                              bg = 'bg-red-500/5 border-red-500/20';
-                                              textColor = 'text-red-300';
-                                              statusText = '\u2716';
-                                              statusColor = 'text-red-400';
-                                            } else if (isEmpty) {
-                                              bg = 'bg-amber-500/5 border-amber-500/20';
-                                              textColor = 'text-amber-300';
-                                              statusText = '0';
-                                              statusColor = 'text-amber-400';
-                                            }
-
-                                            return (
-                                              <div
-                                                key={key}
-                                                className={`flex items-center justify-between px-2 py-1.5 border text-[9px] font-mono ${bg} ${isResearching ? 'animate-pulse' : ''}`}
-                                                title={isFailed ? cat.error : `${cat.label}: ${cat.status}`}
-                                              >
-                                                <span className={`truncate ${textColor}`}>{cat.label}</span>
-                                                <span className={`ml-1 font-bold ${statusColor}`}>{statusText}</span>
-                                              </div>
-                                            );
-                                          })}
-                                        </div>
+                                      <div className="px-4 py-2 border-b border-white/5 bg-[#0a0a0a] font-mono text-[10px] leading-relaxed whitespace-pre">
+                                        {Object.entries(categoryProgress).map(([key, cat]) => {
+                                          const pct = cat.status === 'complete' ? '100%' : cat.status === 'failed' ? '  0%' : cat.status === 'empty' ? '  0%' : cat.status === 'researching' ? ' ...' : '  --';
+                                          const color = cat.status === 'complete' ? 'text-emerald-400' : cat.status === 'failed' ? 'text-red-400' : cat.status === 'researching' ? 'text-blue-400' : cat.status === 'empty' ? 'text-amber-400' : 'text-zinc-600';
+                                          return (
+                                            <div key={key} className="flex">
+                                              <span className="text-zinc-500 w-[260px] truncate">{cat.label}</span>
+                                              <span className={color}>{pct}</span>
+                                              {cat.status === 'complete' && <span className="text-zinc-600 ml-2">({cat.count} reqs)</span>}
+                                              {cat.status === 'failed' && <span className="text-red-400/60 ml-2">err</span>}
+                                            </div>
+                                          );
+                                        })}
                                       </div>
                                     )}
 

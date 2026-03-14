@@ -26,7 +26,7 @@ from ..compliance_registry import (
 )
 
 # Timeout for individual Gemini API calls (seconds)
-GEMINI_CALL_TIMEOUT = 30
+GEMINI_CALL_TIMEOUT = 45
 
 DEFAULT_LITE_MODEL = "gemini-3.1-flash-lite-preview"
 DEFAULT_LIGHT_MODEL = "gemini-3-flash-preview"
