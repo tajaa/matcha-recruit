@@ -1671,16 +1671,22 @@ async def _research_medical_compliance_for_jurisdiction(
     failed_categories: List[str] = []
     added_requirements: List[Dict[str, Any]] = []
 
-    for idx, category in enumerate(missing, start=1):
+    # Batch categories into groups of 4 to reduce Gemini calls (4-5 calls
+    # instead of 17) while keeping each prompt small enough for accuracy.
+    batch_size = 4
+    batches = [missing[i:i + batch_size] for i in range(0, len(missing), batch_size)]
+
+    for batch_idx, batch in enumerate(batches, start=1):
+        batch_label = ", ".join(c.replace("_", " ") for c in batch)
         print(
-            f"[Medical Compliance] [{idx}/{len(missing)}] Researching {category} "
-            f"for {location_name}..."
+            f"[Medical Compliance] [batch {batch_idx}/{len(batches)}] Researching "
+            f"{batch_label} for {location_name}..."
         )
         if progress_callback:
             progress_callback(
-                idx,
-                len(missing),
-                f"Researching {category.replace('_', ' ')} for {location_name}...",
+                batch_idx,
+                len(batches),
+                f"Researching {batch_label} for {location_name}...",
             )
 
         try:
@@ -1688,7 +1694,7 @@ async def _research_medical_compliance_for_jurisdiction(
                 city=city,
                 state=state,
                 county=county,
-                categories=[category],
+                categories=batch,
                 source_context=source_context,
                 corrections_context=corrections_context,
                 preemption_rules=preemption_rules,
@@ -1696,25 +1702,28 @@ async def _research_medical_compliance_for_jurisdiction(
             )
             reqs = reqs or []
 
-            tag = MEDICAL_COMPLIANCE_INDUSTRY_TAGS.get(category, "healthcare")
             for req in reqs:
                 _clamp_varchar_fields(req)
+                cat = req.get("category", "")
                 if not req.get("applicable_industries"):
+                    tag = MEDICAL_COMPLIANCE_INDUSTRY_TAGS.get(cat, "healthcare")
                     req["applicable_industries"] = [tag]
 
             if reqs:
                 await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
                 total_new += len(reqs)
                 added_requirements.extend(reqs)
-                print(
-                    f"[Medical Compliance]   -> {len(reqs)} requirements saved "
-                    f"for {category}"
-                )
+                by_cat: Dict[str, int] = {}
+                for r in reqs:
+                    by_cat[r.get("category", "unknown")] = by_cat.get(r.get("category", "unknown"), 0) + 1
+                for cat, count in sorted(by_cat.items()):
+                    print(f"[Medical Compliance]   -> {count} requirements saved for {cat}")
             else:
-                print(f"[Medical Compliance]   -> No results for {category}")
+                print(f"[Medical Compliance]   -> No results for batch")
+                failed_categories.extend(batch)
         except Exception as e:
-            failed_categories.append(category)
-            print(f"[Medical Compliance]   -> Error researching {category}: {e}")
+            failed_categories.extend(batch)
+            print(f"[Medical Compliance]   -> Error researching batch: {e}")
 
     print(
         f"[Medical Compliance] Complete for {location_name}: {total_new} new, "

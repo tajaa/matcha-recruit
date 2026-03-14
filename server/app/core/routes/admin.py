@@ -7,7 +7,7 @@ import logging
 import re
 import secrets
 from datetime import datetime, timedelta
-from typing import Optional, Any, AsyncGenerator
+from typing import Dict, List, Optional, Any, AsyncGenerator
 from uuid import UUID
 
 import asyncpg
@@ -50,6 +50,7 @@ KNOWN_PLATFORM_ITEMS = {
     "onboarding", "employees", "policies", "handbooks", "time_off",
     "accommodations", "er_copilot", "incidents", "risk_assessment",
     "compliance", "jurisdictions", "blog", "hr_news", "matcha_work",
+    "offer_letters",
 }
 
 class PlatformFeaturesUpdate(BaseModel):
@@ -4613,20 +4614,26 @@ async def check_jurisdiction_specialty(jurisdiction_id: UUID):
 
 @router.post("/jurisdictions/{jurisdiction_id}/check-medical-compliance", dependencies=[Depends(require_admin)])
 async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
-    """Run medical compliance research (17 categories) for a jurisdiction. Returns SSE stream."""
+    """Run medical compliance research (17 categories) for a jurisdiction. Returns SSE stream with per-category progress."""
+    from ..compliance_registry import MEDICAL_COMPLIANCE_CATEGORIES, INDUSTRY_TAGS as MC_INDUSTRY_TAGS, CATEGORY_LABELS
     from ..services.compliance_service import (
-        _research_medical_compliance_for_jurisdiction,
+        _lookup_has_local_ordinance,
+        _clamp_varchar_fields,
+        _upsert_requirements_additive,
         _jurisdiction_row_to_dict,
         _filter_requirements_for_company,
         _filter_city_level_requirements,
         _filter_with_preemption,
         _normalize_requirement_categories,
         _sync_requirements_to_location,
-        _lookup_has_local_ordinance,
+        get_recent_corrections,
+        format_corrections_for_prompt,
     )
+    from ..services.gemini_compliance import get_gemini_compliance_service
+    from ..services.jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
 
     async with get_connection() as conn:
-        j = await conn.fetchrow("SELECT id, city, state FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        j = await conn.fetchrow("SELECT id, city, state, county FROM jurisdictions WHERE id = $1", jurisdiction_id)
         if not j:
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
         location_label = f"{_format_city_label(j['city'])}, {j['state']}"
@@ -4636,25 +4643,130 @@ async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
             async with get_connection() as conn:
                 yield _to_sse({"type": "started", "location": location_label})
 
-                # Medical compliance research
+                city = j["city"]
+                state = j["state"]
+                county = j.get("county")
+
+                # Determine which categories still need research
+                all_medical_cats = sorted(MEDICAL_COMPLIANCE_CATEGORIES)
+                existing = await conn.fetch(
+                    "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                    jurisdiction_id,
+                )
+                existing_cats = {r["category"] for r in existing}
+                missing = [cat for cat in all_medical_cats if cat not in existing_cats]
+
+                # Emit manifest: every category with its initial status
                 yield _to_sse({
-                    "type": "researching",
-                    "message": f"Researching medical compliance for {location_label}...",
+                    "type": "category_manifest",
+                    "categories": [
+                        {
+                            "key": cat,
+                            "label": CATEGORY_LABELS.get(cat, cat),
+                            "status": "pending" if cat in missing else "complete",
+                        }
+                        for cat in all_medical_cats
+                    ],
                 })
+
+                if not missing:
+                    yield _to_sse({"type": "completed", "message": "All medical compliance categories already present.", "total_new": 0, "failed": []})
+                    yield "data: [DONE]\n\n"
+                    return
+
+                # Gather context for Gemini prompts
+                has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
+                known_sources = await get_known_sources(conn, jurisdiction_id)
+                source_context = build_context_prompt(known_sources)
+                source_context += get_global_authority_sources(list(MEDICAL_COMPLIANCE_CATEGORIES))
+                corrections = await get_recent_corrections(jurisdiction_id)
+                corrections_context = format_corrections_for_prompt(corrections)
+
                 try:
-                    mc_result = await _research_medical_compliance_for_jurisdiction(
-                        conn, jurisdiction_id
+                    preemption_rows = await conn.fetch(
+                        "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+                        state.upper(),
                     )
-                    mc_new = mc_result.get("new", 0)
-                    mc_failed = mc_result.get("failed", [])
-                    yield _to_sse({
-                        "type": "repository_refresh",
-                        "message": f"Medical compliance: +{mc_new} requirement(s) added."
-                            + (f" Failed: {', '.join(mc_failed)}" if mc_failed else ""),
-                    })
-                except Exception as exc:
-                    logger.warning("Medical compliance research failed: %s", exc)
-                    yield _to_sse({"type": "warning", "message": f"Medical compliance research failed: {exc}"})
+                    preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+                except Exception:
+                    preemption_rules = {}
+
+                service = get_gemini_compliance_service()
+                total_new = 0
+                failed_categories: List[str] = []
+                category_counts: Dict[str, int] = {}
+
+                batch_size = 4
+                batches = [missing[i:i + batch_size] for i in range(0, len(missing), batch_size)]
+
+                for batch_idx, batch in enumerate(batches, start=1):
+                    # Mark batch categories as researching
+                    for cat in batch:
+                        yield _to_sse({
+                            "type": "category_status",
+                            "category": cat,
+                            "status": "researching",
+                        })
+
+                    try:
+                        reqs = await service.research_location_compliance(
+                            city=city,
+                            state=state,
+                            county=county,
+                            categories=batch,
+                            source_context=source_context,
+                            corrections_context=corrections_context,
+                            preemption_rules=preemption_rules,
+                            has_local_ordinance=has_local_ordinance,
+                        )
+                        reqs = reqs or []
+
+                        for req in reqs:
+                            _clamp_varchar_fields(req)
+                            cat = req.get("category", "")
+                            if not req.get("applicable_industries"):
+                                tag = MC_INDUSTRY_TAGS.get(cat, "healthcare")
+                                req["applicable_industries"] = [tag]
+
+                        # Count results per category in this batch
+                        batch_cat_counts: Dict[str, int] = {}
+                        for r in reqs:
+                            c = r.get("category", "unknown")
+                            batch_cat_counts[c] = batch_cat_counts.get(c, 0) + 1
+
+                        if reqs:
+                            await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                            total_new += len(reqs)
+
+                        # Emit per-category status
+                        for cat in batch:
+                            count = batch_cat_counts.get(cat, 0)
+                            category_counts[cat] = count
+                            if count > 0:
+                                yield _to_sse({
+                                    "type": "category_status",
+                                    "category": cat,
+                                    "status": "complete",
+                                    "count": count,
+                                })
+                            else:
+                                yield _to_sse({
+                                    "type": "category_status",
+                                    "category": cat,
+                                    "status": "empty",
+                                })
+                                failed_categories.append(cat)
+
+                    except Exception as e:
+                        logger.warning("Medical compliance batch %d failed: %s", batch_idx, e)
+                        for cat in batch:
+                            yield _to_sse({
+                                "type": "category_status",
+                                "category": cat,
+                                "status": "failed",
+                                "error": str(e),
+                            })
+                        failed_categories.extend(batch)
 
                 # Sync to linked locations
                 linked = await conn.fetch(
@@ -4675,8 +4787,7 @@ async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
                         jurisdiction_id,
                     )
                     requirements = [_jurisdiction_row_to_dict(dict(r)) for r in rows]
-                    state = j["state"]
-                    has_local = await _lookup_has_local_ordinance(conn, j["city"], state)
+                    has_local = await _lookup_has_local_ordinance(conn, city, state)
                     if has_local is False:
                         requirements = _filter_city_level_requirements(requirements, state)
                     _normalize_requirement_categories(requirements)
@@ -4695,7 +4806,13 @@ async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
                         "message": f"Synced to {len(linked)} location(s), {total_synced} update(s).",
                     })
 
-                yield _to_sse({"type": "completed", "message": "Medical compliance research complete."})
+                yield _to_sse({
+                    "type": "completed",
+                    "message": "Medical compliance research complete.",
+                    "total_new": total_new,
+                    "failed": failed_categories,
+                    "category_counts": category_counts,
+                })
         except Exception:
             logger.error("Medical compliance check failed for %s", jurisdiction_id, exc_info=True)
             yield _to_sse({"type": "error", "message": "Medical compliance research failed"})

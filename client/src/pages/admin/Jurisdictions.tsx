@@ -342,6 +342,7 @@ export function Jurisdictions() {
   const [checkMessages, setCheckMessages] = useState<CheckMessage[]>([]);
   const [specialtyId, setSpecialtyId] = useState<string | null>(null);
   const [medicalComplianceId, setMedicalComplianceId] = useState<string | null>(null);
+  const [categoryProgress, setCategoryProgress] = useState<Record<string, { label: string; status: string; count: number; error?: string }>>({});
   const [topMetroRunning, setTopMetroRunning] = useState(false);
   const [topMetroCities, setTopMetroCities] = useState<Record<string, MetroRunCity>>({});
   const [topMetroOrder, setTopMetroOrder] = useState<string[]>([]);
@@ -729,6 +730,7 @@ export function Jurisdictions() {
     setMedicalComplianceId(id);
     setCheckTargetId(id);
     setCheckMessages([]);
+    setCategoryProgress({});
     setExpanded(id);
     try {
       const response = await adminJurisdictions.checkMedicalCompliance(id);
@@ -749,6 +751,23 @@ export function Jurisdictions() {
           if (payload === '[DONE]') continue;
           try {
             const event = JSON.parse(payload);
+            if (event.type === 'category_manifest') {
+              const initial: Record<string, { label: string; status: string; count: number }> = {};
+              for (const cat of event.categories) {
+                initial[cat.key] = { label: cat.label, status: 'pending', count: 0 };
+              }
+              setCategoryProgress(initial);
+            } else if (event.type === 'category_status') {
+              setCategoryProgress(prev => ({
+                ...prev,
+                [event.category]: {
+                  ...prev[event.category],
+                  status: event.status,
+                  count: event.count ?? prev[event.category]?.count ?? 0,
+                  error: event.error,
+                },
+              }));
+            }
             setCheckMessages(prev => [...prev, event]);
           } catch { /* skip malformed */ }
         }
@@ -1424,6 +1443,57 @@ export function Jurisdictions() {
                                         </div>
                                       )}
                                     </div>
+
+                                    {Object.keys(categoryProgress).length > 0 && (
+                                      <div className="px-4 py-3 border-b border-white/5 bg-zinc-900/40">
+                                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-1">
+                                          {Object.entries(categoryProgress).map(([key, cat]) => {
+                                            const isResearching = cat.status === 'researching';
+                                            const isComplete = cat.status === 'complete';
+                                            const isFailed = cat.status === 'failed';
+                                            const isEmpty = cat.status === 'empty';
+
+                                            let bg = 'bg-zinc-800/50 border-zinc-700/30';
+                                            let textColor = 'text-zinc-500';
+                                            let statusText = '\u2014';
+                                            let statusColor = 'text-zinc-600';
+
+                                            if (isResearching) {
+                                              bg = 'bg-blue-500/5 border-blue-500/20';
+                                              textColor = 'text-blue-300';
+                                              statusText = '...';
+                                              statusColor = 'text-blue-400';
+                                            } else if (isComplete) {
+                                              bg = 'bg-emerald-500/5 border-emerald-500/20';
+                                              textColor = 'text-emerald-300';
+                                              statusText = `${cat.count}`;
+                                              statusColor = 'text-emerald-400';
+                                            } else if (isFailed) {
+                                              bg = 'bg-red-500/5 border-red-500/20';
+                                              textColor = 'text-red-300';
+                                              statusText = '\u2716';
+                                              statusColor = 'text-red-400';
+                                            } else if (isEmpty) {
+                                              bg = 'bg-amber-500/5 border-amber-500/20';
+                                              textColor = 'text-amber-300';
+                                              statusText = '0';
+                                              statusColor = 'text-amber-400';
+                                            }
+
+                                            return (
+                                              <div
+                                                key={key}
+                                                className={`flex items-center justify-between px-2 py-1.5 border text-[9px] font-mono ${bg} ${isResearching ? 'animate-pulse' : ''}`}
+                                                title={isFailed ? cat.error : `${cat.label}: ${cat.status}`}
+                                              >
+                                                <span className={`truncate ${textColor}`}>{cat.label}</span>
+                                                <span className={`ml-1 font-bold ${statusColor}`}>{statusText}</span>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      </div>
+                                    )}
 
                                     <div className="max-h-[300px] overflow-y-auto p-4 space-y-1 bg-[#0a0a0a] text-[11px] leading-relaxed flex flex-col-reverse">
                                       {[...checkMessages].reverse().map((msg, idx) => {
