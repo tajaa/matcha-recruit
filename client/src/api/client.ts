@@ -1800,6 +1800,27 @@ export const credentialExpirations = {
     request<CredentialExpirationsResponse>('/dashboard/credential-expirations'),
 };
 
+// Upcoming Deadlines
+export interface UpcomingItem {
+  category: string;
+  title: string;
+  subtitle: string | null;
+  date: string;
+  days_until: number;
+  severity: 'critical' | 'warning' | 'info';
+  link: string;
+}
+
+export interface UpcomingResponse {
+  items: UpcomingItem[];
+  total: number;
+}
+
+export const upcomingDeadlines = {
+  get: (days = 90): Promise<UpcomingResponse> =>
+    request<UpcomingResponse>(`/dashboard/upcoming?days=${days}`),
+};
+
 // Jurisdiction Admin API
 export interface JurisdictionLocation {
   id: string;

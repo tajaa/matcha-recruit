@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import type { UserRole } from '../types';
 import type { MWThread } from '../types/matcha-work';
 import { matchaWork } from '../api/client';
-import { HelpCircle, X, ChevronDown, Sliders, Sun, Moon, Bell, AlertTriangle } from 'lucide-react';
+import { HelpCircle, X, ChevronDown, Sliders, Sun, Moon, Bell, AlertTriangle, Clock } from 'lucide-react';
 import { PendingApproval } from './PendingApproval';
 import { PlatformFeatureManager } from '../pages/admin/PlatformFeatureManager';
 
@@ -48,6 +48,13 @@ const navSections: NavSection[] = [
         roles: ['admin', 'client'],
         helpText: 'Recent activity in your company.',
         icon: <Bell className="w-4 h-4" />,
+      },
+      {
+        path: '/app/matcha/upcoming',
+        label: 'Upcoming',
+        roles: ['admin', 'client'],
+        helpText: 'All time-sensitive deadlines across the platform.',
+        icon: <Clock className="w-4 h-4" />,
       },
     ],
   },
