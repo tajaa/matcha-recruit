@@ -75,6 +75,24 @@ const categoryLabel: Record<string, string> = {
   research_consent: 'Research & Informed Consent',
   state_licensing: 'State Licensing & Scope',
   emergency_preparedness: 'Emergency Preparedness',
+  // Medical compliance
+  health_it: 'Health IT & Interoperability',
+  quality_reporting: 'Quality Reporting',
+  cybersecurity: 'Cybersecurity',
+  environmental_safety: 'Environmental Safety',
+  pharmacy_drugs: 'Pharmacy & Drugs',
+  payer_relations: 'Payer Relations',
+  reproductive_behavioral: 'Reproductive & Behavioral',
+  pediatric_vulnerable: 'Pediatric & Vulnerable',
+  telehealth: 'Telehealth',
+  medical_devices: 'Medical Devices',
+  transplant_organ: 'Transplant & Organ',
+  antitrust: 'Antitrust',
+  tax_exempt: 'Tax-Exempt Compliance',
+  language_access: 'Language Access',
+  records_retention: 'Records Retention',
+  marketing_comms: 'Marketing & Comms',
+  emerging_regulatory: 'Emerging Regulatory',
 };
 
 const medicalCategories = new Set([
@@ -82,6 +100,12 @@ const medicalCategories = new Set([
   'hipaa_privacy', 'billing_integrity', 'clinical_safety',
   'healthcare_workforce', 'corporate_integrity', 'research_consent',
   'state_licensing', 'emergency_preparedness',
+  // Medical compliance
+  'health_it', 'quality_reporting', 'cybersecurity', 'environmental_safety',
+  'pharmacy_drugs', 'payer_relations', 'reproductive_behavioral', 'pediatric_vulnerable',
+  'telehealth', 'medical_devices', 'transplant_organ', 'antitrust',
+  'tax_exempt', 'language_access', 'records_retention', 'marketing_comms',
+  'emerging_regulatory',
 ]);
 
 const levelColor: Record<string, string> = {
@@ -361,6 +385,7 @@ export function Jurisdictions() {
   const [checkTargetId, setCheckTargetId] = useState<string | null>(null);
   const [checkMessages, setCheckMessages] = useState<CheckMessage[]>([]);
   const [specialtyId, setSpecialtyId] = useState<string | null>(null);
+  const [medicalComplianceId, setMedicalComplianceId] = useState<string | null>(null);
   const [topMetroRunning, setTopMetroRunning] = useState(false);
   const [topMetroCities, setTopMetroCities] = useState<Record<string, MetroRunCity>>({});
   const [topMetroOrder, setTopMetroOrder] = useState<string[]>([]);
@@ -666,7 +691,7 @@ export function Jurisdictions() {
   };
 
   const handleCheck = async (id: string) => {
-    if (topMetroRunning || checkingId) return;
+    if (topMetroRunning || checkingId || medicalComplianceId) return;
     setCheckingId(id);
     setCheckTargetId(id);
     setCheckMessages([]);
@@ -705,7 +730,7 @@ export function Jurisdictions() {
   };
 
   const handleSpecialtyResearch = async (id: string) => {
-    if (topMetroRunning || checkingId || specialtyId) return;
+    if (topMetroRunning || checkingId || specialtyId || medicalComplianceId) return;
     setSpecialtyId(id);
     setCheckTargetId(id);
     setCheckMessages([]);
@@ -740,6 +765,45 @@ export function Jurisdictions() {
       setCheckMessages(prev => [...prev, { type: 'error', message: msg }]);
     } finally {
       setSpecialtyId(null);
+    }
+  };
+
+  const handleMedicalComplianceResearch = async (id: string) => {
+    if (topMetroRunning || checkingId || specialtyId || medicalComplianceId) return;
+    setMedicalComplianceId(id);
+    setCheckTargetId(id);
+    setCheckMessages([]);
+    setExpanded(id);
+    try {
+      const response = await adminJurisdictions.checkMedicalCompliance(id);
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No response body');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith('data: ')) continue;
+          const payload = trimmed.slice(6);
+          if (payload === '[DONE]') continue;
+          try {
+            const event = JSON.parse(payload);
+            setCheckMessages(prev => [...prev, event]);
+          } catch { /* skip malformed */ }
+        }
+      }
+      setDetailCache({});
+      await fetchData();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Failed to run medical compliance research';
+      setCheckMessages(prev => [...prev, { type: 'error', message: msg }]);
+    } finally {
+      setMedicalComplianceId(null);
     }
   };
 
@@ -1315,7 +1379,7 @@ export function Jurisdictions() {
                                     <div className="flex items-center gap-2 shrink-0 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleCheck(j.id); }}
-                                        disabled={topMetroRunning || checkingId !== null || specialtyId !== null || deletingId !== null}
+                                        disabled={topMetroRunning || checkingId !== null || specialtyId !== null || medicalComplianceId !== null || deletingId !== null}
                                         className={`relative px-3 py-2 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
                                           checkingId === j.id ? 'text-blue-300 border-blue-500/40 bg-blue-500/5' : 'text-zinc-500 border-zinc-700/60 hover:text-white hover:border-zinc-500 disabled:opacity-30'
                                         }`}
@@ -1331,7 +1395,7 @@ export function Jurisdictions() {
                                       </button>
                                       <button
                                         onClick={(e) => { e.stopPropagation(); handleSpecialtyResearch(j.id); }}
-                                        disabled={topMetroRunning || checkingId !== null || specialtyId !== null || deletingId !== null}
+                                        disabled={topMetroRunning || checkingId !== null || specialtyId !== null || medicalComplianceId !== null || deletingId !== null}
                                         className={`relative px-3 py-2 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
                                           specialtyId === j.id ? 'text-purple-300 border-purple-500/40 bg-purple-500/5' : 'text-zinc-500 border-zinc-700/60 hover:text-purple-300 hover:border-purple-500/40 disabled:opacity-30'
                                         }`}
@@ -1347,8 +1411,25 @@ export function Jurisdictions() {
                                         </span>
                                       </button>
                                       <button
+                                        onClick={(e) => { e.stopPropagation(); handleMedicalComplianceResearch(j.id); }}
+                                        disabled={topMetroRunning || checkingId !== null || specialtyId !== null || medicalComplianceId !== null || deletingId !== null}
+                                        className={`relative px-3 py-2 text-[9px] tracking-[0.1em] uppercase font-mono border overflow-hidden transition-all duration-200 ${
+                                          medicalComplianceId === j.id ? 'text-teal-300 border-teal-500/40 bg-teal-500/5' : 'text-zinc-500 border-zinc-700/60 hover:text-teal-300 hover:border-teal-500/40 disabled:opacity-30'
+                                        }`}
+                                        title="Research health specs (17 categories)"
+                                      >
+                                        {medicalComplianceId === j.id && <span className="absolute inset-0 bg-gradient-to-r from-transparent via-teal-500/10 to-transparent" style={{ animation: 'scanX 1.5s ease-in-out infinite' }} />}
+                                        <span className="relative flex items-center gap-1.5">
+                                          {medicalComplianceId === j.id ? (
+                                            <><svg className="w-3 h-3 animate-spin" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" strokeDasharray="28" strokeDashoffset="8" strokeLinecap="round" /></svg>Health Specs</>
+                                          ) : (
+                                            <><svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v6m3-3H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>Health Specs</>
+                                          )}
+                                        </span>
+                                      </button>
+                                      <button
                                         onClick={(e) => { e.stopPropagation(); void handleDelete(j); }}
-                                        disabled={topMetroRunning || checkingId !== null || deletingId !== null}
+                                        disabled={topMetroRunning || checkingId !== null || medicalComplianceId !== null || deletingId !== null}
                                         className={`p-2 border transition-colors disabled:opacity-30 ${deletingId === j.id ? 'text-red-300 border-red-500/40 bg-red-500/5' : 'text-zinc-700 border-zinc-800 hover:text-red-400 hover:border-red-700/60'}`}
                                         title="Delete jurisdiction"
                                       >
@@ -1364,7 +1445,7 @@ export function Jurisdictions() {
                               </div>
 
                               {isExpanded && checkTargetId === j.id && checkMessages.length > 0 && (() => {
-                                const isActive = checkingId === j.id || specialtyId === j.id;
+                                const isActive = checkingId === j.id || specialtyId === j.id || medicalComplianceId === j.id;
                                 const completed = checkMessages.find(m => m.type === 'completed');
                                 const hasError = checkMessages.some(m => m.type === 'error');
                                 const resultCount = checkMessages.filter(m => m.type === 'result').length;

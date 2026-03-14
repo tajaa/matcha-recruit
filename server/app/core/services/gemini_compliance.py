@@ -317,6 +317,12 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
         if not normalized.get("applicable_industries"):
             normalized["applicable_industries"] = ["healthcare:oncology"]
 
+    from ..services.compliance_service import MEDICAL_COMPLIANCE_CATEGORIES, MEDICAL_COMPLIANCE_INDUSTRY_TAGS
+    if normalized.get("category") in MEDICAL_COMPLIANCE_CATEGORIES:
+        if not normalized.get("applicable_industries"):
+            tag = MEDICAL_COMPLIANCE_INDUSTRY_TAGS.get(normalized["category"], "healthcare")
+            normalized["applicable_industries"] = [tag]
+
     # Clamp numeric_value to fit DECIMAL(10,4) — max absolute value 999999.9999
     nv = normalized.get("numeric_value")
     if nv is not None:
@@ -617,6 +623,150 @@ CMS Emergency Preparedness Rule (42 CFR § 482.15) — emergency plan, communica
 NFPA fire and life safety code requirements adopted through CMS, accrediting bodies, or STATE health/facility regulators;
 and any STATE-specific emergency preparedness requirements for healthcare facilities.
 Include penalties for EMTALA violations and state emergency management mandates.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "health_it": """Research HEALTH INFORMATION TECHNOLOGY requirements for healthcare in this jurisdiction.
+Cover: 21st Century Cures Act information blocking rules (ONC Final Rule),
+ONC Health IT Certification Program (§ 170.315),
+TEFCA (Trusted Exchange Framework and Common Agreement) participation requirements,
+state health information exchange (HIE) participation mandates,
+EHR meaningful use / Promoting Interoperability requirements,
+and state-specific health IT interoperability or data sharing laws.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "quality_reporting": """Research QUALITY REPORTING AND VALUE-BASED CARE requirements for healthcare in this jurisdiction.
+Cover: MIPS (Merit-based Incentive Payment System) and QPP (Quality Payment Program) requirements,
+HEDIS (Healthcare Effectiveness Data and Information Set) measures,
+Hospital Value-Based Purchasing (VBP) program,
+Hospital-Acquired Condition (HAC) Reduction Program,
+Hospital Readmissions Reduction Program (HRRP),
+CMS Star Ratings, and state-specific quality reporting mandates.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "cybersecurity": """Research HEALTHCARE CYBERSECURITY requirements for healthcare in this jurisdiction.
+Cover: NIST Cybersecurity Framework (CSF) as applied to healthcare,
+Health Care Industry Cybersecurity (HCIC) Act (Public Law 116-321),
+HIPAA Security Rule technical safeguards (45 CFR § 164.312),
+state data breach notification laws specific to healthcare/PHI,
+and any state-specific cybersecurity requirements for healthcare entities.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "environmental_safety": """Research ENVIRONMENTAL AND FACILITY SAFETY requirements for healthcare facilities in this jurisdiction.
+Cover: NFPA 101 (Life Safety Code) and NFPA 99 (Health Care Facilities Code) as adopted by CMS,
+OSHA healthcare-specific standards (bloodborne pathogens 29 CFR 1910.1030, hazard communication),
+EPA medical waste management (RCRA regulated medical waste),
+state medical waste disposal and tracking requirements,
+and CMS/Joint Commission environment of care standards.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "pharmacy_drugs": """Research PHARMACY AND CONTROLLED SUBSTANCES requirements in this jurisdiction.
+Cover: DEA registration and Schedule II-V prescribing/dispensing requirements (21 CFR Parts 1301-1321),
+state PDMP (Prescription Drug Monitoring Program) mandates and interstate data sharing,
+340B Drug Pricing Program compliance for covered entities,
+DSCSA (Drug Supply Chain Security Act) serialization and verification requirements,
+USP compounding standards (USP <795>, <797>, <800>),
+and state pharmacy practice act requirements.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "payer_relations": """Research PAYER RELATIONS AND MANAGED CARE requirements in this jurisdiction.
+Cover: Medicare Advantage (MA) regulatory requirements (42 CFR Part 422),
+Medicaid managed care organization (MCO) requirements (42 CFR Part 438),
+No Surprises Act (NSA) requirements including independent dispute resolution (IDR),
+state surprise billing protections,
+network adequacy requirements,
+and state-specific managed care regulations and prompt payment laws.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "reproductive_behavioral": """Research REPRODUCTIVE AND BEHAVIORAL HEALTH requirements in this jurisdiction.
+Cover: post-Dobbs state abortion laws (restrictions, protections, shield laws),
+42 CFR Part 2 (Confidentiality of Substance Use Disorder Patient Records),
+Mental Health Parity and Addiction Equity Act (MHPAEA) compliance,
+state behavioral health licensure and practice requirements,
+state reproductive health privacy protections,
+and any state-specific mental health or substance abuse treatment mandates.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "pediatric_vulnerable": """Research PEDIATRIC AND VULNERABLE POPULATION requirements in this jurisdiction.
+Cover: CAPTA (Child Abuse Prevention and Treatment Act) mandatory reporting requirements,
+Elder Justice Act provisions for healthcare settings,
+state mandatory reporting laws for child/elder abuse,
+emancipated minor and mature minor consent rules,
+pediatric-specific consent and privacy requirements,
+and state-specific protections for vulnerable populations in healthcare.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "telehealth": """Research TELEHEALTH AND DIGITAL HEALTH requirements in this jurisdiction.
+Cover: Interstate Medical Licensure Compact (IMLC) participation,
+Nurse Licensure Compact (NLC) participation,
+remote patient monitoring (RPM) reimbursement and licensure rules,
+state telehealth parity laws (coverage and reimbursement),
+state-specific telehealth prescribing rules (especially controlled substances),
+and state requirements for provider-patient relationship establishment via telehealth.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "medical_devices": """Research MEDICAL DEVICE AND EQUIPMENT requirements in this jurisdiction.
+Cover: FDA Medical Device Reporting (MDR) requirements (21 CFR Part 803),
+Unique Device Identification (UDI) system requirements,
+radiation-emitting product standards (21 CFR Parts 1000-1050),
+state radiation machine registration and inspection requirements,
+and state-specific medical device or equipment safety regulations.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "transplant_organ": """Research TRANSPLANT AND ORGAN PROCUREMENT requirements in this jurisdiction.
+Cover: National Organ Transplant Act (NOTA, 42 U.S.C. § 274),
+OPTN (Organ Procurement and Transplantation Network) bylaws and policies,
+CMS transplant program Conditions of Participation (42 CFR § 482.68-104),
+state anatomical gift acts (based on Revised Uniform Anatomical Gift Act),
+and state-specific organ/tissue donation and transplant regulations.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "antitrust": """Research HEALTHCARE ANTITRUST AND COMPETITION requirements in this jurisdiction.
+Cover: Sherman Antitrust Act application to healthcare (price fixing, market allocation),
+FTC and DOJ healthcare merger enforcement and guidelines,
+state Certificate of Need (CON) laws and requirements,
+state antitrust exemptions or immunities for healthcare entities,
+and any state-specific healthcare competition regulations.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "tax_exempt": """Research TAX-EXEMPT HEALTHCARE ORGANIZATION requirements in this jurisdiction.
+Cover: IRC § 501(r) requirements for charitable hospitals (community benefit, financial assistance policies, billing/collections limitations),
+Community Health Needs Assessment (CHNA) requirements,
+IRS Schedule H reporting obligations,
+state property tax exemptions for healthcare organizations,
+and state-specific charitable organization requirements for healthcare entities.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "language_access": """Research LANGUAGE ACCESS AND CIVIL RIGHTS requirements for healthcare in this jurisdiction.
+Cover: Title VI of the Civil Rights Act (language access for LEP patients),
+Section 1557 of the ACA (nondiscrimination in health programs),
+ADA Title III requirements for healthcare facilities,
+state language access laws for healthcare settings,
+and state-specific civil rights protections in healthcare.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "records_retention": """Research MEDICAL RECORDS RETENTION requirements in this jurisdiction.
+Cover: state medical records retention periods (adult and minor patients),
+HIPAA 6-year retention requirement for policies and documentation (45 CFR § 164.530(j)),
+EMTALA log retention requirements,
+state-specific requirements for electronic health record retention and destruction,
+and any profession-specific records retention requirements.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "marketing_comms": """Research HEALTHCARE MARKETING AND COMMUNICATIONS requirements in this jurisdiction.
+Cover: HIPAA marketing authorization requirements (45 CFR § 164.508(a)(3)),
+Medicare Communications and Marketing Guidelines (MCMG),
+TCPA (Telephone Consumer Protection Act) as applied to healthcare communications,
+state anti-kickback and fee-splitting laws as they relate to marketing,
+and state-specific healthcare advertising regulations.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+        "emerging_regulatory": """Research EMERGING REGULATORY requirements for healthcare in this jurisdiction.
+Cover: AI and Software as a Medical Device (SaMD) regulations (FDA framework),
+Social Determinants of Health (SDOH) screening and reporting requirements,
+ESG (Environmental, Social, Governance) reporting requirements for healthcare,
+state genomic data privacy laws,
+state cannabis/marijuana laws affecting healthcare employers and drug testing,
+and any other emerging healthcare regulatory trends in this jurisdiction.
 Set current_value to a SHORT summary (under 80 chars).""",
     }
 

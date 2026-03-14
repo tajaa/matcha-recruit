@@ -51,6 +51,24 @@ POLICY_TYPES = [
     {"value": "tumor_registry", "label": "Tumor Registry Reporting", "categories": ["tumor_registry"], "industries": ["healthcare:oncology"]},
     {"value": "oncology_clinical_trials", "label": "Clinical Trials Compliance", "categories": ["oncology_clinical_trials"], "industries": ["healthcare:oncology"]},
     {"value": "oncology_patient_rights", "label": "Oncology Patient Rights", "categories": ["oncology_patient_rights"], "industries": ["healthcare:oncology"]},
+    # Medical compliance policy types
+    {"value": "health_it_compliance", "label": "Health IT & Interoperability", "categories": ["health_it"], "industries": ["healthcare"]},
+    {"value": "quality_reporting_compliance", "label": "Quality Reporting & Value-Based Care", "categories": ["quality_reporting"], "industries": ["healthcare"]},
+    {"value": "cybersecurity_compliance", "label": "Healthcare Cybersecurity", "categories": ["cybersecurity"], "industries": ["healthcare"]},
+    {"value": "environmental_safety_compliance", "label": "Environmental & Facility Safety", "categories": ["environmental_safety"], "industries": ["healthcare"]},
+    {"value": "pharmacy_compliance", "label": "Pharmacy & Controlled Substances", "categories": ["pharmacy_drugs"], "industries": ["healthcare:pharmacy"]},
+    {"value": "payer_relations_compliance", "label": "Payer Relations & Managed Care", "categories": ["payer_relations"], "industries": ["healthcare:managed_care"]},
+    {"value": "reproductive_behavioral_compliance", "label": "Reproductive & Behavioral Health", "categories": ["reproductive_behavioral"], "industries": ["healthcare:behavioral_health"]},
+    {"value": "pediatric_vulnerable_compliance", "label": "Pediatric & Vulnerable Populations", "categories": ["pediatric_vulnerable"], "industries": ["healthcare:pediatric"]},
+    {"value": "telehealth_compliance", "label": "Telehealth & Digital Health", "categories": ["telehealth"], "industries": ["healthcare:telehealth"]},
+    {"value": "medical_device_safety", "label": "Medical Device Safety", "categories": ["medical_devices"], "industries": ["healthcare:devices"]},
+    {"value": "transplant_compliance", "label": "Transplant & Organ Procurement", "categories": ["transplant_organ"], "industries": ["healthcare:transplant"]},
+    {"value": "antitrust_compliance", "label": "Healthcare Antitrust & Competition", "categories": ["antitrust"], "industries": ["healthcare"]},
+    {"value": "tax_exempt_compliance", "label": "Tax-Exempt Organization Compliance", "categories": ["tax_exempt"], "industries": ["healthcare:nonprofit"]},
+    {"value": "language_access_compliance", "label": "Language Access & Civil Rights", "categories": ["language_access"], "industries": ["healthcare"]},
+    {"value": "records_retention_compliance", "label": "Medical Records Retention", "categories": ["records_retention"], "industries": ["healthcare"]},
+    {"value": "marketing_comms_compliance", "label": "Healthcare Marketing & Communications", "categories": ["marketing_comms"], "industries": ["healthcare"]},
+    {"value": "emerging_regulatory_compliance", "label": "Emerging Regulatory Compliance", "categories": ["emerging_regulatory"], "industries": ["healthcare"]},
 ]
 
 # Map free-text industry values to canonical names for filtering.

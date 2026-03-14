@@ -96,6 +96,37 @@ ONCOLOGY_CATEGORIES = {
     "oncology_patient_rights",
 }
 
+MEDICAL_COMPLIANCE_CATEGORIES = {
+    "health_it",
+    "quality_reporting",
+    "cybersecurity",
+    "environmental_safety",
+    "pharmacy_drugs",
+    "payer_relations",
+    "reproductive_behavioral",
+    "pediatric_vulnerable",
+    "telehealth",
+    "medical_devices",
+    "transplant_organ",
+    "antitrust",
+    "tax_exempt",
+    "language_access",
+    "records_retention",
+    "marketing_comms",
+    "emerging_regulatory",
+}
+
+MEDICAL_COMPLIANCE_INDUSTRY_TAGS = {
+    "pharmacy_drugs": "healthcare:pharmacy",
+    "payer_relations": "healthcare:managed_care",
+    "reproductive_behavioral": "healthcare:behavioral_health",
+    "pediatric_vulnerable": "healthcare:pediatric",
+    "telehealth": "healthcare:telehealth",
+    "medical_devices": "healthcare:devices",
+    "transplant_organ": "healthcare:transplant",
+    "tax_exempt": "healthcare:nonprofit",
+}
+
 # Map free-text company.industry values to canonical industry profile names.
 # Reuses the same aliases as handbook_service.GUIDED_INDUSTRY_ALIASES.
 _INDUSTRY_ALIASES: Dict[str, str] = {
@@ -261,6 +292,9 @@ def _requirement_applicable_industries(req: Dict[str, Any]) -> set:
 
     if category in ONCOLOGY_CATEGORIES or _looks_oncology_specific(req):
         return {"healthcare:oncology"}
+
+    if category in MEDICAL_COMPLIANCE_CATEGORIES:
+        return {MEDICAL_COMPLIANCE_INDUSTRY_TAGS.get(category, "healthcare")}
 
     if (
         category in HEALTHCARE_CATEGORIES
@@ -1614,6 +1648,142 @@ async def _research_oncology_requirements_for_jurisdiction(
     if failed_categories and total_new == 0:
         raise RuntimeError(
             f"All oncology categories failed for {location_name}: "
+            f"{', '.join(failed_categories)}"
+        )
+
+    return {
+        "new": total_new,
+        "location": location_name,
+        "categories": missing,
+        "failed": failed_categories,
+        "requirements": added_requirements,
+    }
+
+
+async def _research_medical_compliance_for_jurisdiction(
+    conn,
+    jurisdiction_id: UUID,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> Dict[str, Any]:
+    """Research missing medical compliance categories for a jurisdiction.
+
+    Covers 17 categories from the US Medical Compliance Policy Reference
+    (health IT, cybersecurity, pharmacy, telehealth, devices, etc.).
+    """
+    from .gemini_compliance import get_gemini_compliance_service
+    from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
+
+    j = await conn.fetchrow(
+        "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
+        jurisdiction_id,
+    )
+    if not j:
+        return {"error": "Jurisdiction not found", "new": 0, "categories": [], "failed": []}
+
+    city = j["city"]
+    state = j["state"]
+    county = j.get("county")
+    location_name = f"{city}, {state}"
+
+    has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
+    known_sources = await get_known_sources(conn, jurisdiction_id)
+    source_context = build_context_prompt(known_sources)
+    source_context += get_global_authority_sources(list(MEDICAL_COMPLIANCE_CATEGORIES))
+    corrections = await get_recent_corrections(jurisdiction_id)
+    corrections_context = format_corrections_for_prompt(corrections)
+
+    try:
+        preemption_rows = await conn.fetch(
+            "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+            state.upper(),
+        )
+        preemption_rules = {
+            row["category"]: row["allows_local_override"] for row in preemption_rows
+        }
+    except Exception:
+        preemption_rules = {}
+
+    existing = await conn.fetch(
+        "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+        jurisdiction_id,
+    )
+    existing_cats = {r["category"] for r in existing}
+    missing = sorted(cat for cat in MEDICAL_COMPLIANCE_CATEGORIES if cat not in existing_cats)
+
+    if not missing:
+        print(f"[Medical Compliance] All medical compliance categories already present for {location_name}")
+        return {
+            "new": 0,
+            "location": location_name,
+            "categories": [],
+            "failed": [],
+            "requirements": [],
+            "skipped": True,
+        }
+
+    print(
+        f"[Medical Compliance] Researching {len(missing)} categories "
+        f"for {location_name}: {', '.join(missing)}"
+    )
+
+    service = get_gemini_compliance_service()
+    total_new = 0
+    failed_categories: List[str] = []
+    added_requirements: List[Dict[str, Any]] = []
+
+    for idx, category in enumerate(missing, start=1):
+        print(
+            f"[Medical Compliance] [{idx}/{len(missing)}] Researching {category} "
+            f"for {location_name}..."
+        )
+        if progress_callback:
+            progress_callback(
+                idx,
+                len(missing),
+                f"Researching {category.replace('_', ' ')} for {location_name}...",
+            )
+
+        try:
+            reqs = await service.research_location_compliance(
+                city=city,
+                state=state,
+                county=county,
+                categories=[category],
+                source_context=source_context,
+                corrections_context=corrections_context,
+                preemption_rules=preemption_rules,
+                has_local_ordinance=has_local_ordinance,
+            )
+            reqs = reqs or []
+
+            tag = MEDICAL_COMPLIANCE_INDUSTRY_TAGS.get(category, "healthcare")
+            for req in reqs:
+                _clamp_varchar_fields(req)
+                if not req.get("applicable_industries"):
+                    req["applicable_industries"] = [tag]
+
+            if reqs:
+                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                total_new += len(reqs)
+                added_requirements.extend(reqs)
+                print(
+                    f"[Medical Compliance]   -> {len(reqs)} requirements saved "
+                    f"for {category}"
+                )
+            else:
+                print(f"[Medical Compliance]   -> No results for {category}")
+        except Exception as e:
+            failed_categories.append(category)
+            print(f"[Medical Compliance]   -> Error researching {category}: {e}")
+
+    print(
+        f"[Medical Compliance] Complete for {location_name}: {total_new} new, "
+        f"{len(failed_categories)} failed"
+    )
+
+    if failed_categories and total_new == 0:
+        raise RuntimeError(
+            f"All medical compliance categories failed for {location_name}: "
             f"{', '.join(failed_categories)}"
         )
 

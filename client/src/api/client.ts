@@ -1966,6 +1966,16 @@ export const adminJurisdictions = {
     return response;
   },
 
+  checkMedicalCompliance: async (id: string): Promise<Response> => {
+    const token = getAccessToken();
+    const response = await fetch(`/api/admin/jurisdictions/${id}/check-medical-compliance`, {
+      method: 'POST',
+      headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+    });
+    if (!response.ok) throw new Error('Failed to start medical compliance research');
+    return response;
+  },
+
   checkTopMetros: async (): Promise<Response> => {
     const token = getAccessToken();
     const response = await fetch('/api/admin/jurisdictions/top-metros/check', {

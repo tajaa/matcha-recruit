@@ -117,6 +117,24 @@ const CAT_LABELS: Record<string, string> = {
   tumor_registry: 'Tumor Registry',
   oncology_clinical_trials: 'Onc Trials',
   oncology_patient_rights: 'Onc Patient Rights',
+  // Medical compliance
+  health_it: 'Health IT',
+  quality_reporting: 'Quality Reporting',
+  cybersecurity: 'Cybersecurity',
+  environmental_safety: 'Env Safety',
+  pharmacy_drugs: 'Pharmacy',
+  payer_relations: 'Payer Relations',
+  reproductive_behavioral: 'Repro & Behavioral',
+  pediatric_vulnerable: 'Pediatric & Vulnerable',
+  telehealth: 'Telehealth',
+  medical_devices: 'Medical Devices',
+  transplant_organ: 'Transplant',
+  antitrust: 'Antitrust',
+  tax_exempt: 'Tax-Exempt',
+  language_access: 'Language Access',
+  records_retention: 'Records Retention',
+  marketing_comms: 'Marketing',
+  emerging_regulatory: 'Emerging',
 };
 
 const ALL_CATEGORIES = Object.keys(CAT_LABELS);
@@ -130,7 +148,14 @@ const ONCOLOGY_CATEGORIES = new Set([
   'radiation_safety', 'chemotherapy_handling', 'tumor_registry',
   'oncology_clinical_trials', 'oncology_patient_rights',
 ]);
-type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology';
+const MEDICAL_COMPLIANCE_CATEGORIES = new Set([
+  'health_it', 'quality_reporting', 'cybersecurity', 'environmental_safety',
+  'pharmacy_drugs', 'payer_relations', 'reproductive_behavioral', 'pediatric_vulnerable',
+  'telehealth', 'medical_devices', 'transplant_organ', 'antitrust',
+  'tax_exempt', 'language_access', 'records_retention', 'marketing_comms',
+  'emerging_regulatory',
+]);
+type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology' | 'medical';
 
 const INDUSTRY_SPECIFIC_RATE_TYPES = ['tipped', 'hotel', 'fast_food', 'healthcare'];
 
@@ -1037,8 +1062,10 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
       reqs = reqs.filter(r => HEALTHCARE_CATEGORIES.has(r.category) || ONCOLOGY_CATEGORIES.has(r.category));
     } else if (specialtyFilter === 'oncology') {
       reqs = reqs.filter(r => ONCOLOGY_CATEGORIES.has(r.category));
+    } else if (specialtyFilter === 'medical') {
+      reqs = reqs.filter(r => MEDICAL_COMPLIANCE_CATEGORIES.has(r.category));
     } else if (specialtyFilter === 'general') {
-      reqs = reqs.filter(r => !HEALTHCARE_CATEGORIES.has(r.category) && !ONCOLOGY_CATEGORIES.has(r.category));
+      reqs = reqs.filter(r => !HEALTHCARE_CATEGORIES.has(r.category) && !ONCOLOGY_CATEGORIES.has(r.category) && !MEDICAL_COMPLIANCE_CATEGORIES.has(r.category));
     }
     const map: Record<string, JurisdictionDetail['requirements']> = {};
     for (const req of reqs) {
@@ -1087,8 +1114,10 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
       reqs = reqs.filter(r => HEALTHCARE_CATEGORIES.has(r.category) || ONCOLOGY_CATEGORIES.has(r.category));
     } else if (specialtyFilter === 'oncology') {
       reqs = reqs.filter(r => ONCOLOGY_CATEGORIES.has(r.category));
+    } else if (specialtyFilter === 'medical') {
+      reqs = reqs.filter(r => MEDICAL_COMPLIANCE_CATEGORIES.has(r.category));
     } else if (specialtyFilter === 'general') {
-      reqs = reqs.filter(r => !HEALTHCARE_CATEGORIES.has(r.category) && !ONCOLOGY_CATEGORIES.has(r.category));
+      reqs = reqs.filter(r => !HEALTHCARE_CATEGORIES.has(r.category) && !ONCOLOGY_CATEGORIES.has(r.category) && !MEDICAL_COMPLIANCE_CATEGORIES.has(r.category));
     }
     const map: Record<string, Record<string, JurisdictionDetail['requirements']>> = {};
     for (const req of reqs) {
@@ -1180,6 +1209,7 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                       <option value="general">General Labor</option>
                       <option value="healthcare">Healthcare</option>
                       <option value="oncology">Oncology</option>
+                      <option value="medical">Medical Compliance</option>
                     </select>
                     <button
                       onClick={onOpenProfileEditor}
