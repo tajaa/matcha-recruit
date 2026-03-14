@@ -14,18 +14,21 @@ Maintain a static `industry_risk_benchmarks` JSON table (refreshed quarterly) de
 
 - **Median back wages per employee** (from DOL WHD data for that NAICS)
 - **Median OSHA penalty by violation type** (from OSHA enforcement data for that NAICS)
-- **EEOC charge rate per 1,000 employees** (from EEOC stats + BLS employment counts for that NAICS)
+- **EEOC charge rate per 1,000 employees** (national aggregate from EEOC stats ÷ BLS QCEW employment counts — **not NAICS-specific**, see Known Limitations)
 - **Injury incidence rate per 100 FTE** (from BLS SOII for that NAICS)
 
 When industry-specific data is unavailable, fall back to the all-industry median.
+
+**Denominator source**: Establishment counts and employment totals by NAICS (needed for inspection probability, charge rates) come from **BLS QCEW** (Quarterly Census of Employment and Wages), available as free CSV at `bls.gov/cew/`.
 
 ### Primary Data Sources
 
 | Dataset | Access | Update Cadence | Key Use |
 |---|---|---|---|
-| **DOL WHD Compliance Actions** | Free REST API (`developer.dol.gov`) + bulk CSV | Ongoing | Back wages per employee by NAICS |
-| **OSHA Enforcement (Inspections + Violations)** | Free REST API (`developer.dol.gov`) + daily CSV | Daily | Actual penalty amounts by NAICS + violation type |
-| **EEOC Enforcement Statistics** | Free XLSX (`eeoc.gov/data`) | Annual | Charge counts, merit resolution rates, avg settlements by basis |
+| **DOL WHD Compliance Actions** | Bulk CSV (`enforcedata.dol.gov`) + REST API | Ongoing | Back wages per employee by NAICS |
+| **OSHA Enforcement (Inspections + Violations)** | Bulk CSV (`enforcedata.dol.gov`, daily) + REST API | Daily | Actual penalty amounts by NAICS + violation type |
+| **EEOC Enforcement Statistics** | Free XLSX (`eeoc.gov/data`) | Annual | Charge counts, merit resolution rates, avg settlements by basis. **National aggregates only — not broken down by respondent NAICS.** |
+| **BLS QCEW** | Free CSV (`bls.gov/cew/`) | Quarterly | Total establishments + employment by NAICS × state. **Required denominator** for inspection probability and charge rate calculations. |
 | **BLS SOII** | Free XLSX (`bls.gov/iif`) | Annual | Injury/illness incidence rates by NAICS |
 | **HHS OCR Breach Portal** | Free web portal (`ocrportal.hhs.gov`) | Ongoing | Breach frequency by entity type, enforcement action rates |
 | **NPDB Public Use File** | Free CSV (`npdb.hrsa.gov`) | Quarterly | Adverse licensure action rates by practitioner type + state |
@@ -303,11 +306,31 @@ Cost data embeds inside the existing JSONB `raw_data` field of each dimension in
 - **2024 headline**: TRC rate = 2.3 per 100 FTE (private industry)
 - **Use**: When the Workforce dimension adds cost estimates, use actual injury rates by NAICS × OSHA Safety Pays average costs per injury type (`osha.gov/safetypays/estimator`) to compute expected annual injury costs.
 
+### BLS Quarterly Census of Employment and Wages (QCEW)
+
+- **URL**: `bls.gov/cew/downloadable-data-files.htm`
+- **Format**: CSV, annual and quarterly files
+- **Coverage**: All employers covered by state unemployment insurance + federal workers, ~95% of US jobs
+- **Key fields**: NAICS code, area (state/county/MSA), establishment count, employment, total wages
+- **Use**: Provides the denominator for all rate calculations in the NAICS lookup table — `osha_inspection_probability` (inspections / establishments) and `eeoc_charges_per_1000_employees` (charges / employment). Without QCEW, these fields cannot be computed.
+
 ### Workers' Compensation Cost Data
 
-- **OSHA Safety Pays**: `osha.gov/safetypays/estimator` — average direct WC claim costs + indirect cost multipliers for 40 injury types (sourced from NCCI)
-- **NSC Injury Facts**: `injuryfacts.nsc.org/work/costs/workers-compensation-costs/` — average claim costs by injury type (2022-2023): all claims $47,316, motor vehicle $91,433, burns $64,973, falls/slips $54,499
+- **OSHA Safety Pays**: `osha.gov/safetypays/estimator` — average direct WC claim costs + indirect cost multipliers for 40 injury types (sourced from NCCI). **Note**: Interactive calculator only, not a downloadable dataset. Extract the ~40 injury type cost figures once and store statically; re-check annually.
+- **NSC Injury Facts**: `injuryfacts.nsc.org/work/costs/workers-compensation-costs/` — average claim costs by injury type (2022-2023): all claims $47,316, motor vehicle $91,433, burns $64,973, falls/slips $54,499. Granular data requires paid subscription.
 - **Use**: Combine with BLS SOII injury rates for total expected cost per worker by industry.
+
+### Known Limitations
+
+1. **EEOC data is not NAICS-specific.** EEOC publishes aggregate national charge counts, not per-respondent-industry. The `eeoc_charges_per_1000_employees` field uses a flat national rate (~0.66 per 1,000 private sector workers = 88,531 charges / ~134M workers). This is a reasonable proxy but won't differentiate high-charge industries (hospitality, healthcare) from low-charge ones (tech, finance). If EEOC Explore adds respondent-industry breakdowns in the future, switch to those.
+
+2. **State-level enforcement not captured.** ~22 states run their own OSHA state plans (Cal/OSHA, etc.) with different penalty structures and higher inspection rates. States like CA (DLSE), NY (DOL), and WA also run independent wage/hour enforcement with penalties that can exceed federal levels. Federal OSHA data includes state-plan inspections, but penalty amounts may differ from what the state actually assessed. Companies in aggressive-enforcement states may have **understated** exposure. Flag as a future enhancement: overlay state enforcement data where available.
+
+3. **OSHA Safety Pays is not machine-readable.** The ~40 injury type cost figures must be manually extracted from the interactive estimator and stored statically. NCCI (the underlying source) licenses granular data commercially.
+
+### Penalty Inflation Adjustment
+
+Federal civil penalties adjust **annually** under the Federal Civil Penalties Inflation Adjustment Act. Both OSHA and HIPAA penalty tiers in this PRD are point-in-time snapshots (OSHA: Jan 2025, HIPAA: 2026). The quarterly refresh of the NAICS lookup table should also check for updated penalty tiers, typically published in Federal Register notices each January.
 
 ### Implementation: NAICS Lookup Table
 
@@ -322,15 +345,22 @@ The industry benchmarks table should be stored as a static JSON file (or a DB ta
     "osha_median_penalty_serious": 4500,
     "osha_median_penalty_willful": 82000,
     "osha_inspection_probability": 0.012,
-    "eeoc_charges_per_1000_employees": 3.2,
+    "eeoc_charges_per_1000_employees": 0.66,
     "eeoc_merit_resolution_rate": 0.17,
     "bls_trc_rate_per_100": 3.1,
     "bls_dart_rate_per_100": 1.8,
+    "qcew_total_establishments": 660000,
+    "qcew_total_employment": 12500000,
     "last_updated": "2026-01-15"
   }
 }
 ```
 
-**Refresh cadence**: Quarterly. DOL APIs support incremental queries by date range. EEOC/BLS publish annually — check in January for prior-year data.
+**Field notes:**
+- `osha_inspection_probability` = OSHA inspections for this NAICS / `qcew_total_establishments`
+- `eeoc_charges_per_1000_employees` = national aggregate rate (0.66), not NAICS-specific (see Known Limitations #1)
+- `qcew_*` fields sourced from BLS QCEW, used as denominators
+
+**Refresh cadence**: Quarterly. Use bulk CSV downloads from `enforcedata.dol.gov` as the primary ingestion path (more reliable than the DOL REST APIs, which have had intermittent availability). DOL APIs can supplement for incremental queries by date range. EEOC/BLS publish annually — check in January for prior-year data.
 
 **Fallback**: When a company's NAICS code has insufficient data (< 30 records in the source dataset), use the 2-digit NAICS sector aggregate. If that's also insufficient, use all-industry medians.
