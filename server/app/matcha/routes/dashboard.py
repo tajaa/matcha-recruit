@@ -822,6 +822,55 @@ _UPCOMING_SOURCES: list[dict] = [
         """,
         "link": "/app/matcha/onboarding",
     },
+    # Upcoming legislation — passed/signed laws about to take effect for this company's locations
+    {
+        "category": "legislation",
+        "sql": """
+            SELECT ul.id::text,
+                   ul.title,
+                   ul.impact_summary AS subtitle,
+                   ul.expected_effective_date::date AS deadline
+            FROM upcoming_legislation ul
+            WHERE ({company_filter})
+              AND ul.current_status IN ('passed', 'signed', 'effective_soon')
+              AND ul.expected_effective_date IS NOT NULL
+              AND ul.expected_effective_date::date <= $2
+        """,
+        "link": "/app/matcha/compliance",
+    },
+    # Compliance requirement expirations — requirements with an expiration date approaching
+    {
+        "category": "requirement",
+        "sql": """
+            SELECT cr.id::text,
+                   cr.title,
+                   cr.jurisdiction_name || ' — ' || cr.category AS subtitle,
+                   cr.expiration_date::date AS deadline
+            FROM compliance_requirements cr
+            JOIN business_locations bl ON bl.id = cr.location_id
+            WHERE ({company_filter_cr})
+              AND cr.expiration_date IS NOT NULL
+              AND cr.expiration_date::date <= $2
+        """,
+        "link": "/app/matcha/compliance",
+    },
+    # Upcoming compliance requirement effective dates — new rules about to take effect
+    {
+        "category": "legislation",
+        "sql": """
+            SELECT cr.id::text,
+                   cr.title,
+                   cr.jurisdiction_name || ' — effective ' || to_char(cr.effective_date, 'Mon DD, YYYY') AS subtitle,
+                   cr.effective_date::date AS deadline
+            FROM compliance_requirements cr
+            JOIN business_locations bl ON bl.id = cr.location_id
+            WHERE ({company_filter_cr})
+              AND cr.effective_date IS NOT NULL
+              AND cr.effective_date::date > CURRENT_DATE
+              AND cr.effective_date::date <= $2
+        """,
+        "link": "/app/matcha/compliance",
+    },
 ]
 
 
@@ -834,6 +883,7 @@ def _apply_company_filter(sql: str, company_id: UUID | None) -> str:
             .replace("{company_filter_cobra}", "ce.company_id = $1")
             .replace("{company_filter_i9}", "i9.company_id = $1")
             .replace("{company_filter_onboard}", "eot.company_id = $1")
+            .replace("{company_filter_cr}", "bl.company_id = $1")
             .replace("{company_filter}", "company_id = $1")
         )
     # Admin: no company scoping — use TRUE
@@ -843,6 +893,7 @@ def _apply_company_filter(sql: str, company_id: UUID | None) -> str:
         .replace("{company_filter_cobra}", "TRUE")
         .replace("{company_filter_i9}", "TRUE")
         .replace("{company_filter_onboard}", "TRUE")
+        .replace("{company_filter_cr}", "TRUE")
         .replace("{company_filter}", "TRUE")
     )
 
@@ -863,9 +914,18 @@ async def get_upcoming_deadlines(
         for source in _UPCOMING_SOURCES:
             try:
                 sql = _apply_company_filter(source["sql"], company_id)
-                # Always pass company_id as $1 and lookahead as $2.
-                # For admins company_id is None but $1 isn't referenced (replaced with TRUE).
-                rows = await conn.fetch(sql, company_id, lookahead)
+                # Pass only the args the query actually references to avoid asyncpg
+                # "N args passed but server expects M" errors.
+                uses_p1 = "$1" in sql
+                uses_p2 = "$2" in sql
+                if uses_p1 and uses_p2:
+                    rows = await conn.fetch(sql, company_id, lookahead)
+                elif uses_p1:
+                    rows = await conn.fetch(sql, company_id)
+                elif uses_p2:
+                    rows = await conn.fetch(sql, lookahead)
+                else:
+                    rows = await conn.fetch(sql)
             except (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError):
                 logger.debug("Skipping upcoming source %s (table/column missing)", source["category"])
                 continue
