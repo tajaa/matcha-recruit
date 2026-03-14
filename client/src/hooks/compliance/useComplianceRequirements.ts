@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { ComplianceRequirement } from '../../api/compliance';
 import {
-  CATEGORY_GROUPS, CATEGORY_LABELS, ALL_CATEGORY_KEYS, LABOR_CATEGORIES,
+  CATEGORY_GROUPS, ALL_CATEGORY_KEYS, LABOR_CATEGORIES,
   type CategoryGroup,
 } from '../../generated/complianceCategories';
 
@@ -36,7 +36,7 @@ export interface CategorySection {
 
 export function useComplianceRequirements(
   requirements: ComplianceRequirement[] | undefined,
-  industryName?: string,
+  _industryName?: string,
 ) {
   const requirementsByCategory = useMemo(() => {
     if (!requirements) return {};

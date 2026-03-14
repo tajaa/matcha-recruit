@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { CheckCircle, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { useIsLightMode } from '../hooks/useIsLightMode';
 
 export type LifecycleStepIcon =
   | 'locations' | 'research' | 'alerts' | 'posters' | 'audit'
@@ -32,7 +31,6 @@ interface LifecycleWizardProps {
 }
 
 const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => React.ReactElement> = {
-  // Compliance
   'locations': ({ className }) => (
     <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path d="M10 17C10 17 4 11 4 7C4 3.68629 6.68629 1 10 1C13.3137 1 16 3.68629 16 7C16 11 10 17 10 17Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -61,8 +59,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M4 10L8 14L16 6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-
-  // Employees
   'onboard': ({ className }) => (
     <svg className={className} width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path d="M10 5V15M5 10H15" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -93,8 +89,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M5 16C5 13.5 7.23858 11.5 10 11.5C12.7614 11.5 15 13.5 15 16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
     </svg>
   ),
-
-  // OfferLetters
   'draft': ({ className }) => (
     <svg className={className} width="16" height="16" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path d="M10 6.5V3.5M10 16.5V13.5M13.5 10H16.5M3.5 10H6.5M12.5 7.5L14.5 5.5M5.5 14.5L7.5 12.5M12.5 12.5L14.5 14.5M5.5 5.5L7.5 7.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -112,8 +106,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M16 5L4 10L10 11L11 17L16 5Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-
-  // ERCopilot
   'intake': ({ className }) => (
     <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path d="M4 6H16M4 10H16M4 14H12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
@@ -137,8 +129,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M6 10L9 13L14 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-
-  // Policies
   'editor': ({ className }) => (
     <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path d="M3 4H17V16H3Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -156,8 +146,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M6 10L8 12L14 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-
-  // OnboardingCenter
   'setup': ({ className }) => (
     <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <circle cx="10" cy="10" r="8" stroke="currentColor" strokeWidth="1.6" />
@@ -175,8 +163,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M4 6L10 3L16 6V12L10 15L4 12V6Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-
-  // PTOManagement
   'allocate': ({ className }) => (
     <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <rect x="3" y="4" width="14" height="12" rx="1" stroke="currentColor" strokeWidth="1.6" />
@@ -194,8 +180,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M6 10L8 12L14 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-
-  // IRList
   'report': ({ className }) => (
     <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path d="M4 2H16V18H4Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -214,8 +198,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M6 10L9 13L15 7" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-
-  // Experience
   'launch': ({ className }) => (
     <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path d="M3 17L17 3M17 3H8M17 3V12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -231,8 +213,6 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
       <path d="M3 16H17M4 12L7 8M7 8L10 12M10 12L13 8M13 8L16 12M16 12V4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   ),
-
-  // Additional icons for remaining workflows
   'evidence': ({ className }) => (
     <svg className={className} width="14" height="14" viewBox="0 0 20 20" fill="none" aria-hidden="true">
       <path d="M4 3H16V17H4Z" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -377,65 +357,12 @@ const STEP_ICONS: Record<LifecycleStepIcon, (props: { className: string }) => Re
   ),
 };
 
-const LT = {
-  container: 'border border-white/5 bg-zinc-900 rounded-2xl overflow-hidden mb-8 shadow-lg',
-  headerBtn: 'w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03] transition-colors',
-  title: 'text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 font-mono',
-  stageBadge: 'px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest bg-zinc-800 border border-white/5 text-zinc-100',
-  stageTitle: 'text-[10px] font-bold uppercase tracking-widest text-zinc-400',
-  chevron: 'text-zinc-600',
-  contentBorder: 'border-t border-white/5',
-  stepCircleComplete: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500',
-  stepCircleActive: 'bg-white border-white text-black shadow-md',
-  stepCirclePending: 'bg-zinc-800 border-white/5 text-zinc-600',
-  stepTitleActive: 'text-white',
-  stepTitleComplete: 'text-emerald-500/60',
-  stepTitlePending: 'text-zinc-600',
-  connectorActive: 'bg-emerald-500/20',
-  connectorPending: 'bg-white/5',
-  infoBox: 'p-5 bg-zinc-950/40 border border-white/5 rounded-xl',
-  infoIcon: 'p-2 bg-white/5 rounded-lg text-zinc-400',
-  infoTitle: 'text-[11px] font-bold text-white uppercase tracking-widest',
-  infoBadge: 'text-[8px] px-2 py-0.5 font-bold uppercase tracking-widest bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 rounded-full',
-  infoDesc: 'text-xs text-zinc-400 leading-relaxed',
-  infoAction: 'text-[10px] text-zinc-500 font-mono mt-3',
-  actionArrow: 'text-emerald-500',
-} as const;
-
-const DK = {
-  container: 'border border-white/10 bg-zinc-900/50 rounded-2xl overflow-hidden mb-8 shadow-sm backdrop-blur-sm',
-  headerBtn: 'w-full flex items-center justify-between px-5 py-4 text-left hover:bg-white/[0.03] transition-colors',
-  title: 'text-[10px] font-bold uppercase tracking-[0.2em] text-zinc-500 font-mono',
-  stageBadge: 'px-2 py-0.5 text-[9px] font-mono font-bold uppercase tracking-widest bg-zinc-800 border border-white/5 text-zinc-100',
-  stageTitle: 'text-[10px] font-bold uppercase tracking-widest text-zinc-400',
-  chevron: 'text-zinc-600',
-  contentBorder: 'border-t border-white/5',
-  stepCircleComplete: 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500',
-  stepCircleActive: 'bg-white border-white text-black shadow-[0_0_15px_rgba(255,255,255,0.1)]',
-  stepCirclePending: 'bg-zinc-900 border-white/5 text-zinc-700',
-  stepTitleActive: 'text-white',
-  stepTitleComplete: 'text-matcha-500/60',
-  stepTitlePending: 'text-zinc-700',
-  connectorActive: 'bg-matcha-500/20',
-  connectorPending: 'bg-white/5',
-  infoBox: 'p-5 bg-zinc-950/40 border border-white/5 rounded-xl',
-  infoIcon: 'p-2 bg-white/5 rounded-lg text-zinc-400',
-  infoTitle: 'text-[11px] font-bold text-white uppercase tracking-widest',
-  infoBadge: 'text-[8px] px-2 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 rounded-full',
-  infoDesc: 'text-xs text-zinc-500 leading-relaxed',
-  infoAction: 'text-[10px] text-zinc-400 font-mono mt-3',
-  actionArrow: 'text-matcha-500',
-} as const;
-
 export function LifecycleWizard({
   steps,
   activeStep,
   storageKey,
   title = 'System Lifecycle',
 }: LifecycleWizardProps) {
-  const isLight = useIsLightMode();
-  const t = isLight ? LT : DK;
-  
   const [collapsed, setCollapsed] = useState(() => {
     try {
       return localStorage.getItem(storageKey) === 'true';
@@ -456,28 +383,19 @@ export function LifecycleWizard({
   const StepIcon = STEP_ICONS[activeStepData.icon];
 
   return (
-    <div className={t.container}>
+    <div className="border border-zinc-800 bg-zinc-900 rounded overflow-hidden mb-6">
       <button
         onClick={toggle}
-        className={t.headerBtn}
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-zinc-800/50"
       >
         <div className="flex items-center gap-4">
-          <span className={t.title}>
-            {title}
-          </span>
-          <div className="flex items-center gap-2">
-            <span className={t.stageBadge}>
-              Stage 0{activeStep}
-            </span>
-            <span className={t.stageTitle + " hidden sm:inline"}>
-              {activeStepData.title}
-            </span>
+          <span className="text-xs text-zinc-500">{title}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-zinc-500">Stage {activeStep}</span>
+            <span className="text-sm text-zinc-300 hidden sm:inline">{activeStepData.title}</span>
           </div>
         </div>
-        <ChevronDown
-          size={14}
-          className={`${t.chevron} transition-transform duration-300 ${collapsed ? '' : 'rotate-180'}`}
-        />
+        <ChevronDown size={14} className={`text-zinc-600 ${collapsed ? '' : 'rotate-180'}`} />
       </button>
 
       <AnimatePresence initial={false}>
@@ -487,7 +405,7 @@ export function LifecycleWizard({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className={`${t.contentBorder} overflow-hidden`}
+            className="border-t border-white/5 overflow-hidden"
           >
             <div className="px-5 py-8">
               <div className="flex items-start justify-between gap-8 mb-8 overflow-x-auto no-scrollbar pb-4">
@@ -502,10 +420,10 @@ export function LifecycleWizard({
                         <div
                           className={`relative w-9 h-9 rounded-full border flex items-center justify-center transition-all duration-500 ${
                             isComplete
-                              ? t.stepCircleComplete
+                              ? 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500'
                               : isActive
-                              ? t.stepCircleActive
-                              : t.stepCirclePending
+                              ? 'bg-white border-white text-black shadow-[0_0_15px_rgba(255,255,255,0.1)]'
+                              : 'bg-zinc-900 border-white/5 text-zinc-700'
                           }`}
                         >
                           {isComplete ? (
@@ -516,7 +434,7 @@ export function LifecycleWizard({
                         </div>
                         <span
                           className={`mt-2 text-[9px] font-bold uppercase tracking-[0.15em] ${
-                            isActive ? t.stepTitleActive : isComplete ? t.stepTitleComplete : t.stepTitlePending
+                            isActive ? 'text-white' : isComplete ? 'text-matcha-500/60' : 'text-zinc-700'
                           }`}
                         >
                           {step.title}
@@ -525,7 +443,7 @@ export function LifecycleWizard({
                       {idx < steps.length - 1 && (
                         <div
                           className={`w-10 h-px transition-colors duration-700 ${
-                            step.id < activeStep ? t.connectorActive : t.connectorPending
+                            step.id < activeStep ? 'bg-matcha-500/20' : 'bg-white/5'
                           }`}
                         />
                       )}
@@ -534,26 +452,26 @@ export function LifecycleWizard({
                 })}
               </div>
 
-              <div className={t.infoBox}>
+              <div className="p-5 bg-zinc-950/40 border border-white/5 rounded-xl">
                 <div className="flex items-start gap-4">
-                  <div className={t.infoIcon}>
+                  <div className="p-2 bg-white/5 rounded-lg text-zinc-400">
                     <StepIcon className="w-5 h-5" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-3 mb-2">
-                      <h4 className={t.infoTitle}>
+                      <h4 className="text-[11px] font-bold text-white uppercase tracking-widest">
                         {activeStepData.title}
                       </h4>
-                      <span className={t.infoBadge}>
+                      <span className="text-[8px] px-2 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 rounded-full">
                         Active Stage
                       </span>
                     </div>
-                    <p className={t.infoDesc}>
+                    <p className="text-xs text-zinc-500 leading-relaxed">
                       {activeStepData.description}
                     </p>
                     {activeStepData.action && (
-                      <p className={t.infoAction + " opacity-80"}>
-                        <span className={t.actionArrow}>→</span> {activeStepData.action}
+                      <p className="text-[10px] text-zinc-400 font-mono mt-3 opacity-80">
+                        <span className="text-matcha-500">&rarr;</span> {activeStepData.action}
                       </p>
                     )}
                   </div>
