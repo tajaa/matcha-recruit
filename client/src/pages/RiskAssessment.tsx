@@ -168,7 +168,7 @@ function CostLineItemDetail({ label, text }: { label: string; text: string }) {
   );
 }
 
-function CostLineItemRow({ item }: { item: import('../types').CostLineItem }) {
+function CostLineItemRow({ item, barWidth = 0, lowPct = 0 }: { item: import('../types').CostLineItem; barWidth?: number; lowPct?: number }) {
   const [expanded, setExpanded] = useState(false);
   const hasDetails = item.formula || item.statute || item.risk_context || item.benchmark;
 
@@ -177,29 +177,42 @@ function CostLineItemRow({ item }: { item: import('../types').CostLineItem }) {
       <button
         type="button"
         onClick={() => hasDetails && setExpanded(!expanded)}
-        className={`flex flex-col gap-0.5 text-left ${hasDetails ? 'cursor-pointer' : 'cursor-default'}`}
+        className={`flex flex-col gap-1.5 text-left ${hasDetails ? 'cursor-pointer hover:bg-white/[0.02] -mx-2 px-2 py-1 rounded-lg transition-colors' : 'cursor-default'}`}
       >
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[10px] text-zinc-400 flex items-center gap-1">
+        {/* Label + dollar range */}
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-[11px] text-zinc-300 flex items-center gap-1.5 font-medium">
             {hasDetails && (
               expanded
-                ? <ChevronDown className="w-2.5 h-2.5 text-zinc-600" />
-                : <ChevronRight className="w-2.5 h-2.5 text-zinc-600" />
+                ? <ChevronDown className="w-3 h-3 text-zinc-500" />
+                : <ChevronRight className="w-3 h-3 text-zinc-500" />
             )}
             {item.label}
           </span>
-          <span className="text-[10px] font-mono text-red-400/80">
+          <span className="text-[11px] font-mono text-red-400/90 shrink-0 tabular-nums">
             {formatCurrency(item.low)} – {formatCurrency(item.high)}
           </span>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[9px] text-zinc-600">{item.basis}</span>
-          <span className="text-[9px] text-zinc-600 font-mono shrink-0">{item.affected_count} affected</span>
+
+        {/* Visual range bar */}
+        {barWidth > 0 && (
+          <div className="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+            <div className="h-full rounded-full relative" style={{ width: `${barWidth}%` }}>
+              <div className="absolute inset-0 bg-red-500/20 rounded-full" />
+              <div className="absolute inset-y-0 left-0 bg-red-500/50 rounded-full" style={{ width: `${barWidth > 0 ? (lowPct / barWidth) * 100 : 0}%` }} />
+            </div>
+          </div>
+        )}
+
+        {/* Meta line */}
+        <div className="flex items-center gap-3 text-[9px] text-zinc-600">
+          <span className="truncate">{item.basis}</span>
+          <span className="font-mono shrink-0 text-zinc-500">{item.affected_count} affected</span>
         </div>
       </button>
 
       {expanded && (
-        <div className="mt-2 ml-3.5 pl-2.5 border-l border-white/5 flex flex-col gap-2.5 pb-1">
+        <div className="mt-2 ml-4 pl-3 border-l border-white/5 flex flex-col gap-2.5 pb-1">
           {item.formula && <CostLineItemDetail label="Calculation" text={item.formula} />}
           {item.statute && <CostLineItemDetail label="Legal basis" text={item.statute} />}
           {item.risk_context && <CostLineItemDetail label="Risk context" text={item.risk_context} />}
@@ -211,19 +224,28 @@ function CostLineItemRow({ item }: { item: import('../types').CostLineItem }) {
 }
 
 function CostOfRiskCard({ cost }: { cost: CostOfRisk }) {
+  const maxHigh = Math.max(...cost.line_items.map(i => i.high), 1);
   return (
-    <div className="border border-white/10 bg-black/20 p-3 flex flex-col gap-3 rounded-xl">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col gap-4">
+      {/* Header with total range */}
+      <div className="flex items-baseline justify-between gap-4">
         <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Estimated Exposure</div>
-        <div className="text-[11px] font-mono text-red-400">
-          {formatCurrency(cost.total_low)} – {formatCurrency(cost.total_high)}
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-lg font-mono font-light text-red-400">{formatCurrency(cost.total_low)}</span>
+          <span className="text-[10px] text-zinc-600">to</span>
+          <span className="text-lg font-mono font-light text-red-400">{formatCurrency(cost.total_high)}</span>
         </div>
       </div>
 
-      <div className="flex flex-col gap-2">
-        {cost.line_items.map((item) => (
-          <CostLineItemRow key={item.key} item={item} />
-        ))}
+      {/* Line items with visual bars */}
+      <div className="flex flex-col gap-3">
+        {cost.line_items.map((item) => {
+          const barWidth = Math.min((item.high / maxHigh) * 100, 100);
+          const lowPct = Math.min((item.low / maxHigh) * 100, 100);
+          return (
+            <CostLineItemRow key={item.key} item={item} barWidth={barWidth} lowPct={lowPct} />
+          );
+        })}
       </div>
     </div>
   );
@@ -236,39 +258,38 @@ function DimensionCard({ dimensionKey, dim, weight }: { dimensionKey: string; di
   const costOfRisk = getCostOfRisk(dim);
 
   return (
-    <div className="bg-zinc-900 border border-white/10 p-6 flex flex-col gap-5 rounded-2xl">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">{meta.label}</div>
-          {weight && <div className="text-[9px] text-zinc-600 uppercase tracking-widest mt-0.5">{weight} weight</div>}
-        </div>
-        <BandBadge band={dim.band} />
-      </div>
-
-      {/* Score */}
-      <div className="flex items-end gap-2">
-        <span className={`text-4xl font-light font-mono ${c.text}`}>{dim.score}</span>
-        <span className="text-sm text-zinc-600 mb-1 font-mono">/ 100</span>
-      </div>
-
-      <ScoreBar score={dim.score} band={dim.band} />
-
-      {/* Factors */}
-      <div className="flex flex-col gap-1.5">
-        {dim.factors.map((factor, i) => (
-          <div key={i} className="flex items-start gap-2 text-[11px] text-zinc-500">
-            <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-700 shrink-0" />
-            {factor}
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl overflow-hidden">
+      {/* Top section: score + factors side by side */}
+      <div className="flex">
+        {/* Left: score block */}
+        <div className="w-32 shrink-0 p-5 flex flex-col items-center justify-center border-r border-white/5">
+          <span className={`text-5xl font-light font-mono ${c.text}`}>{dim.score}</span>
+          <div className="mt-2 w-full">
+            <ScoreBar score={dim.score} band={dim.band} />
           </div>
-        ))}
+          <BandBadge band={dim.band} />
+          {weight && <div className="text-[9px] text-zinc-700 uppercase tracking-widest mt-1">{weight}</div>}
+        </div>
+
+        {/* Right: header + factors */}
+        <div className="flex-1 p-5 min-w-0">
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-3">{meta.label}</div>
+          <div className="flex flex-col gap-1.5">
+            {dim.factors.map((factor, i) => (
+              <div key={i} className="flex items-start gap-2 text-[11px] text-zinc-400 leading-snug">
+                <span className="mt-1.5 w-1 h-1 rounded-full bg-zinc-600 shrink-0" />
+                {factor}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
+      {/* Compliance metrics (full width below) */}
       {complianceMetrics && (
-        <div className="border border-white/10 bg-black/20 p-3 flex flex-col gap-3 rounded-xl">
-          <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">Employee Compliance Alerts</div>
-
-          <div className="grid grid-cols-2 gap-px bg-white/10 rounded-lg overflow-hidden">
+        <div className="border-t border-white/5 px-5 py-4">
+          <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-3">Employee Compliance Alerts</div>
+          <div className="grid grid-cols-4 gap-px bg-white/10 rounded-lg overflow-hidden">
             {[
               { label: 'Below Min Wage', value: complianceMetrics.total, tone: complianceMetrics.total > 0 ? 'text-red-400' : 'text-zinc-300' },
               { label: 'Hourly', value: complianceMetrics.hourly, tone: complianceMetrics.hourly > 0 ? 'text-red-400' : 'text-zinc-300' },
@@ -282,8 +303,8 @@ function DimensionCard({ dimensionKey, dim, weight }: { dimensionKey: string; di
             ))}
           </div>
 
-          {complianceMetrics.topLocations.length > 0 ? (
-            <div className="flex flex-col gap-1.5">
+          {complianceMetrics.topLocations.length > 0 && (
+            <div className="flex flex-col gap-1 mt-3">
               {complianceMetrics.topLocations.map((location) => (
                 <div key={location.location_id} className="flex items-center justify-between gap-3 text-[10px] text-zinc-400">
                   <span className="truncate">{formatComplianceLocation(location)}</span>
@@ -291,13 +312,16 @@ function DimensionCard({ dimensionKey, dim, weight }: { dimensionKey: string; di
                 </div>
               ))}
             </div>
-          ) : (
-            <div className="text-[10px] text-zinc-600 font-mono">No employee pay alerts detected.</div>
           )}
         </div>
       )}
 
-      {costOfRisk && <CostOfRiskCard cost={costOfRisk} />}
+      {/* Cost of risk (full width below) */}
+      {costOfRisk && (
+        <div className="border-t border-white/5 px-5 py-4">
+          <CostOfRiskCard cost={costOfRisk} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1669,7 +1693,7 @@ export default function RiskAssessment() {
           {/* Dimension detail cards */}
           <div>
             <div className="text-[10px] text-stone-500 uppercase tracking-widest font-bold mb-4">Dimension Breakdown</div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {DIMENSION_ORDER.map(key => (
                 <DimensionCard
                   key={key}
