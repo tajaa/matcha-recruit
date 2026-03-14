@@ -19,7 +19,17 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
 import { useCompliance, useComplianceRequirements, useJurisdictionSearch, useComplianceCheck } from '../hooks/compliance';
+import type { CategoryGroup } from '../generated/complianceCategories';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+
+const GROUP_FILTER_OPTIONS: { value: 'all' | CategoryGroup; label: string }[] = [
+    { value: 'all', label: 'All Categories' },
+    { value: 'labor', label: 'Labor' },
+    { value: 'supplementary', label: 'Supplementary' },
+    { value: 'healthcare', label: 'Healthcare' },
+    { value: 'oncology', label: 'Oncology' },
+    { value: 'medical_compliance', label: 'Medical Compliance' },
+];
 
 function EmployeesTooltip({ names, count, children }: { names?: string[] | null; count: number; children: React.ReactNode }) {
     const [show, setShow] = useState(false);
@@ -408,6 +418,19 @@ export function Compliance() {
     const { checkInProgress, checkMessages, runComplianceCheck } = complianceCheckHook;
     const { orderedRequirementCategories, sectionedCategories } = complianceReqHook;
     const [sectionedView, setSectionedView] = useState(true);
+    const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all');
+
+    const filteredSections = useMemo(() => {
+        if (groupFilter === 'all') return sectionedCategories;
+        return sectionedCategories.filter(s => s.id === groupFilter);
+    }, [sectionedCategories, groupFilter]);
+
+    const filteredFlatCategories = useMemo(() => {
+        if (groupFilter === 'all') return orderedRequirementCategories;
+        // Use the filtered sections to get the right categories in order
+        const sectionCats = filteredSections.flatMap(s => s.categories);
+        return sectionCats;
+    }, [groupFilter, orderedRequirementCategories, filteredSections]);
     const { jurisdictionSearch, setJurisdictionSearch, filteredJurisdictions } = jurisdictionSearchHook;
     const latestMissingCoverageCategories = useMemo(() => {
         for (let index = checkMessages.length - 1; index >= 0; index -= 1) {
@@ -1172,17 +1195,30 @@ export function Compliance() {
                                         )}
                                     </button>
                                 ))}
-                                {activeTab === 'requirements' && sectionedCategories.length > 1 && (
-                                    <button
-                                        onClick={() => setSectionedView(v => !v)}
-                                        className={`ml-auto p-2 rounded-sm border ${t.border} ${t.cardBg} ${t.rowHover} transition-colors flex-shrink-0`}
-                                        title={sectionedView ? 'Switch to flat view' : 'Switch to sectioned view'}
-                                    >
-                                        {sectionedView
-                                            ? <LayoutList size={13} className={t.textMuted} />
-                                            : <Layers size={13} className={t.textMuted} />
-                                        }
-                                    </button>
+                                {activeTab === 'requirements' && (
+                                    <div className="ml-auto flex items-center gap-1.5">
+                                        <select
+                                            value={groupFilter}
+                                            onChange={e => setGroupFilter(e.target.value as 'all' | CategoryGroup)}
+                                            className={`text-[10px] font-mono uppercase tracking-wider px-2 py-1.5 rounded-sm border ${t.border} ${t.cardBg} ${t.textMuted} bg-transparent cursor-pointer focus:outline-none`}
+                                        >
+                                            {GROUP_FILTER_OPTIONS.map(opt => (
+                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                            ))}
+                                        </select>
+                                        {sectionedCategories.length > 1 && (
+                                            <button
+                                                onClick={() => setSectionedView(v => !v)}
+                                                className={`p-2 rounded-sm border ${t.border} ${t.cardBg} ${t.rowHover} transition-colors flex-shrink-0`}
+                                                title={sectionedView ? 'Switch to flat view' : 'Switch to sectioned view'}
+                                            >
+                                                {sectionedView
+                                                    ? <LayoutList size={13} className={t.textMuted} />
+                                                    : <Layers size={13} className={t.textMuted} />
+                                                }
+                                            </button>
+                                        )}
+                                    </div>
                                 )}
                             </div>
 
@@ -1525,13 +1561,18 @@ export function Compliance() {
                                         </div>
                                     ) : sectionedView ? (
                                         <div className="space-y-6">
-                                            {sectionedCategories.map((section) => (
+                                            {filteredSections.map((section) => (
                                                 <div key={section.id}>
-                                                    {sectionedCategories.length > 1 && (
+                                                    {filteredSections.length > 1 && (
                                                         <div className="flex items-center gap-3 mb-2">
                                                             <div className={`flex-1 h-px ${t.border} border-t`} />
                                                             <span className={`text-[9px] font-bold uppercase tracking-[0.25em] ${t.textFaint} flex-shrink-0`}>
                                                                 {section.label}
+                                                                {section.requirementCount > 0 && (
+                                                                    <span className={`ml-1.5 font-normal ${t.textFaint}`}>
+                                                                        ({section.requirementCount} {section.requirementCount === 1 ? 'requirement' : 'requirements'})
+                                                                    </span>
+                                                                )}
                                                             </span>
                                                             <div className={`flex-1 h-px ${t.border} border-t`} />
                                                         </div>
@@ -1544,7 +1585,7 @@ export function Compliance() {
                                         </div>
                                     ) : (
                                         <div className={`space-y-px ${t.requirementDivider} border ${t.border}`}>
-                                            {orderedRequirementCategories.map(([category, reqs]) => renderCategoryAccordion(category, reqs))}
+                                            {filteredFlatCategories.map(([category, reqs]) => renderCategoryAccordion(category, reqs))}
                                         </div>
                                     )}
                                     </>

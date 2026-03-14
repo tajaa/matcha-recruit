@@ -1,56 +1,37 @@
 import { useMemo } from 'react';
 import type { ComplianceRequirement } from '../../api/compliance';
+import {
+  CATEGORY_GROUPS, CATEGORY_LABELS, ALL_CATEGORY_KEYS, LABOR_CATEGORIES,
+  type CategoryGroup,
+} from '../../generated/complianceCategories';
 
-const REQUIREMENT_CATEGORY_ORDER = [
-  'meal_breaks',
-  'minimum_wage',
-  'overtime',
-  'pay_frequency',
-  'sick_leave',
-  'final_pay',
-  'minor_work_permit',
-  'scheduling_reporting',
-  'workers_comp',
-  'business_license',
-  'tax_rate',
-  'posting_requirements',
-];
+type SectionId = CategoryGroup;
 
-const CORE_REQUIREMENT_SECTIONS = [
-  'meal_breaks',
-  'minimum_wage',
-  'overtime',
-  'pay_frequency',
-  'sick_leave',
-  'final_pay',
-  'minor_work_permit',
-  'scheduling_reporting',
-];
+const SECTION_ORDER: SectionId[] = ['labor', 'supplementary', 'healthcare', 'oncology', 'medical_compliance'];
+const SECTION_LABELS: Record<SectionId, string> = {
+  labor: 'Core Labor',
+  supplementary: 'Supplementary',
+  healthcare: 'Healthcare',
+  oncology: 'Oncology',
+  medical_compliance: 'Medical Compliance',
+};
 
-const INDUSTRY_SPECIFIC_CATEGORIES = new Set([
-  'hipaa_privacy',
-  'billing_integrity',
-  'clinical_safety',
-  'healthcare_workforce',
-  'corporate_integrity',
-  'research_consent',
-  'state_licensing',
-  'emergency_preparedness',
-]);
+// Ordering within each section — use ALL_CATEGORY_KEYS order (matches registry)
+const CATEGORY_ORDER_INDEX = new Map(ALL_CATEGORY_KEYS.map((k, i) => [k, i]));
 
 function normalizeCategoryKey(category: string): string {
   return category.trim().toLowerCase().replace(/[\s-]+/g, '_');
 }
 
-function isIndustrySpecific(category: string, reqs: ComplianceRequirement[]): boolean {
-  if (INDUSTRY_SPECIFIC_CATEGORIES.has(category)) return true;
-  return reqs.some(r => r.applicable_industries && r.applicable_industries.length > 0);
+function getSectionId(category: string): SectionId {
+  return CATEGORY_GROUPS[category] || 'supplementary';
 }
 
 export interface CategorySection {
-  id: 'core_labor' | 'industry_specific';
+  id: SectionId;
   label: string;
   categories: [string, ComplianceRequirement[]][];
+  requirementCount: number;
 }
 
 export function useComplianceRequirements(
@@ -68,14 +49,14 @@ export function useComplianceRequirements(
   }, [requirements]);
 
   const orderedRequirementCategories = useMemo(() => {
-    const orderIndex = new Map(REQUIREMENT_CATEGORY_ORDER.map((cat, idx) => [cat, idx]));
     const categories = new Set(Object.keys(requirementsByCategory));
-    CORE_REQUIREMENT_SECTIONS.forEach(category => categories.add(category));
+    // Always show core labor categories even when empty
+    LABOR_CATEGORIES.forEach(category => categories.add(category));
 
     return Array.from(categories)
       .sort((a, b) => {
-        const aIdx = orderIndex.get(a);
-        const bIdx = orderIndex.get(b);
+        const aIdx = CATEGORY_ORDER_INDEX.get(a);
+        const bIdx = CATEGORY_ORDER_INDEX.get(b);
         if (aIdx !== undefined && bIdx !== undefined) return aIdx - bIdx;
         if (aIdx !== undefined) return -1;
         if (bIdx !== undefined) return 1;
@@ -85,29 +66,34 @@ export function useComplianceRequirements(
   }, [requirementsByCategory]);
 
   const sectionedCategories = useMemo(() => {
-    const core: [string, ComplianceRequirement[]][] = [];
-    const industry: [string, ComplianceRequirement[]][] = [];
+    const buckets = new Map<SectionId, [string, ComplianceRequirement[]][]>();
+    for (const id of SECTION_ORDER) buckets.set(id, []);
 
     for (const entry of orderedRequirementCategories) {
       const [category, reqs] = entry;
-      if (isIndustrySpecific(category, reqs)) {
-        industry.push(entry);
-      } else {
-        core.push(entry);
-      }
+      const sectionId = getSectionId(category);
+      // For non-labor sections, only include categories that have requirements
+      if (sectionId !== 'labor' && reqs.length === 0) continue;
+      const bucket = buckets.get(sectionId);
+      if (bucket) bucket.push(entry);
     }
 
-    const sections: CategorySection[] = [
-      { id: 'core_labor', label: 'Core Labor', categories: core },
-    ];
-
-    if (industry.length > 0) {
-      const label = industryName ? `${industryName}-Specific` : 'Industry-Specific';
-      sections.push({ id: 'industry_specific', label, categories: industry });
+    const sections: CategorySection[] = [];
+    for (const id of SECTION_ORDER) {
+      const categories = buckets.get(id)!;
+      // Always show labor; only show other sections if they have categories with data
+      if (id !== 'labor' && categories.length === 0) continue;
+      const reqCount = categories.reduce((sum, [, reqs]) => sum + reqs.length, 0);
+      sections.push({
+        id,
+        label: SECTION_LABELS[id],
+        categories,
+        requirementCount: reqCount,
+      });
     }
 
     return sections;
-  }, [orderedRequirementCategories, industryName]);
+  }, [orderedRequirementCategories]);
 
   return { requirementsByCategory, orderedRequirementCategories, sectionedCategories };
 }
