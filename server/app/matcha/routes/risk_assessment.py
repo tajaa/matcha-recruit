@@ -23,6 +23,13 @@ from ..services.risk_assessment_service import (
     generate_recommendations,
     DEFAULT_WEIGHTS,
 )
+from ..services.monte_carlo_service import (
+    run_monte_carlo,
+    extract_cost_of_risk_items,
+)
+from ..services.cohort_analysis_service import compute_cohort_analysis
+from ..services.benchmark_service import compute_benchmarks
+from ..services.anomaly_detection_service import detect_anomalies
 
 logger = logging.getLogger(__name__)
 
@@ -578,3 +585,153 @@ async def get_assignable_users(
         AssignableUserResponse(id=row["id"], name=row["name"], email=row["email"])
         for row in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Monte Carlo Simulation
+# ---------------------------------------------------------------------------
+
+@router.post("/admin/monte-carlo/{company_id}")
+async def run_monte_carlo_simulation(
+    company_id: UUID = Path(...),
+    current_user=Depends(require_admin),
+):
+    """Run Monte Carlo simulation using latest snapshot's cost-of-risk data.
+
+    Produces probability distributions of annual loss exposure across all
+    cost-of-risk categories. Results are stored on the snapshot for retrieval.
+    """
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT dimensions FROM risk_assessment_snapshots WHERE company_id = $1",
+            company_id,
+        )
+
+    if not row:
+        raise HTTPException(
+            status_code=404,
+            detail="No risk assessment snapshot found. Run a risk assessment first.",
+        )
+
+    dims = row["dimensions"]
+    if isinstance(dims, str):
+        dims = json.loads(dims)
+
+    line_items = extract_cost_of_risk_items(dims)
+    if not line_items:
+        raise HTTPException(
+            status_code=422,
+            detail="No cost-of-risk data found in the snapshot.",
+        )
+
+    result = run_monte_carlo(line_items)
+
+    # Store on snapshot
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            UPDATE risk_assessment_snapshots
+            SET monte_carlo = $1::jsonb
+            WHERE company_id = $2
+            """,
+            json.dumps(result.to_dict(), default=str),
+            company_id,
+        )
+
+    return result.to_dict()
+
+
+@router.get("/monte-carlo")
+async def get_monte_carlo(
+    current_user=Depends(require_admin_or_client),
+    company_id_override: str | None = Query(None, alias="company_id"),
+):
+    """Return the latest stored Monte Carlo simulation for the company."""
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT monte_carlo FROM risk_assessment_snapshots WHERE company_id = $1",
+            company_id,
+        )
+
+    if not row or not row["monte_carlo"]:
+        raise HTTPException(
+            status_code=404,
+            detail="No Monte Carlo simulation has been run for this company.",
+        )
+
+    mc = row["monte_carlo"]
+    if isinstance(mc, str):
+        mc = json.loads(mc)
+    return mc
+
+
+# ---------------------------------------------------------------------------
+# Cohort Analysis / Department Heat Maps
+# ---------------------------------------------------------------------------
+
+@router.get("/cohorts")
+async def get_cohort_analysis(
+    current_user=Depends(require_admin_or_client),
+    dimension: str = Query("department", pattern="^(department|location|hire_quarter|tenure)$"),
+    company_id_override: str | None = Query(None, alias="company_id"),
+):
+    """Cohort-level risk metrics grouped by department, location, hire quarter, or tenure."""
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated")
+
+    results = await compute_cohort_analysis(company_id, dimension=dimension)
+    return [r.to_dict() for r in results]
+
+
+# ---------------------------------------------------------------------------
+# Risk-Adjusted Benchmarking
+# ---------------------------------------------------------------------------
+
+@router.get("/benchmarks")
+async def get_benchmarks(
+    current_user=Depends(require_admin_or_client),
+    company_id_override: str | None = Query(None, alias="company_id"),
+):
+    """Compare company risk metrics against NAICS industry peers."""
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated")
+
+    result = await compute_benchmarks(company_id)
+    return result.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Anomaly Detection
+# ---------------------------------------------------------------------------
+
+@router.get("/anomalies")
+async def get_anomalies(
+    current_user=Depends(require_admin_or_client),
+    months: int = Query(24, ge=6, le=36),
+    company_id_override: str | None = Query(None, alias="company_id"),
+):
+    """Detect anomalies in risk metrics over time using statistical process control."""
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated")
+
+    result = await detect_anomalies(company_id, months=months)
+    return result.to_dict()

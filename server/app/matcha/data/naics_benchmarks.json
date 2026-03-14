@@ -1,0 +1,122 @@
+{
+  "62": {
+    "label": "Healthcare and Social Assistance",
+    "incident_rate_per_100": {"median": 4.5, "p25": 2.8, "p75": 6.5},
+    "osha_trc_rate": {"median": 4.2, "p25": 2.5, "p75": 6.0},
+    "osha_dart_rate": {"median": 2.1, "p25": 1.2, "p75": 3.2},
+    "er_case_rate_per_1000": {"median": 18.0, "p25": 10.0, "p75": 28.0},
+    "eeoc_charge_rate_per_1000": {"median": 6.5, "p25": 3.0, "p75": 12.0}
+  },
+  "622": {
+    "label": "Hospitals",
+    "incident_rate_per_100": {"median": 5.5, "p25": 3.5, "p75": 8.0},
+    "osha_trc_rate": {"median": 5.2, "p25": 3.2, "p75": 7.5},
+    "osha_dart_rate": {"median": 2.6, "p25": 1.5, "p75": 4.0},
+    "er_case_rate_per_1000": {"median": 22.0, "p25": 14.0, "p75": 32.0},
+    "eeoc_charge_rate_per_1000": {"median": 7.0, "p25": 3.5, "p75": 13.0}
+  },
+  "623": {
+    "label": "Nursing and Residential Care Facilities",
+    "incident_rate_per_100": {"median": 6.8, "p25": 4.5, "p75": 9.5},
+    "osha_trc_rate": {"median": 6.5, "p25": 4.2, "p75": 9.0},
+    "osha_dart_rate": {"median": 3.5, "p25": 2.0, "p75": 5.2},
+    "er_case_rate_per_1000": {"median": 25.0, "p25": 16.0, "p75": 36.0},
+    "eeoc_charge_rate_per_1000": {"median": 8.0, "p25": 4.0, "p75": 14.0}
+  },
+  "621": {
+    "label": "Ambulatory Health Care Services",
+    "incident_rate_per_100": {"median": 2.5, "p25": 1.2, "p75": 4.0},
+    "osha_trc_rate": {"median": 2.3, "p25": 1.0, "p75": 3.8},
+    "osha_dart_rate": {"median": 1.2, "p25": 0.5, "p75": 2.0},
+    "er_case_rate_per_1000": {"median": 12.0, "p25": 6.0, "p75": 20.0},
+    "eeoc_charge_rate_per_1000": {"median": 5.0, "p25": 2.0, "p75": 9.0}
+  },
+  "72": {
+    "label": "Accommodation and Food Services",
+    "incident_rate_per_100": {"median": 3.8, "p25": 2.2, "p75": 5.5},
+    "osha_trc_rate": {"median": 3.5, "p25": 2.0, "p75": 5.2},
+    "osha_dart_rate": {"median": 1.8, "p25": 1.0, "p75": 2.8},
+    "er_case_rate_per_1000": {"median": 15.0, "p25": 8.0, "p75": 24.0},
+    "eeoc_charge_rate_per_1000": {"median": 7.5, "p25": 3.5, "p75": 13.0}
+  },
+  "721": {
+    "label": "Accommodation",
+    "incident_rate_per_100": {"median": 4.2, "p25": 2.5, "p75": 6.0},
+    "osha_trc_rate": {"median": 4.0, "p25": 2.3, "p75": 5.8},
+    "osha_dart_rate": {"median": 2.0, "p25": 1.1, "p75": 3.0},
+    "er_case_rate_per_1000": {"median": 16.0, "p25": 9.0, "p75": 25.0},
+    "eeoc_charge_rate_per_1000": {"median": 8.0, "p25": 4.0, "p75": 14.0}
+  },
+  "722": {
+    "label": "Food Services and Drinking Places",
+    "incident_rate_per_100": {"median": 3.5, "p25": 2.0, "p75": 5.0},
+    "osha_trc_rate": {"median": 3.2, "p25": 1.8, "p75": 4.8},
+    "osha_dart_rate": {"median": 1.6, "p25": 0.9, "p75": 2.5},
+    "er_case_rate_per_1000": {"median": 14.0, "p25": 7.0, "p75": 22.0},
+    "eeoc_charge_rate_per_1000": {"median": 7.0, "p25": 3.0, "p75": 12.0}
+  },
+  "44": {
+    "label": "Retail Trade",
+    "incident_rate_per_100": {"median": 3.2, "p25": 1.8, "p75": 4.8},
+    "osha_trc_rate": {"median": 3.0, "p25": 1.6, "p75": 4.5},
+    "osha_dart_rate": {"median": 1.5, "p25": 0.8, "p75": 2.4},
+    "er_case_rate_per_1000": {"median": 12.0, "p25": 6.0, "p75": 20.0},
+    "eeoc_charge_rate_per_1000": {"median": 6.0, "p25": 2.5, "p75": 11.0}
+  },
+  "23": {
+    "label": "Construction",
+    "incident_rate_per_100": {"median": 3.0, "p25": 1.8, "p75": 4.5},
+    "osha_trc_rate": {"median": 2.8, "p25": 1.5, "p75": 4.2},
+    "osha_dart_rate": {"median": 1.5, "p25": 0.8, "p75": 2.5},
+    "er_case_rate_per_1000": {"median": 10.0, "p25": 5.0, "p75": 18.0},
+    "eeoc_charge_rate_per_1000": {"median": 4.0, "p25": 1.5, "p75": 8.0}
+  },
+  "31": {
+    "label": "Manufacturing",
+    "incident_rate_per_100": {"median": 3.3, "p25": 2.0, "p75": 5.0},
+    "osha_trc_rate": {"median": 3.1, "p25": 1.8, "p75": 4.8},
+    "osha_dart_rate": {"median": 1.6, "p25": 0.9, "p75": 2.6},
+    "er_case_rate_per_1000": {"median": 11.0, "p25": 5.5, "p75": 19.0},
+    "eeoc_charge_rate_per_1000": {"median": 5.5, "p25": 2.5, "p75": 10.0}
+  },
+  "48": {
+    "label": "Transportation and Warehousing",
+    "incident_rate_per_100": {"median": 4.8, "p25": 3.0, "p75": 7.0},
+    "osha_trc_rate": {"median": 4.5, "p25": 2.8, "p75": 6.5},
+    "osha_dart_rate": {"median": 2.5, "p25": 1.4, "p75": 3.8},
+    "er_case_rate_per_1000": {"median": 14.0, "p25": 7.0, "p75": 23.0},
+    "eeoc_charge_rate_per_1000": {"median": 6.0, "p25": 2.5, "p75": 11.0}
+  },
+  "54": {
+    "label": "Professional, Scientific, and Technical Services",
+    "incident_rate_per_100": {"median": 0.8, "p25": 0.3, "p75": 1.5},
+    "osha_trc_rate": {"median": 0.7, "p25": 0.2, "p75": 1.3},
+    "osha_dart_rate": {"median": 0.4, "p25": 0.1, "p75": 0.8},
+    "er_case_rate_per_1000": {"median": 8.0, "p25": 3.0, "p75": 15.0},
+    "eeoc_charge_rate_per_1000": {"median": 4.0, "p25": 1.5, "p75": 8.0}
+  },
+  "52": {
+    "label": "Finance and Insurance",
+    "incident_rate_per_100": {"median": 0.6, "p25": 0.2, "p75": 1.2},
+    "osha_trc_rate": {"median": 0.5, "p25": 0.2, "p75": 1.0},
+    "osha_dart_rate": {"median": 0.3, "p25": 0.1, "p75": 0.6},
+    "er_case_rate_per_1000": {"median": 10.0, "p25": 4.0, "p75": 18.0},
+    "eeoc_charge_rate_per_1000": {"median": 5.0, "p25": 2.0, "p75": 9.0}
+  },
+  "61": {
+    "label": "Educational Services",
+    "incident_rate_per_100": {"median": 2.0, "p25": 1.0, "p75": 3.5},
+    "osha_trc_rate": {"median": 1.8, "p25": 0.8, "p75": 3.2},
+    "osha_dart_rate": {"median": 0.9, "p25": 0.4, "p75": 1.6},
+    "er_case_rate_per_1000": {"median": 12.0, "p25": 6.0, "p75": 20.0},
+    "eeoc_charge_rate_per_1000": {"median": 5.5, "p25": 2.5, "p75": 10.0}
+  },
+  "default": {
+    "label": "All Industries",
+    "incident_rate_per_100": {"median": 2.8, "p25": 1.2, "p75": 4.5},
+    "osha_trc_rate": {"median": 2.6, "p25": 1.0, "p75": 4.2},
+    "osha_dart_rate": {"median": 1.4, "p25": 0.6, "p75": 2.3},
+    "er_case_rate_per_1000": {"median": 12.0, "p25": 5.0, "p75": 22.0},
+    "eeoc_charge_rate_per_1000": {"median": 5.0, "p25": 2.0, "p75": 10.0}
+  }
+}

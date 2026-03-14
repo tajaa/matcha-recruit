@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock, Play, ShieldAlert, TrendingUp, TrendingDown } from 'lucide-react';
+import { HelpCircle, Plus, Check, X, ChevronDown, ChevronRight, User, Calendar, Clock, Play, ShieldAlert, TrendingUp, TrendingDown, Loader2 } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList, AreaChart, Area, Line, ReferenceArea } from 'recharts';
-import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser, RiskHistoryEntry, PreTermAnalytics, CostOfRisk } from '../types';
+import type { RiskAssessmentResult, DimensionResult, ERCaseMetrics, RiskActionItem, AssignableUser, RiskHistoryEntry, PreTermAnalytics, CostOfRisk, MonteCarloResult, CohortResult, BenchmarkResult, AnomalyDetectionResult } from '../types';
 import { riskAssessment, erCopilot, companies as companiesApi, preTermination, ApiRequestError } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
@@ -1060,6 +1060,388 @@ function isEmptyResult(data: RiskAssessmentResult): boolean {
   return DIMENSION_ORDER.every(k => data.dimensions[k].score === 0);
 }
 
+// ---------------------------------------------------------------------------
+// Analytics Tab
+// ---------------------------------------------------------------------------
+
+const fmt = (n: number) =>
+  n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M` : `$${Math.round(n / 1000)}K`;
+
+function MonteCarloPanel({ companyId, isAdmin }: { companyId?: string; isAdmin: boolean }) {
+  const [mc, setMc] = useState<MonteCarloResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    riskAssessment.getMonteCarlo(companyId)
+      .then(setMc)
+      .catch(() => setMc(null))
+      .finally(() => setLoading(false));
+  }, [companyId]);
+
+  const runSim = async () => {
+    if (!companyId) return;
+    setRunning(true);
+    setError(null);
+    try {
+      const result = await riskAssessment.runMonteCarlo(companyId);
+      setMc(result);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Simulation failed');
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const categories = mc ? Object.values(mc.categories).filter(c => c.expected_loss > 0) : [];
+
+  return (
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Monte Carlo Simulation</div>
+          <div className="text-[10px] text-zinc-600 font-mono mt-0.5">10,000 iterations · Annual loss distribution</div>
+        </div>
+        {isAdmin && companyId && (
+          <button
+            onClick={runSim}
+            disabled={running}
+            className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-white/10 text-zinc-300 rounded-lg hover:bg-white/15 disabled:opacity-50 transition-colors"
+          >
+            {running ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+            {running ? 'Running…' : mc ? 'Re-run' : 'Run Simulation'}
+          </button>
+        )}
+      </div>
+
+      {error && <div className="text-[10px] text-red-400 font-mono">{error}</div>}
+
+      {loading && <div className="text-[10px] text-zinc-600 animate-pulse font-mono">Loading…</div>}
+
+      {!loading && !mc && !error && (
+        <div className="text-[10px] text-zinc-600 font-mono">
+          {isAdmin ? 'Click "Run Simulation" to compute loss distribution.' : 'No simulation available yet.'}
+        </div>
+      )}
+
+      {mc && (
+        <>
+          {/* Aggregate summary */}
+          <div className="grid grid-cols-3 gap-px bg-white/10 rounded-xl overflow-hidden">
+            {[
+              { label: 'Expected Annual Loss', value: fmt(mc.aggregate.expected_annual_loss), sub: 'mean' },
+              { label: 'VaR 95%', value: fmt(mc.aggregate.var_95), sub: '1-in-20 year' },
+              { label: 'CVaR 95%', value: fmt(mc.aggregate.cvar_95), sub: 'tail average' },
+            ].map(s => (
+              <div key={s.label} className="bg-zinc-800 px-4 py-3">
+                <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold">{s.label}</div>
+                <div className="text-xl font-mono font-light text-zinc-200 mt-1">{s.value}</div>
+                <div className="text-[9px] text-zinc-600 mt-0.5">{s.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Percentile bar */}
+          <div>
+            <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-2">Loss Percentiles (Aggregate)</div>
+            <div className="relative h-2 bg-white/10 rounded-full overflow-hidden">
+              {/* Shade P10–P90 */}
+              {(() => {
+                const max = mc.aggregate.percentiles.p99;
+                if (!max) return null;
+                const p10pct = (mc.aggregate.percentiles.p10 / max) * 100;
+                const p90pct = (mc.aggregate.percentiles.p90 / max) * 100;
+                return (
+                  <div
+                    className="absolute top-0 h-full bg-amber-500/40 rounded-full"
+                    style={{ left: `${p10pct}%`, width: `${p90pct - p10pct}%` }}
+                  />
+                );
+              })()}
+            </div>
+            <div className="flex justify-between mt-1.5 text-[9px] font-mono text-zinc-600">
+              {(['p10', 'p25', 'p50', 'p75', 'p90', 'p99'] as const).map(p => (
+                <span key={p}><span className="text-zinc-500">{p.toUpperCase()}</span> {fmt(mc.aggregate.percentiles[p])}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Per-category rows */}
+          {categories.length > 0 && (
+            <div>
+              <div className="text-[9px] text-zinc-600 uppercase tracking-widest font-bold mb-2">By Category</div>
+              <div className="divide-y divide-white/5">
+                {categories.map(cat => (
+                  <div key={cat.key} className="py-2.5 flex items-center gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[11px] text-zinc-300 font-medium truncate">{cat.label}</div>
+                      <div className="text-[9px] text-zinc-600 font-mono mt-0.5">
+                        {cat.frequency_type} · λ={cat.frequency_lambda}
+                        {cat.zero_loss_pct > 0 && ` · ${cat.zero_loss_pct}% zero-loss`}
+                      </div>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <div className="text-[11px] font-mono text-zinc-200">{fmt(cat.expected_loss)}<span className="text-zinc-600 text-[9px] ml-1">exp</span></div>
+                      <div className="text-[9px] font-mono text-zinc-500">
+                        {fmt(cat.percentiles.p10)}–{fmt(cat.percentiles.p90)} <span className="text-zinc-700">P10-P90</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="text-[9px] text-zinc-700 font-mono">
+            Computed {new Date(mc.computed_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })} · {mc.iterations.toLocaleString()} iterations
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function CohortPanel({ companyId }: { companyId?: string }) {
+  const [cohorts, setCohorts] = useState<CohortResult[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dim, setDim] = useState<'department' | 'location' | 'hire_quarter' | 'tenure'>('department');
+
+  useEffect(() => {
+    setLoading(true);
+    riskAssessment.getCohorts(dim, companyId)
+      .then(setCohorts)
+      .catch(() => setCohorts([]))
+      .finally(() => setLoading(false));
+  }, [dim, companyId]);
+
+  return (
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Cohort Heat Map</div>
+        <div className="flex gap-0 border border-white/10 rounded-lg overflow-hidden">
+          {(['department', 'location', 'hire_quarter', 'tenure'] as const).map(d => (
+            <button
+              key={d}
+              onClick={() => setDim(d)}
+              className={`px-3 py-1.5 text-[9px] uppercase tracking-widest font-mono transition-colors ${
+                dim === d ? 'bg-white/15 text-zinc-200' : 'text-zinc-600 hover:text-zinc-400'
+              }`}
+            >
+              {d.replace('_', ' ')}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading && <div className="text-[10px] text-zinc-600 animate-pulse font-mono">Loading…</div>}
+
+      {!loading && cohorts.length === 0 && (
+        <div className="text-[10px] text-zinc-600 font-mono">No cohort data available.</div>
+      )}
+
+      {!loading && cohorts.length > 0 && (
+        <div className="divide-y divide-white/5">
+          {/* Header */}
+          <div className="grid grid-cols-5 gap-2 pb-2 text-[9px] text-zinc-600 uppercase tracking-widest font-bold">
+            <span className="col-span-2">Cohort</span>
+            <span className="text-right">Headcount</span>
+            <span className="text-right">Incidents</span>
+            <span className="text-right">Concentration</span>
+          </div>
+          {cohorts.map(c => {
+            const conc = c.risk_concentration;
+            const concColor = conc >= 2 ? 'text-red-400' : conc >= 1.3 ? 'text-amber-400' : 'text-zinc-400';
+            return (
+              <div key={c.label} className="grid grid-cols-5 gap-2 py-2.5 items-center">
+                <div className="col-span-2">
+                  <div className="text-[11px] text-zinc-200 font-medium truncate">{c.label}</div>
+                  {c.flags.length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-1">
+                      {c.flags.map((f, i) => (
+                        <span key={i} className="text-[8px] bg-amber-500/10 text-amber-400 border border-amber-500/20 px-1.5 py-0.5 rounded font-mono">{f}</span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="text-right text-[11px] font-mono text-zinc-400">
+                  {c.headcount} <span className="text-zinc-700 text-[9px]">{c.headcount_pct}%</span>
+                </div>
+                <div className="text-right text-[11px] font-mono text-zinc-400">
+                  {c.incident_count}
+                  {c.incident_rate > 0 && <span className="text-zinc-700 text-[9px] ml-1">{c.incident_rate}/100</span>}
+                </div>
+                <div className={`text-right text-[11px] font-mono font-bold ${concColor}`}>
+                  {conc > 0 ? `${conc.toFixed(1)}x` : '—'}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function BenchmarkPanel({ companyId }: { companyId?: string }) {
+  const [bm, setBm] = useState<BenchmarkResult | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    riskAssessment.getBenchmarks(companyId)
+      .then(setBm)
+      .catch(() => setBm(null))
+      .finally(() => setLoading(false));
+  }, [companyId]);
+
+  const METRIC_LABELS: Record<string, string> = {
+    incident_rate_per_100: 'Incident Rate / 100 FTE',
+    osha_trc_rate: 'OSHA TRC Rate',
+    osha_dart_rate: 'OSHA DART Rate',
+    er_case_rate_per_1000: 'ER Case Rate / 1,000',
+    eeoc_charge_rate_per_1000: 'EEOC Charge Rate / 1,000',
+  };
+
+  return (
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Industry Benchmarks</div>
+
+      {loading && <div className="text-[10px] text-zinc-600 animate-pulse font-mono">Loading…</div>}
+
+      {!loading && !bm && (
+        <div className="text-[10px] text-zinc-600 font-mono">No benchmark data available.</div>
+      )}
+
+      {bm && (
+        <>
+          <div className="text-[10px] text-zinc-600 font-mono">vs. {bm.naics_label} <span className="text-zinc-700">({bm.naics_code})</span></div>
+          {bm.metrics.length === 0 ? (
+            <div className="text-[10px] text-zinc-600 font-mono">No metrics to compare.</div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {bm.metrics.map(m => {
+                const ratioColor = m.ratio <= 1.2 ? 'text-emerald-400' : m.ratio <= 2 ? 'text-amber-400' : 'text-red-400';
+                const barWidth = Math.min((m.company_value / (m.industry_median * 3)) * 100, 100);
+                const medianBarWidth = Math.min((m.industry_median / (m.industry_median * 3)) * 100, 100);
+                return (
+                  <div key={m.metric} className="py-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] text-zinc-400">{METRIC_LABELS[m.metric] ?? m.metric}</span>
+                      <span className={`text-[10px] font-mono font-bold ${ratioColor}`}>{m.ratio.toFixed(1)}x</span>
+                    </div>
+                    <div className="relative h-1.5 bg-white/10 rounded-full">
+                      {/* Industry median marker */}
+                      <div
+                        className="absolute top-0 h-full w-0.5 bg-zinc-500/60"
+                        style={{ left: `${medianBarWidth}%` }}
+                      />
+                      {/* Company bar */}
+                      <div
+                        className={`absolute top-0 h-full rounded-full ${m.ratio <= 1.2 ? 'bg-emerald-500/60' : m.ratio <= 2 ? 'bg-amber-500/60' : 'bg-red-500/60'}`}
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between mt-1 text-[9px] font-mono text-zinc-600">
+                      <span>You: {m.company_value.toFixed(1)}</span>
+                      <span className="text-zinc-700">P{m.percentile}</span>
+                      <span>Median: {m.industry_median.toFixed(1)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AnomalyPanel({ companyId }: { companyId?: string }) {
+  const [result, setResult] = useState<AnomalyDetectionResult | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setLoading(true);
+    riskAssessment.getAnomalies(24, companyId)
+      .then(setResult)
+      .catch(() => setResult(null))
+      .finally(() => setLoading(false));
+  }, [companyId]);
+
+  return (
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Anomaly Detection</div>
+
+      {loading && <div className="text-[10px] text-zinc-600 animate-pulse font-mono">Loading…</div>}
+
+      {!loading && !result && (
+        <div className="text-[10px] text-zinc-600 font-mono">No anomaly data available.</div>
+      )}
+
+      {result && !result.has_sufficient_data && (
+        <div className="text-[10px] text-zinc-600 font-mono">
+          Needs ≥ 6 months of history ({result.data_points_available} data points available).
+        </div>
+      )}
+
+      {result && result.has_sufficient_data && (
+        <>
+          <div className="flex gap-4">
+            <div className="bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2 text-center">
+              <div className="text-xl font-mono font-light text-red-400">{result.alert_count}</div>
+              <div className="text-[9px] text-red-500/70 uppercase tracking-widest font-bold mt-0.5">Alerts</div>
+            </div>
+            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2 text-center">
+              <div className="text-xl font-mono font-light text-amber-400">{result.warning_count}</div>
+              <div className="text-[9px] text-amber-500/70 uppercase tracking-widest font-bold mt-0.5">Warnings</div>
+            </div>
+          </div>
+
+          {result.total_anomalies === 0 ? (
+            <div className="text-[10px] text-emerald-400 font-mono">No anomalies detected — all metrics within normal range.</div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {result.metrics.flatMap(m => m.anomalies).map((a, i) => (
+                <div key={i} className="py-2.5">
+                  <div className="flex items-start gap-2">
+                    <span className={`shrink-0 text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded ${
+                      a.severity === 'alert'
+                        ? 'bg-red-500/10 text-red-400 border border-red-500/20'
+                        : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                    }`}>{a.severity}</span>
+                    <div>
+                      <div className="text-[11px] text-zinc-200">{a.description}</div>
+                      <div className="text-[9px] text-zinc-600 font-mono mt-0.5">
+                        {a.period} · value {a.value.toFixed(1)} · mean {a.rolling_mean.toFixed(1)} · z={a.z_score.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function AnalyticsTab({ companyId, isAdmin }: { companyId?: string; isAdmin: boolean }) {
+  return (
+    <div className="space-y-6">
+      <MonteCarloPanel companyId={companyId} isAdmin={isAdmin} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <CohortPanel companyId={companyId} />
+        <BenchmarkPanel companyId={companyId} />
+      </div>
+      <AnomalyPanel companyId={companyId} />
+    </div>
+  );
+}
+
 export default function RiskAssessment() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
@@ -1074,6 +1456,7 @@ export default function RiskAssessment() {
   const [metricsDays, setMetricsDays] = useState(30);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [preTermAnalytics, setPreTermAnalytics] = useState<PreTermAnalytics | null>(null);
+  const [activeTab, setActiveTab] = useState<'overview' | 'analytics'>('overview');
 
   const fetchMetrics = useCallback(async (days: number) => {
     setMetricsLoading(true);
@@ -1209,6 +1592,28 @@ export default function RiskAssessment() {
 
       {!error && !notAssessed && data && !isEmptyResult(data) && (
         <>
+          {/* Tab bar */}
+          <div className="flex gap-0 border border-stone-300 rounded-xl overflow-hidden w-fit">
+            {(['overview', 'analytics'] as const).map(tab => (
+              <button
+                key={tab}
+                onClick={() => setActiveTab(tab)}
+                className={`px-5 py-2 text-[11px] uppercase tracking-widest font-bold transition-colors ${
+                  activeTab === tab
+                    ? 'bg-zinc-900 text-zinc-50'
+                    : 'bg-stone-200 text-stone-500 hover:text-zinc-900'
+                }`}
+              >
+                {tab === 'overview' ? 'Overview' : 'Analytics'}
+              </button>
+            ))}
+          </div>
+
+          {activeTab === 'analytics' && (
+            <AnalyticsTab companyId={adminCompanyId} isAdmin={isAdmin} />
+          )}
+
+          {activeTab === 'overview' && <>
           {/* Overall score */}
           <div className="grid grid-cols-5 gap-px bg-white/10 border border-white/10 rounded-2xl overflow-hidden">
             {/* Big number */}
@@ -1444,6 +1849,7 @@ export default function RiskAssessment() {
               ))}
             </div>
           </div>
+          </>}
         </>
       )}
     </div>

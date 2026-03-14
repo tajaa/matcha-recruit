@@ -131,6 +131,10 @@ import type {
   RiskActionItemUpdate,
   AssignableUser,
   RiskHistoryEntry,
+  MonteCarloResult,
+  CohortResult,
+  BenchmarkResult,
+  AnomalyDetectionResult,
   PreTermCheck,
   PreTermCheckRequest,
   PreTermAcknowledgeRequest,
@@ -3441,6 +3445,16 @@ export const riskAssessment = {
     request(_raParams(`/risk-assessment/history${months ? `?months=${months}` : ''}`, companyId)),
   adminRun: (companyId: string): Promise<RiskAssessmentResult> =>
     request(`/risk-assessment/admin/run/${companyId}`, { method: 'POST' }),
+  getMonteCarlo: (companyId?: string): Promise<MonteCarloResult> =>
+    request(_raParams('/risk-assessment/monte-carlo', companyId)),
+  runMonteCarlo: (companyId: string): Promise<MonteCarloResult> =>
+    request(`/risk-assessment/admin/monte-carlo/${companyId}`, { method: 'POST' }),
+  getCohorts: (dimension: string, companyId?: string): Promise<CohortResult[]> =>
+    request(_raParams(`/risk-assessment/cohorts?dimension=${dimension}`, companyId)),
+  getBenchmarks: (companyId?: string): Promise<BenchmarkResult> =>
+    request(_raParams('/risk-assessment/benchmarks', companyId)),
+  getAnomalies: (months: number, companyId?: string): Promise<AnomalyDetectionResult> =>
+    request(_raParams(`/risk-assessment/anomalies?months=${months}`, companyId)),
 };
 
 // Combined API object for convenient imports

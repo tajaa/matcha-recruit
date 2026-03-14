@@ -2662,6 +2662,89 @@ export interface RiskHistoryEntry {
   source: 'scheduled' | 'manual';
 }
 
+export interface MonteCarloCategoryResult {
+  key: string;
+  label: string;
+  frequency_type: 'deterministic' | 'stochastic';
+  frequency_lambda: number;
+  expected_loss: number;
+  percentiles: { p5: number; p10: number; p25: number; p50: number; p75: number; p90: number; p95: number; p99: number };
+  zero_loss_pct: number;
+}
+
+export interface MonteCarloAggregateResult {
+  expected_annual_loss: number;
+  percentiles: { p5: number; p10: number; p25: number; p50: number; p75: number; p90: number; p95: number; p99: number };
+  var_95: number;
+  var_99: number;
+  cvar_95: number;
+  max_simulated: number;
+}
+
+export interface MonteCarloResult {
+  iterations: number;
+  categories: Record<string, MonteCarloCategoryResult>;
+  aggregate: MonteCarloAggregateResult;
+  computed_at: string;
+}
+
+export interface CohortResult {
+  label: string;
+  headcount: number;
+  headcount_pct: number;
+  incident_count: number;
+  incident_rate: number;
+  er_case_count: number;
+  discipline_count: number;
+  risk_concentration: number;
+  flags: string[];
+}
+
+export interface BenchmarkMetric {
+  metric: string;
+  company_value: number;
+  industry_median: number;
+  ratio: number;
+  percentile: number;
+  interpretation: string;
+}
+
+export interface BenchmarkResult {
+  naics_code: string;
+  naics_label: string;
+  metrics: BenchmarkMetric[];
+}
+
+export interface AnomalyItem {
+  metric: string;
+  period: string;
+  value: number;
+  rolling_mean: number;
+  rolling_std: number;
+  z_score: number;
+  severity: 'warning' | 'alert';
+  description: string;
+}
+
+export interface MetricTimeSeries {
+  metric: string;
+  label: string;
+  data_points: number;
+  current_value: number;
+  rolling_mean: number;
+  rolling_std: number;
+  anomalies: AnomalyItem[];
+}
+
+export interface AnomalyDetectionResult {
+  has_sufficient_data: boolean;
+  data_points_available: number;
+  metrics: MetricTimeSeries[];
+  total_anomalies: number;
+  alert_count: number;
+  warning_count: number;
+}
+
 // ---------------------------------------------------------------------------
 // Training Compliance
 // ---------------------------------------------------------------------------
