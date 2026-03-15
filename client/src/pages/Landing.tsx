@@ -1,75 +1,8 @@
+import { lazy, Suspense } from 'react'
 import { LinkButton } from '../components/ui'
 import { AsciiHalftone } from '../components/AsciiHalftone'
 
-const cities = [
-  { name: 'TORONTO', x: '72%', y: '12%' },
-  { name: 'CHICAGO', x: '63%', y: '15%' },
-  { name: 'NY', x: '78%', y: '18%' },
-  { name: 'SF', x: '52%', y: '24%' },
-  { name: 'LA', x: '54%', y: '32%' },
-  { name: 'AUSTIN', x: '65%', y: '30%' },
-  { name: 'MIAMI', x: '76%', y: '34%' },
-  { name: 'MEXICO CITY', x: '62%', y: '44%' },
-  { name: 'BOG', x: '80%', y: '56%' },
-  { name: 'LIMA', x: '72%', y: '70%' },
-  { name: 'SAO', x: '82%', y: '66%' },
-  { name: 'BUENOS AIRES', x: '76%', y: '78%' },
-]
-
-function Globe() {
-  return (
-    <div className="absolute inset-0 overflow-hidden">
-      {/* Concentric ellipses for wireframe sphere */}
-      {[100, 90, 78, 64, 48, 30].map((size, i) => (
-        <div
-          key={`h-${i}`}
-          className="globe-ring"
-          style={{
-            width: `${size}%`,
-            height: `${size}%`,
-            left: `${50 - size / 2 + 15}%`,
-            top: `${50 - size / 2}%`,
-          }}
-        />
-      ))}
-      {/* Vertical arcs */}
-      {[20, 35, 50, 65, 80].map((left, i) => (
-        <div
-          key={`v-${i}`}
-          className="globe-ring"
-          style={{
-            width: '60%',
-            height: '96%',
-            left: `${left}%`,
-            top: '2%',
-            transform: `rotateY(${60 - i * 15}deg)`,
-          }}
-        />
-      ))}
-      {/* Meridian lines */}
-      {[30, 45, 60, 75].map((top, i) => (
-        <div
-          key={`m-${i}`}
-          className="absolute border-t border-zinc-700/10"
-          style={{ width: '80%', left: '25%', top: `${top}%` }}
-        />
-      ))}
-      {/* City dots + labels */}
-      {cities.map((city) => (
-        <div
-          key={city.name}
-          className="absolute"
-          style={{ left: city.x, top: city.y }}
-        >
-          <div className="relative dot-ping h-2 w-2 rounded-full bg-amber-500" />
-          <span className="absolute left-3 top-[-3px] text-[10px] tracking-[0.2em] text-zinc-500 font-[Space_Mono] whitespace-nowrap">
-            {city.name}
-          </span>
-        </div>
-      ))}
-    </div>
-  )
-}
+const ParticleSphere = lazy(() => import('../components/ParticleSphere'))
 
 export default function Landing() {
   return (
@@ -137,9 +70,17 @@ export default function Landing() {
             </div>
           </div>
 
-          {/* Globe */}
-          <div className="absolute right-0 top-0 bottom-0 w-[65%] hidden md:block">
-            <Globe />
+          {/* Particle Sphere */}
+          <div className="absolute right-0 top-0 bottom-0 w-[60%] hidden lg:flex items-center justify-center">
+            <Suspense
+              fallback={
+                <div className="text-zinc-600 font-[Space_Mono] text-[8px] uppercase tracking-[0.4em] animate-pulse">
+                  Booting Neural Sphere...
+                </div>
+              }
+            >
+              <ParticleSphere className="w-full h-[70vh] opacity-80" />
+            </Suspense>
           </div>
         </section>
 

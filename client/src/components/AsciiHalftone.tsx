@@ -92,7 +92,7 @@ export function AsciiHalftone() {
         }
       }
 
-      time += 0.015
+      time += 0.04
       animId = requestAnimationFrame(draw)
     }
 
