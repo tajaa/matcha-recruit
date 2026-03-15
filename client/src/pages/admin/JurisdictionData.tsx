@@ -12,7 +12,6 @@ import { CSS } from '@dnd-kit/utilities';
 import { useQueryClient } from '@tanstack/react-query';
 import { useJurisdictionData } from '../../hooks/useJurisdictionData';
 import { useIndustryProfiles } from '../../hooks/useIndustryProfiles';
-import { useIsLightMode } from '../../hooks/useIsLightMode';
 import { api } from '../../api/client';
 import type { JurisdictionDataState, JurisdictionDataCitySummary, JurisdictionDataOverview, JurisdictionDetail, JurisdictionDataPreemption, IndustryProfile, CategoryEvidence, JurisdictionRequirement } from '../../api/client';
 
@@ -49,39 +48,6 @@ const LT = {
   tooltip: 'bg-zinc-900 text-zinc-100',
   trashBtn: 'text-stone-300 hover:text-red-500',
   confirmBtn: 'text-red-500 hover:text-red-700',
-};
-const DK = {
-  pageBg: 'bg-zinc-950',
-  card: 'bg-zinc-900 rounded-xl',
-  innerEl: 'bg-zinc-800 rounded-lg',
-  textMain: 'text-zinc-100',
-  textMuted: 'text-zinc-400',
-  textFaint: 'text-zinc-300',
-  textDim: 'text-zinc-200',
-  border: 'border-white/10',
-  divide: 'divide-white/10',
-  rowHover: 'hover:bg-white/5',
-  label: 'text-[10px] text-zinc-400 uppercase tracking-widest font-bold',
-  select: 'bg-zinc-900 border border-white/10 rounded-lg text-zinc-100 focus:border-white/20',
-  btnGhost: 'text-zinc-400 hover:text-zinc-100',
-  statusOk: 'text-emerald-400',
-  statusWarn: 'text-amber-400',
-  statusErr: 'text-red-400',
-  dotOk: 'bg-emerald-400',
-  dotMiss: 'bg-red-500',
-  barBg: 'bg-zinc-700',
-  barFill: 'bg-emerald-400',
-  barTier1: 'bg-emerald-400',
-  barTier2: 'bg-amber-400',
-  barTier3: 'bg-red-400',
-  kpi: 'bg-zinc-900 rounded-xl border border-white/10',
-  tabActive: 'bg-zinc-800 text-zinc-100 shadow-sm',
-  tabInactive: 'text-zinc-500 hover:text-zinc-200',
-  preemptOk: 'bg-emerald-500/20 text-emerald-400',
-  preemptNo: 'bg-red-500/20 text-red-400',
-  tooltip: 'bg-zinc-800 text-zinc-200',
-  trashBtn: 'text-zinc-700 hover:text-red-500',
-  confirmBtn: 'text-red-400 hover:text-red-300',
 };
 
 type Tab = 'coverage' | 'missing' | 'quality' | 'preemption' | 'bookmarks';
@@ -154,8 +120,7 @@ function formatDate(iso: string | null): string {
 
 /* ═══════ Main Component ═══════ */
 export default function JurisdictionData() {
-  const isLight = useIsLightMode();
-  const t = isLight ? LT : DK;
+  const t = LT;
   const { data, isLoading, hardRefresh } = useJurisdictionData();
   const { profiles, create: createProfile, update: updateProfile, remove: removeProfile } = useIndustryProfiles();
   const queryClient = useQueryClient();
@@ -236,16 +201,16 @@ export default function JurisdictionData() {
 
   if (isLoading) {
     return (
-      <div className={`min-h-screen ${t.pageBg} flex items-center justify-center`}>
-        <Loader2 className={`w-5 h-5 animate-spin ${t.textMuted}`} />
+      <div className="flex items-center justify-center py-24">
+        <Loader2 className="w-5 h-5 animate-spin text-stone-400" />
       </div>
     );
   }
 
   if (!data) {
     return (
-      <div className={`min-h-screen ${t.pageBg} flex items-center justify-center`}>
-        <p className={t.textMuted}>Failed to load data.</p>
+      <div className="flex items-center justify-center py-24">
+        <p className="text-stone-500">Failed to load data.</p>
       </div>
     );
   }
@@ -253,14 +218,12 @@ export default function JurisdictionData() {
   const { summary } = data;
 
   return (
-    <div className={`min-h-screen ${t.pageBg} p-5 md:p-8`}>
-      <div className="max-w-[1400px] mx-auto space-y-5">
+    <div className="max-w-6xl mx-auto py-4 px-4 sm:px-6 space-y-5">
 
-        {/* ── Header ── */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between pb-4 border-b border-white/10">
           <div>
-            <h1 className={`text-4xl tracking-tighter font-bold ${t.textMain}`}>JURISDICTION DATA</h1>
-            <p className={`text-sm ${t.textMuted} mt-1`}>Compliance data repository overview</p>
+            <h1 className="text-xl font-semibold text-zinc-50">Jurisdiction Data</h1>
+            <p className="text-sm text-zinc-400 mt-0.5">Compliance data repository overview</p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -270,7 +233,6 @@ export default function JurisdictionData() {
             >
               <Settings2 className="w-3.5 h-3.5" />
             </button>
-
             <button
               onClick={() => hardRefresh()}
               className={`flex items-center gap-2 px-3 py-1.5 text-sm rounded-lg transition ${t.btnGhost} ${t.innerEl}`}
@@ -330,7 +292,6 @@ export default function JurisdictionData() {
             )}
           </motion.div>
         </AnimatePresence>
-      </div>
 
       {/* ── City Detail Drawer ── */}
       <AnimatePresence>
@@ -1124,7 +1085,7 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
       <motion.div
         initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-        className={`fixed inset-y-0 right-0 w-full max-w-2xl z-50 ${t.pageBg} shadow-2xl overflow-y-auto`}
+        className="fixed inset-y-0 right-0 w-full max-w-2xl z-50 bg-stone-200 shadow-2xl overflow-y-auto"
       >
         <div className="p-6 space-y-5">
           {/* header */}

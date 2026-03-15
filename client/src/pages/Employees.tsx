@@ -11,6 +11,7 @@ import { TabNav } from '../components/ui/TabNav';
 import { EmptyState } from '../components/ui/EmptyState';
 import { ErrorBanner } from '../components/ui/ErrorBanner';
 import { PageHeader } from '../components/ui/PageHeader';
+import { TableSkeleton } from '../components/ui/TableSkeleton';
 import type { GoogleWorkspaceConnectionStatus } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -425,8 +426,12 @@ export default function Employees() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-sm text-stone-400 animate-pulse">Loading…</div>
+      <div className="max-w-6xl mx-auto py-6 px-4 sm:px-6 space-y-5">
+        <div className="pb-4 border-b border-stone-200 space-y-2">
+          <div className="h-5 w-32 bg-stone-200 animate-pulse rounded-md" />
+          <div className="h-3.5 w-56 bg-stone-200/60 animate-pulse rounded-md" />
+        </div>
+        <TableSkeleton />
       </div>
     );
   }
