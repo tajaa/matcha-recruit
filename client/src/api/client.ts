@@ -77,6 +77,7 @@ import type {
   IRRecommendationsAnalysis,
   IRPrecedentAnalysis,
   IRConsistencyGuidance,
+  IRPolicyMappingAnalysis,
   IRConsistencyAnalytics,
   IRAuditLogResponse,
   EmployeeIncidentItem,
@@ -1297,6 +1298,12 @@ export const irIncidents = {
     request<IRPrecedentAnalysis>(`/ir/incidents/${incidentId}/analyze/similar`, {
       method: 'POST',
     }),
+
+  getPolicyMapping: (incidentId: string): Promise<IRPolicyMappingAnalysis> =>
+    request<IRPolicyMappingAnalysis>(`/ir/incidents/${incidentId}/policy-mapping`),
+
+  refreshPolicyMapping: (incidentId: string): Promise<IRPolicyMappingAnalysis> =>
+    request<IRPolicyMappingAnalysis>(`/ir/incidents/${incidentId}/analyze/policy-mapping`, { method: 'POST' }),
 
   getConsistencyGuidance: (incidentId: string): Promise<IRConsistencyGuidance> =>
     request<IRConsistencyGuidance>(`/ir/incidents/${incidentId}/consistency-guidance`),

@@ -294,6 +294,26 @@ class ActionBySeverity(BaseModel):
     actions: list[ActionProbability]
 
 
+class PolicyViolationMatch(BaseModel):
+    """A single policy matched against an incident."""
+    policy_id: str
+    policy_title: str
+    relevance: Literal["violated", "bent", "related"]
+    confidence: float  # 0.0-1.0
+    reasoning: str
+    relevant_excerpt: Optional[str] = None
+
+
+class PolicyMappingAnalysis(BaseModel):
+    """AI policy mapping analysis result."""
+    matches: list[PolicyViolationMatch]
+    summary: str
+    no_matching_policies: bool = False
+    generated_at: str
+    from_cache: bool = False
+    cache_reason: Optional[str] = None
+
+
 class ConsistencyAnalytics(BaseModel):
     """Company-wide consistency analytics across resolved incidents."""
     total_resolved: int

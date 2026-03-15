@@ -1818,6 +1818,24 @@ export interface IRConsistencyGuidance {
   from_cache: boolean;
 }
 
+export interface IRPolicyViolationMatch {
+  policy_id: string;
+  policy_title: string;
+  relevance: 'violated' | 'bent' | 'related';
+  confidence: number;
+  reasoning: string;
+  relevant_excerpt?: string;
+}
+
+export interface IRPolicyMappingAnalysis {
+  matches: IRPolicyViolationMatch[];
+  summary: string;
+  no_matching_policies: boolean;
+  generated_at: string;
+  from_cache?: boolean;
+  cache_reason?: string;
+}
+
 export interface IRActionByType {
   incident_type: string;
   total: number;

@@ -1889,7 +1889,7 @@ async def init_db():
             CREATE TABLE IF NOT EXISTS ir_incident_analysis (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 incident_id UUID NOT NULL REFERENCES ir_incidents(id) ON DELETE CASCADE,
-                analysis_type VARCHAR(50) NOT NULL CHECK (analysis_type IN ('categorization', 'severity', 'root_cause', 'recommendations', 'similar', 'consistency', 'company_consistency')),
+                analysis_type VARCHAR(50) NOT NULL CHECK (analysis_type IN ('categorization', 'severity', 'root_cause', 'recommendations', 'similar', 'consistency', 'company_consistency', 'policy_mapping')),
                 analysis_data JSONB NOT NULL,
                 generated_by UUID REFERENCES users(id),
                 generated_at TIMESTAMP DEFAULT NOW(),

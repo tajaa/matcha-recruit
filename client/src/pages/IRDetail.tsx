@@ -16,6 +16,7 @@ import { RootCauseAnalysisModal } from '../components/ir/RootCauseAnalysisModal'
 import { RecommendationsAnalysisModal } from '../components/ir/RecommendationsAnalysisModal';
 import { SimilarIncidentsAnalysisModal } from '../components/ir/SimilarIncidentsAnalysisModal';
 import { ConsistencyGuidancePanel } from '../components/ir/ConsistencyGuidancePanel';
+import { PolicyMappingPanel } from '../components/ir/PolicyMappingPanel';
 import { AnalysisTerminalModal } from '../components/ir/AnalysisTerminalModal';
 import { ScheduleInterviewsModal } from '../components/ir/ScheduleInterviewsModal';
 import { useIRAnalysisStream } from '../hooks/ir/useIRAnalysisStream';
@@ -712,6 +713,9 @@ export function IRDetail() {
 
         {/* Sidebar */}
         <div className="space-y-8">
+          {/* Policy Mapping - always shown */}
+          <PolicyMappingPanel incidentId={id!} />
+
           {/* Consistency Guidance - only for investigating/action_required */}
           {(incident.status === 'investigating' || incident.status === 'action_required') && (
             <ConsistencyGuidancePanel

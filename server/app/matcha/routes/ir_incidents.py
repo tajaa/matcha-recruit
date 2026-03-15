@@ -42,6 +42,7 @@ from ..models.ir_incident import (
     ActionProbability,
     ConsistencyGuidance,
     ConsistencyAnalytics,
+    PolicyMappingAnalysis,
     AnalyticsSummary,
     TrendsAnalysis,
     TrendDataPoint,
@@ -65,7 +66,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Valid analysis types
-ANALYSIS_TYPES = Literal["categorization", "severity", "root_cause", "recommendations", "similar", "consistency", "company_consistency"]
+ANALYSIS_TYPES = Literal["categorization", "severity", "root_cause", "recommendations", "similar", "consistency", "company_consistency", "policy_mapping"]
 
 
 def _sse(event: dict) -> str:
@@ -407,6 +408,11 @@ async def create_incident(
                 previous_status=None,
                 location_name=location_name or row.get("location"),
                 occurred_at=row.get("occurred_at"),
+            )
+            background_tasks.add_task(
+                _auto_map_policy_violations,
+                str(row["id"]),
+                str(effective_company_id),
             )
 
         return row_to_response(response_row, 0)
@@ -1097,6 +1103,16 @@ async def update_incident(
                     previous_status=previous_status,
                     location_name=location_name or row.get("location"),
                     occurred_at=row.get("occurred_at"),
+                )
+
+        # Re-map policies if description or category_data changed
+        if incident.description is not None or incident.category_data is not None:
+            effective_cid = row.get("company_id") or company_id
+            if effective_cid:
+                background_tasks.add_task(
+                    _auto_map_policy_violations,
+                    str(incident_id),
+                    str(effective_cid),
                 )
 
         return row_to_response(response_row, doc_count)
@@ -2213,6 +2229,204 @@ async def analyze_similar_incidents(
         yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ===========================================
+# Policy Mapping
+# ===========================================
+
+async def _auto_map_policy_violations(incident_id: str, company_id: str):
+    """Background task: auto-map incident to company policies."""
+    try:
+        from ..services.ir_analysis import get_ir_analyzer
+
+        async with get_connection() as conn:
+            # Fetch incident
+            row = await conn.fetchrow(
+                "SELECT title, description, incident_type, severity, category_data FROM ir_incidents WHERE id = $1",
+                incident_id,
+            )
+            if not row:
+                return
+
+            # Fetch active policies
+            policies = await conn.fetch(
+                "SELECT id, title, description, content FROM policies WHERE company_id = $1 AND status = 'active'",
+                company_id,
+            )
+
+            if not policies:
+                # Cache empty result
+                empty_result = {
+                    "matches": [],
+                    "summary": "No active policies found for this company.",
+                    "no_matching_policies": True,
+                    "generated_at": _utc_now_naive().isoformat(),
+                }
+                await conn.execute(
+                    """
+                    INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                    VALUES ($1, 'policy_mapping', $2)
+                    ON CONFLICT (incident_id, analysis_type)
+                    DO UPDATE SET analysis_data = $2, generated_at = now()
+                    """,
+                    incident_id,
+                    json.dumps(empty_result),
+                )
+                return
+
+            policies_list = [
+                {"id": str(p["id"]), "title": p["title"], "description": p.get("description"), "content": p.get("content")}
+                for p in policies
+            ]
+
+            analyzer = get_ir_analyzer()
+            result = await analyzer.map_policy_violations(
+                title=row["title"],
+                description=row.get("description") or "",
+                incident_type=row["incident_type"],
+                severity=row["severity"],
+                category_data=_safe_json_loads(row.get("category_data"), {}),
+                policies=policies_list,
+            )
+
+            await conn.execute(
+                """
+                INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                VALUES ($1, 'policy_mapping', $2)
+                ON CONFLICT (incident_id, analysis_type)
+                DO UPDATE SET analysis_data = $2, generated_at = now()
+                """,
+                incident_id,
+                json.dumps(result),
+            )
+    except Exception as e:
+        logger.warning(f"Auto policy mapping failed for incident {incident_id}: {e}")
+
+
+@router.get("/{incident_id}/policy-mapping", response_model=PolicyMappingAnalysis)
+async def get_policy_mapping(
+    incident_id: UUID,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Get policy violation mapping for an incident."""
+    from ..services.ir_analysis import get_ir_analyzer
+
+    async with get_connection() as conn:
+        inc = await _get_incident_with_company_check(conn, incident_id, current_user, columns="id, title, description, incident_type, severity, category_data, company_id")
+
+        # Check cache (<24h)
+        cached = await conn.fetchrow(
+            """
+            SELECT analysis_data, generated_at FROM ir_incident_analysis
+            WHERE incident_id = $1 AND analysis_type = 'policy_mapping'
+            ORDER BY generated_at DESC LIMIT 1
+            """,
+            str(incident_id),
+        )
+
+        if cached:
+            cache_age = _utc_now_naive() - cached["generated_at"]
+            if cache_age < timedelta(hours=24):
+                result = _safe_json_loads(cached["analysis_data"])
+                result["from_cache"] = True
+                return PolicyMappingAnalysis(**result)
+
+        # Fetch active policies
+        company_id = inc.get("company_id")
+        if not company_id:
+            return PolicyMappingAnalysis(
+                matches=[], summary="No company associated with this incident.",
+                no_matching_policies=True, generated_at=_utc_now_naive().isoformat(),
+            )
+
+        policies = await conn.fetch(
+            "SELECT id, title, description, content FROM policies WHERE company_id = $1 AND status = 'active'",
+            company_id,
+        )
+
+        if not policies:
+            empty = PolicyMappingAnalysis(
+                matches=[], summary="No active policies found for this company.",
+                no_matching_policies=True, generated_at=_utc_now_naive().isoformat(),
+            )
+            # Cache
+            await conn.execute(
+                """
+                INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                VALUES ($1, 'policy_mapping', $2)
+                ON CONFLICT (incident_id, analysis_type)
+                DO UPDATE SET analysis_data = $2, generated_at = now()
+                """,
+                str(incident_id),
+                json.dumps(empty.model_dump(mode='json')),
+            )
+            return empty
+
+        policies_list = [
+            {"id": str(p["id"]), "title": p["title"], "description": p.get("description"), "content": p.get("content")}
+            for p in policies
+        ]
+
+        try:
+            analyzer = get_ir_analyzer()
+            result = await analyzer.map_policy_violations(
+                title=inc["title"],
+                description=inc.get("description") or "",
+                incident_type=inc["incident_type"],
+                severity=inc["severity"],
+                category_data=_safe_json_loads(inc.get("category_data"), {}),
+                policies=policies_list,
+            )
+        except Exception as e:
+            logger.warning(f"Policy mapping failed: {e}")
+            raise HTTPException(status_code=502, detail="Policy mapping analysis failed")
+
+        # Cache result
+        await conn.execute(
+            """
+            INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+            VALUES ($1, 'policy_mapping', $2)
+            ON CONFLICT (incident_id, analysis_type)
+            DO UPDATE SET analysis_data = $2, generated_at = now()
+            """,
+            str(incident_id),
+            json.dumps(result),
+        )
+
+        await log_audit(
+            conn,
+            str(incident_id),
+            str(current_user.id),
+            "analysis_run",
+            "analysis",
+            None,
+            {"type": "policy_mapping"},
+            request.client.host if request.client else None,
+        )
+
+        return PolicyMappingAnalysis(**result)
+
+
+@router.post("/{incident_id}/analyze/policy-mapping", response_model=PolicyMappingAnalysis)
+async def refresh_policy_mapping(
+    incident_id: UUID,
+    request: Request,
+    current_user=Depends(require_admin_or_client),
+):
+    """Force-refresh policy mapping for an incident."""
+    async with get_connection() as conn:
+        await _get_incident_with_company_check(conn, incident_id, current_user, columns="id")
+
+        # Delete existing cache
+        await conn.execute(
+            "DELETE FROM ir_incident_analysis WHERE incident_id = $1 AND analysis_type = 'policy_mapping'",
+            str(incident_id),
+        )
+
+    # Delegate to the GET handler which will compute fresh
+    return await get_policy_mapping(incident_id, request, current_user)
 
 
 @router.get("/{incident_id}/consistency-guidance", response_model=ConsistencyGuidance)

@@ -126,6 +126,35 @@ def _validate_similar_incidents(result: dict) -> Optional[str]:
     return None
 
 
+VALID_RELEVANCES = {"violated", "bent", "related"}
+
+
+def _validate_policy_mapping(result: dict) -> Optional[str]:
+    """Validate policy mapping response. Returns error message or None."""
+    if not isinstance(result.get("matches"), list):
+        return "Invalid matches: must be a list"
+
+    for i, match in enumerate(result.get("matches", [])):
+        if not isinstance(match, dict):
+            return f"matches[{i}] must be an object"
+        if not match.get("policy_id"):
+            return f"matches[{i}] missing required field: policy_id"
+        if not match.get("policy_title"):
+            return f"matches[{i}] missing required field: policy_title"
+        if match.get("relevance") not in VALID_RELEVANCES:
+            return f"matches[{i}] invalid relevance: {match.get('relevance')}. Must be one of: {VALID_RELEVANCES}"
+        confidence = match.get("confidence")
+        if not isinstance(confidence, (int, float)) or not 0 <= confidence <= 1:
+            return f"matches[{i}] invalid confidence: {confidence} (must be number between 0.0 and 1.0)"
+        if not match.get("reasoning"):
+            return f"matches[{i}] missing required field: reasoning"
+
+    if not result.get("summary"):
+        return "Missing required field: summary"
+
+    return None
+
+
 # ===========================================
 # Prompts
 # ===========================================
@@ -379,6 +408,48 @@ Return ONLY a JSON object with this structure:
 }}
 
 If no similar incidents exist, return an empty similar_incidents array and pattern_detected: false."""
+
+
+POLICY_MAPPING_PROMPT = """You are an HR policy compliance analyst. Given an incident report and a company's active policies, identify which policies were violated, bent, or are contextually related.
+
+INCIDENT REPORT:
+Title: {title}
+Description: {description}
+Type: {incident_type}
+Severity: {severity}
+Category-Specific Data: {category_data}
+
+COMPANY ACTIVE POLICIES:
+{policies_list}
+
+Your task:
+1. Analyze the incident against each policy
+2. Identify policies that were clearly violated, arguably bent, or contextually related
+3. For each match, explain the connection and quote a relevant excerpt from the policy if possible
+4. Sort matches by confidence (highest first), return at most 5
+
+Relevance tiers:
+- violated: The incident clearly broke this policy
+- bent: The policy was stretched or arguably not followed; debatable
+- related: The policy is contextually relevant but not necessarily broken
+
+Return ONLY a JSON object with this structure:
+{{
+    "matches": [
+        {{
+            "policy_id": "uuid-of-policy",
+            "policy_title": "Anti-Harassment Policy",
+            "relevance": "violated",
+            "confidence": 0.92,
+            "reasoning": "The reported behavior constitutes harassment as defined in Section 2 of the policy.",
+            "relevant_excerpt": "All employees are expected to maintain a respectful workplace free from intimidation..."
+        }}
+    ],
+    "summary": "This incident primarily violates the Anti-Harassment Policy and is related to the Code of Conduct.",
+    "no_matching_policies": false
+}}
+
+If no policies match the incident, return matches as an empty array and no_matching_policies as true."""
 
 
 class IRAnalyzer:
@@ -710,6 +781,51 @@ class IRAnalyzer:
             return prompt
 
         result = await self._call_with_retry(build_prompt, _validate_similar_incidents, label="similar_incidents")
+        result["generated_at"] = datetime.now(timezone.utc).isoformat()
+        return result
+
+    async def map_policy_violations(
+        self,
+        title: str,
+        description: str,
+        incident_type: str,
+        severity: str,
+        category_data: Optional[dict] = None,
+        policies: Optional[list[dict]] = None,
+    ) -> dict[str, Any]:
+        """
+        Map an incident to company policies to identify violations.
+
+        Args:
+            title: Incident title.
+            description: Incident description.
+            incident_type: Type of incident.
+            severity: Incident severity.
+            category_data: Type-specific data.
+            policies: List of active company policies with id, title, description/content.
+
+        Returns:
+            Policy mapping analysis with matched policies.
+        """
+        policies_text = "\n".join([
+            f"{i+1}. [{p['id']}] {p['title']}: {(p.get('description') or (p.get('content') or '')[:200]) or 'No description'}"
+            for i, p in enumerate(policies or [])
+        ]) if policies else "No active policies available."
+
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = POLICY_MAPPING_PROMPT.format(
+                title=title,
+                description=description or "No description provided",
+                incident_type=incident_type,
+                severity=severity,
+                category_data=json.dumps(category_data) if category_data else "None",
+                policies_list=policies_text,
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
+
+        result = await self._call_with_retry(build_prompt, _validate_policy_mapping, label="policy_mapping")
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 
