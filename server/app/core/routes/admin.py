@@ -2791,8 +2791,24 @@ _data_overview_cached_at: float = 0.0
 _DATA_OVERVIEW_CACHE_TTL = 3600  # 1 hour
 
 REQUIRED_CATEGORIES = [
+    # Labor
     "minimum_wage", "overtime", "sick_leave", "meal_breaks",
     "pay_frequency", "final_pay", "minor_work_permit", "scheduling_reporting",
+    "leave", "workplace_safety", "workers_comp", "anti_discrimination",
+    # Supplementary
+    "business_license", "tax_rate", "posting_requirements",
+    # Healthcare
+    "hipaa_privacy", "billing_integrity", "clinical_safety", "healthcare_workforce",
+    "corporate_integrity", "research_consent", "state_licensing", "emergency_preparedness",
+    # Oncology
+    "radiation_safety", "chemotherapy_handling", "tumor_registry",
+    "oncology_clinical_trials", "oncology_patient_rights",
+    # Medical Compliance
+    "health_it", "quality_reporting", "cybersecurity", "environmental_safety",
+    "pharmacy_drugs", "payer_relations", "reproductive_behavioral", "pediatric_vulnerable",
+    "telehealth", "medical_devices", "transplant_organ", "antitrust",
+    "tax_exempt", "language_access", "records_retention", "marketing_comms",
+    "emerging_regulatory",
 ]
 
 
@@ -2831,19 +2847,25 @@ async def jurisdiction_data_overview(bust: bool = False):
         """)
 
         # ── 2. Preemption rules ──
-        preemption_rows = await conn.fetch("""
-            SELECT state, category, allows_local_override, notes
-            FROM state_preemption_rules
-            ORDER BY state, category
-        """)
+        try:
+            preemption_rows = await conn.fetch("""
+                SELECT state, category, allows_local_override, notes
+                FROM state_preemption_rules
+                ORDER BY state, category
+            """)
+        except Exception:
+            preemption_rows = []
 
         # ── 3. Structured data sources ──
-        source_rows = await conn.fetch("""
-            SELECT source_name, source_type, categories, record_count,
-                   last_fetched_at, last_fetch_status, is_active
-            FROM structured_data_sources
-            ORDER BY source_name
-        """)
+        try:
+            source_rows = await conn.fetch("""
+                SELECT source_name, source_type, categories, record_count,
+                       last_fetched_at, last_fetch_status, is_active
+                FROM structured_data_sources
+                ORDER BY source_name
+            """)
+        except Exception:
+            source_rows = []
 
     # ── Build state → cities map ──
     from datetime import datetime as dt, timezone

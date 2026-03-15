@@ -1,9 +1,9 @@
 import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
-  Database, ChevronDown, ChevronRight, AlertTriangle, CheckCircle,
-  XCircle, Loader2, RefreshCw, Layers, Globe2, Filter, Trash2, Check,
+  Database, ChevronDown, AlertTriangle, CheckCircle,
+  XCircle, Loader2, RefreshCw, Layers, Globe2, Trash2, Check,
   X, ExternalLink, Settings2, ChevronUp, GripVertical, Eye, EyeOff, Plus, Info, Pencil, Save,
-  Bookmark, BookmarkCheck
+  Bookmark, BookmarkCheck, Search
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { DndContext, closestCenter, type DragEndEvent } from '@dnd-kit/core';
@@ -50,10 +50,9 @@ const LT = {
   confirmBtn: 'text-red-500 hover:text-red-700',
 };
 
-type Tab = 'coverage' | 'missing' | 'quality' | 'preemption' | 'bookmarks';
+type Tab = 'explorer' | 'quality' | 'preemption' | 'bookmarks';
 const TABS: { id: Tab; label: string }[] = [
-  { id: 'coverage', label: 'Coverage' },
-  { id: 'missing', label: 'Missing Data' },
+  { id: 'explorer', label: 'Explorer' },
   { id: 'quality', label: 'Data Quality' },
   { id: 'preemption', label: 'Preemption Rules' },
   { id: 'bookmarks', label: 'Bookmarks' },
@@ -66,7 +65,9 @@ import {
   ONCOLOGY_CATEGORIES,
   MEDICAL_COMPLIANCE_CATEGORIES,
   ALL_CATEGORY_KEYS,
+  CATEGORY_GROUPS,
 } from '../../generated/complianceCategories';
+import type { CategoryGroup } from '../../generated/complianceCategories';
 
 const ALL_CATEGORIES = ALL_CATEGORY_KEYS;
 const VALID_RATE_TYPES = ['general', 'tipped', 'exempt_salary', 'hotel', 'fast_food', 'healthcare'];
@@ -83,6 +84,11 @@ function matchesSpecialtyFilter(category: string, filter: string): boolean {
 const HEALTHCARE_CATS_SORTED = [...HEALTHCARE_CATEGORIES].sort((a, b) => (CATEGORY_LABELS[a] || a).localeCompare(CATEGORY_LABELS[b] || b));
 const ONCOLOGY_CATS_SORTED = [...ONCOLOGY_CATEGORIES].sort((a, b) => (CATEGORY_LABELS[a] || a).localeCompare(CATEGORY_LABELS[b] || b));
 const MEDICAL_CATS_SORTED = [...MEDICAL_COMPLIANCE_CATEGORIES].sort((a, b) => (CATEGORY_LABELS[a] || a).localeCompare(CATEGORY_LABELS[b] || b));
+
+function getSpecialtyProfileRequirement(filter: string): string | null {
+  if (filter === 'all' || filter === 'general') return null;
+  return 'healthcare';
+}
 
 const INDUSTRY_SPECIFIC_RATE_TYPES = ['tipped', 'hotel', 'fast_food', 'healthcare'];
 
@@ -124,14 +130,12 @@ export default function JurisdictionData() {
   const { data, isLoading, hardRefresh } = useJurisdictionData();
   const { profiles, create: createProfile, update: updateProfile, remove: removeProfile } = useIndustryProfiles();
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<Tab>('coverage');
-  const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set());
-  const [filterState, setFilterState] = useState('');
-  const [filterCategory, setFilterCategory] = useState('');
-  const [filterStaleOnly, setFilterStaleOnly] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>('explorer');
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null);
   const [cityDetail, setCityDetail] = useState<JurisdictionDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const [specialtyFilter, setSpecialtyFilter] = useState('all');
 
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [editingProfile, setEditingProfile] = useState<IndustryProfile | null>(null);
@@ -153,14 +157,6 @@ export default function JurisdictionData() {
     setCityDetail(null);
   };
 
-  const toggleState = (state: string) => {
-    setExpandedStates(prev => {
-      const next = new Set(prev);
-      next.has(state) ? next.delete(state) : next.add(state);
-      return next;
-    });
-  };
-
   const handleDelete = async (id: string) => {
     try {
       await api.adminJurisdictions.delete(id);
@@ -172,20 +168,64 @@ export default function JurisdictionData() {
     queryClient.setQueryData(['jurisdiction-data-overview'], fresh);
   };
 
-  const missingRows = useMemo(() => {
+  const allCities = useMemo(() => {
     if (!data) return [];
-    const rows: (JurisdictionDataCitySummary & { state: string })[] = [];
+    const matchingCats = specialtyFilter === 'all'
+      ? ALL_CATEGORY_KEYS
+      : ALL_CATEGORY_KEYS.filter(k => matchesSpecialtyFilter(k, specialtyFilter));
+    const cities: (JurisdictionDataCitySummary & {
+      state: string; filteredPresent: number; filteredMissing: number;
+      filteredTotal: number; coveragePct: number;
+    })[] = [];
     for (const s of data.states) {
       for (const c of s.cities) {
-        if (c.categories_missing.length === 0) continue;
-        if (filterState && s.state !== filterState) continue;
-        if (filterCategory && !c.categories_missing.includes(filterCategory)) continue;
-        if (filterStaleOnly && !c.is_stale) continue;
-        rows.push({ ...c, state: s.state });
+        const present = matchingCats.filter(cat => c.categories_present.includes(cat)).length;
+        cities.push({
+          ...c, state: s.state,
+          filteredPresent: present,
+          filteredMissing: matchingCats.length - present,
+          filteredTotal: matchingCats.length,
+          coveragePct: matchingCats.length > 0 ? Math.round(present / matchingCats.length * 100) : 0,
+        });
       }
     }
-    return rows.sort((a, b) => b.categories_missing.length - a.categories_missing.length);
-  }, [data, filterState, filterCategory, filterStaleOnly]);
+    return cities;
+  }, [data, specialtyFilter]);
+
+  const categoryCoverage = useMemo(() => {
+    if (!data) return [];
+    const matchingCats = specialtyFilter === 'all'
+      ? ALL_CATEGORY_KEYS
+      : ALL_CATEGORY_KEYS.filter(k => matchesSpecialtyFilter(k, specialtyFilter));
+    const total = allCities.length;
+    return matchingCats.map(cat => {
+      const withData = allCities.filter(c => c.categories_present.includes(cat)).length;
+      return {
+        category: cat,
+        group: (CATEGORY_GROUPS[cat] || 'labor') as CategoryGroup,
+        label: CATEGORY_LABELS[cat] || cat,
+        shortLabel: CAT_LABELS[cat] || cat,
+        citiesWithData: withData,
+        totalCities: total,
+        coveragePct: total > 0 ? Math.round(withData / total * 100) : 0,
+      };
+    });
+  }, [data, allCities, specialtyFilter]);
+
+  const kpis = useMemo(() => {
+    if (specialtyFilter === 'all' || !data) return null;
+    const withData = allCities.filter(c => c.filteredPresent > 0);
+    const uniqueStates = new Set(withData.map(c => c.state));
+    const avgCoverage = allCities.length > 0
+      ? Math.round(allCities.reduce((s, c) => s + c.coveragePct, 0) / allCities.length) : 0;
+    return {
+      states: `${uniqueStates.size}/50`,
+      cities: `${withData.length}/${allCities.length}`,
+      coverage: avgCoverage,
+      tier1: data.summary.tier1_pct,
+      stale: allCities.filter(c => c.is_stale).length,
+    };
+  }, [specialtyFilter, data, allCities]);
 
   const preemptionMatrix = useMemo(() => {
     if (!data) return { states: [] as string[], matrix: {} as Record<string, Record<string, { allows: boolean; notes: string | null }>> };
@@ -243,43 +283,87 @@ export default function JurisdictionData() {
           </div>
         </div>
 
-        {/* ── KPI Bar ── */}
-        <div className="grid grid-cols-5 gap-3">
-          <KpiCard t={t} label="States" value={`${summary.total_states}/50`} icon={<Globe2 className="w-4 h-4" />} />
-          <KpiCard t={t} label="Cities" value={summary.total_cities.toLocaleString()} icon={<Database className="w-4 h-4" />} />
-          <KpiCard t={t} label="Coverage" value={`${summary.category_coverage_pct}%`} icon={<Layers className="w-4 h-4" />}
-            accent={summary.category_coverage_pct >= 70 ? 'ok' : summary.category_coverage_pct >= 40 ? 'warn' : 'err'} />
-          <KpiCard t={t} label="Tier 1" value={`${summary.tier1_pct}%`} icon={<CheckCircle className="w-4 h-4" />}
-            accent={summary.tier1_pct >= 50 ? 'ok' : summary.tier1_pct >= 20 ? 'warn' : 'err'} />
-          <KpiCard t={t} label="Stale >90d" value={summary.stale_count.toString()} icon={<AlertTriangle className="w-4 h-4" />}
-            accent={summary.stale_count === 0 ? 'ok' : summary.stale_count <= 10 ? 'warn' : 'err'} />
-        </div>
+        {/* ── KPI Bar (reactive to specialty filter) ── */}
+        {(() => {
+          const k = kpis;
+          const covPct = k ? k.coverage : summary.category_coverage_pct;
+          const t1Pct = k ? k.tier1 : summary.tier1_pct;
+          const staleN = k ? k.stale : summary.stale_count;
+          return (
+            <div className="grid grid-cols-5 gap-3">
+              <KpiCard t={t} label="States" value={k ? k.states : `${summary.total_states}/50`} icon={<Globe2 className="w-4 h-4" />} />
+              <KpiCard t={t} label="Cities" value={k ? k.cities : summary.total_cities.toLocaleString()} icon={<Database className="w-4 h-4" />} />
+              <KpiCard t={t} label="Coverage" value={`${covPct}%`} icon={<Layers className="w-4 h-4" />}
+                accent={covPct >= 70 ? 'ok' : covPct >= 40 ? 'warn' : 'err'} />
+              <KpiCard t={t} label="Tier 1" value={`${t1Pct}%`} icon={<CheckCircle className="w-4 h-4" />}
+                accent={t1Pct >= 50 ? 'ok' : t1Pct >= 20 ? 'warn' : 'err'} />
+              <KpiCard t={t} label="Stale >90d" value={staleN.toString()} icon={<AlertTriangle className="w-4 h-4" />}
+                accent={staleN === 0 ? 'ok' : staleN <= 10 ? 'warn' : 'err'} />
+            </div>
+          );
+        })()}
 
-        {/* ── Tabs ── */}
-        <div className={`flex gap-1 p-1 rounded-xl ${t.innerEl} w-fit`}>
-          {TABS.map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-1.5 text-sm font-medium rounded-lg transition ${activeTab === tab.id ? t.tabActive : t.tabInactive}`}>
-              {tab.label}
-            </button>
-          ))}
+        {/* ── Tabs + Specialty Filter ── */}
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className={`flex gap-1 p-1 rounded-xl ${t.innerEl} w-fit`}>
+            {TABS.map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                className={`px-4 py-1.5 text-sm font-medium rounded-lg transition ${activeTab === tab.id ? t.tabActive : t.tabInactive}`}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <select
+            value={specialtyFilter}
+            onChange={e => setSpecialtyFilter(e.target.value)}
+            className={`${t.select} text-sm px-3 py-1.5`}
+          >
+            <option value="all">All Specialties</option>
+            <option value="general">General / Labor</option>
+            <option value="healthcare">All Healthcare</option>
+            <option value="medical">All Medical Compliance</option>
+            <optgroup label="Healthcare">
+              {HEALTHCARE_CATS_SORTED.map(k => (
+                <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Oncology">
+              {ONCOLOGY_CATS_SORTED.map(k => (
+                <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
+              ))}
+            </optgroup>
+            <optgroup label="Medical Compliance">
+              {MEDICAL_CATS_SORTED.map(k => (
+                <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
+              ))}
+            </optgroup>
+          </select>
+          {specialtyFilter !== 'all' && specialtyFilter !== 'general' && (() => {
+            const reqRateType = getSpecialtyProfileRequirement(specialtyFilter);
+            if (!reqRateType) return null;
+            const matching = profiles.filter(p => p.rate_types?.includes(reqRateType));
+            return (
+              <div className="flex items-center gap-1.5">
+                <Info className={`w-3.5 h-3.5 ${t.textFaint}`} />
+                <span className={`text-xs ${t.textDim}`}>Requires</span>
+                <span className={`text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded ${t.card}`}>{reqRateType}</span>
+                {matching.map(p => (
+                  <span key={p.id} className={`text-[10px] px-1.5 py-0.5 rounded ${t.preemptOk}`}>{p.name}</span>
+                ))}
+                {matching.length === 0 && <span className={`text-[10px] ${t.statusWarn}`}>No profiles</span>}
+              </div>
+            );
+          })()}
         </div>
 
         {/* ── Tab Content ── */}
         <AnimatePresence mode="wait">
           <motion.div key={activeTab} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.12 }}>
-            {activeTab === 'coverage' && (
-              <CoverageTab t={t} states={data.states} cats={summary.required_categories}
-                expandedStates={expandedStates} toggleState={toggleState} onDelete={handleDelete}
-                onCityClick={openCity} />
-            )}
-            {activeTab === 'missing' && (
-              <MissingDataTab t={t} rows={missingRows} cats={summary.required_categories} states={data.states}
-                filterState={filterState} setFilterState={setFilterState}
-                filterCategory={filterCategory} setFilterCategory={setFilterCategory}
-                filterStaleOnly={filterStaleOnly} setFilterStaleOnly={setFilterStaleOnly}
-                onDelete={handleDelete} onCityClick={openCity} />
+            {activeTab === 'explorer' && (
+              <ExplorerTab t={t} allCities={allCities} categoryCoverage={categoryCoverage}
+                onCityClick={openCity} onDelete={handleDelete}
+                specialtyFilter={specialtyFilter} states={data.states} />
             )}
             {activeTab === 'quality' && (
               <DataQualityTab t={t} summary={summary} sources={data.structured_sources} />
@@ -299,7 +383,8 @@ export default function JurisdictionData() {
           <CityDetailDrawer t={t} detail={cityDetail} loading={loadingDetail} onClose={closeCity}
             profiles={profiles} onOpenProfileEditor={() => { setEditingProfile(null); setProfileEditorOpen(true); }}
             preemptionRules={data?.preemption_rules ?? []}
-            onDetailUpdate={setCityDetail} />
+            onDetailUpdate={setCityDetail}
+            specialtyFilter={specialtyFilter} />
         )}
       </AnimatePresence>
 
@@ -365,158 +450,273 @@ function DeleteBtn({ t, onDelete }: { t: typeof LT; onDelete: () => Promise<void
   );
 }
 
-/* ───── Coverage Tab ───── */
-function CoverageTab({ t, states, cats, expandedStates, toggleState, onDelete, onCityClick }: {
-  t: typeof LT; states: JurisdictionDataState[]; cats: string[];
-  expandedStates: Set<string>; toggleState: (s: string) => void;
-  onDelete: (id: string) => Promise<void>;
-  onCityClick: (id: string) => void;
-}) {
-  return (
-    <div className={`${t.card} p-5`}>
-      <div className={`${t.label} mb-3`}>State-by-State Coverage</div>
-      <div className="space-y-0.5">
-        {states.map(s => {
-          const isOpen = expandedStates.has(s.state);
-          return (
-            <div key={s.state}>
-              <button onClick={() => toggleState(s.state)}
-                className={`w-full flex items-center gap-2 px-3 py-2 rounded-xl transition ${t.rowHover}`}>
-                {isOpen ? <ChevronDown className={`w-4 h-4 ${t.textMuted} flex-shrink-0`} />
-                  : <ChevronRight className={`w-4 h-4 ${t.textMuted} flex-shrink-0`} />}
-                <span className={`font-mono font-bold text-sm w-8 ${t.textMain}`}>{s.state}</span>
-                <span className={`text-xs ${t.textFaint} w-16`}>{s.city_count} {s.city_count === 1 ? 'city' : 'cities'}</span>
-                <div className="flex-1 flex items-center gap-2">
-                  <div className={`flex-1 h-2 rounded-full ${t.barBg} overflow-hidden`}>
-                    <div className={`h-full rounded-full ${t.barFill}`} style={{ width: `${s.coverage_pct}%` }} />
-                  </div>
-                  <span className={`text-xs font-mono ${t.textFaint} w-10 text-right`}>{s.coverage_pct}%</span>
-                </div>
-              </button>
+/* ───── Explorer Tab (replaces Coverage + Missing Data) ───── */
+type FlatCity = JurisdictionDataCitySummary & {
+  state: string; filteredPresent: number; filteredMissing: number;
+  filteredTotal: number; coveragePct: number;
+};
+type CatCoverage = {
+  category: string; group: CategoryGroup; label: string; shortLabel: string;
+  citiesWithData: number; totalCities: number; coveragePct: number;
+};
+type SortKey = 'state' | 'city' | 'coverage' | 'gaps' | 'verified';
 
-              <AnimatePresence>
-                {isOpen && (
-                  <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
-                    exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden">
-                    <div className={`ml-7 mr-3 mb-2 ${t.innerEl} p-3`}>
-                      {/* legend */}
-                      <div className="flex gap-3 mb-2 px-1">
-                        {cats.map(c => (
-                          <span key={c} className={`text-[10px] font-mono ${t.textFaint}`}>
-                            {CAT_LABELS[c] || c}
-                          </span>
-                        ))}
-                      </div>
-                      {/* city rows */}
-                      {s.cities.map(city => (
-                        <div key={city.city} onClick={() => onCityClick(city.id)}
-                          className={`group flex items-center gap-2 px-2 py-1.5 rounded-lg cursor-pointer ${t.rowHover}`}>
-                          <span className={`text-sm ${t.textMain} w-40 truncate`}>{city.city}</span>
-                          <div className="flex gap-1.5">
-                            {cats.map(c => (
-                              <div key={c}
-                                className={`w-3 h-3 rounded-full ${city.categories_present.includes(c) ? t.dotOk : t.dotMiss}`}
-                                title={`${CAT_LABELS[c] || c}: ${city.categories_present.includes(c) ? 'Present' : 'Missing'}`} />
-                            ))}
-                          </div>
-                          <span className={`text-[11px] font-mono ${t.textFaint} ml-auto`}>{formatDate(city.last_verified_at)}</span>
-                          {city.is_stale && <AlertTriangle className={`w-3.5 h-3.5 ${t.statusWarn} flex-shrink-0`} />}
-                          <DeleteBtn t={t} onDelete={() => onDelete(city.id!)} />
-                        </div>
-                      ))}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+const GROUP_LABELS: Record<CategoryGroup, string> = {
+  labor: 'Labor', supplementary: 'Supplementary', healthcare: 'Healthcare',
+  oncology: 'Oncology', medical_compliance: 'Medical Compliance',
+};
+const GROUP_ORDER: CategoryGroup[] = ['labor', 'supplementary', 'healthcare', 'oncology', 'medical_compliance'];
 
-/* ───── Missing Data Tab ───── */
-function MissingDataTab({ t, rows, cats, states, filterState, setFilterState, filterCategory, setFilterCategory, filterStaleOnly, setFilterStaleOnly, onDelete, onCityClick }: {
+function ExplorerTab({ t, allCities, categoryCoverage, onCityClick, onDelete, specialtyFilter, states }: {
   t: typeof LT;
-  rows: (JurisdictionDataCitySummary & { state: string })[];
-  cats: string[];
-  states: JurisdictionDataState[];
-  filterState: string; setFilterState: (v: string) => void;
-  filterCategory: string; setFilterCategory: (v: string) => void;
-  filterStaleOnly: boolean; setFilterStaleOnly: (v: boolean) => void;
-  onDelete: (id: string) => Promise<void>;
+  allCities: FlatCity[];
+  categoryCoverage: CatCoverage[];
   onCityClick: (id: string) => void;
+  onDelete: (id: string) => Promise<void>;
+  specialtyFilter: string;
+  states: JurisdictionDataState[];
 }) {
+  const [sortKey, setSortKey] = useState<SortKey>('gaps');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [filterState, setFilterState] = useState('');
+  const [filterStaleOnly, setFilterStaleOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [showCategoryPanel, setShowCategoryPanel] = useState(true);
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
+
   const uniqueStates = useMemo(() => [...new Set(states.map(s => s.state))].sort(), [states]);
 
+  const toggleSort = (key: SortKey) => {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir(key === 'city' || key === 'state' ? 'asc' : 'desc'); }
+    setPage(0);
+  };
+
+  const filteredCities = useMemo(() => {
+    let result = allCities;
+    if (filterState) result = result.filter(c => c.state === filterState);
+    if (searchQuery) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter(c => c.city.toLowerCase().includes(q) || c.state.toLowerCase().includes(q));
+    }
+    if (filterStaleOnly) result = result.filter(c => c.is_stale);
+    if (selectedCategory) {
+      result = result.filter(c => c.categories_present.includes(selectedCategory) || c.categories_missing.includes(selectedCategory));
+    }
+    return [...result].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case 'state': cmp = a.state.localeCompare(b.state) || a.city.localeCompare(b.city); break;
+        case 'city': cmp = a.city.localeCompare(b.city); break;
+        case 'coverage': cmp = a.coveragePct - b.coveragePct; break;
+        case 'gaps': cmp = a.filteredMissing - b.filteredMissing; break;
+        case 'verified': cmp = (a.last_verified_at || '').localeCompare(b.last_verified_at || ''); break;
+      }
+      return sortDir === 'desc' ? -cmp : cmp;
+    });
+  }, [allCities, filterState, searchQuery, filterStaleOnly, selectedCategory, sortKey, sortDir]);
+
+  const pageStart = page * PAGE_SIZE;
+  const pageEnd = Math.min(pageStart + PAGE_SIZE, filteredCities.length);
+  const pageRows = filteredCities.slice(pageStart, pageEnd);
+  const totalPages = Math.ceil(filteredCities.length / PAGE_SIZE);
+
+  // Reset page on filter change
+  useEffect(() => { setPage(0); }, [filterState, searchQuery, filterStaleOnly, selectedCategory, specialtyFilter]);
+
+  // Category coverage grouped
+  const groupedCats = useMemo(() => {
+    const map: Partial<Record<CategoryGroup, CatCoverage[]>> = {};
+    for (const c of categoryCoverage) {
+      if (!map[c.group]) map[c.group] = [];
+      map[c.group]!.push(c);
+    }
+    return map;
+  }, [categoryCoverage]);
+
+  const SortHeader = ({ label, sortK, className = '' }: { label: string; sortK: SortKey; className?: string }) => (
+    <th className={`text-left py-2 px-2 cursor-pointer select-none ${className}`}
+      onClick={() => toggleSort(sortK)}>
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {sortKey === sortK && (
+          <span className="text-emerald-600">{sortDir === 'desc' ? '↓' : '↑'}</span>
+        )}
+      </span>
+    </th>
+  );
+
   return (
-    <div className={`${t.card} p-5 space-y-4`}>
-      <div className="flex flex-wrap items-center gap-3">
-        <div className={`flex items-center gap-1.5 ${t.label}`}><Filter className="w-3.5 h-3.5" />Filters</div>
-        <select value={filterState} onChange={e => setFilterState(e.target.value)}
-          className={`${t.select} text-sm px-3 py-1.5`}>
-          <option value="">All States</option>
-          {uniqueStates.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={filterCategory} onChange={e => setFilterCategory(e.target.value)}
-          className={`${t.select} text-sm px-3 py-1.5`}>
-          <option value="">All Categories</option>
-          {cats.map(c => <option key={c} value={c}>{CAT_LABELS[c] || c}</option>)}
-        </select>
-        <label className={`flex items-center gap-2 text-sm cursor-pointer ${t.textDim}`}>
-          <input type="checkbox" checked={filterStaleOnly} onChange={e => setFilterStaleOnly(e.target.checked)} className="rounded" />
-          Stale only
-        </label>
-        <span className={`text-xs ${t.textFaint} ml-auto`}>{rows.length} jurisdictions</span>
+    <div className="space-y-4">
+      {/* ── Category Coverage Panel ── */}
+      <div className={`${t.card} overflow-hidden`}>
+        <button onClick={() => setShowCategoryPanel(p => !p)}
+          className={`w-full flex items-center justify-between px-5 py-3 ${t.rowHover} transition`}>
+          <span className={t.label}>Category Coverage</span>
+          {showCategoryPanel
+            ? <ChevronUp className={`w-4 h-4 ${t.textMuted}`} />
+            : <ChevronDown className={`w-4 h-4 ${t.textMuted}`} />}
+        </button>
+        <AnimatePresence>
+          {showCategoryPanel && (
+            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.15 }} className="overflow-hidden">
+              <div className="px-5 pb-4 space-y-3">
+                {GROUP_ORDER.filter(g => groupedCats[g]?.length).map(group => (
+                  <div key={group}>
+                    <div className={`${t.label} mb-1.5`}>{GROUP_LABELS[group]} ({groupedCats[group]!.length})</div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+                      {groupedCats[group]!.map(cat => {
+                        const isSelected = selectedCategory === cat.category;
+                        return (
+                          <button key={cat.category}
+                            onClick={() => setSelectedCategory(isSelected ? null : cat.category)}
+                            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-left transition ${
+                              isSelected ? 'ring-2 ring-emerald-500 bg-emerald-50' : `${t.innerEl} ${t.rowHover}`
+                            }`}>
+                            <div className="flex-1 min-w-0">
+                              <div className={`text-xs truncate ${t.textMain}`}>{cat.shortLabel}</div>
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <div className={`flex-1 h-1.5 rounded-full ${t.barBg} overflow-hidden`}>
+                                  <div className={`h-full rounded-full ${cat.coveragePct >= 50 ? t.barFill : cat.coveragePct > 0 ? t.barTier2 : t.barTier3}`}
+                                    style={{ width: `${cat.coveragePct}%` }} />
+                                </div>
+                                <span className={`text-[10px] font-mono ${t.textFaint} w-7 text-right`}>{cat.coveragePct}%</span>
+                              </div>
+                            </div>
+                            <span className={`text-[10px] font-mono ${t.textFaint} whitespace-nowrap`}>
+                              {cat.citiesWithData}/{cat.totalCities}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className={`${t.label} border-b ${t.border}`}>
-              <th className="text-left py-2 px-2">ST</th>
-              <th className="text-left py-2 px-2">City</th>
-              <th className="text-left py-2 px-2">Missing</th>
-              <th className="text-left py-2 px-2">Gaps</th>
-              <th className="text-left py-2 px-2">Verified</th>
-              <th className="py-2 px-2" />
-            </tr>
-          </thead>
-          <tbody className={`divide-y ${t.divide}`}>
-            {rows.slice(0, 100).map((row, i) => (
-              <tr key={`${row.state}-${row.city}-${i}`} className={`group ${t.rowHover}`}>
-                <td className={`py-2 px-2 font-mono font-bold ${t.textMain}`}>{row.state}</td>
-                <td className={`py-2 px-2 ${t.textMain} cursor-pointer hover:underline`}
-                  onClick={() => onCityClick(row.id)}>{row.city}</td>
-                <td className="py-2 px-2">
-                  <div className="flex flex-wrap gap-1">
-                    {row.categories_missing.map(c => (
-                      <span key={c} className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${t.preemptNo}`}>{CAT_LABELS[c] || c}</span>
-                    ))}
-                  </div>
-                </td>
-                <td className={`py-2 px-2 font-mono ${row.categories_missing.length >= 4 ? t.statusErr : t.statusWarn}`}>
-                  {row.categories_missing.length}/{cats.length}
-                </td>
-                <td className={`py-2 px-2 ${t.textFaint} whitespace-nowrap`}>
-                  <span className="flex items-center gap-1.5">
-                    {formatDate(row.last_verified_at)}
-                    {row.is_stale && <AlertTriangle className={`w-3 h-3 ${t.statusWarn}`} />}
-                  </span>
-                </td>
-                <td className="py-2 px-2 text-right">
-                  <DeleteBtn t={t} onDelete={() => onDelete(row.id!)} />
-                </td>
+      {/* ── Filter Bar ── */}
+      <div className={`${t.card} p-4`}>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className={`relative flex-1 min-w-[180px] max-w-xs`}>
+            <Search className={`absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 ${t.textFaint}`} />
+            <input
+              type="text" placeholder="Search city or state..."
+              value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+              className={`${t.select} text-sm pl-8 pr-3 py-1.5 w-full`}
+            />
+          </div>
+          <select value={filterState} onChange={e => setFilterState(e.target.value)}
+            className={`${t.select} text-sm px-3 py-1.5`}>
+            <option value="">All States</option>
+            {uniqueStates.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <label className={`flex items-center gap-2 text-sm cursor-pointer ${t.textDim}`}>
+            <input type="checkbox" checked={filterStaleOnly} onChange={e => setFilterStaleOnly(e.target.checked)} className="rounded" />
+            Stale only
+          </label>
+          {selectedCategory && (
+            <span className={`flex items-center gap-1 text-xs px-2 py-1 rounded-lg ${t.preemptOk}`}>
+              {CAT_LABELS[selectedCategory] || selectedCategory}
+              <button onClick={() => setSelectedCategory(null)} className="hover:text-red-600 transition">
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          <span className={`text-xs ${t.textFaint} ml-auto`}>
+            {filteredCities.length === allCities.length
+              ? `${allCities.length} jurisdictions`
+              : `${filteredCities.length} of ${allCities.length}`}
+          </span>
+        </div>
+      </div>
+
+      {/* ── City Grid ── */}
+      <div className={`${t.card} overflow-hidden`}>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className={`${t.label} border-b ${t.border}`}>
+                <SortHeader label="ST" sortK="state" className="w-12" />
+                <SortHeader label="City" sortK="city" />
+                <SortHeader label="Coverage" sortK="coverage" className="w-40" />
+                <SortHeader label="Gaps" sortK="gaps" className="w-16" />
+                {selectedCategory && <th className={`text-left py-2 px-2 ${t.label}`}>{CAT_LABELS[selectedCategory]}</th>}
+                <SortHeader label="Verified" sortK="verified" className="w-24" />
+                <th className="w-8 py-2 px-2" />
               </tr>
-            ))}
-          </tbody>
-        </table>
-        {rows.length === 0 && (
-          <div className={`text-center py-8 text-xs ${t.textMuted}`}>No missing data found.</div>
-        )}
-        {rows.length > 100 && (
-          <div className={`text-center py-2 text-[10px] ${t.textFaint}`}>Showing 100 of {rows.length}</div>
+            </thead>
+            <tbody className={`divide-y ${t.divide}`}>
+              {pageRows.map((row, i) => (
+                <tr key={`${row.state}-${row.city}-${i}`} className={`group ${t.rowHover}`}>
+                  <td className={`py-2 px-2 font-mono font-bold ${t.textMain}`}>{row.state}</td>
+                  <td className={`py-2 px-2 ${t.textMain} cursor-pointer hover:underline`}
+                    onClick={() => onCityClick(row.id)}>{row.city}</td>
+                  <td className="py-2 px-2">
+                    <div className="flex items-center gap-2">
+                      <div className={`flex-1 h-2 rounded-full ${t.barBg} overflow-hidden`}>
+                        <div className={`h-full rounded-full ${row.coveragePct >= 70 ? t.barFill : row.coveragePct >= 30 ? t.barTier2 : t.barTier3}`}
+                          style={{ width: `${row.coveragePct}%` }} />
+                      </div>
+                      <span className={`text-[11px] font-mono ${t.textFaint} w-14 text-right`}>
+                        {row.filteredPresent}/{row.filteredTotal}
+                      </span>
+                    </div>
+                  </td>
+                  <td className={`py-2 px-2 font-mono ${
+                    row.filteredMissing === 0 ? t.statusOk
+                    : row.filteredMissing >= row.filteredTotal / 2 ? t.statusErr
+                    : t.statusWarn
+                  }`}>
+                    {row.filteredMissing}
+                  </td>
+                  {selectedCategory && (
+                    <td className="py-2 px-2 text-center">
+                      <div className={`w-3 h-3 rounded-full inline-block ${
+                        row.categories_present.includes(selectedCategory) ? t.dotOk : t.dotMiss
+                      }`} />
+                    </td>
+                  )}
+                  <td className={`py-2 px-2 ${t.textFaint} whitespace-nowrap`}>
+                    <span className="flex items-center gap-1.5">
+                      {formatDate(row.last_verified_at)}
+                      {row.is_stale && <AlertTriangle className={`w-3 h-3 ${t.statusWarn}`} />}
+                    </span>
+                  </td>
+                  <td className="py-2 px-2 text-right">
+                    <DeleteBtn t={t} onDelete={() => onDelete(row.id!)} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {filteredCities.length === 0 && (
+            <div className={`text-center py-8 text-xs ${t.textMuted}`}>No jurisdictions match the current filters.</div>
+          )}
+        </div>
+        {/* Pagination */}
+        {totalPages > 1 && (
+          <div className={`flex items-center justify-between px-4 py-2.5 border-t ${t.border}`}>
+            <span className={`text-xs ${t.textFaint}`}>
+              {pageStart + 1}–{pageEnd} of {filteredCities.length}
+            </span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0}
+                className={`px-2.5 py-1 text-xs rounded-md transition ${page === 0 ? t.textFaint : `${t.btnGhost} ${t.innerEl}`}`}>
+                Prev
+              </button>
+              <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1}
+                className={`px-2.5 py-1 text-xs rounded-md transition ${page >= totalPages - 1 ? t.textFaint : `${t.btnGhost} ${t.innerEl}`}`}>
+                Next
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </div>
@@ -882,14 +1082,14 @@ function SortableRequirementCard({ req, t, colors, isEditing, editForm, setEditF
   );
 }
 
-function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfileEditor, preemptionRules, onDetailUpdate }: {
+function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfileEditor, preemptionRules, onDetailUpdate, specialtyFilter }: {
   t: typeof LT; detail: JurisdictionDetail | null; loading: boolean; onClose: () => void;
   profiles: IndustryProfile[]; onOpenProfileEditor: () => void;
   preemptionRules: JurisdictionDataPreemption[];
   onDetailUpdate: (updated: JurisdictionDetail) => void;
+  specialtyFilter: string;
 }) {
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
-  const [specialtyFilter, setSpecialtyFilter] = useState('all');
   const [drawerTab, setDrawerTab] = useState<'requirements' | 'hierarchy'>('requirements');
   const [editingReqId, setEditingReqId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({ title: '', description: '', current_value: '', effective_date: '', source_url: '', source_name: '' });
@@ -1098,7 +1298,7 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                     {detail.state}{detail.county ? ` · ${detail.county} County` : ''}
                     {' · '}{detail.requirements.length} requirement{detail.requirements.length !== 1 ? 's' : ''}
                   </p>
-                  {/* Profile selector + Specialty filter */}
+                  {/* Profile selector */}
                   <div className="flex items-center gap-1.5 mt-2">
                     <select
                       value={selectedProfileId ?? ''}
@@ -1110,31 +1310,11 @@ function CityDetailDrawer({ t, detail, loading, onClose, profiles, onOpenProfile
                         <option key={p.id} value={p.id}>{p.name}</option>
                       ))}
                     </select>
-                    <select
-                      value={specialtyFilter}
-                      onChange={e => setSpecialtyFilter(e.target.value)}
-                      className={`${t.select} text-xs px-2.5 py-1`}
-                    >
-                      <option value="all">All Specialties</option>
-                      <option value="general">General / Labor</option>
-                      <option value="healthcare">All Healthcare</option>
-                      <option value="medical">All Medical Compliance</option>
-                      <optgroup label="Healthcare">
-                        {HEALTHCARE_CATS_SORTED.map(k => (
-                          <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Oncology">
-                        {ONCOLOGY_CATS_SORTED.map(k => (
-                          <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
-                        ))}
-                      </optgroup>
-                      <optgroup label="Medical Compliance">
-                        {MEDICAL_CATS_SORTED.map(k => (
-                          <option key={k} value={k}>{CATEGORY_LABELS[k]}</option>
-                        ))}
-                      </optgroup>
-                    </select>
+                    {specialtyFilter !== 'all' && (
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded ${t.preemptOk}`}>
+                        {CATEGORY_LABELS[specialtyFilter] || specialtyFilter}
+                      </span>
+                    )}
                     <button
                       onClick={onOpenProfileEditor}
                       className={`p-1 rounded-lg transition ${t.btnGhost}`}
