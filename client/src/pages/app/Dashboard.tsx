@@ -9,7 +9,7 @@ type DashboardStats = {
   compliance_rate: number
   pending_incidents: { id: string; title: string; severity: string }[]
   incident_summary: { total_open: number; critical: number; high: number }
-  stale_policies: { stale_count: number }
+  stale_policies: { stale_count: number } | null
   critical_compliance_alerts: number
   warning_compliance_alerts: number
 }
@@ -64,7 +64,7 @@ export default function Dashboard() {
       </div>
 
       {/* Alerts row */}
-      {(stats.critical_compliance_alerts > 0 || stats.stale_policies.stale_count > 0) && (
+      {(stats.critical_compliance_alerts > 0 || (stats.stale_policies?.stale_count ?? 0) > 0) && (
         <div className="mt-6 flex gap-4">
           {stats.critical_compliance_alerts > 0 && (
             <Card className="flex-1 p-5">
@@ -74,10 +74,10 @@ export default function Dashboard() {
               <p className="text-xs text-zinc-500 mt-1">Requires immediate attention</p>
             </Card>
           )}
-          {stats.stale_policies.stale_count > 0 && (
+          {(stats.stale_policies?.stale_count ?? 0) > 0 && (
             <Card className="flex-1 p-5">
               <p className="text-sm font-medium text-amber-400">
-                {stats.stale_policies.stale_count} stale polic{stats.stale_policies.stale_count > 1 ? 'ies' : 'y'}
+                {(stats.stale_policies?.stale_count ?? 0)} stale polic{(stats.stale_policies?.stale_count ?? 0) > 1 ? 'ies' : 'y'}
               </p>
               <p className="text-xs text-zinc-500 mt-1">Review and update recommended</p>
             </Card>
