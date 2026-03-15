@@ -9,6 +9,7 @@ import Features from './pages/admin/Features'
 import Settings from './pages/admin/Settings'
 import Dashboard from './pages/app/Dashboard'
 import Employees from './pages/app/Employees'
+import Onboarding from './pages/app/Onboarding'
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
       <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
         <Route index element={<Dashboard />} />
         <Route path="employees" element={<Employees />} />
+        <Route path="onboarding" element={<Onboarding />} />
       </Route>
     </Routes>
   )
