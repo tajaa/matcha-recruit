@@ -1,1 +1,24 @@
 @import "tailwindcss";
+
+/* Wireframe globe rings */
+.globe-ring {
+  position: absolute;
+  border: 1px solid rgba(161, 161, 170, 0.12);
+  border-radius: 50%;
+}
+
+/* Pulse for city dots */
+@keyframes ping-slow {
+  0% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(1.8); }
+  100% { opacity: 0; transform: scale(2.5); }
+}
+
+.dot-ping::after {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: rgba(234, 179, 8, 0.4);
+  animation: ping-slow 3s ease-out infinite;
+}
