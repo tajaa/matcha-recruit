@@ -2927,6 +2927,56 @@ async def resend_investigation_interview_invite(
         return {"status": "sent"}
 
 
+@router.post("/{incident_id}/investigation-interviews/{investigation_interview_id}/generate-link")
+async def generate_investigation_interview_link(
+    incident_id: UUID,
+    investigation_interview_id: UUID,
+    current_user=Depends(require_admin_or_client),
+):
+    """Generate (or retrieve) an invite link for an investigation interview.
+
+    Ensures a token exists without sending an email, so admins can copy and
+    share the link directly (e.g. via Slack, in-person, etc.).
+    """
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        incident = await conn.fetchrow(
+            "SELECT id, company_id FROM ir_incidents WHERE id = $1", incident_id,
+        )
+        if not incident:
+            raise HTTPException(status_code=404, detail="Incident not found")
+        if current_user.role != "admin" and incident["company_id"] != company_id:
+            raise HTTPException(status_code=404, detail="Incident not found")
+
+        row = await conn.fetchrow(
+            """
+            SELECT id, status, invite_token
+            FROM ir_investigation_interviews
+            WHERE id = $1 AND incident_id = $2
+            """,
+            investigation_interview_id, incident_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Investigation interview not found")
+
+        if row["status"] in ("cancelled", "completed", "analyzed"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot generate link for {row['status']} interview",
+            )
+
+        invite_token = row["invite_token"]
+        if not invite_token:
+            invite_token = secrets.token_urlsafe(32)
+            await conn.execute(
+                "UPDATE ir_investigation_interviews SET invite_token = $1 WHERE id = $2",
+                invite_token, investigation_interview_id,
+            )
+
+        return {"invite_token": invite_token}
+
+
 @router.get("/{incident_id}/investigation-interviews", response_model=list[InvestigationInterviewResponse])
 async def list_investigation_interviews(
     incident_id: UUID,

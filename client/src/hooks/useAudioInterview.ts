@@ -10,8 +10,8 @@ const TURN_START_DELAY_SECONDS = 0.5;
 const TURN_START_GRACE_SECONDS = 0.05;
 
 // Session protection constants
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes idle = auto-disconnect
-const DEFAULT_MAX_SESSION_DURATION_MS = 12 * 60 * 1000; // 12 minutes max session (default)
+const IDLE_TIMEOUT_MS = 3 * 60 * 1000; // 3 minutes idle = auto-disconnect
+const DEFAULT_MAX_SESSION_DURATION_MS = 7 * 60 * 1000; // 7 minutes max session (default)
 const WARNING_BEFORE_DISCONNECT_MS = 60 * 1000; // Warn 1 minute before auto-disconnect
 
 interface UseAudioInterviewOptions {

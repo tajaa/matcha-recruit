@@ -1349,6 +1349,11 @@ export const irIncidents = {
     request<{ status: string }>(`/ir/incidents/${incidentId}/investigation-interviews/${interviewId}/resend-invite`, {
       method: 'POST',
     }),
+
+  generateInvestigationLink: (incidentId: string, interviewId: string): Promise<{ invite_token: string }> =>
+    request<{ invite_token: string }>(`/ir/incidents/${incidentId}/investigation-interviews/${interviewId}/generate-link`, {
+      method: 'POST',
+    }),
 };
 
 // Admin Handbook References API

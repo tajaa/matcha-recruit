@@ -149,6 +149,7 @@ export function IRDetail() {
   const [loadingInterviews, setLoadingInterviews] = useState(false);
   const [showScheduleModal, setShowScheduleModal] = useState(false);
   const [showAnalysisModal, setShowAnalysisModal] = useState<InvestigationInterview | null>(null);
+  const [copiedLinkId, setCopiedLinkId] = useState<string | null>(null);
 
   const fetchIncident = useCallback(async () => {
     if (!id) return;
@@ -226,6 +227,20 @@ export function IRDetail() {
     if (!id) return;
     await irIncidents.resendInvestigationInvite(id, interviewId);
     await fetchInvestigationInterviews();
+  };
+
+  const handleCopyLink = async (inv: InvestigationInterview) => {
+    if (!id) return;
+    let token = inv.invite_token;
+    if (!token) {
+      const res = await irIncidents.generateInvestigationLink(id, inv.id);
+      token = res.invite_token;
+      await fetchInvestigationInterviews();
+    }
+    const url = `${window.location.origin}/investigation/${token}`;
+    await navigator.clipboard.writeText(url);
+    setCopiedLinkId(inv.id);
+    setTimeout(() => setCopiedLinkId(null), 2000);
   };
 
   const handleCancelInterview = async (interviewId: string) => {
@@ -565,6 +580,14 @@ export function IRDetail() {
                             className={`text-[10px] ${t.btnGhost} uppercase tracking-wider font-bold`}
                           >
                             View Analysis
+                          </button>
+                        )}
+                        {(inv.status === 'pending' || inv.status === 'in_progress') && (
+                          <button
+                            onClick={() => handleCopyLink(inv)}
+                            className={`text-[10px] ${copiedLinkId === inv.id ? 'text-green-400' : t.btnGhost} uppercase tracking-wider font-bold`}
+                          >
+                            {copiedLinkId === inv.id ? 'Copied!' : 'Copy Link'}
                           </button>
                         )}
                         {inv.status === 'pending' && inv.invite_token && (
