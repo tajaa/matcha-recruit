@@ -107,7 +107,7 @@ export function PortalOnboarding() {
       <div className="border-b border-white/10 pb-6">
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold tracking-tight text-white uppercase">Onboarding Checklist</h1>
-          <FeatureGuideTrigger guideId="portal-onboarding" variant="light" />
+          <FeatureGuideTrigger guideId="portal-onboarding" />
         </div>
         <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Complete your onboarding tasks to get started</p>
       </div>

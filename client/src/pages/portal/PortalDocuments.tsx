@@ -102,7 +102,7 @@ export function PortalDocuments() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-white uppercase">My Documents</h1>
-            <FeatureGuideTrigger guideId="portal-documents" variant="light" />
+            <FeatureGuideTrigger guideId="portal-documents" />
           </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">View and sign assigned documents</p>
         </div>

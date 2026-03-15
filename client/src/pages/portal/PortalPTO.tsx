@@ -162,7 +162,7 @@ export function PortalPTO() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold tracking-tight text-white uppercase">Time Off</h1>
-            <FeatureGuideTrigger guideId="portal-pto" variant="light" />
+            <FeatureGuideTrigger guideId="portal-pto" />
           </div>
           <p className="text-xs text-zinc-500 mt-2 font-mono tracking-wide uppercase">Manage your PTO requests</p>
         </div>

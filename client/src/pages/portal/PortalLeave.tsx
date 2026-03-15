@@ -326,7 +326,7 @@ export default function PortalLeave() {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-mono font-medium text-zinc-900">Extended Leave</h1>
-            <FeatureGuideTrigger guideId="portal-leave" variant="light" />
+            <FeatureGuideTrigger guideId="portal-leave" />
           </div>
           <p className="text-sm text-zinc-500 mt-1">Submit and track long-duration leave requests</p>
         </div>
