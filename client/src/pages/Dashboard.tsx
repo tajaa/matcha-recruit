@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowUpRight, Users, FileText, CheckCircle2, Clock, Activity, ShieldAlert, Calendar, Building, UserPlus, LayoutDashboard, History, AlertTriangle, MapPin, ChevronRight, TriangleAlert, X, ExternalLink, Sparkles, Circle, Check, Pin } from 'lucide-react';
 import { useIsLightMode } from '../hooks/useIsLightMode';
+import { baseLT, baseDK } from '../theme';
 import { getAccessToken, credentialExpirations } from '../api/client';
 import type { CredentialExpiration, CredentialExpirationSummary } from '../api/client';
 import { OnboardingWizard } from '../components/OnboardingWizard';
@@ -18,21 +19,10 @@ const API_BASE = import.meta.env.VITE_API_URL || '/api';
 // ─── theme ────────────────────────────────────────────────────────────────────
 
 const LT = {
+  ...baseLT,
+  // ── dashboard-specific (light) ────────────────────────────────────────────
   pageBg: 'bg-stone-300',
   cardLight: 'bg-stone-100 rounded-xl',
-  innerHover: 'bg-stone-200 rounded-lg hover:bg-stone-300',
-  innerEl: 'bg-stone-200 rounded-lg',
-  textMain: 'text-zinc-900',
-  textMuted: 'text-stone-500',
-  textFaint: 'text-stone-400',
-  textDim: 'text-stone-600',
-  border: 'border-stone-200',
-  divide: 'divide-stone-200',
-  footerBg: 'border-t border-stone-200 bg-stone-200',
-  rowHover: 'hover:bg-stone-50',
-  icon: 'text-stone-400',
-  arrow: 'text-stone-400 group-hover:text-zinc-900',
-  label: 'text-xs text-stone-500 font-semibold',
   labelOnDark: 'text-xs text-zinc-500 font-semibold',
   kpiGap: 'bg-stone-300',
   kpiCell: 'bg-stone-200',
@@ -41,8 +31,6 @@ const LT = {
   kpiLabelCls: 'text-stone-500',
   horizonActive: 'bg-zinc-900 text-zinc-50',
   horizonInactive: 'bg-stone-200 text-stone-500 hover:text-zinc-900',
-  spinner: 'border-stone-300 border-t-zinc-900',
-  modalBg: 'bg-stone-100 rounded-lg',
   descBox: 'bg-stone-200 rounded-lg',
   selectCls: 'bg-white border border-stone-300 rounded-lg text-zinc-900 text-xs px-3 py-2 focus:outline-none focus:border-stone-400',
   pillActive: 'bg-zinc-900 text-zinc-50',
@@ -63,13 +51,10 @@ const LT = {
   cardDarkGhost: 'text-zinc-800',
   cardDarkTrack: 'text-zinc-800',
   cardDarkTrackBg: 'bg-zinc-800',
-  btnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
-  btnSecondary: 'border border-stone-300 hover:border-stone-400 text-stone-600 hover:text-zinc-900',
   livePill: 'bg-stone-200 text-stone-600',
   dateBadge: 'bg-stone-200 text-stone-500',
   recentBadge: 'bg-stone-200 text-stone-600',
   innerBg: 'bg-stone-300 rounded-md',
-  footerLink: 'text-stone-500 hover:text-zinc-900',
   activityDot: { success: 'bg-zinc-900', warning: 'bg-stone-400 animate-pulse', def: 'bg-stone-300' },
   incidentSev: [
     { text: 'text-zinc-900', dot: 'bg-zinc-900' },
@@ -80,21 +65,9 @@ const LT = {
 } as const;
 
 const DK = {
-  pageBg: 'bg-zinc-950',
+  ...baseDK,
+  // ── dashboard-specific (dark) ─────────────────────────────────────────────
   cardLight: 'bg-zinc-900/50 border border-white/10 rounded-xl',
-  innerHover: 'bg-zinc-800 rounded-lg hover:bg-zinc-700',
-  innerEl: 'bg-zinc-800 rounded-lg',
-  textMain: 'text-zinc-100',
-  textMuted: 'text-zinc-500',
-  textFaint: 'text-zinc-600',
-  textDim: 'text-zinc-400',
-  border: 'border-white/10',
-  divide: 'divide-white/10',
-  footerBg: 'border-t border-white/10 bg-white/5',
-  rowHover: 'hover:bg-white/5',
-  icon: 'text-zinc-600',
-  arrow: 'text-zinc-600 group-hover:text-zinc-100',
-  label: 'text-xs text-zinc-500 font-semibold',
   labelOnDark: 'text-xs text-zinc-500 font-semibold',
   kpiGap: 'bg-zinc-950',
   kpiCell: 'bg-zinc-900',
@@ -103,8 +76,6 @@ const DK = {
   kpiLabelCls: 'text-zinc-500',
   horizonActive: 'bg-zinc-700 text-zinc-100',
   horizonInactive: 'bg-zinc-800 text-zinc-500 hover:text-zinc-100',
-  spinner: 'border-zinc-800 border-t-zinc-100',
-  modalBg: 'bg-zinc-900 border border-white/10 rounded-lg',
   descBox: 'bg-zinc-800 rounded-lg',
   selectCls: 'bg-zinc-800 border border-white/10 rounded-lg text-zinc-100 text-xs px-3 py-2 focus:outline-none focus:border-white/20',
   pillActive: 'bg-zinc-700 text-zinc-100',
@@ -125,13 +96,10 @@ const DK = {
   cardDarkGhost: 'text-zinc-700',
   cardDarkTrack: 'text-zinc-700',
   cardDarkTrackBg: 'bg-zinc-700',
-  btnPrimary: 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600',
-  btnSecondary: 'border border-white/10 hover:border-white/20 text-zinc-500 hover:text-zinc-100',
   livePill: 'bg-zinc-800 text-zinc-400',
   dateBadge: 'bg-zinc-800 text-zinc-500',
   recentBadge: 'bg-zinc-800 text-zinc-400',
   innerBg: 'bg-zinc-700 rounded-md',
-  footerLink: 'text-zinc-500 hover:text-zinc-100',
   activityDot: { success: 'bg-zinc-100', warning: 'bg-zinc-400 animate-pulse', def: 'bg-zinc-600' },
   incidentSev: [
     { text: 'text-zinc-100', dot: 'bg-zinc-100' },

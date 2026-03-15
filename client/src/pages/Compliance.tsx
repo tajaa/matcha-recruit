@@ -13,14 +13,16 @@ import {
     MapPin, Trash2, Edit2, X,
     ChevronDown, AlertTriangle, Bell, CheckCircle,
     ExternalLink, Building2, Loader2, Clock, Calendar,
-    History, Eye, Zap, Info, ShieldCheck, Users, Layers, LayoutList, Pin
+    History, Eye, Zap, Info, Users, Layers, LayoutList, Pin
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FeatureGuideTrigger } from '../features/feature-guides';
 import { LifecycleWizard } from '../components/LifecycleWizard';
+import { Tabs } from '../components/Tabs';
+import { ContentCard } from '../components/ContentCard';
+import { baseLT } from '../theme';
 import { useCompliance, useComplianceRequirements, useJurisdictionSearch, useComplianceCheck } from '../hooks/compliance';
 import type { CategoryGroup } from '../generated/complianceCategories';
-import { useIsLightMode } from '../hooks/useIsLightMode';
 
 const GROUP_FILTER_OPTIONS: { value: 'all' | CategoryGroup; label: string }[] = [
     { value: 'all', label: 'All Categories' },
@@ -200,86 +202,62 @@ const COMPLIANCE_CYCLE_STEPS = [
 // ─── theme ────────────────────────────────────────────────────────────────────
 
 const LT = {
-  // ── page surface (light bg) ─────────────────────────────────────────────────
+  ...baseLT,
+  // ── compliance-specific (light) ───────────────────────────────────────────
   pageBg: 'bg-stone-300',
-  pageText: 'text-zinc-900',
-  pageMuted: 'text-stone-500',
-  pageFaint: 'text-stone-400',
-  pageDim: 'text-stone-600',
-  pageBorder: 'border-stone-200',
-  pageBtnPrimary: 'bg-zinc-900 text-zinc-50 hover:bg-zinc-800',
-  pageLinkHover: 'hover:text-zinc-900',
-  // page-surface banners
+  cardLight: 'bg-stone-100 rounded-xl',
+  cardDark: 'bg-zinc-900 rounded-xl',
+  cardDarkHover: 'hover:bg-zinc-800',
+  labelOnDark: 'text-xs text-zinc-500 font-semibold',
+  livePill: 'bg-stone-200 text-stone-600',
+  label: 'text-[10px] text-stone-500 uppercase tracking-widest font-bold',
+  innerElAlt: 'bg-stone-50',
   alertSync: 'border border-amber-300 bg-amber-50 text-amber-700',
   alertSyncError: 'border border-red-300 bg-red-50 text-red-700',
   alertSyncLink: 'decoration-red-400/50 hover:text-red-800',
-  // ── card interiors (dark — mirrors DK for contrast) ─────────────────────────
-  card: 'bg-zinc-900 rounded-2xl border border-white/10',
-  cardBg: 'bg-zinc-900',
-  cardHeader: 'border-b border-white/10',
-  innerEl: 'bg-zinc-800 rounded-xl',
-  innerElAlt: 'bg-black/40',
-  textMain: 'text-zinc-100',
-  textMuted: 'text-zinc-500',
-  textFaint: 'text-zinc-600',
-  textDim: 'text-zinc-400',
-  border: 'border-white/10',
-  divide: 'divide-white/10',
-  rowHover: 'hover:bg-white/5',
-  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
-  input: 'bg-zinc-900 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
-  select: 'bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
-  btnPrimary: 'bg-white text-black hover:bg-zinc-100',
-  btnGhost: 'text-zinc-500 hover:text-zinc-100',
-  spinner: 'border-zinc-700 border-t-zinc-300',
-  statusOk: 'text-emerald-400',
-  statusWarn: 'text-amber-400',
-  statusErr: 'text-red-400',
-  linkify: 'text-emerald-400 hover:text-emerald-300 underline',
-  linkHover: 'hover:text-white',
-  tabActive: 'text-zinc-100',
-  tabInactive: 'text-zinc-600 hover:text-zinc-400',
-  tabIndicator: 'bg-white',
-  dot: 'bg-white/10',
-  checkBg: 'bg-black/40',
-  dotNominal: 'bg-zinc-700',
-  dotNominalSmall: 'bg-zinc-800',
-  badgeNew: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
-  badgeUpdated: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  badgeNominal: 'bg-white/5 text-zinc-600 border-white/5',
-  emptyBg: 'bg-white/[0.01]',
-  contentBg: 'bg-zinc-950',
-  expandedBg: 'bg-zinc-950/40',
-  requirementDivider: 'bg-white/5',
-  requirementItemBg: 'bg-zinc-950/20',
-  alertDismissed: 'opacity-50 bg-zinc-900/40 border-white/5',
-  alertActionBg: 'bg-white/5 border border-white/5',
-  alertBtnHover: 'hover:bg-white/5',
-  neutralBadge: 'bg-white/5 text-zinc-500 border border-white/10',
-  legDismissed: 'bg-zinc-800 text-zinc-500 border-zinc-700',
-  posterCancelled: 'bg-zinc-800 text-zinc-500 border-zinc-700',
-  authorityLink: 'text-blue-400 hover:text-white',
-  impactBg: 'bg-amber-500/[0.03] border-l-2 border-amber-500/20',
-  impactText: 'text-amber-200/70',
-  coverageMissingBorder: 'border-amber-500/30',
-  coverageMissingBg: 'bg-amber-500/10',
-  coverageMissingTitle: 'text-amber-300',
-  coverageMissingText: 'text-amber-100',
-  localInfoBg: 'bg-blue-500/10 border border-blue-500/20',
-  localInfoIcon: 'text-blue-400',
-  localInfoText: 'text-blue-300',
-  checkManual: 'bg-white/5 text-zinc-500 border-white/10',
-  sourceTypeFallback: 'bg-zinc-800 text-zinc-500',
-  borderInline: 'border-white/[0.03]',
-  sourceLinkDecor: 'decoration-white/10',
-  coveragePendingBorder: 'border-zinc-800',
-  // ── modal (light bg) ───────────────────────────────────────────────────────
+  dot: 'bg-stone-300',
+  checkBg: 'bg-stone-50',
+  dotNominal: 'bg-stone-300',
+  dotNominalSmall: 'bg-stone-200',
+  emptyBg: 'bg-stone-50',
+  contentBg: 'bg-stone-50',
+  expandedBg: 'bg-stone-50',
+  requirementDivider: 'bg-stone-200',
+  requirementItemBg: 'bg-stone-50',
+  alertDismissed: 'opacity-50 bg-stone-50 border-stone-200',
+  alertActionBg: 'bg-stone-100 border border-stone-200',
+  alertBtnHover: 'hover:bg-stone-100',
+  neutralBadge: 'bg-stone-100 text-stone-500 border border-stone-200',
+  legDismissed: 'bg-stone-100 text-stone-400 border-stone-200',
+  posterCancelled: 'bg-stone-100 text-stone-400 border-stone-200',
+  authorityLink: 'text-blue-600 hover:text-blue-800',
+  impactBg: 'bg-amber-50 border-l-2 border-amber-300',
+  impactText: 'text-amber-700',
+  coverageMissingBorder: 'border-amber-300',
+  coverageMissingBg: 'bg-amber-50',
+  coverageMissingTitle: 'text-amber-700',
+  coverageMissingText: 'text-amber-800',
+  localInfoBg: 'bg-blue-50 border border-blue-200',
+  localInfoIcon: 'text-blue-500',
+  localInfoText: 'text-blue-700',
+  checkManual: 'bg-stone-50 text-stone-500 border-stone-200',
+  sourceTypeFallback: 'bg-stone-100 text-stone-500',
+  borderInline: 'border-stone-100',
+  sourceLinkDecor: 'decoration-stone-300',
+  coveragePendingBorder: 'border-stone-200',
+  badgeCoverage: 'bg-amber-50 text-amber-600 border-amber-300',
+  confidenceHigh: 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  confidenceMed: 'bg-amber-50 text-amber-600 border-amber-200',
+  confidenceLow: 'bg-red-50 text-red-600 border-red-200',
+  legislationProposed: 'bg-blue-50 text-blue-600 border-blue-200',
+  legislationPassed: 'bg-amber-50 text-amber-600 border-amber-200',
+  legislationEffectiveSoon: 'bg-red-50 text-red-600 border-red-200',
+  legislationEffective: 'bg-emerald-50 text-emerald-600 border-emerald-200',
+  // modal
   modalBg: 'bg-stone-100 rounded-2xl',
   modalHeader: 'border-b border-stone-200',
   modalFooter: 'border-t border-stone-200',
   modalAccent: 'bg-stone-300',
-  closeBtnCls: 'text-stone-400 hover:text-zinc-900 transition-colors',
-  cancelBtn: 'bg-transparent border border-stone-300 text-stone-500 hover:text-zinc-900 hover:bg-stone-200',
   pageInput: 'bg-white border border-stone-300 text-zinc-900 rounded-xl placeholder:text-stone-400 focus:border-stone-400',
   pageSelect: 'bg-white border border-stone-300 rounded-xl text-zinc-900 focus:border-stone-400',
   dropdownBg: 'bg-stone-50',
@@ -289,98 +267,8 @@ const LT = {
   pageRowHover: 'hover:bg-stone-50',
 } as const;
 
-const DK = {
-  // ── page surface ────────────────────────────────────────────────────────────
-  pageBg: 'bg-zinc-950',
-  pageText: 'text-zinc-100',
-  pageMuted: 'text-zinc-500',
-  pageFaint: 'text-zinc-600',
-  pageDim: 'text-zinc-400',
-  pageBorder: 'border-white/10',
-  pageBtnPrimary: 'bg-white text-black hover:bg-zinc-100',
-  pageLinkHover: 'hover:text-white',
-  alertSync: 'border border-amber-500/30 bg-amber-500/10 text-amber-200',
-  alertSyncError: 'border border-red-500/30 bg-red-500/10 text-red-200',
-  alertSyncLink: 'decoration-red-400/50 hover:text-red-100',
-  // ── card interiors ──────────────────────────────────────────────────────────
-  card: 'bg-zinc-900 rounded-2xl border border-white/10',
-  cardBg: 'bg-zinc-900',
-  cardHeader: 'border-b border-white/10',
-  innerEl: 'bg-zinc-800 rounded-xl',
-  innerElAlt: 'bg-black/40',
-  textMain: 'text-zinc-100',
-  textMuted: 'text-zinc-500',
-  textFaint: 'text-zinc-600',
-  textDim: 'text-zinc-400',
-  border: 'border-white/10',
-  divide: 'divide-white/10',
-  rowHover: 'hover:bg-white/5',
-  label: 'text-[10px] text-zinc-500 uppercase tracking-widest font-bold',
-  input: 'bg-zinc-900 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
-  select: 'bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
-  btnPrimary: 'bg-white text-black hover:bg-zinc-100',
-  btnGhost: 'text-zinc-500 hover:text-zinc-100',
-  spinner: 'border-zinc-700 border-t-zinc-300',
-  statusOk: 'text-emerald-400',
-  statusWarn: 'text-amber-400',
-  statusErr: 'text-red-400',
-  linkify: 'text-emerald-400 hover:text-emerald-300 underline',
-  linkHover: 'hover:text-white',
-  tabActive: 'text-zinc-100',
-  tabInactive: 'text-zinc-600 hover:text-zinc-400',
-  tabIndicator: 'bg-white',
-  dot: 'bg-white/10',
-  checkBg: 'bg-black/40',
-  dotNominal: 'bg-zinc-700',
-  dotNominalSmall: 'bg-zinc-800',
-  badgeNew: 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
-  badgeUpdated: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-  badgeNominal: 'bg-white/5 text-zinc-600 border-white/5',
-  emptyBg: 'bg-white/[0.01]',
-  contentBg: 'bg-zinc-950',
-  expandedBg: 'bg-zinc-950/40',
-  requirementDivider: 'bg-white/5',
-  requirementItemBg: 'bg-zinc-950/20',
-  alertDismissed: 'opacity-50 bg-zinc-900/40 border-white/5',
-  alertActionBg: 'bg-white/5 border border-white/5',
-  alertBtnHover: 'hover:bg-white/5',
-  neutralBadge: 'bg-white/5 text-zinc-500 border border-white/10',
-  legDismissed: 'bg-zinc-800 text-zinc-500 border-zinc-700',
-  posterCancelled: 'bg-zinc-800 text-zinc-500 border-zinc-700',
-  authorityLink: 'text-blue-400 hover:text-white',
-  impactBg: 'bg-amber-500/[0.03] border-l-2 border-amber-500/20',
-  impactText: 'text-amber-200/70',
-  coverageMissingBorder: 'border-amber-500/30',
-  coverageMissingBg: 'bg-amber-500/10',
-  coverageMissingTitle: 'text-amber-300',
-  coverageMissingText: 'text-amber-100',
-  localInfoBg: 'bg-blue-500/10 border border-blue-500/20',
-  localInfoIcon: 'text-blue-400',
-  localInfoText: 'text-blue-300',
-  checkManual: 'bg-white/5 text-zinc-500 border-white/10',
-  sourceTypeFallback: 'bg-zinc-800 text-zinc-500',
-  borderInline: 'border-white/[0.03]',
-  sourceLinkDecor: 'decoration-white/10',
-  coveragePendingBorder: 'border-zinc-800',
-  // ── modal ───────────────────────────────────────────────────────────────────
-  modalBg: 'bg-zinc-900 border border-white/10 rounded-2xl',
-  modalHeader: 'border-b border-white/10',
-  modalFooter: 'border-t border-white/10',
-  modalAccent: 'bg-white/5',
-  closeBtnCls: 'text-zinc-500 hover:text-zinc-100 transition-colors',
-  cancelBtn: 'bg-transparent border border-white/10 text-zinc-500 hover:text-white hover:bg-white/5',
-  pageInput: 'bg-zinc-900 border border-white/10 text-zinc-100 rounded-xl placeholder:text-zinc-600 focus:border-white/20',
-  pageSelect: 'bg-zinc-900 border border-white/10 rounded-xl text-zinc-100 focus:border-white/20',
-  dropdownBg: 'bg-black/40',
-  dropdownHeader: 'bg-zinc-950',
-  listItemSelected: 'bg-white/10 text-white',
-  listItemHoverText: 'hover:text-zinc-300',
-  pageRowHover: 'hover:bg-white/5',
-} as const;
-
 export function Compliance() {
-    const isLight = useIsLightMode();
-    const t = isLight ? LT : DK;
+    const t = LT;
     const { user } = useAuth();
     const navigate = useNavigate();
     const [searchParams] = useSearchParams();
@@ -645,7 +533,7 @@ export function Compliance() {
                     ) : (
                         <span className={`px-2 py-0.5 text-[8px] rounded-xs border font-bold uppercase tracking-[0.2em] ${
                             missingCoverageCategorySet.has(category)
-                                ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                ? t.badgeCoverage
                                 : `${t.cardBg} ${t.textMuted} ${t.coveragePendingBorder}`
                         }`}>
                             {missingCoverageCategorySet.has(category) ? 'Missing Source Coverage' : 'Coverage Pending'}
@@ -676,7 +564,7 @@ export function Compliance() {
                                 </div>
                             ) : (
                                 reqs.map(req => (
-                                    <div key={req.id} className={`p-6 ${t.rowHover} transition-colors rounded-sm`}>
+                                    <div key={req.id} className={`p-6 ${t.rowHover} transition-colors rounded-lg`}>
                                         <div className="flex items-start justify-between mb-4 gap-6">
                                             <div className="flex-1">
                                                 <h4 className={`${t.textMain} text-xs font-bold uppercase tracking-wide mb-2`}>
@@ -692,19 +580,19 @@ export function Compliance() {
                                                         </span>
                                                     )}
                                                     {req.applicable_industries?.includes('healthcare') && (
-                                                        <span className="px-1.5 py-0.5 bg-cyan-500/10 border border-cyan-500/20 text-[8px] uppercase tracking-widest text-cyan-300 font-bold rounded-xs">
+                                                        <span className="px-1.5 py-0.5 bg-cyan-50 border border-cyan-200 text-[8px] uppercase tracking-widest text-cyan-700 font-bold rounded-xs">
                                                             Medical
                                                         </span>
                                                     )}
                                                     {(req.affected_employee_count ?? 0) > 0 && (
                                                         <EmployeesTooltip names={req.affected_employee_names} count={req.affected_employee_count!}>
-                                                            <span className="px-1.5 py-0.5 bg-violet-500/10 border border-violet-500/20 text-[8px] uppercase tracking-widest text-violet-400 font-bold rounded-xs cursor-default">
+                                                            <span className="px-1.5 py-0.5 bg-violet-50 border border-violet-200 text-[8px] uppercase tracking-widest text-violet-600 font-bold rounded-xs cursor-default">
                                                                 {req.affected_employee_count} employee{req.affected_employee_count !== 1 ? 's' : ''}
                                                             </span>
                                                         </EmployeesTooltip>
                                                     )}
                                                     {(req.min_wage_violation_count ?? 0) > 0 && (
-                                                        <span className="px-1.5 py-0.5 bg-red-500/10 border border-red-500/20 text-[8px] uppercase tracking-widest text-red-400 font-bold rounded-xs">
+                                                        <span className="px-1.5 py-0.5 bg-red-50 border border-red-200 text-[8px] uppercase tracking-widest text-red-600 font-bold rounded-xs">
                                                             {req.min_wage_violation_count} below threshold
                                                         </span>
                                                     )}
@@ -714,7 +602,7 @@ export function Compliance() {
                                                 </div>
                                             </div>
                                             {req.current_value && (
-                                                <span className={`${t.statusOk} font-mono text-xs bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-sm shadow-inner`}>
+                                                <span className={`${t.statusOk} font-mono text-xs bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg`}>
                                                     {req.current_value}
                                                 </span>
                                             )}
@@ -763,13 +651,17 @@ export function Compliance() {
     );
 
     const getSeverityStyles = (severity: string) => {
+        if (!isLight) {
+            switch (severity) {
+                case 'critical':  return 'bg-red-500/10 text-red-400 border-red-500/20';
+                case 'warning':   return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
+                default:          return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+            }
+        }
         switch (severity) {
-            case 'critical':
-                return 'bg-red-500/10 text-red-400 border-red-500/20';
-            case 'warning':
-                return 'bg-amber-500/10 text-amber-400 border-amber-500/20';
-            default:
-                return 'bg-blue-500/10 text-blue-400 border-blue-500/20';
+            case 'critical':  return 'bg-red-50 text-red-600 border-red-200';
+            case 'warning':   return 'bg-amber-50 text-amber-600 border-amber-200';
+            default:          return 'bg-blue-50 text-blue-600 border-blue-200';
         }
     };
 
@@ -785,9 +677,9 @@ export function Compliance() {
     const getConfidenceBadge = (score: number | null) => {
         if (score === null || score === undefined) return null;
         const pct = Math.round(score * 100);
-        if (score >= 0.6) return { label: `${pct}%`, color: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30', tag: 'Verified' };
-        if (score >= 0.3) return { label: `${pct}%`, color: 'bg-amber-500/20 text-amber-400 border-amber-500/30', tag: 'Unverified' };
-        return { label: `${pct}%`, color: 'bg-red-500/20 text-red-400 border-red-500/30', tag: 'Low Confidence' };
+        if (score >= 0.6) return { label: `${pct}%`, color: t.confidenceHigh, tag: 'Verified' };
+        if (score >= 0.3) return { label: `${pct}%`, color: t.confidenceMed, tag: 'Unverified' };
+        return { label: `${pct}%`, color: t.confidenceLow, tag: 'Low Confidence' };
     };
 
     const getAlertTypeIcon = (alertType: string | null) => {
@@ -803,31 +695,34 @@ export function Compliance() {
     const locationAlerts = alerts?.filter(a => a.location_id === selectedLocationId && a.status !== 'dismissed') || [];
     const unreadAlertsCount = locationAlerts.filter(a => a.status === 'unread').length;
 
+    const totalRequirements = locations?.reduce((s, l) => s + (l.requirements_count || 0), 0) ?? 0;
+    const totalAlerts = locations?.reduce((s, l) => s + (l.unread_alerts_count || 0), 0) ?? 0;
+    const totalEmployees = locations?.reduce((s, l) => s + (l.employee_count || 0), 0) ?? 0;
+
     return (
-        <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-6 sm:px-8 lg:px-10 py-10 min-h-screen ${t.pageBg}`}>
-        <div className="max-w-7xl mx-auto space-y-10 pb-24">
-            <div className={`flex items-center justify-between border-b ${t.pageBorder} pb-8`}>
-                <div className="flex items-center gap-8">
-                    <div>
-                        <div className="flex items-center gap-3">
-                            <h1 className={`text-4xl font-bold tracking-tighter ${t.pageText} uppercase`}>Compliance</h1>
-                            <FeatureGuideTrigger guideId="compliance" />
-                        </div>
-                        <div className="flex items-center gap-2 mt-2">
-                            <ShieldCheck size={12} className="text-matcha-500" />
-                            <p className={`text-[10px] ${t.pageMuted} font-mono tracking-widest uppercase`}>
-                                Algorithmic Enforcement Node
-                            </p>
+        <div className={`-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen ${t.pageBg}`}>
+        <div className="max-w-7xl mx-auto space-y-5 pb-24">
+
+            {/* Header */}
+            <div className="flex justify-between items-start pb-6">
+                <div>
+                    <div className="flex items-center gap-3">
+                        <h1 className={`text-3xl font-bold tracking-tight ${t.textMain}`}>
+                            Compliance <FeatureGuideTrigger guideId="compliance" />
+                        </h1>
+                        <div className={`px-2.5 py-0.5 ${t.livePill} text-[10px] font-bold rounded-full`}>
+                            {locations?.length ?? 0} Locations
                         </div>
                     </div>
+                    <p className={`text-[10px] ${t.textMuted} mt-1.5 font-mono tracking-wide`}>Regulatory Monitoring</p>
                     {isAdmin && companies?.companies && companies.companies.length > 0 && (
-                        <div className={`flex flex-col gap-1.5 pl-8 border-l ${t.pageBorder}`}>
-                            <span className={`text-[8px] font-bold uppercase tracking-widest ${t.pageFaint}`}>Company Context</span>
+                        <div className="mt-2 flex items-center gap-2">
+                            <span className="text-xs text-stone-500">Company:</span>
                             <select
                                 data-tour="compliance-company-select"
                                 value={selectedCompanyId || ''}
                                 onChange={e => setSelectedCompanyId(e.target.value)}
-                                className={`${t.pageSelect} text-[10px] font-mono uppercase tracking-[0.2em] focus:outline-none transition-all px-3 py-1.5 min-w-[220px]`}
+                                className="text-xs bg-white border border-stone-300 rounded-lg text-zinc-900 px-2 py-1 focus:outline-none focus:border-stone-400"
                             >
                                 {companies.companies.map(c => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
@@ -836,16 +731,46 @@ export function Compliance() {
                         </div>
                     )}
                 </div>
-                <div className="flex items-center gap-3">
+                <div className="flex gap-2">
                     {wizardReturnPath && (
                         <button
                             onClick={() => navigate(wizardReturnPath)}
-                            className={`px-5 py-2.5 ${t.cancelBtn} text-[10px] font-bold uppercase tracking-[0.2em] transition-all rounded-sm`}
+                            className={`px-4 py-2 ${t.btnSecondary} rounded-lg text-[10px] font-bold transition-all`}
                         >
-                            Return To Handbook
+                            Return to Handbook
                         </button>
                     )}
+                    <button
+                        onClick={() => setShowAddModal(true)}
+                        className={`px-4 py-2 ${t.btnPrimary} rounded-lg text-[10px] font-bold transition-all flex items-center gap-1.5`}
+                    >
+                        <MapPin size={12} />
+                        Add Location
+                    </button>
                 </div>
+            </div>
+
+            {/* Stat Cards */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                {[
+                    { label: 'Locations', value: locations?.length ?? 0, icon: MapPin, change: 'business sites' },
+                    { label: 'Requirements', value: totalRequirements, icon: Layers, change: 'tracked nodes' },
+                    { label: 'Alerts', value: totalAlerts, icon: Bell, change: 'need attention', urgent: totalAlerts > 0 },
+                    { label: 'Employees', value: totalEmployees, icon: Users, change: 'covered' },
+                ].map((stat) => (
+                    <div key={stat.label} className={`${t.cardDark} p-5 relative overflow-hidden`}>
+                        <div className="absolute top-0 right-0 p-3 text-zinc-800">
+                            <stat.icon className="w-8 h-8" strokeWidth={0.5} />
+                        </div>
+                        <div className="relative z-10">
+                            <div className={`${t.labelOnDark} mb-2`}>{stat.label}</div>
+                            <div className={`text-3xl font-light font-mono mb-0.5 tabular-nums ${stat.urgent ? 'text-amber-400' : 'text-zinc-50'}`}>
+                                {stat.value}
+                            </div>
+                            <div className="text-[9px] text-zinc-500 font-mono">{stat.change}</div>
+                        </div>
+                    </div>
+                ))}
             </div>
 
             <LifecycleWizard
@@ -860,17 +785,13 @@ export function Compliance() {
               title="Compliance Lifecycle"
             />
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-10">
-                <div data-tour="compliance-locations" className="lg:col-span-1 space-y-6">
-                    <div className={`flex items-center justify-between border-b ${t.pageBorder} pb-2`}>
-                        <h2 className={`text-[10px] font-bold ${t.pageMuted} uppercase tracking-[0.25em]`}>
-                            Endpoints
-                        </h2>
-                        <span className={`text-[9px] font-mono ${t.pageFaint}`}>[{locations?.length || 0}]</span>
-                    </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div data-tour="compliance-locations" className="lg:col-span-1">
+                    <div className={`${t.cardLight} p-3`}>
+                    <div className={`${t.label} mb-3 px-1`}>Locations <span className="font-mono normal-case">[{locations?.length || 0}]</span></div>
 
                     {syncStates.size > 0 && (
-                        <div className={`${t.alertSync} px-4 py-3 rounded-sm text-xs space-y-1`}>
+                        <div className={`${t.alertSync} px-3 py-2 rounded-lg text-xs space-y-1 mb-2`}>
                             <p className="font-medium uppercase tracking-wider">Handbook requires compliance sync</p>
                             <p>
                                 Run <strong>Sync Compliance</strong> for each highlighted location below, then return to your handbook.
@@ -883,7 +804,7 @@ export function Compliance() {
                         const missingStates = [...syncStates].filter(s => !coveredStates.has(s));
                         if (missingStates.length === 0) return null;
                         return (
-                            <div className={`${t.alertSyncError} px-4 py-3 rounded-sm text-xs space-y-1 mt-2`}>
+                            <div className={`${t.alertSyncError} px-3 py-2 rounded-lg text-xs space-y-1 mb-2`}>
                                 <p className="font-medium uppercase tracking-wider">Location required for compliance sync</p>
                                 <p>
                                     Add a location in <strong>{missingStates.join(', ')}</strong> to your compliance dashboard,
@@ -900,19 +821,19 @@ export function Compliance() {
                     })()}
 
                     {loadingLocations ? (
-                        <div className="space-y-2">
+                        <div className="space-y-1">
                             {[1, 2, 3].map(i => (
-                                <div key={i} className={`${t.cardBg} border ${t.border} rounded-sm p-4 animate-pulse h-20`} />
+                                <div key={i} className={`${t.innerEl} p-4 animate-pulse h-16`} />
                             ))}
                         </div>
                     ) : locations?.length === 0 ? (
-                        <div className={`${t.cardBg} border border-dashed ${t.border} rounded-sm py-16 px-8 text-center`}>
-                            <div className={`w-12 h-12 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
-                                <MapPin size={20} className={t.textMuted} />
+                        <div className="py-12 px-4 text-center">
+                            <div className={`w-10 h-10 mx-auto mb-4 rounded-full ${t.innerEl} flex items-center justify-center opacity-40`}>
+                                <MapPin size={16} className={t.textMuted} />
                             </div>
-                            <h3 className={`${t.textDim} text-[10px] font-bold uppercase tracking-widest mb-2`}>No Locations Yet</h3>
-                            <p className={`${t.textFaint} text-[10px] mb-6 leading-relaxed uppercase tracking-tighter`}>
-                                Locations are automatically created when employees are onboarded with a workplace address.
+                            <h3 className={`${t.textDim} text-[10px] font-bold uppercase tracking-widest mb-1`}>No Locations Yet</h3>
+                            <p className={`${t.textFaint} text-[10px] leading-relaxed`}>
+                                Locations are created automatically when employees are onboarded.
                             </p>
                         </div>
                     ) : (
@@ -924,20 +845,14 @@ export function Compliance() {
                                 animate={{ opacity: 1, x: 0 }}
                                 key={location.id}
                                 onClick={() => setSelectedLocationId(location.id)}
-                                className={`border rounded-sm p-2.5 cursor-pointer transition-all duration-300 group relative overflow-hidden ${
+                                className={`rounded-lg p-2.5 cursor-pointer transition-all duration-200 group relative overflow-hidden ${
                                     selectedLocationId === location.id
-                                        ? 'border-matcha-500/40 bg-matcha-500/[0.03] shadow-[0_0_20px_rgba(0,0,0,0.4)]'
+                                        ? 'bg-stone-300'
                                         : syncStates.has((location.state || '').toUpperCase())
-                                            ? 'border-amber-500/40 bg-amber-500/[0.04] hover:border-amber-500/60'
-                                            : `${t.border} ${t.cardBg} ${t.rowHover}`
+                                            ? 'bg-amber-100 hover:bg-amber-200'
+                                            : t.innerHover
                                 }`}
                             >
-                                {selectedLocationId === location.id && (
-                                    <motion.div
-                                        layoutId="active-location-indicator"
-                                        className="absolute left-0 top-0 bottom-0 w-0.5 bg-matcha-500"
-                                    />
-                                )}
                                 <div className="flex items-start justify-between">
                                     <div className="min-w-0 flex-1">
                                         {/* Row 1: name + badges + employee count */}
@@ -951,12 +866,12 @@ export function Compliance() {
                                                 <span className={`text-[7px] px-1 py-0.5 ${t.neutralBadge} rounded-xs uppercase tracking-widest`}>Local</span>
                                             )}
                                             {location.source === 'employee_derived' && (
-                                                <span className="text-[7px] px-1 py-0.5 rounded bg-blue-500/10 text-blue-400 uppercase tracking-widest">
+                                                <span className={`text-[7px] px-1 py-0.5 rounded ${t.badgeBlue} uppercase tracking-widest`}>
                                                     Auto
                                                 </span>
                                             )}
                                             {location.coverage_status === 'pending_review' && (
-                                                <span className="text-[7px] px-1 py-0.5 rounded bg-amber-500/10 text-amber-400 uppercase tracking-widest"
+                                                <span className={`text-[7px] px-1 py-0.5 rounded ${t.badgeAmber} uppercase tracking-widest`}
                                                       title="Platform admin is reviewing this jurisdiction">
                                                     Pending
                                                 </span>
@@ -985,12 +900,12 @@ export function Compliance() {
                                                 </span>
                                             )}
                                             {location.data_status === 'needs_research' && (
-                                                <span className="text-[7px] px-1 py-0.5 rounded bg-red-500/10 text-red-400 uppercase tracking-wider font-bold">
+                                                <span className={`text-[7px] px-1 py-0.5 rounded ${t.badgeRed} uppercase tracking-wider font-bold`}>
                                                     Research
                                                 </span>
                                             )}
                                             {location.data_status === 'available' && (
-                                                <span className="text-[7px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-400 uppercase tracking-wider font-bold">
+                                                <span className={`text-[7px] px-1 py-0.5 rounded ${t.badgeEmerald} uppercase tracking-wider font-bold`}>
                                                     Ready
                                                 </span>
                                             )}
@@ -1067,22 +982,23 @@ export function Compliance() {
                         ))}
                     </div>
                     )}
+                    </div>{/* end cardLight */}
                 </div>
 
                 <div data-tour="compliance-content" className="lg:col-span-2">
                     {mutationError && (
-                        <div className={`mb-4 flex items-center justify-between gap-4 px-4 py-3 bg-red-500/10 border border-red-500/20 rounded-sm text-[10px] ${t.statusErr} font-mono uppercase tracking-widest`}>
+                        <div className={`mb-4 flex items-center justify-between gap-4 px-4 py-3 ${t.badgeRed} rounded-lg text-[10px] font-mono uppercase tracking-widest`}>
                             <span>{mutationError}</span>
-                            <button onClick={() => setMutationError(null)} className={`${t.statusErr} hover:text-red-300 transition-colors`}>
+                            <button onClick={() => setMutationError(null)} className={`${t.statusErr} hover:opacity-70 transition-colors`}>
                                 <X size={12} />
                             </button>
                         </div>
                     )}
                     {selectedLocationId && selectedLocation ? (
-                        <div className={`${t.cardBg} border ${t.border} rounded-sm overflow-hidden min-h-[600px] flex flex-col shadow-2xl`}>
+                        <ContentCard className="min-h-[600px] flex flex-col">
                             <div className={`px-5 py-3 ${t.cardHeader} ${t.cardBg} flex items-center justify-between gap-4`}>
                                 <div className="flex items-center gap-3 min-w-0">
-                                    <div className={`w-7 h-7 rounded-sm ${t.innerEl} border ${t.border} flex items-center justify-center flex-shrink-0`}>
+                                    <div className={`w-7 h-7 rounded-lg ${t.innerEl} border ${t.border} flex items-center justify-center flex-shrink-0`}>
                                         <Building2 size={13} className={t.textDim} />
                                     </div>
                                     <div className="min-w-0">
@@ -1110,7 +1026,7 @@ export function Compliance() {
                                         if (!selectedLocationId || checkInProgress) return;
                                         await runComplianceCheck();
                                     }}
-                                    className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 ${t.btnPrimary} text-[9px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 rounded-sm`}
+                                    className={`flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 ${t.btnPrimary} text-[9px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 rounded-lg`}
                                 >
                                     {checkInProgress ? (
                                         <><Loader2 size={10} className="animate-spin" /> Scanning</>
@@ -1127,7 +1043,7 @@ export function Compliance() {
                                     className={`${t.cardHeader} ${t.checkBg} overflow-hidden`}
                                 >
                                     <div className={`flex items-center gap-4 px-8 py-3 ${t.cardHeader} text-[8px] uppercase tracking-[0.3em] font-bold ${t.textFaint}`}>
-                                        <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.4)]" /> New</div>
+                                        <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> New</div>
                                         <div className="flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-amber-500" /> Delta</div>
                                         <div className="flex items-center gap-1.5"><div className={`w-1.5 h-1.5 rounded-full ${t.dotNominal}`} /> Nominal</div>
                                     </div>
@@ -1160,66 +1076,47 @@ export function Compliance() {
                                 </motion.div>
                             )}
 
-                            <div data-tour="compliance-tabs" className={`flex items-center ${t.cardHeader} ${t.cardBg} px-4`}>
-                                {[
-                                    { id: 'requirements', label: 'Matrix', count: requirements?.length },
-                                    { id: 'alerts', label: 'Alerts', count: locationAlerts.length, badge: unreadAlertsCount },
-                                    { id: 'upcoming', label: 'Future', count: upcomingLegislation?.length },
-                                    { id: 'history', label: 'Log' },
-                                    { id: 'posters', label: 'Vault' },
-                                    { id: 'employees', label: 'Employees', count: selectedLocation?.employee_count ?? 0 },
-                                ].map((tab) => (
-                                    <button
-                                        key={tab.id}
-                                        onClick={() => setActiveTab(tab.id as any)}
-                                        className={`px-6 py-4 text-[10px] font-bold uppercase tracking-[0.2em] transition-all relative ${
-                                            activeTab === tab.id
-                                                ? t.tabActive
-                                                : t.tabInactive
-                                        }`}
-                                    >
-                                        <span className="flex items-center gap-2">
-                                            {tab.label}
-                                            {tab.count !== undefined && (
-                                                <span className="text-[8px] opacity-40 font-mono">[{tab.count}]</span>
-                                            )}
-                                            {tab.badge ? (
-                                                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.4)]" />
-                                            ) : null}
-                                        </span>
-                                        {activeTab === tab.id && (
-                                            <motion.div
-                                                layoutId="active-tab-indicator"
-                                                className={`absolute bottom-0 left-6 right-6 h-0.5 ${t.tabIndicator}`}
-                                            />
-                                        )}
-                                    </button>
-                                ))}
-                                {activeTab === 'requirements' && (
-                                    <div className="ml-auto flex items-center gap-1.5">
-                                        <select
-                                            value={groupFilter}
-                                            onChange={e => setGroupFilter(e.target.value as 'all' | CategoryGroup)}
-                                            className={`text-[10px] font-mono uppercase tracking-wider px-2 py-1.5 rounded-sm border ${t.border} ${t.cardBg} ${t.textMuted} bg-transparent cursor-pointer focus:outline-none`}
-                                        >
-                                            {GROUP_FILTER_OPTIONS.map(opt => (
-                                                <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                            ))}
-                                        </select>
-                                        {sectionedCategories.length > 1 && (
-                                            <button
-                                                onClick={() => setSectionedView(v => !v)}
-                                                className={`p-2 rounded-sm border ${t.border} ${t.cardBg} ${t.rowHover} transition-colors flex-shrink-0`}
-                                                title={sectionedView ? 'Switch to flat view' : 'Switch to sectioned view'}
+                            <div data-tour="compliance-tabs" className={`${t.cardHeader} ${t.cardBg} px-4 pt-2`}>
+                                <Tabs
+                                    tabs={[
+                                        { id: 'requirements', label: 'Matrix', count: requirements?.length },
+                                        { id: 'alerts', label: 'Alerts', count: locationAlerts.length, badge: !!unreadAlertsCount },
+                                        { id: 'upcoming', label: 'Future', count: upcomingLegislation?.length },
+                                        { id: 'history', label: 'Log' },
+                                        { id: 'posters', label: 'Vault' },
+                                        { id: 'employees', label: 'Employees', count: selectedLocation?.employee_count ?? 0 },
+                                    ]}
+                                    activeTab={activeTab}
+                                    onTabChange={(id) => setActiveTab(id as typeof activeTab)}
+                                    variant="light"
+                                    controls={activeTab === 'requirements' ? (
+                                        <>
+                                            <select
+                                                value={groupFilter}
+                                                onChange={e => setGroupFilter(e.target.value as 'all' | CategoryGroup)}
+                                                className={`text-[10px] font-mono uppercase tracking-wider px-2 py-1.5 rounded-lg border ${t.border} ${t.cardBg} ${t.textMuted} bg-transparent cursor-pointer focus:outline-none`}
                                             >
-                                                {sectionedView
-                                                    ? <LayoutList size={13} className={t.textMuted} />
-                                                    : <Layers size={13} className={t.textMuted} />
-                                                }
-                                            </button>
-                                        )}
-                                    </div>
-                                )}
+                                                {GROUP_FILTER_OPTIONS.map(opt => (
+                                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                                ))}
+                                            </select>
+                                            {sectionedCategories.length > 1 && (
+                                                <button
+                                                    onClick={() => setSectionedView(v => !v)}
+                                                    className={`p-2 rounded-lg border ${t.border} ${t.cardBg} ${t.rowHover} transition-colors flex-shrink-0`}
+                                                    title={sectionedView ? 'Switch to flat view' : 'Switch to sectioned view'}
+                                                >
+                                                    {sectionedView
+                                                        ? <LayoutList size={13} className={t.textMuted} />
+                                                        : <Layers size={13} className={t.textMuted} />
+                                                    }
+                                                </button>
+                                            )}
+                                        </>
+                                    ) : undefined}
+                                >
+                                    {() => <></>}
+                                </Tabs>
                             </div>
 
                             {selectedLocation?.has_local_ordinance === false && (
@@ -1243,7 +1140,7 @@ export function Compliance() {
                                             <p className={`${t.textFaint} text-[10px] font-mono uppercase tracking-widest py-8 text-center`}>No employees assigned to this location.</p>
                                         ) : (
                                             selectedLocation!.employee_names!.map((name, i) => (
-                                                <div key={i} className={`${t.cardBg} border ${t.border} rounded-sm px-5 py-3 flex items-center gap-3`}>
+                                                <div key={i} className={`${t.cardBg} border ${t.border} rounded-lg px-5 py-3 flex items-center gap-3`}>
                                                     <div className={`w-7 h-7 rounded-full bg-violet-500/10 border border-violet-500/20 flex items-center justify-center flex-shrink-0`}>
                                                         <span className="text-[10px] font-bold text-violet-400">{name.charAt(0).toUpperCase()}</span>
                                                     </div>
@@ -1269,7 +1166,7 @@ export function Compliance() {
                                                 ) : (
                                                     <div className="space-y-2">
                                                         {availablePosters.map(poster => (
-                                                            <div key={poster.location_id} className={`${t.cardBg} border ${t.border} rounded-sm p-5 flex items-center justify-between group ${t.rowHover} transition-colors`}>
+                                                            <div key={poster.location_id} className={`${t.cardBg} border ${t.border} rounded-lg p-5 flex items-center justify-between group ${t.rowHover} transition-colors`}>
                                                                 <div>
                                                                     <div className={`text-xs font-bold ${t.textMain} uppercase tracking-widest`}>
                                                                         {poster.location_city}, {poster.location_state}
@@ -1327,14 +1224,14 @@ export function Compliance() {
                                                                                 </button>
                                                                             )}
                                                                             {poster.has_active_order && (
-                                                                                <span className="px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest bg-blue-500/10 text-blue-400 rounded-xs border border-blue-500/20">
+                                                                                <span className={`px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest ${t.badgeBlue} rounded-xs border`}>
                                                                                     Order Logged
                                                                                 </span>
                                                                             )}
                                                                         </>
                                                                     )}
                                                                     {poster.template_status === 'pending' && (
-                                                                        <span className="px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest bg-amber-500/10 text-amber-400 rounded-xs border border-amber-500/20 animate-pulse">
+                                                                        <span className={`px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest ${t.badgeAmber} rounded-xs border animate-pulse`}>
                                                                             Synthesis Pending
                                                                         </span>
                                                                     )}
@@ -1354,7 +1251,7 @@ export function Compliance() {
                                                     <h3 className={`text-[10px] font-bold uppercase tracking-widest ${t.textMuted} mb-4 pb-2 ${t.cardHeader}`}>Vault History</h3>
                                                     <div className="space-y-2">
                                                         {posterOrders.map(order => (
-                                                            <div key={order.id} className={`${t.cardBg} border ${t.border} rounded-sm p-5 ${t.rowHover} transition-colors`}>
+                                                            <div key={order.id} className={`${t.cardBg} border ${t.border} rounded-lg p-5 ${t.rowHover} transition-colors`}>
                                                                 <div className="flex items-center justify-between">
                                                                     <div>
                                                                         <div className={`text-xs font-bold ${t.textDim} uppercase tracking-widest`}>
@@ -1371,7 +1268,7 @@ export function Compliance() {
                                                                             order.status === 'delivered' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
                                                                             order.status === 'shipped' ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20' :
                                                                             order.status === 'cancelled' ? t.posterCancelled :
-                                                                            'bg-blue-500/10 text-blue-400 border-blue-500/20'
+                                                                            t.badgeBlue
                                                                         }`}>
                                                                             {order.status}
                                                                         </span>
@@ -1405,17 +1302,17 @@ export function Compliance() {
                                         <div className="space-y-3">
                                             {upcomingLegislation.map(leg => {
                                                 const statusColors: Record<string, string> = {
-                                                    proposed: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-                                                    passed: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
+                                                    proposed: t.legislationProposed,
+                                                    passed: t.legislationPassed,
                                                     signed: 'bg-orange-500/10 text-orange-400 border-orange-500/20',
-                                                    effective_soon: 'bg-red-500/10 text-red-400 border-red-500/20',
-                                                    effective: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20',
+                                                    effective_soon: t.legislationEffectiveSoon,
+                                                    effective: t.legislationEffective,
                                                     dismissed: t.legDismissed,
                                                 };
                                                 const isEffectiveNow = leg.days_until_effective !== null && leg.days_until_effective <= 0;
                                                 const displayStatus = isEffectiveNow ? 'effective' : leg.current_status;
                                                 return (
-                                                    <div key={leg.id} id={`legislation-${leg.id}`} className={`border ${t.border} rounded-sm p-6 ${t.cardBg} ${t.rowHover} transition-colors`}>
+                                                    <div key={leg.id} id={`legislation-${leg.id}`} className={`border ${t.border} rounded-lg p-6 ${t.cardBg} ${t.rowHover} transition-colors`}>
                                                         <div className="flex items-start justify-between gap-6">
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-3 flex-wrap mb-2">
@@ -1496,7 +1393,7 @@ export function Compliance() {
                                     ) : (
                                         <div className="space-y-1.5">
                                             {checkLog.map(entry => (
-                                                <div key={entry.id} className={`flex items-center gap-6 p-4 border ${t.border} rounded-sm ${t.cardBg} ${t.rowHover} transition-colors group`}>
+                                                <div key={entry.id} className={`flex items-center gap-6 p-4 border ${t.border} rounded-lg ${t.cardBg} ${t.rowHover} transition-colors group`}>
                                                     <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 shadow-sm ${
                                                         entry.status === 'completed' ? 'bg-emerald-500 shadow-emerald-500/20' :
                                                         entry.status === 'failed' ? 'bg-red-500 shadow-red-500/20' :
@@ -1505,7 +1402,7 @@ export function Compliance() {
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center gap-4">
                                                             <span className={`text-[8px] px-1.5 py-0.5 rounded-xs border font-bold uppercase tracking-widest ${
-                                                                entry.check_type === 'scheduled' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                                                                entry.check_type === 'scheduled' ? t.badgeBlue :
                                                                 entry.check_type === 'proactive' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
                                                                 t.checkManual
                                                             }`}>
@@ -1540,7 +1437,7 @@ export function Compliance() {
                                 ) : activeTab === 'requirements' ? (
                                     <>
                                     {latestMissingCoverageCategories.length > 0 && (
-                                        <div className={`mb-4 p-4 border ${t.coverageMissingBorder} ${t.coverageMissingBg} rounded-sm`}>
+                                        <div className={`mb-4 p-4 border ${t.coverageMissingBorder} ${t.coverageMissingBg} rounded-lg`}>
                                             <p className={`text-[10px] font-bold uppercase tracking-[0.2em] ${t.coverageMissingTitle}`}>
                                                 Source Coverage Missing
                                             </p>
@@ -1613,7 +1510,7 @@ export function Compliance() {
                                                     initial={{ opacity: 0, y: 10 }}
                                                     animate={{ opacity: 1, y: 0 }}
                                                     key={alert.id}
-                                                    className={`border rounded-sm p-5 transition-all ${getSeverityStyles(alert.severity)} ${
+                                                    className={`border rounded-lg p-5 transition-all ${getSeverityStyles(alert.severity)} ${
                                                         alert.status === 'unread' ? 'bg-opacity-10 border-opacity-30' : t.alertDismissed
                                                     }`}
                                                 >
@@ -1684,7 +1581,7 @@ export function Compliance() {
                                                                                         <div className="flex items-center gap-2 mb-1">
                                                                                             <span className={`px-1 py-0.5 rounded-xs uppercase tracking-widest font-bold text-[7px] ${
                                                                                                 src.type === 'official' ? `bg-emerald-500/10 ${t.statusOk}` :
-                                                                                                src.type === 'news' ? 'bg-blue-500/10 text-blue-400' :
+                                                                                                src.type === 'news' ? t.badgeBlue :
                                                                                                 t.sourceTypeFallback
                                                                                             }`}>
                                                                                                 {src.type}
@@ -1707,7 +1604,7 @@ export function Compliance() {
                                                                     </div>
                                                                 )}
                                                                 {alert.action_required && (
-                                                                    <div className={`mt-4 p-3 ${t.alertActionBg} rounded-sm`}>
+                                                                    <div className={`mt-4 p-3 ${t.alertActionBg} rounded-lg`}>
                                                                         <span className={`text-[8px] font-bold uppercase tracking-[0.3em] ${t.textMuted} block mb-1`}>Mandatory Action</span>
                                                                         <span className={`text-[10px] ${t.textMain} font-bold uppercase tracking-wide`}>{alert.action_required}</span>
                                                                     </div>
@@ -1742,17 +1639,17 @@ export function Compliance() {
                                     )
                                 ) : null}
                             </div>
-                        </div>
+                        </ContentCard>
                     ) : (
-                        <div className={`${t.cardBg} border ${t.border} rounded-sm p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]`}>
+                        <ContentCard className="p-12 text-center h-full flex flex-col items-center justify-center min-h-[400px]">
                             <div className={`w-16 h-16 mx-auto mb-6 rounded-full ${t.cardBg} border ${t.border} flex items-center justify-center opacity-40`}>
                                 <MapPin size={24} className={t.textFaint} />
                             </div>
-                            <h3 className={`${t.textMain} font-bold uppercase tracking-[0.2em] text-[10px] mb-2`}>Select Global Endpoint</h3>
-                            <p className={`${t.textFaint} text-[10px] max-w-sm font-mono uppercase tracking-tight`}>
-                                Choose a location from the matrix to initialize compliance telemetry and alert protocols.
+                            <h3 className={`${t.textMain} font-semibold text-sm mb-2`}>Select a Location</h3>
+                            <p className={`${t.textFaint} text-xs max-w-sm`}>
+                                Choose a location from the list to view compliance requirements and alerts.
                             </p>
-                        </div>
+                        </ContentCard>
                     )}
                 </div>
             </div>
@@ -1812,7 +1709,7 @@ export function Compliance() {
                                         value={formData.name}
                                         onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
                                         placeholder="e.g. SF HEADQUARTERS"
-                                        className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                        className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-lg font-mono uppercase tracking-tight`}
                                     />
                                 </div>
 
@@ -1836,10 +1733,10 @@ export function Compliance() {
                                                 value={jurisdictionSearch}
                                                 onChange={e => setJurisdictionSearch(e.target.value)}
                                                 placeholder="SEARCH CITIES..."
-                                                className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-widest`}
+                                                className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-lg font-mono uppercase tracking-widest`}
                                             />
                                         </div>
-                                        <div className={`max-h-40 overflow-y-auto border ${t.pageBorder} rounded-sm ${t.dropdownBg} no-scrollbar`}>
+                                        <div className={`max-h-40 overflow-y-auto border ${t.pageBorder} rounded-lg ${t.dropdownBg} no-scrollbar`}>
                                             {Object.keys(filteredJurisdictions).length === 0 ? (
                                                 <div className={`px-4 py-8 text-center ${t.pageFaint} text-[9px] font-mono uppercase tracking-widest`}>
                                                     {jurisdictionSearch ? 'Zero Matches' : 'Initializing Matrix...'}
@@ -1889,7 +1786,7 @@ export function Compliance() {
                                             )}
                                         </div>
                                         {formData.jurisdictionKey && (
-                                            <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-sm">
+                                            <div className="p-4 bg-emerald-500/5 border border-emerald-500/10 rounded-lg">
                                                 <div className={`text-[8px] ${t.statusOk} font-bold uppercase tracking-widest mb-1`}>Matrix Resolution</div>
                                                 <div className={`text-xs ${t.pageDim} font-mono uppercase tracking-tighter`}>
                                                     {formData.city}, {formData.state}
@@ -1918,7 +1815,7 @@ export function Compliance() {
                                                 value={formData.address}
                                                 onChange={e => setFormData(prev => ({ ...prev, address: e.target.value }))}
                                                 placeholder="PHYSICAL LOCATION"
-                                                className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-lg font-mono uppercase tracking-tight`}
                                             />
                                         </div>
 
@@ -1932,7 +1829,7 @@ export function Compliance() {
                                                     value={formData.city}
                                                     onChange={e => setFormData(prev => ({ ...prev, city: e.target.value }))}
                                                     required
-                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-lg font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                             <div>
@@ -1943,7 +1840,7 @@ export function Compliance() {
                                                     value={formData.state}
                                                     onChange={e => setFormData(prev => ({ ...prev, state: e.target.value }))}
                                                     required
-                                                    className={`w-full px-4 py-3 ${t.pageSelect} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                    className={`w-full px-4 py-3 ${t.pageSelect} text-sm focus:outline-none transition-all rounded-lg font-mono uppercase tracking-tight`}
                                                 >
                                                     <option value="">--</option>
                                                     {US_STATES.map(state => (
@@ -1964,7 +1861,7 @@ export function Compliance() {
                                                     type="text"
                                                     value={formData.county}
                                                     onChange={e => setFormData(prev => ({ ...prev, county: e.target.value }))}
-                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-lg font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                             <div>
@@ -1977,7 +1874,7 @@ export function Compliance() {
                                                     onChange={e => setFormData(prev => ({ ...prev, zipcode: e.target.value }))}
                                                     required={!isClient && !isAdmin}
                                                     maxLength={10}
-                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-sm font-mono uppercase tracking-tight`}
+                                                    className={`w-full px-4 py-3 ${t.pageInput} text-sm focus:outline-none transition-all rounded-lg font-mono uppercase tracking-tight`}
                                                 />
                                             </div>
                                         </div>
@@ -1994,14 +1891,14 @@ export function Compliance() {
                                             setJurisdictionSearch('');
                                             setUseManualEntry(false);
                                         }}
-                                        className={`flex-1 px-6 py-3.5 ${t.cancelBtn} rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all`}
+                                        className={`flex-1 px-6 py-3.5 ${t.cancelBtn} rounded-lg text-[10px] font-bold uppercase tracking-[0.2em] transition-all`}
                                     >
                                         Abort
                                     </button>
                                     <button
                                         type="submit"
                                         disabled={createLocationMutation.isPending || updateLocationMutation.isPending || (showJurisdictionPicker && !formData.jurisdictionKey)}
-                                        className={`flex-1 px-6 py-3.5 ${t.pageBtnPrimary} rounded-sm text-[10px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 shadow-lg`}
+                                        className={`flex-1 px-6 py-3.5 ${t.pageBtnPrimary} rounded-lg text-[10px] font-bold uppercase tracking-[0.2em] transition-all disabled:opacity-50 shadow-lg`}
                                     >
                                         {createLocationMutation.isPending || updateLocationMutation.isPending
                                             ? 'Syncing...'
