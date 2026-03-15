@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Card, Badge, Button, Input } from '../../components/ui'
+import { Badge, Button, Input } from '../../components/ui'
 import { api } from '../../api/client'
 
 type Company = {
