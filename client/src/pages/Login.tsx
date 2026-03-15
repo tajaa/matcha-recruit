@@ -7,6 +7,14 @@ import { api } from '../api/client'
 type LoginResponse = {
   access_token: string
   refresh_token: string
+  user: { role: string }
+}
+
+const roleRoutes: Record<string, string> = {
+  admin: '/admin',
+  client: '/app',
+  employee: '/portal',
+  candidate: '/candidate',
 }
 
 export default function Login() {
@@ -24,7 +32,7 @@ export default function Login() {
       const res = await api.post<LoginResponse>('/auth/login', { email, password })
       localStorage.setItem('matcha_access_token', res.access_token)
       localStorage.setItem('matcha_refresh_token', res.refresh_token)
-      navigate('/admin')
+      navigate(roleRoutes[res.user.role] ?? '/app')
     } catch {
       setError('Invalid email or password')
     } finally {

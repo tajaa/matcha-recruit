@@ -1,14 +1,21 @@
+import type { LucideIcon } from 'lucide-react'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Building2, ToggleRight, Settings, LogOut } from 'lucide-react'
+import { LogOut } from 'lucide-react'
 import { Logo, Button } from './ui'
 
-const nav = [
-  { to: '/admin/companies', icon: Building2, label: 'Companies' },
-  { to: '/admin/features', icon: ToggleRight, label: 'Business Features' },
-  { to: '/admin/settings', icon: Settings, label: 'Settings' },
-]
+export type NavItem = {
+  to: string
+  icon: LucideIcon
+  label: string
+}
 
-export default function Sidebar() {
+type SidebarShellProps = {
+  logoTo: string
+  logoLabel: string
+  nav: NavItem[]
+}
+
+export default function SidebarShell({ logoTo, logoLabel, nav }: SidebarShellProps) {
   const navigate = useNavigate()
 
   function handleLogout() {
@@ -20,7 +27,7 @@ export default function Sidebar() {
   return (
     <aside className="fixed inset-y-0 left-0 w-56 bg-zinc-950 border-r border-zinc-800 flex flex-col">
       <div className="px-5 py-5">
-        <Logo to="/admin" label="Matcha Admin" />
+        <Logo to={logoTo} label={logoLabel} />
       </div>
 
       <nav className="flex-1 px-3 py-2 space-y-0.5">
