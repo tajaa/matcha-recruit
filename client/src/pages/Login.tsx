@@ -1,19 +1,35 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button } from '../components/ui'
-import { Input } from '../components/ui'
-import { Logo } from '../components/ui'
+import { Button, Input, Logo } from '../components/ui'
+import { api } from '../api/client'
+
+type LoginResponse = {
+  access_token: string
+  refresh_token: string
+}
 
 export default function Login() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    // TODO: wire to /api/auth/login
-    navigate('/admin')
+    setError('')
+    setLoading(true)
+    try {
+      const res = await api.post<LoginResponse>('/auth/login', { email, password })
+      localStorage.setItem('matcha_access_token', res.access_token)
+      localStorage.setItem('matcha_refresh_token', res.refresh_token)
+      navigate('/admin')
+    } catch {
+      setError('Invalid email or password')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -40,8 +56,11 @@ export default function Login() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
           />
-          <Button type="submit" className="w-full">
-            Sign in
+          {error && (
+            <p className="text-sm text-red-400">{error}</p>
+          )}
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? 'Signing in...' : 'Sign in'}
           </Button>
         </form>
 
