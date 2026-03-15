@@ -3589,6 +3589,27 @@ export interface EmployeeCredentials {
   health_clearances?: Record<string, unknown> | null;
 }
 
+export interface CredentialDocument {
+  id: string;
+  company_id: string;
+  employee_id: string;
+  document_type: string;
+  filename: string;
+  file_path?: string | null;
+  mime_type?: string | null;
+  file_size?: number | null;
+  extracted_data?: Record<string, unknown> | null;
+  extraction_status: string;
+  review_status: string;
+  reviewed_by?: string | null;
+  reviewed_at?: string | null;
+  review_notes?: string | null;
+  uploaded_by?: string | null;
+  uploaded_via: string;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export const employees = {
   list: (status?: string): Promise<{ id: string; first_name: string; last_name: string; email: string }[]> =>
     request(`/employees${status ? `?status=${status}` : ''}`),
@@ -3620,6 +3641,38 @@ export const employees = {
       method: 'PUT',
       body: JSON.stringify(data),
     }),
+  // Credential documents
+  uploadCredentialDocument: async (employeeId: string, file: File, documentType: string): Promise<CredentialDocument> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`${API_BASE}/employees/${employeeId}/credential-documents?document_type=${encodeURIComponent(documentType)}`, {
+      method: 'POST', headers, body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+    return response.json();
+  },
+  listCredentialDocuments: (employeeId: string): Promise<CredentialDocument[]> =>
+    request<CredentialDocument[]>(`/employees/${employeeId}/credential-documents`),
+  deleteCredentialDocument: (employeeId: string, documentId: string): Promise<void> =>
+    request(`/employees/${employeeId}/credential-documents/${documentId}`, { method: 'DELETE' }),
+  approveCredentialDocument: (employeeId: string, documentId: string, applyToCredentials: boolean, notes?: string): Promise<void> =>
+    request(`/employees/${employeeId}/credential-documents/${documentId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ apply_to_credentials: applyToCredentials, notes }),
+    }),
+  rejectCredentialDocument: (employeeId: string, documentId: string, notes: string): Promise<void> =>
+    request(`/employees/${employeeId}/credential-documents/${documentId}/reject`, {
+      method: 'POST',
+      body: JSON.stringify({ notes }),
+    }),
+  downloadCredentialDocument: (employeeId: string, documentId: string): Promise<{ url: string; filename: string }> =>
+    request(`/employees/${employeeId}/credential-documents/${documentId}/download`),
 };
 
 export const preTermination = {

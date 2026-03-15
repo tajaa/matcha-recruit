@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getAccessToken, provisioning, employees as employeesApi } from '../api/client';
-import type { EmployeeCredentials } from '../api/client';
+import type { EmployeeCredentials, CredentialDocument } from '../api/client';
 import type { EmployeeGoogleWorkspaceProvisioningStatus, EmployeeSlackProvisioningStatus, ProvisioningRunStatus, EmployeeIncidentItem } from '../types';
 import { useAuth } from '../context/AuthContext';
 import { useIsLightMode } from '../hooks/useIsLightMode';
@@ -10,7 +10,7 @@ import type { LeaveRequestAdmin } from '../api/leave';
 import {
   ArrowLeft, Mail, Phone, MapPin, Calendar, Users, CheckCircle, Clock, FileText,
   Laptop, GraduationCap, Settings, Plus, X, AlertTriangle, SkipForward, RotateCcw,
-  Pencil, DollarSign, Briefcase, Save, ChevronRight, Shield
+  Pencil, DollarSign, Briefcase, Save, ChevronRight, Shield, Upload, Download, Eye, Trash2
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
@@ -215,6 +215,13 @@ export default function EmployeeDetail() {
   const [credentialsEditing, setCredentialsEditing] = useState(false);
   const [credentialsSaving, setCredentialsSaving] = useState(false);
   const [credentialsForm, setCredentialsForm] = useState<Partial<EmployeeCredentials>>({});
+
+  // Credential documents
+  const [credDocs, setCredDocs] = useState<CredentialDocument[]>([]);
+  const [credDocUploading, setCredDocUploading] = useState(false);
+  const [credDocType, setCredDocType] = useState('medical_license');
+  const [credDocReviewId, setCredDocReviewId] = useState<string | null>(null);
+  const [credDocRejectNotes, setCredDocRejectNotes] = useState('');
 
   // Leave state
   const [leaveEligibility, setLeaveEligibility] = useState<LeaveEligibilityData | null>(null);
@@ -578,6 +585,80 @@ export default function EmployeeDetail() {
       setError(err instanceof Error ? err.message : 'Failed to save credentials');
     } finally {
       setCredentialsSaving(false);
+    }
+  };
+
+  const fetchCredDocs = async () => {
+    if (!employeeId) return;
+    try {
+      const docs = await employeesApi.listCredentialDocuments(employeeId);
+      setCredDocs(docs);
+    } catch { /* not available */ }
+  };
+
+  useEffect(() => {
+    if (employeeId && isHealthcare) fetchCredDocs();
+  }, [employeeId, isHealthcare]);
+
+  const handleCredDocUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !employeeId) return;
+    setCredDocUploading(true);
+    try {
+      await employeesApi.uploadCredentialDocument(employeeId, file, credDocType);
+      fetchCredDocs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setCredDocUploading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleApproveCredDoc = async (docId: string, apply: boolean) => {
+    if (!employeeId) return;
+    try {
+      await employeesApi.approveCredentialDocument(employeeId, docId, apply);
+      fetchCredDocs();
+      if (apply) {
+        // Refresh credentials since they may have been updated
+        employeesApi.getCredentials(employeeId).then(c => { setCredentials(c); setCredentialsForm(c); }).catch(() => {});
+      }
+      setCredDocReviewId(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Approve failed');
+    }
+  };
+
+  const handleRejectCredDoc = async (docId: string) => {
+    if (!employeeId || !credDocRejectNotes.trim()) return;
+    try {
+      await employeesApi.rejectCredentialDocument(employeeId, docId, credDocRejectNotes);
+      fetchCredDocs();
+      setCredDocReviewId(null);
+      setCredDocRejectNotes('');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Reject failed');
+    }
+  };
+
+  const handleDeleteCredDoc = async (docId: string) => {
+    if (!employeeId) return;
+    try {
+      await employeesApi.deleteCredentialDocument(employeeId, docId);
+      fetchCredDocs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Delete failed');
+    }
+  };
+
+  const handleDownloadCredDoc = async (docId: string) => {
+    if (!employeeId) return;
+    try {
+      const { url } = await employeesApi.downloadCredentialDocument(employeeId, docId);
+      window.open(url, '_blank');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Download failed');
     }
   };
 
@@ -1362,6 +1443,141 @@ export default function EmployeeDetail() {
                     <p className={`text-xs ${t.textFaint} italic`}>No credentials on file. Click edit to add.</p>
                   )}
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* Credential Documents */}
+          {isHealthcare && (
+            <div className={`${t.card} p-6 space-y-4 shadow-sm`}>
+              <div className="flex items-center justify-between">
+                <h2 className={`text-[10px] font-bold uppercase tracking-wider ${t.textMuted}`}>Credential Documents</h2>
+              </div>
+
+              {/* Upload area */}
+              <div className="flex items-end gap-2">
+                <div className="flex-1">
+                  <label className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold block mb-1`}>Document Type</label>
+                  <select
+                    value={credDocType}
+                    onChange={(e) => setCredDocType(e.target.value)}
+                    className={`w-full px-3 py-1.5 text-sm ${t.inputCls}`}
+                  >
+                    <option value="medical_license">Medical License</option>
+                    <option value="dea">DEA Registration</option>
+                    <option value="npi">NPI Card</option>
+                    <option value="board_cert">Board Certification</option>
+                    <option value="malpractice">Malpractice Insurance</option>
+                    <option value="health_clearance">Health Clearance</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+                <label className={`px-3 py-1.5 text-sm rounded-xl font-medium cursor-pointer flex items-center gap-1.5 ${t.btnPrimary} ${credDocUploading ? 'opacity-50 pointer-events-none' : ''}`}>
+                  <Upload size={14} />
+                  {credDocUploading ? 'Uploading...' : 'Upload'}
+                  <input type="file" accept=".pdf,.png,.jpg,.jpeg,.gif,.tiff" onChange={handleCredDocUpload} className="hidden" />
+                </label>
+              </div>
+
+              {/* Document list */}
+              {credDocs.length > 0 ? (
+                <div className={`divide-y ${t.divide}`}>
+                  {credDocs.map((doc) => {
+                    const isReviewing = credDocReviewId === doc.id;
+                    const extractedFields = (doc.extracted_data as any)?.fields || {};
+                    const docTypeLabels: Record<string, string> = {
+                      medical_license: 'Medical License', dea: 'DEA', npi: 'NPI', board_cert: 'Board Cert',
+                      malpractice: 'Malpractice', health_clearance: 'Health Clearance', other: 'Other',
+                    };
+                    return (
+                      <div key={doc.id} className="py-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <FileText size={14} className={t.textMuted} />
+                            <span className={`text-xs ${t.textDim}`}>{doc.filename}</span>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded ${isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-800 text-zinc-500'}`}>
+                              {docTypeLabels[doc.document_type] || doc.document_type}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            {/* Status badges */}
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                              doc.extraction_status === 'extracted' ? (isLight ? 'bg-blue-100 text-blue-600' : 'bg-blue-500/10 text-blue-400') :
+                              doc.extraction_status === 'failed' ? (isLight ? 'bg-red-100 text-red-600' : 'bg-red-500/10 text-red-400') :
+                              (isLight ? 'bg-amber-100 text-amber-600' : 'bg-amber-500/10 text-amber-400')
+                            }`}>
+                              {doc.extraction_status === 'extracted' ? 'Scanned' : doc.extraction_status === 'failed' ? 'Scan Failed' : 'Scanning...'}
+                            </span>
+                            <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                              doc.review_status === 'approved' ? (isLight ? 'bg-emerald-100 text-emerald-600' : 'bg-emerald-500/10 text-emerald-400') :
+                              doc.review_status === 'rejected' ? (isLight ? 'bg-red-100 text-red-600' : 'bg-red-500/10 text-red-400') :
+                              (isLight ? 'bg-stone-200 text-stone-500' : 'bg-zinc-800 text-zinc-500')
+                            }`}>
+                              {doc.review_status}
+                            </span>
+                            {/* Action buttons */}
+                            <button onClick={() => handleDownloadCredDoc(doc.id)} className={`p-1 ${t.textMuted} hover:${t.textMain} transition-colors`} title="Download">
+                              <Download size={13} />
+                            </button>
+                            {doc.extraction_status === 'extracted' && doc.review_status === 'pending' && (
+                              <button onClick={() => setCredDocReviewId(isReviewing ? null : doc.id)} className={`p-1 ${t.textMuted} hover:${t.textMain} transition-colors`} title="Review">
+                                <Eye size={13} />
+                              </button>
+                            )}
+                            <button onClick={() => handleDeleteCredDoc(doc.id)} className={`p-1 text-red-400 hover:text-red-300 transition-colors`} title="Delete">
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Review panel */}
+                        {isReviewing && (
+                          <div className={`${t.innerEl} p-3 space-y-3`}>
+                            <div className={`text-[9px] ${t.textMuted} uppercase tracking-wider font-bold`}>Extracted Data</div>
+                            <div className="space-y-1">
+                              {Object.entries(extractedFields).map(([key, val]: [string, any]) => (
+                                val?.value && (
+                                  <div key={key} className="flex justify-between gap-4">
+                                    <span className={`text-[10px] ${t.textMuted}`}>{key.replace(/_/g, ' ')}</span>
+                                    <span className={`text-[10px] ${t.textDim} text-right`}>
+                                      {val.value}
+                                      {val.confidence != null && <span className={`ml-1 ${t.textFaint}`}>({Math.round(val.confidence * 100)}%)</span>}
+                                    </span>
+                                  </div>
+                                )
+                              ))}
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                              <button onClick={() => handleApproveCredDoc(doc.id, true)} className={`px-3 py-1 text-[10px] rounded-lg font-bold uppercase ${isLight ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-emerald-500 text-black hover:bg-emerald-400'}`}>
+                                Approve & Apply
+                              </button>
+                              <button onClick={() => handleApproveCredDoc(doc.id, false)} className={`px-3 py-1 text-[10px] rounded-lg font-bold uppercase ${t.btnSecondary}`}>
+                                Approve Only
+                              </button>
+                              <div className="flex-1 flex gap-1">
+                                <input
+                                  value={credDocRejectNotes}
+                                  onChange={(e) => setCredDocRejectNotes(e.target.value)}
+                                  placeholder="Rejection reason..."
+                                  className={`flex-1 px-2 py-1 text-[10px] ${t.inputCls}`}
+                                />
+                                <button
+                                  onClick={() => handleRejectCredDoc(doc.id)}
+                                  disabled={!credDocRejectNotes.trim()}
+                                  className={`px-3 py-1 text-[10px] rounded-lg font-bold uppercase ${isLight ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-red-500 text-black hover:bg-red-400'} disabled:opacity-50`}
+                                >
+                                  Reject
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className={`text-xs ${t.textFaint} italic`}>No credential documents uploaded.</p>
               )}
             </div>
           )}

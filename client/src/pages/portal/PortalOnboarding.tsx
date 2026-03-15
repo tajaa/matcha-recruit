@@ -1,8 +1,28 @@
-import { useState, useEffect } from 'react';
-import { CheckCircle, Clock, FileText, Laptop, GraduationCap, Settings, AlertCircle, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { CheckCircle, Clock, FileText, Laptop, GraduationCap, Settings, AlertCircle, RotateCcw, Upload, Shield } from 'lucide-react';
 import { FeatureGuideTrigger } from '../../features/feature-guides';
+import { portalApi } from '../../api/portal';
 
 const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
+const CREDENTIAL_DOC_TYPES = [
+  { value: 'medical_license', label: 'Medical License' },
+  { value: 'dea', label: 'DEA Registration' },
+  { value: 'npi', label: 'NPI Card' },
+  { value: 'board_cert', label: 'Board Certification' },
+  { value: 'malpractice', label: 'Malpractice Insurance' },
+  { value: 'health_clearance', label: 'Health Clearance (CPR/BLS/TB/etc)' },
+  { value: 'other', label: 'Other' },
+] as const;
+
+interface CredentialDoc {
+  id: string;
+  document_type: string;
+  filename: string;
+  extraction_status: string;
+  review_status: string;
+  created_at: string | null;
+}
 
 interface OnboardingTask {
   id: string;
@@ -54,6 +74,36 @@ export function PortalOnboarding() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [completingTask, setCompletingTask] = useState<string | null>(null);
+
+  // Credential document upload state
+  const [credDocs, setCredDocs] = useState<CredentialDoc[]>([]);
+  const [credDocType, setCredDocType] = useState('medical_license');
+  const [credUploading, setCredUploading] = useState(false);
+  const credFileRef = useRef<HTMLInputElement>(null);
+
+  const fetchCredDocs = async () => {
+    try {
+      const docs = await portalApi.listCredentialDocuments();
+      setCredDocs(docs);
+    } catch { /* ignore if not available */ }
+  };
+
+  useEffect(() => { fetchCredDocs(); }, []);
+
+  const handleCredUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCredUploading(true);
+    try {
+      await portalApi.uploadCredentialDocument(file, credDocType);
+      fetchCredDocs();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upload failed');
+    } finally {
+      setCredUploading(false);
+      if (credFileRef.current) credFileRef.current.value = '';
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -272,6 +322,84 @@ export function PortalOnboarding() {
           </div>
         </div>
       )}
+
+      {/* Credential Documents Upload */}
+      <div className="bg-zinc-900/30 border border-white/10">
+        <div className="px-6 py-4 border-b border-white/10 bg-white/5">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-blue-400" />
+            <h2 className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">Upload Credentials (Optional)</h2>
+          </div>
+          <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-1">Upload licenses, certifications, or other credential documents for verification</p>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="flex items-end gap-3">
+            <div className="flex-1">
+              <label className="text-[9px] text-zinc-500 uppercase tracking-wider font-bold block mb-1.5">Document Type</label>
+              <select
+                value={credDocType}
+                onChange={(e) => setCredDocType(e.target.value)}
+                className="w-full bg-zinc-800 border border-white/10 text-zinc-100 text-sm px-3 py-2 focus:outline-none focus:border-white/20"
+              >
+                {CREDENTIAL_DOC_TYPES.map((dt) => (
+                  <option key={dt.value} value={dt.value}>{dt.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <input
+                ref={credFileRef}
+                type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.gif,.tiff"
+                onChange={handleCredUpload}
+                className="hidden"
+              />
+              <button
+                onClick={() => credFileRef.current?.click()}
+                disabled={credUploading}
+                className="px-6 py-2 bg-white text-black text-[10px] uppercase tracking-widest font-bold border border-white hover:bg-zinc-200 transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                <Upload className="w-3.5 h-3.5" />
+                {credUploading ? 'Uploading...' : 'Upload'}
+              </button>
+            </div>
+          </div>
+
+          {credDocs.length > 0 && (
+            <div className="space-y-2">
+              {credDocs.map((doc) => (
+                <div key={doc.id} className="flex items-center justify-between px-4 py-3 bg-zinc-800/50 border border-white/5">
+                  <div className="flex items-center gap-3">
+                    <FileText className="w-4 h-4 text-zinc-500" />
+                    <div>
+                      <div className="text-xs text-zinc-300">{doc.filename}</div>
+                      <div className="text-[9px] text-zinc-600 uppercase tracking-wider">
+                        {CREDENTIAL_DOC_TYPES.find((t) => t.value === doc.document_type)?.label || doc.document_type}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`inline-flex items-center px-2 py-0.5 text-[9px] uppercase tracking-widest font-bold border ${
+                      doc.extraction_status === 'extracted' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
+                      doc.extraction_status === 'failed' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                      'bg-amber-500/10 text-amber-400 border-amber-500/20 animate-pulse'
+                    }`}>
+                      {doc.extraction_status === 'extracted' ? 'Scanned' : doc.extraction_status === 'failed' ? 'Scan Failed' : 'Scanning...'}
+                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 text-[9px] uppercase tracking-widest font-bold border ${
+                      doc.review_status === 'approved' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                      doc.review_status === 'rejected' ? 'bg-red-500/10 text-red-400 border-red-500/20' :
+                      'bg-zinc-500/10 text-zinc-400 border-zinc-500/20'
+                    }`}>
+                      {doc.review_status}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

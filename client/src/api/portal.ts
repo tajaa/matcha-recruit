@@ -126,4 +126,24 @@ export const portalApi = {
       method: 'PATCH',
       body: JSON.stringify({ notes: notes || null }),
     }),
+
+  // Credential Documents
+  uploadCredentialDocument: async (file: File, documentType: string) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const token = getAccessToken();
+    const headers: HeadersInit = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const response = await fetch(`/api/v1/portal/me/credential-documents?document_type=${encodeURIComponent(documentType)}`, {
+      method: 'POST', headers, body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ detail: 'Upload failed' }));
+      throw new Error(error.detail || 'Upload failed');
+    }
+    return response.json();
+  },
+
+  listCredentialDocuments: () =>
+    fetchWithAuth('/api/v1/portal/me/credential-documents'),
 };
