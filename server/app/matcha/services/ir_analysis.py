@@ -826,6 +826,7 @@ class IRAnalyzer:
             return prompt
 
         result = await self._call_with_retry(build_prompt, _validate_policy_mapping, label="policy_mapping")
+        result["matches"] = sorted(result.get("matches", []), key=lambda m: m.get("confidence", 0), reverse=True)[:5]
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
 

@@ -158,6 +158,11 @@ export function PolicyMappingPanel({ incidentId }: PolicyMappingPanelProps) {
             <div className={`text-[10px] ${t.textMuted} italic leading-relaxed`}>
               {match.reasoning}
             </div>
+            {match.relevant_excerpt && (
+              <div className={`text-[10px] ${t.textFaint} mt-1 pl-2 border-l-2 ${isLight ? 'border-stone-300' : 'border-zinc-700'}`}>
+                {match.relevant_excerpt}
+              </div>
+            )}
           </div>
         ))}
       </div>
