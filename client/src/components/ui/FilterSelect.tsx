@@ -13,7 +13,7 @@ export function FilterSelect({ value, onChange, options, placeholder = 'All', cl
     <select
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      className={`px-3 py-2 bg-white border border-zinc-300 text-zinc-800 text-sm rounded focus:outline-none focus:border-zinc-500 ${className}`}
+      className={`px-3 py-2 bg-white border border-stone-300 text-zinc-900 text-sm rounded-lg focus:outline-none focus:border-stone-400 ${className}`}
     >
       <option value="">{placeholder}</option>
       {options.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}

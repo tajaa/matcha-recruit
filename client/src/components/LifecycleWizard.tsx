@@ -382,19 +382,19 @@ export function LifecycleWizard({
   const activeStepData = steps[activeStep - 1] || steps[0];
 
   return (
-    <div className="border border-zinc-200 bg-white rounded overflow-hidden mb-6">
+    <div className="bg-zinc-900 rounded-xl overflow-hidden">
       <button
         onClick={toggle}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-zinc-50"
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-zinc-800 rounded-xl"
       >
         <div className="flex items-center gap-4">
-          <span className="text-xs text-zinc-400">{title}</span>
+          <span className="text-xs text-zinc-500">{title}</span>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-zinc-400">Stage {activeStep}</span>
-            <span className="text-sm text-zinc-600 hidden sm:inline">{activeStepData.title}</span>
+            <span className="text-xs text-zinc-500">Stage {activeStep}</span>
+            <span className="text-sm text-zinc-100 hidden sm:inline">{activeStepData.title}</span>
           </div>
         </div>
-        <ChevronDown size={14} className={`text-zinc-400 ${collapsed ? '' : 'rotate-180'}`} />
+        <ChevronDown size={14} className={`text-zinc-500 ${collapsed ? '' : 'rotate-180'}`} />
       </button>
 
       <AnimatePresence initial={false}>
@@ -404,7 +404,7 @@ export function LifecycleWizard({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="border-t border-zinc-100 overflow-hidden"
+            className="border-t border-zinc-800 overflow-hidden"
           >
             <div className="px-5 py-8">
               <div className="flex items-start justify-between gap-8 mb-8 overflow-x-auto no-scrollbar pb-4">
@@ -419,10 +419,10 @@ export function LifecycleWizard({
                         <div
                           className={`relative w-8 h-8 rounded-full border flex items-center justify-center ${
                             isComplete
-                              ? 'border-zinc-400 text-zinc-400'
+                              ? 'border-zinc-600 text-zinc-500'
                               : isActive
-                              ? 'border-zinc-800 text-zinc-800 bg-zinc-800 text-white'
-                              : 'border-zinc-200 text-zinc-300'
+                              ? 'border-zinc-100 bg-zinc-100 text-zinc-900'
+                              : 'border-zinc-700 text-zinc-600'
                           }`}
                         >
                           {isComplete ? (
@@ -432,14 +432,14 @@ export function LifecycleWizard({
                           )}
                         </div>
                         <span
-                          className={`mt-2 text-[10px] ${isActive ? 'text-zinc-700 font-medium' : isComplete ? 'text-zinc-500' : 'text-zinc-300'}`}
+                          className={`mt-2 text-[10px] ${isActive ? 'text-zinc-100 font-medium' : isComplete ? 'text-zinc-500' : 'text-zinc-600'}`}
                         >
                           {step.title}
                         </span>
                       </div>
                       {idx < steps.length - 1 && (
                         <div
-                          className={`w-10 h-px ${step.id < activeStep ? 'bg-zinc-300' : 'bg-zinc-100'}`}
+                          className={`w-10 h-px ${step.id < activeStep ? 'bg-zinc-600' : 'bg-zinc-800'}`}
                         />
                       )}
                     </div>
@@ -447,11 +447,11 @@ export function LifecycleWizard({
                 })}
               </div>
 
-              <div className="p-4 bg-zinc-50 border border-zinc-200 rounded">
-                <p className="text-sm font-medium text-zinc-700 mb-1">{activeStepData.title}</p>
-                <p className="text-sm text-zinc-500">{activeStepData.description}</p>
+              <div className="p-4 bg-zinc-800 rounded-lg">
+                <p className="text-sm font-medium text-zinc-100 mb-1">{activeStepData.title}</p>
+                <p className="text-sm text-zinc-400">{activeStepData.description}</p>
                 {activeStepData.action && (
-                  <p className="text-xs text-zinc-400 mt-2">&rarr; {activeStepData.action}</p>
+                  <p className="text-xs text-zinc-500 mt-2">&rarr; {activeStepData.action}</p>
                 )}
               </div>
             </div>

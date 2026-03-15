@@ -1149,7 +1149,7 @@ export function Dashboard() {
   return (
     <>
     <OnboardingWizard />
-    <div className="max-w-5xl mx-auto py-4">
+    <div className="max-w-6xl mx-auto py-4">
     <CompanyProfileBanner />
     <GettingStartedChecklist />
     <div className="space-y-5 animate-in fade-in duration-500">
