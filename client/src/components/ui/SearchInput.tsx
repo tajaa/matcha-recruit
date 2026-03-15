@@ -22,13 +22,13 @@ export function SearchInput({ value, onChange, placeholder = 'Search...', classN
 
   return (
     <div className={`relative flex-1 min-w-[200px] max-w-sm ${className}`}>
-      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
       <input
         type="text"
         value={local}
         onChange={(e) => setLocal(e.target.value)}
         placeholder={placeholder}
-        className="w-full pl-8 pr-3 py-2 bg-zinc-900 border border-zinc-800 text-zinc-200 text-sm rounded focus:outline-none focus:border-zinc-600 placeholder:text-zinc-600"
+        className="w-full pl-8 pr-3 py-2 bg-white border border-zinc-300 text-zinc-800 text-sm rounded focus:outline-none focus:border-zinc-500 placeholder:text-zinc-400"
       />
     </div>
   );

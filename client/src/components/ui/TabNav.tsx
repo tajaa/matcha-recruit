@@ -9,13 +9,13 @@ interface TabNavProps {
 
 export function TabNav({ tabs, activeTab, onTabChange, className = '' }: TabNavProps) {
   return (
-    <div className={`border-b border-zinc-800 ${className}`}>
+    <div className={`border-b border-zinc-200 ${className}`}>
       <nav className="-mb-px flex gap-6 overflow-x-auto no-scrollbar">
         {tabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => onTabChange(tab.value)}
-            className={`pb-3 text-sm border-b-2 whitespace-nowrap ${activeTab === tab.value ? 'border-zinc-300 text-zinc-200 font-medium' : 'border-transparent text-zinc-500 hover:text-zinc-400'}`}
+            className={`pb-3 text-sm border-b-2 whitespace-nowrap ${activeTab === tab.value ? 'border-zinc-800 text-zinc-800 font-medium' : 'border-transparent text-zinc-400 hover:text-zinc-600'}`}
           >
             {tab.label}
           </button>

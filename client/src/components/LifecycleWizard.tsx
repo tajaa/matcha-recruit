@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { CheckCircle, ChevronDown } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
 
@@ -380,22 +380,21 @@ export function LifecycleWizard({
   };
 
   const activeStepData = steps[activeStep - 1] || steps[0];
-  const StepIcon = STEP_ICONS[activeStepData.icon];
 
   return (
-    <div className="border border-zinc-800 bg-zinc-900 rounded overflow-hidden mb-6">
+    <div className="border border-zinc-200 bg-white rounded overflow-hidden mb-6">
       <button
         onClick={toggle}
-        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-zinc-800/50"
+        className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-zinc-50"
       >
         <div className="flex items-center gap-4">
-          <span className="text-xs text-zinc-500">{title}</span>
+          <span className="text-xs text-zinc-400">{title}</span>
           <div className="flex items-center gap-3">
-            <span className="text-xs text-zinc-500">Stage {activeStep}</span>
-            <span className="text-sm text-zinc-300 hidden sm:inline">{activeStepData.title}</span>
+            <span className="text-xs text-zinc-400">Stage {activeStep}</span>
+            <span className="text-sm text-zinc-600 hidden sm:inline">{activeStepData.title}</span>
           </div>
         </div>
-        <ChevronDown size={14} className={`text-zinc-600 ${collapsed ? '' : 'rotate-180'}`} />
+        <ChevronDown size={14} className={`text-zinc-400 ${collapsed ? '' : 'rotate-180'}`} />
       </button>
 
       <AnimatePresence initial={false}>
@@ -405,7 +404,7 @@ export function LifecycleWizard({
             animate={{ height: 'auto', opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-            className="border-t border-white/5 overflow-hidden"
+            className="border-t border-zinc-100 overflow-hidden"
           >
             <div className="px-5 py-8">
               <div className="flex items-start justify-between gap-8 mb-8 overflow-x-auto no-scrollbar pb-4">
@@ -418,12 +417,12 @@ export function LifecycleWizard({
                     <div key={step.id} className="flex items-center gap-4 group flex-shrink-0">
                       <div className="flex flex-col items-center">
                         <div
-                          className={`relative w-9 h-9 rounded-full border flex items-center justify-center transition-all duration-500 ${
+                          className={`relative w-8 h-8 rounded-full border flex items-center justify-center ${
                             isComplete
-                              ? 'bg-matcha-500/10 border-matcha-500/30 text-matcha-500'
+                              ? 'border-zinc-400 text-zinc-400'
                               : isActive
-                              ? 'bg-white border-white text-black shadow-[0_0_15px_rgba(255,255,255,0.1)]'
-                              : 'bg-zinc-900 border-white/5 text-zinc-700'
+                              ? 'border-zinc-800 text-zinc-800 bg-zinc-800 text-white'
+                              : 'border-zinc-200 text-zinc-300'
                           }`}
                         >
                           {isComplete ? (
@@ -433,18 +432,14 @@ export function LifecycleWizard({
                           )}
                         </div>
                         <span
-                          className={`mt-2 text-[9px] font-bold uppercase tracking-[0.15em] ${
-                            isActive ? 'text-white' : isComplete ? 'text-matcha-500/60' : 'text-zinc-700'
-                          }`}
+                          className={`mt-2 text-[10px] ${isActive ? 'text-zinc-700 font-medium' : isComplete ? 'text-zinc-500' : 'text-zinc-300'}`}
                         >
                           {step.title}
                         </span>
                       </div>
                       {idx < steps.length - 1 && (
                         <div
-                          className={`w-10 h-px transition-colors duration-700 ${
-                            step.id < activeStep ? 'bg-matcha-500/20' : 'bg-white/5'
-                          }`}
+                          className={`w-10 h-px ${step.id < activeStep ? 'bg-zinc-300' : 'bg-zinc-100'}`}
                         />
                       )}
                     </div>
@@ -452,30 +447,12 @@ export function LifecycleWizard({
                 })}
               </div>
 
-              <div className="p-5 bg-zinc-950/40 border border-white/5 rounded-xl">
-                <div className="flex items-start gap-4">
-                  <div className="p-2 bg-white/5 rounded-lg text-zinc-400">
-                    <StepIcon className="w-5 h-5" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-2">
-                      <h4 className="text-[11px] font-bold text-white uppercase tracking-widest">
-                        {activeStepData.title}
-                      </h4>
-                      <span className="text-[8px] px-2 py-0.5 font-bold uppercase tracking-widest bg-matcha-500/10 text-matcha-500 border border-matcha-500/20 rounded-full">
-                        Active Stage
-                      </span>
-                    </div>
-                    <p className="text-xs text-zinc-500 leading-relaxed">
-                      {activeStepData.description}
-                    </p>
-                    {activeStepData.action && (
-                      <p className="text-[10px] text-zinc-400 font-mono mt-3 opacity-80">
-                        <span className="text-matcha-500">&rarr;</span> {activeStepData.action}
-                      </p>
-                    )}
-                  </div>
-                </div>
+              <div className="p-4 bg-zinc-50 border border-zinc-200 rounded">
+                <p className="text-sm font-medium text-zinc-700 mb-1">{activeStepData.title}</p>
+                <p className="text-sm text-zinc-500">{activeStepData.description}</p>
+                {activeStepData.action && (
+                  <p className="text-xs text-zinc-400 mt-2">&rarr; {activeStepData.action}</p>
+                )}
               </div>
             </div>
           </motion.div>

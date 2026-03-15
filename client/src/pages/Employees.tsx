@@ -131,15 +131,15 @@ function StatusActionBadge({ employee, handleSendInvite, invitingId }: { employe
   const base = 'inline-flex items-center gap-1 px-2 py-0.5 border rounded text-xs';
 
   if (employee.termination_date || employee.employment_status === 'terminated' || employee.employment_status === 'offboarded') {
-    return <span data-tour="emp-status-badge" className={`${base} border-zinc-700 text-zinc-500`}><UserX size={11} /> Terminated</span>;
+    return <span data-tour="emp-status-badge" className={`${base} border-zinc-300 text-zinc-400`}><UserX size={11} /> Terminated</span>;
   }
   if (employee.user_id) {
     const status = employee.employment_status;
-    if (status === 'on_leave')  return <span data-tour="emp-status-badge" className={`${base} border-zinc-600 text-zinc-400`}><Clock size={11} /> On Leave</span>;
-    if (status === 'suspended') return <span data-tour="emp-status-badge" className={`${base} border-zinc-600 text-zinc-300`}><AlertTriangle size={11} /> Suspended</span>;
-    if (status === 'on_notice') return <span data-tour="emp-status-badge" className={`${base} border-zinc-600 text-zinc-300`}><AlertTriangle size={11} /> On Notice</span>;
-    if (status === 'furloughed') return <span data-tour="emp-status-badge" className={`${base} border-zinc-600 text-zinc-400`}><Clock size={11} /> Furloughed</span>;
-    return <span data-tour="emp-status-badge" className={`${base} border-zinc-600 text-zinc-200`}><CheckCircle size={11} /> Active</span>;
+    if (status === 'on_leave')   return <span data-tour="emp-status-badge" className={`${base} border-zinc-400 text-zinc-600`}><Clock size={11} /> On Leave</span>;
+    if (status === 'suspended')  return <span data-tour="emp-status-badge" className={`${base} border-zinc-500 text-zinc-700`}><AlertTriangle size={11} /> Suspended</span>;
+    if (status === 'on_notice')  return <span data-tour="emp-status-badge" className={`${base} border-zinc-500 text-zinc-700`}><AlertTriangle size={11} /> On Notice</span>;
+    if (status === 'furloughed') return <span data-tour="emp-status-badge" className={`${base} border-zinc-400 text-zinc-600`}><Clock size={11} /> Furloughed</span>;
+    return <span data-tour="emp-status-badge" className={`${base} border-zinc-500 text-zinc-800`}><CheckCircle size={11} /> Active</span>;
   }
 
   const isPending = employee.invitation_status === 'pending';
@@ -149,7 +149,7 @@ function StatusActionBadge({ employee, handleSendInvite, invitingId }: { employe
       <button
         data-tour="emp-status-badge"
         onClick={(e) => { e.stopPropagation(); setMode('edit'); setSelectedAction('invite'); }}
-        className={`${base} ${isPending ? 'border-zinc-500 text-zinc-200' : 'border-zinc-700 text-zinc-500'} hover:border-zinc-400`}
+        className={`${base} ${isPending ? 'border-zinc-500 text-zinc-700' : 'border-zinc-300 text-zinc-400'} hover:border-zinc-500`}
       >
         {isPending ? <Clock size={11} /> : <Mail size={11} />}
         {isPending ? 'Invited' : 'Not Invited'}
@@ -163,18 +163,18 @@ function StatusActionBadge({ employee, handleSendInvite, invitingId }: { employe
       <select
         value={selectedAction}
         onChange={(e) => setSelectedAction(e.target.value)}
-        className="px-2 py-0.5 text-xs rounded bg-zinc-800 text-zinc-200 border border-zinc-700 focus:outline-none"
+        className="px-2 py-0.5 text-xs rounded bg-white text-zinc-800 border border-zinc-300 focus:outline-none"
       >
         <option value="invite">{isPending ? 'Resend Invite' : 'Send Invite'}</option>
       </select>
       <button
         onClick={() => { if (selectedAction === 'invite') handleSendInvite(employee.id); setMode('view'); }}
         disabled={invitingId === employee.id}
-        className="px-2 py-0.5 text-xs rounded bg-zinc-200 text-zinc-900 hover:bg-white disabled:opacity-50"
+        className="px-2 py-0.5 text-xs rounded bg-zinc-800 text-white hover:bg-zinc-700 disabled:opacity-50"
       >
         {invitingId === employee.id ? '…' : 'Go'}
       </button>
-      <button onClick={() => setMode('view')} className="text-zinc-500 hover:text-zinc-300">
+      <button onClick={() => setMode('view')} className="text-zinc-400 hover:text-zinc-600">
         <X size={12} />
       </button>
     </div>
@@ -192,17 +192,17 @@ function EmployeeRow({ employee, navigate, onboardingProgress, handleSendInvite,
   return (
     <div
       onClick={() => navigate(`/app/matcha/employees/${employee.id}`)}
-      className="group hover:bg-white/5 transition-colors py-3 px-4 md:px-6 flex flex-col xl:flex-row xl:items-center gap-4 cursor-pointer"
+      className="group hover:bg-zinc-50 py-3 px-4 md:px-6 flex flex-col xl:flex-row xl:items-center gap-4 cursor-pointer"
     >
       <div className="flex items-center min-w-[240px] flex-1">
         <div className="flex-shrink-0">
-          <div className="h-8 w-8 rounded bg-zinc-800 text-zinc-300 flex items-center justify-center text-xs font-medium">
+          <div className="h-8 w-8 rounded bg-zinc-200 text-zinc-700 flex items-center justify-center text-xs font-medium">
             {employee.first_name[0]}{employee.last_name[0]}
           </div>
         </div>
         <div className="ml-3 min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <p className="text-sm font-bold text-zinc-100 truncate">
+            <p className="text-sm font-bold text-zinc-800 truncate">
               {employee.first_name || employee.last_name
                 ? `${employee.first_name} ${employee.last_name}`.trim()
                 : (employee.work_email || employee.email || 'Unknown')}
@@ -224,25 +224,25 @@ function EmployeeRow({ employee, navigate, onboardingProgress, handleSendInvite,
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:flex sm:items-center justify-between xl:justify-end gap-x-4 gap-y-3 xl:gap-6 w-full xl:w-auto border-t border-white/5 pt-3 xl:border-0 xl:pt-0">
+      <div className="grid grid-cols-2 sm:flex sm:items-center justify-between xl:justify-end gap-x-4 gap-y-3 xl:gap-6 w-full xl:w-auto border-t border-zinc-100 pt-3 xl:border-0 xl:pt-0">
         <div className="xl:text-left xl:w-24">
           <p className="text-[9px] text-zinc-500 uppercase tracking-wider xl:hidden mb-0.5">Department</p>
-          <p className="text-xs text-zinc-300 truncate">{employee.department || '\u2014'}</p>
+          <p className="text-xs text-zinc-600 truncate">{employee.department || '\u2014'}</p>
         </div>
         <div className="xl:text-left xl:w-28">
           <p className="text-[9px] text-zinc-500 uppercase tracking-wider xl:hidden mb-0.5">Location</p>
-          <p className="text-[10px] text-zinc-300 font-mono leading-tight">{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '\u2014')}</p>
+          <p className="text-[10px] text-zinc-600 leading-tight">{employee.work_city ? `${employee.work_city}, ${employee.work_state}` : (employee.work_state || '\u2014')}</p>
         </div>
         <div className="xl:text-left xl:w-20">
           <p className="text-[9px] text-zinc-500 uppercase tracking-wider xl:hidden mb-0.5">Type</p>
-          <p className="text-[10px] text-zinc-500 uppercase tracking-wider truncate">
+          <p className="text-[10px] text-zinc-500 truncate">
             {employee.employment_type?.replace('_', ' ') || '\u2014'}
           </p>
         </div>
         <div className="xl:text-center xl:w-10">
           <p className="text-[9px] text-zinc-500 uppercase tracking-wider xl:hidden mb-0.5">IR</p>
           {incidentCount > 0 ? (
-            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border border-zinc-600 text-zinc-300">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs rounded border border-zinc-400 text-zinc-600">
               <AlertTriangle size={10} />{incidentCount}
             </span>
           ) : (
@@ -253,9 +253,9 @@ function EmployeeRow({ employee, navigate, onboardingProgress, handleSendInvite,
           <p className="text-[9px] text-zinc-500 uppercase tracking-wider xl:hidden mb-0.5">Onboarding</p>
           {onboardingProgress[employee.id]?.has_onboarding ? (
             <div className="flex items-center gap-2">
-              <div className="w-12 h-1 bg-zinc-800 rounded-full overflow-hidden">
+              <div className="w-12 h-1 bg-zinc-200 rounded-full overflow-hidden">
                 <div
-                  className="h-full bg-zinc-400 rounded-full transition-all"
+                  className="h-full bg-zinc-500 rounded-full transition-all"
                   style={{
                     width: `${(onboardingProgress[employee.id].completed / onboardingProgress[employee.id].total) * 100}%`,
                   }}
@@ -274,7 +274,7 @@ function EmployeeRow({ employee, navigate, onboardingProgress, handleSendInvite,
           <StatusActionBadge employee={employee} handleSendInvite={handleSendInvite} invitingId={invitingId} />
         </div>
         <div className="hidden xl:flex w-6 justify-end">
-          <ChevronRight size={14} className="text-zinc-600 group-hover:text-zinc-300 transition-colors" />
+          <ChevronRight size={14} className="text-zinc-400 group-hover:text-zinc-600 transition-colors" />
         </div>
       </div>
     </div>
@@ -426,7 +426,7 @@ export default function Employees() {
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[50vh]">
-        <div className="text-xs text-zinc-500 uppercase tracking-wider animate-pulse">Loading directory...</div>
+        <div className="text-sm text-zinc-400 animate-pulse">Loading…</div>
       </div>
     );
   }
@@ -450,7 +450,7 @@ export default function Employees() {
   const hasFilters = searchQuery || filterDepartment || filterEmploymentType || filterLocation;
 
   return (
-    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen bg-zinc-950">
+    <div className="-mx-4 sm:-mx-6 lg:-mx-8 -mt-20 md:-mt-6 -mb-12 px-4 sm:px-6 lg:px-8 py-8 md:pt-10 min-h-screen bg-zinc-50">
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
       <PageHeader
         title={<>Employees <FeatureGuideTrigger guideId="employees" /></>}
@@ -458,7 +458,7 @@ export default function Employees() {
         afterSubtitle={
           <button
             onClick={() => navigate('/app/matcha/onboarding?tab=workspace')}
-            className="mt-2 inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-300"
+            className="mt-2 inline-flex items-center gap-2 text-sm text-zinc-500 hover:text-zinc-700"
             title="Open Google Workspace provisioning settings"
           >
             Google Auto-Provision: <span className={googleBadge.cls}>{googleBadge.label}</span>
@@ -468,7 +468,7 @@ export default function Employees() {
         <button
           data-tour="emp-add-hire-btn"
           onClick={() => navigate('/app/matcha/onboarding?tab=employees')}
-          className="flex items-center gap-2 px-4 py-2 bg-zinc-100 text-zinc-900 hover:bg-white text-sm rounded"
+          className="flex items-center gap-2 px-4 py-2 bg-zinc-800 text-white hover:bg-zinc-700 text-sm rounded"
         >
           <Plus size={14} />
           Add New Hire
@@ -491,7 +491,7 @@ export default function Employees() {
       </div>
 
       {showFirstEmployeeBanner && (
-        <div className="border border-zinc-800 px-4 py-3 rounded text-sm text-zinc-400">
+        <div className="border border-zinc-200 px-4 py-3 rounded text-sm text-zinc-500 bg-zinc-50">
           Use the Employee Lifecycle wizard above to add your first employees.
         </div>
       )}
@@ -537,7 +537,7 @@ export default function Employees() {
         )}
         <button
           onClick={() => setGroupByLocation(!groupByLocation)}
-          className={`flex items-center gap-1.5 px-3 py-2 border rounded text-sm ${groupByLocation ? 'border-zinc-500 text-zinc-200' : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'}`}
+          className={`flex items-center gap-1.5 px-3 py-2 border rounded text-sm ${groupByLocation ? 'border-zinc-600 text-zinc-800 bg-zinc-100' : 'border-zinc-300 text-zinc-500 hover:text-zinc-700'}`}
         >
           <MapPin size={13} />
           Group by location
@@ -545,7 +545,7 @@ export default function Employees() {
         {hasFilters && (
           <button
             onClick={() => { setSearchQuery(''); setFilterDepartment(''); setFilterEmploymentType(''); setFilterLocation(''); }}
-            className="text-sm text-zinc-500 hover:text-zinc-300"
+            className="text-sm text-zinc-400 hover:text-zinc-700"
           >
             Clear
           </button>
@@ -567,10 +567,10 @@ export default function Employees() {
           );
         })()
       ) : (
-        <div data-tour="emp-list" className="border border-zinc-800 rounded overflow-x-auto">
+        <div data-tour="emp-list" className="border border-zinc-200 rounded overflow-x-auto bg-white">
           <div className="min-w-[1024px]">
            {!groupByLocation && (
-             <div className="hidden xl:flex items-center gap-6 py-3 px-6 text-xs text-zinc-500 border-b border-zinc-800">
+             <div className="hidden xl:flex items-center gap-6 py-3 px-6 text-xs text-zinc-400 border-b border-zinc-100">
                 <div className="flex-1 min-w-[240px]">Name / Role</div>
                 <div className="w-24 text-left">Department</div>
                 <div className="w-28 text-left">Location</div>
@@ -607,13 +607,13 @@ export default function Employees() {
                       : city ? `${state} \u2014 ${city}` : state;
                     return (
                       <details key={key} open className="group/loc">
-                        <summary className="flex items-center gap-2 px-6 py-3 cursor-pointer bg-zinc-900 text-zinc-400 text-xs border-b border-zinc-800">
+                        <summary className="flex items-center gap-2 px-6 py-3 cursor-pointer bg-zinc-50 text-zinc-500 text-xs border-b border-zinc-100">
                           <ChevronDown size={14} className="transition-transform group-open/loc:rotate-0 -rotate-90" />
                           <MapPin size={12} />
                           {label}
                           <span className="text-zinc-600 font-mono ml-1">({emps.length})</span>
                         </summary>
-                        <div className="divide-y divide-white/5">
+                        <div className="divide-y divide-zinc-100">
                           {emps.map((employee) => (
                             <EmployeeRow key={employee.id} employee={employee} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
                           ))}
@@ -625,7 +625,7 @@ export default function Employees() {
               );
             })()
           ) : (
-          <div className="divide-y divide-white/5">
+          <div className="divide-y divide-zinc-100">
           {employees.map((employee) => (
             <EmployeeRow key={employee.id} employee={employee} navigate={navigate} onboardingProgress={onboardingProgress} handleSendInvite={handleSendInvite} invitingId={invitingId} incidentCount={incidentCounts[employee.id] || 0} />
           ))}
