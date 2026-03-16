@@ -354,6 +354,9 @@ EVIDENCE OVERVIEW:
 ANALYSIS RESULTS:
 {analysis_results}
 
+DOCUMENT EXCERPTS (from uploaded evidence):
+{document_excerpts}
+
 ANALYSES ALREADY COMPLETED: {analyses_completed}
 
 IMPORTANT: The system automatically handles timeline reconstruction, policy checking,
@@ -370,14 +373,19 @@ Prefer action types: "upload_document", "search_evidence", "open_tab".
 
 Generate practical, concrete recommendations for the human investigator. Recommendations must be realistic for the current evidence.
 
+CRITICAL — Use specific names and details:
+- Reference people BY NAME as they appear in the documents or involved_employees list. Never say "reporting party", "the employee", "the complainant", or "the subject" when you know the actual name.
+- Reference specific facts, dates, and events from the document excerpts. Your guidance should demonstrate that you have read and understood the evidence.
+- If the case has involved_employees, incorporate their names and roles into recommendations (e.g., "Interview Sarah Chen about the March 3rd incident" not "Interview the reporting party about the incident").
+
 Return ONLY a JSON object with this structure:
 {{
-  "summary": "2-3 sentence executive guidance summary",
+  "summary": "2-3 sentence executive guidance summary referencing specific people and facts from the evidence",
   "cards": [
     {{
       "id": "witness-interview-1",
-      "title": "Interview named witnesses about gap period",
-      "recommendation": "Schedule interviews with witnesses mentioned in existing statements to clarify events during the unresolved window.",
+      "title": "Interview [specific person] about [specific event]",
+      "recommendation": "Schedule interview with [name] to clarify [specific detail from evidence].",
       "rationale": "Direct witness accounts are needed to corroborate or refute the reported sequence of events.",
       "priority": "high",
       "blockers": ["Witness availability must be confirmed"],
@@ -402,6 +410,7 @@ Constraints:
 7. Keep tone neutral and investigation-focused.
 8. Never include legal conclusions; focus on next investigative steps.
 9. Focus on what the HUMAN must do: interview people, collect records, request documents. Do NOT recommend running system analyses that are already completed.
+10. Always use real names from the documents — never use generic placeholders like "the employee" or "reporting party" when names are available.
 """
 
 
@@ -755,6 +764,7 @@ class ERAnalyzer:
         intake_context: Optional[dict[str, Any]],
         evidence_overview: dict[str, Any],
         analysis_results: dict[str, Any],
+        document_excerpts: str = "",
     ) -> dict[str, Any]:
         """
         Generate structured interactive suggested guidance cards.
@@ -764,6 +774,7 @@ class ERAnalyzer:
             intake_context: Intake answers and assistance metadata.
             evidence_overview: Evidence/doc readiness summary.
             analysis_results: Timeline/discrepancy/policy outputs.
+            document_excerpts: Truncated text from uploaded documents.
 
         Returns:
             Dict with summary + cards payload.
@@ -774,6 +785,7 @@ class ERAnalyzer:
             intake_context=json.dumps(intake_context or {}, indent=2),
             evidence_overview=json.dumps(evidence_overview, indent=2),
             analysis_results=json.dumps(analysis_results, indent=2),
+            document_excerpts=document_excerpts or "(No document text available yet)",
             analyses_completed=json.dumps(analyses_completed, indent=2),
         )
 

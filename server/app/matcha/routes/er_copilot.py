@@ -2320,6 +2320,18 @@ async def generate_suggested_guidance(
             case_id,
         )
 
+        # Fetch ALL completed docs with scrubbed text (for guidance prompt context)
+        all_doc_text_rows = await conn.fetch(
+            """
+            SELECT id, filename, document_type, scrubbed_text
+            FROM er_case_documents
+            WHERE case_id = $1 AND processing_status = 'completed'
+              AND scrubbed_text IS NOT NULL AND scrubbed_text != ''
+            ORDER BY created_at DESC
+            """,
+            case_id,
+        )
+
         # Check for linked incident witnesses and investigation transcript count
         linked_incident = await conn.fetchrow(
             "SELECT witnesses FROM ir_incidents WHERE er_case_id = $1 LIMIT 1",
@@ -2416,13 +2428,13 @@ async def generate_suggested_guidance(
         "policy_check": policy_data,
     }
 
-    # Build transcript excerpts for confidence eval (truncate each to ~2000 chars)
+    # Build document excerpts from ALL completed docs with text (used for guidance and confidence eval)
     transcript_parts: list[str] = []
-    for tr in transcript_rows:
+    for tr in all_doc_text_rows:
         text = tr["scrubbed_text"] or ""
         if len(text) > 2000:
             text = text[:1000] + "\n...\n" + text[-1000:]
-        transcript_parts.append(f"--- {tr['filename']} ---\n{text}")
+        transcript_parts.append(f"--- {tr['filename']} ({tr['document_type']}) ---\n{text}")
     transcript_excerpts = "\n\n".join(transcript_parts) if transcript_parts else ""
 
     has_policy_violations = bool(policy_data.get("violations"))
@@ -2441,6 +2453,7 @@ async def generate_suggested_guidance(
             intake_context=intake_context if isinstance(intake_context, dict) else {},
             evidence_overview=evidence_overview,
             analysis_results=analysis_results,
+            document_excerpts=transcript_excerpts,
         )
         confidence_task = analyzer.evaluate_determination_confidence(
             case_info=case_info,
@@ -2579,6 +2592,18 @@ async def generate_suggested_guidance_stream(
             case_id,
         )
 
+        # Fetch ALL completed docs with scrubbed text (for guidance prompt context)
+        all_doc_text_rows_s = await conn.fetch(
+            """
+            SELECT id, filename, document_type, scrubbed_text
+            FROM er_case_documents
+            WHERE case_id = $1 AND processing_status = 'completed'
+              AND scrubbed_text IS NOT NULL AND scrubbed_text != ''
+            ORDER BY created_at DESC
+            """,
+            case_id,
+        )
+
     async def event_stream():
         def sse(event: dict) -> str:
             return f"data: {json.dumps(event)}\n\n"
@@ -2659,13 +2684,13 @@ async def generate_suggested_guidance_stream(
             "policy_check": policy_data_local,
         }
 
-        # Build transcript excerpts
+        # Build document excerpts from ALL completed docs with text
         t_parts: list[str] = []
-        for tr in transcript_rows:
+        for tr in all_doc_text_rows_s:
             text = tr["scrubbed_text"] or ""
             if len(text) > 2000:
                 text = text[:1000] + "\n...\n" + text[-1000:]
-            t_parts.append(f"--- {tr['filename']} ---\n{text}")
+            t_parts.append(f"--- {tr['filename']} ({tr['document_type']}) ---\n{text}")
         t_excerpts = "\n\n".join(t_parts) if t_parts else ""
 
         has_violations = bool(policy_data_local.get("violations"))
@@ -2687,6 +2712,7 @@ async def generate_suggested_guidance_stream(
                 intake_context=intake_ctx if isinstance(intake_ctx, dict) else {},
                 evidence_overview=ev_overview,
                 analysis_results=a_results,
+                document_excerpts=t_excerpts,
             )
 
             yield sse({"type": "status", "message": "Scoring evidence confidence..."})
