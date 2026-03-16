@@ -10,6 +10,7 @@ import Settings from './pages/admin/Settings'
 import Dashboard from './pages/app/Dashboard'
 import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
+import ERCopilot from './pages/app/ERCopilot'
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
         <Route index element={<Dashboard />} />
         <Route path="employees" element={<Employees />} />
         <Route path="onboarding" element={<Onboarding />} />
+        <Route path="er-copilot" element={<ERCopilot />} />
       </Route>
     </Routes>
   )

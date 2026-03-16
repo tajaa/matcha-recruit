@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Logo } from '../components/ui'
 import { AsciiHalftone } from '../components/AsciiHalftone'
