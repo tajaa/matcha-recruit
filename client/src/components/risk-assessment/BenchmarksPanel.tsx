@@ -1,61 +1,81 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api/client'
-import { Badge } from '../ui'
-import { DIMENSION_LABELS } from '../../types/risk-assessment'
 import type { BenchmarkResult } from '../../types/risk-assessment'
+
+const METRIC_LABELS: Record<string, string> = {
+  incident_rate_per_100: 'Incident Rate / 100 FTE',
+  osha_trc_rate: 'OSHA TRC Rate',
+  osha_dart_rate: 'OSHA DART Rate',
+  er_case_rate_per_1000: 'ER Case Rate / 1,000',
+  eeoc_charge_rate_per_1000: 'EEOC Charge Rate / 1,000',
+}
 
 type Props = {
   qs: string
 }
 
 export function BenchmarksPanel({ qs }: Props) {
-  const [benchmarks, setBenchmarks] = useState<BenchmarkResult | null>(null)
+  const [bm, setBm] = useState<BenchmarkResult | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    setLoading(true)
     api.get<BenchmarkResult>(`/risk-assessment/benchmarks${qs}`)
-      .then(setBenchmarks)
-      .catch(() => {})
+      .then(setBm)
+      .catch(() => setBm(null))
+      .finally(() => setLoading(false))
   }, [qs])
 
   return (
-    <div>
-      <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-3">
-        Industry Benchmarks
-        {benchmarks?.industry_name && (
-          <span className="ml-2 normal-case font-normal text-zinc-600">
-            — {benchmarks.industry_name}
-          </span>
-        )}
-      </h2>
-      {!benchmarks || !benchmarks.dimensions || benchmarks.dimensions.length === 0 ? (
-        <p className="text-sm text-zinc-500">No NAICS benchmark data available.</p>
-      ) : (
-        <div className="border border-zinc-800 rounded-xl overflow-hidden">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-zinc-900/50 text-zinc-400">
-              <tr>
-                <th className="px-4 py-2.5 font-medium">Dimension</th>
-                <th className="px-4 py-2.5 font-medium text-right">Your Score</th>
-                <th className="px-4 py-2.5 font-medium text-right">Industry Median</th>
-                <th className="px-4 py-2.5 font-medium text-right">Percentile</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-zinc-800">
-              {benchmarks.dimensions.map((row) => (
-                <tr key={row.dimension} className="text-zinc-300">
-                  <td className="px-4 py-2.5">{DIMENSION_LABELS[row.dimension] ?? row.dimension}</td>
-                  <td className="px-4 py-2.5 text-right">{row.company_score}</td>
-                  <td className="px-4 py-2.5 text-right text-zinc-400">{row.industry_median}</td>
-                  <td className="px-4 py-2.5 text-right">
-                    <Badge variant={row.percentile_rank >= 75 ? 'danger' : row.percentile_rank >= 50 ? 'warning' : 'success'}>
-                      {row.percentile_rank}th
-                    </Badge>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
+      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Industry Benchmarks</div>
+
+      {loading && <div className="text-[10px] text-zinc-600 animate-pulse font-mono">Loading...</div>}
+
+      {!loading && !bm && (
+        <div className="text-[10px] text-zinc-600 font-mono">No benchmark data available.</div>
+      )}
+
+      {bm && (
+        <>
+          <div className="text-[10px] text-zinc-600 font-mono">vs. {bm.naics_label} <span className="text-zinc-700">({bm.naics_code})</span></div>
+          {bm.metrics.length === 0 ? (
+            <div className="text-[10px] text-zinc-600 font-mono">No metrics to compare.</div>
+          ) : (
+            <div className="divide-y divide-white/5">
+              {bm.metrics.map(m => {
+                const ratioColor = m.ratio <= 1.2 ? 'text-emerald-400' : m.ratio <= 2 ? 'text-amber-400' : 'text-red-400'
+                const barWidth = Math.min((m.company_value / (m.industry_median * 3)) * 100, 100)
+                const medianBarWidth = Math.min((m.industry_median / (m.industry_median * 3)) * 100, 100)
+                return (
+                  <div key={m.metric} className="py-3">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[10px] text-zinc-400">{METRIC_LABELS[m.metric] ?? m.metric}</span>
+                      <span className={`text-[10px] font-mono font-bold ${ratioColor}`}>{m.ratio.toFixed(1)}x</span>
+                    </div>
+                    <div className="relative h-1.5 bg-white/10 rounded-full">
+                      {/* Industry median marker */}
+                      <div
+                        className="absolute top-0 h-full w-0.5 bg-zinc-500/60"
+                        style={{ left: `${medianBarWidth}%` }}
+                      />
+                      {/* Company bar */}
+                      <div
+                        className={`absolute top-0 h-full rounded-full ${m.ratio <= 1.2 ? 'bg-emerald-500/60' : m.ratio <= 2 ? 'bg-amber-500/60' : 'bg-red-500/60'}`}
+                        style={{ width: `${barWidth}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between mt-1 text-[9px] font-mono text-zinc-600">
+                      <span>You: {m.company_value.toFixed(1)}</span>
+                      <span className="text-zinc-700">P{m.percentile}</span>
+                      <span>Median: {m.industry_median.toFixed(1)}</span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   )
