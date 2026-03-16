@@ -15,6 +15,18 @@ type Employee = {
   start_date: string | null
 }
 
+const emptyForm = {
+  first_name: '',
+  last_name: '',
+  work_email: '',
+  personal_email: '',
+  job_title: '',
+  department: '',
+  work_state: '',
+  employment_type: 'full_time',
+  start_date: '',
+}
+
 const statusBadge = (status: string | null) => {
   switch (status) {
     case 'active': return <Badge variant="success">Active</Badge>
@@ -40,15 +52,50 @@ export default function Employees() {
   const [filter, setFilter] = useState<'all' | 'active' | 'on_leave' | 'terminated'>('all')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
+  const [showAdd, setShowAdd] = useState(false)
+  const [form, setForm] = useState(emptyForm)
+  const [saving, setSaving] = useState(false)
+  const [formError, setFormError] = useState('')
 
-  useEffect(() => {
+  const loadEmployees = () => {
     setLoading(true)
     const params = filter !== 'all' ? `?employment_status=${filter}` : ''
     api.get<Employee[]>(`/employees${params}`)
       .then(setEmployees)
       .catch(() => setEmployees([]))
       .finally(() => setLoading(false))
-  }, [filter])
+  }
+
+  useEffect(() => { loadEmployees() }, [filter])
+
+  const handleSubmit = async () => {
+    if (!form.first_name.trim() || !form.last_name.trim() || !form.work_email.trim()) {
+      setFormError('First name, last name, and work email are required.')
+      return
+    }
+    setSaving(true)
+    setFormError('')
+    try {
+      await api.post('/employees', {
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        work_email: form.work_email.trim(),
+        personal_email: form.personal_email.trim() || undefined,
+        job_title: form.job_title.trim() || undefined,
+        department: form.department.trim() || undefined,
+        work_state: form.work_state.trim() || undefined,
+        employment_type: form.employment_type || undefined,
+        start_date: form.start_date || undefined,
+      })
+      setShowAdd(false)
+      setForm(emptyForm)
+      loadEmployees()
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'Failed to add employee')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   const filtered = employees.filter((e) => {
     const name = `${e.first_name} ${e.last_name}`.toLowerCase()
@@ -68,8 +115,61 @@ export default function Employees() {
             {employees.length} total employee{employees.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <Button>Add Employee</Button>
+        <Button onClick={() => setShowAdd(true)}>Add Employee</Button>
       </div>
+
+      {/* Add Employee Modal */}
+      {showAdd && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-lg shadow-xl">
+            <h2 className="text-lg font-semibold text-zinc-100 mb-4">Add Employee</h2>
+
+            {formError && (
+              <p className="text-sm text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-4">{formError}</p>
+            )}
+
+            <div className="grid grid-cols-2 gap-3">
+              <Input label="First Name" value={form.first_name}
+                onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
+              <Input label="Last Name" value={form.last_name}
+                onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
+              <Input label="Work Email" value={form.work_email}
+                onChange={(e) => setForm({ ...form, work_email: e.target.value })} className="col-span-2" />
+              <Input label="Personal Email" value={form.personal_email}
+                onChange={(e) => setForm({ ...form, personal_email: e.target.value })} className="col-span-2" />
+              <Input label="Job Title" value={form.job_title}
+                onChange={(e) => setForm({ ...form, job_title: e.target.value })} />
+              <Input label="Department" value={form.department}
+                onChange={(e) => setForm({ ...form, department: e.target.value })} />
+              <Input label="Work State" value={form.work_state} placeholder="e.g. CA"
+                onChange={(e) => setForm({ ...form, work_state: e.target.value })} />
+              <div>
+                <label className="block text-xs font-medium text-zinc-400 mb-1">Employment Type</label>
+                <select
+                  value={form.employment_type}
+                  onChange={(e) => setForm({ ...form, employment_type: e.target.value })}
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:ring-1 focus:ring-zinc-500"
+                >
+                  <option value="full_time">Full-time</option>
+                  <option value="part_time">Part-time</option>
+                  <option value="contractor">Contractor</option>
+                </select>
+              </div>
+              <Input label="Start Date" type="date" value={form.start_date}
+                onChange={(e) => setForm({ ...form, start_date: e.target.value })} className="col-span-2" />
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <Button variant="ghost" onClick={() => { setShowAdd(false); setForm(emptyForm); setFormError('') }}>
+                Cancel
+              </Button>
+              <Button onClick={handleSubmit} disabled={saving}>
+                {saving ? 'Adding...' : 'Add Employee'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="mt-6 flex items-center gap-3">
