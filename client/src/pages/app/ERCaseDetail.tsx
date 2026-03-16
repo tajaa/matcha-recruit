@@ -5,6 +5,7 @@ import { NoteThread } from '../../components/NoteThread'
 import { ERDocumentList } from '../../components/er/ERDocumentList'
 import { ERGuidancePanel } from '../../components/er/ERGuidancePanel'
 import { ERTimelinePanel } from '../../components/er/ERTimelinePanel'
+import { ERPolicyCheckPanel } from '../../components/er/ERPolicyCheckPanel'
 import { useERCase } from '../../hooks/er/useERCase'
 import {
   categoryLabel,
@@ -36,7 +37,7 @@ const NOTE_TYPE_CONFIG = NOTE_TYPES.map((t) => ({
   variant: (t.value === 'guidance' ? 'success' : t.value === 'question' ? 'warning' : 'neutral') as BadgeVariant,
 }))
 
-type Tab = 'notes' | 'documents' | 'guidance' | 'timeline'
+type Tab = 'notes' | 'documents' | 'guidance' | 'policy' | 'timeline'
 
 export default function ERCaseDetail() {
   const { caseId } = useParams<{ caseId: string }>()
@@ -90,14 +91,14 @@ export default function ERCaseDetail() {
         <div className="col-span-2">
           {/* Tabs */}
           <div className="flex gap-1 mb-4">
-            {(['notes', 'documents', 'guidance', 'timeline'] as const).map((t) => (
+            {(['notes', 'documents', 'guidance', 'policy', 'timeline'] as const).map((t) => (
               <Button
                 key={t}
                 variant={tab === t ? 'primary' : 'ghost'}
                 size="sm"
                 onClick={() => setTab(t)}
               >
-                {t.charAt(0).toUpperCase() + t.slice(1)}
+                {t === 'policy' ? 'Policy Check' : t.charAt(0).toUpperCase() + t.slice(1)}
               </Button>
             ))}
           </div>
@@ -114,6 +115,9 @@ export default function ERCaseDetail() {
             )}
             {tab === 'guidance' && (
               <ERGuidancePanel caseId={caseId!} guidance={guidance} onGuidanceChange={setGuidance} />
+            )}
+            {tab === 'policy' && (
+              <ERPolicyCheckPanel caseId={caseId!} />
             )}
             {tab === 'timeline' && (
               <ERTimelinePanel caseId={caseId!} timeline={timeline} onTimelineChange={setTimeline} />
