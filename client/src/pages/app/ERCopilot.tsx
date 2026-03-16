@@ -43,9 +43,7 @@ export default function ERCopilot() {
         description: form.description || null,
         category: form.category,
       })
-      setCases((prev) => [created, ...prev])
-      setForm(EMPTY_FORM)
-      setShowForm(false)
+      navigate(`/app/er-copilot/${created.id}`)
     } finally {
       setSaving(false)
     }

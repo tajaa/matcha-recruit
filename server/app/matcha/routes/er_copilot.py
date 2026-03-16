@@ -2248,7 +2248,7 @@ async def generate_suggested_guidance(
 
         case_row = await conn.fetchrow(
             """
-            SELECT case_number, title, description, status, intake_context, created_at, updated_at
+            SELECT case_number, title, description, status, intake_context, created_at, updated_at, involved_employees
             FROM er_cases
             WHERE id = $1
             """,
@@ -2256,6 +2256,37 @@ async def generate_suggested_guidance(
         )
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
+
+        # Enrich involved employees with names
+        involved_raw = case_row["involved_employees"]
+        if isinstance(involved_raw, str):
+            try:
+                involved_raw = json.loads(involved_raw)
+            except Exception:
+                involved_raw = []
+        if not isinstance(involved_raw, list):
+            involved_raw = []
+
+        enriched_employees = []
+        for entry in involved_raw:
+            if not isinstance(entry, dict):
+                continue
+            emp_id_str = entry.get("employee_id")
+            if not emp_id_str:
+                continue
+            try:
+                emp_id = UUID(str(emp_id_str))
+            except (ValueError, TypeError):
+                continue
+            emp_row = await conn.fetchrow(
+                "SELECT first_name, last_name FROM employees WHERE id = $1", emp_id,
+            )
+            name = "Unknown"
+            if emp_row:
+                first = emp_row["first_name"] or ""
+                last = emp_row["last_name"] or ""
+                name = f"{first} {last}".strip() or "Unknown"
+            enriched_employees.append({"name": name, "role": entry.get("role", "unknown")})
 
         evidence_rows = await conn.fetch(
             """
@@ -2360,6 +2391,7 @@ async def generate_suggested_guidance(
         "status": case_row["status"],
         "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
         "updated_at": case_row["updated_at"].isoformat() if case_row["updated_at"] else None,
+        "involved_employees": enriched_employees,
     }
     analyses_completed = {
         "timeline": "timeline" in analysis_map and bool(
@@ -2475,7 +2507,7 @@ async def generate_suggested_guidance_stream(
 
         case_row = await conn.fetchrow(
             """
-            SELECT case_number, title, description, status, intake_context, created_at, updated_at
+            SELECT case_number, title, description, status, intake_context, created_at, updated_at, involved_employees
             FROM er_cases
             WHERE id = $1
             """,
@@ -2483,6 +2515,37 @@ async def generate_suggested_guidance_stream(
         )
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
+
+        # Enrich involved employees with names
+        involved_raw_s = case_row["involved_employees"]
+        if isinstance(involved_raw_s, str):
+            try:
+                involved_raw_s = json.loads(involved_raw_s)
+            except Exception:
+                involved_raw_s = []
+        if not isinstance(involved_raw_s, list):
+            involved_raw_s = []
+
+        enriched_employees_s = []
+        for entry in involved_raw_s:
+            if not isinstance(entry, dict):
+                continue
+            emp_id_str = entry.get("employee_id")
+            if not emp_id_str:
+                continue
+            try:
+                emp_id = UUID(str(emp_id_str))
+            except (ValueError, TypeError):
+                continue
+            emp_row = await conn.fetchrow(
+                "SELECT first_name, last_name FROM employees WHERE id = $1", emp_id,
+            )
+            name = "Unknown"
+            if emp_row:
+                first = emp_row["first_name"] or ""
+                last = emp_row["last_name"] or ""
+                name = f"{first} {last}".strip() or "Unknown"
+            enriched_employees_s.append({"name": name, "role": entry.get("role", "unknown")})
 
         evidence_rows = await conn.fetch(
             """
@@ -2571,6 +2634,7 @@ async def generate_suggested_guidance_stream(
             "status": case_row["status"],
             "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
             "updated_at": case_row["updated_at"].isoformat() if case_row["updated_at"] else None,
+            "involved_employees": enriched_employees_s,
         }
         analyses_done = {
             "timeline": "timeline" in analysis_map_local and bool(

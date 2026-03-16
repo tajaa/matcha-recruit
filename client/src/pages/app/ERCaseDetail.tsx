@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge, Button, Card, Select, type BadgeVariant } from '../../components/ui'
 import { NoteThread } from '../../components/NoteThread'
 import { ERDocumentList } from '../../components/er/ERDocumentList'
 import { ERGuidancePanel } from '../../components/er/ERGuidancePanel'
+import { ERTimelinePanel } from '../../components/er/ERTimelinePanel'
 import { useERCase } from '../../hooks/er/useERCase'
 import {
   categoryLabel,
@@ -11,6 +12,8 @@ import {
   outcomeLabel,
   NOTE_TYPES,
   type ERCaseStatus,
+  type SuggestedGuidanceResponse,
+  type TimelineAnalysisResponse,
 } from '../../types/er'
 
 const statusVariant: Record<string, BadgeVariant> = {
@@ -33,13 +36,26 @@ const NOTE_TYPE_CONFIG = NOTE_TYPES.map((t) => ({
   variant: (t.value === 'guidance' ? 'success' : t.value === 'question' ? 'warning' : 'neutral') as BadgeVariant,
 }))
 
-type Tab = 'notes' | 'documents' | 'guidance'
+type Tab = 'notes' | 'documents' | 'guidance' | 'timeline'
 
 export default function ERCaseDetail() {
   const { caseId } = useParams<{ caseId: string }>()
   const navigate = useNavigate()
   const { case_, loading, error, updateCase, deleteCase, refetch } = useERCase(caseId!)
   const [tab, setTab] = useState<Tab>('notes')
+  const [guidance, setGuidance] = useState<SuggestedGuidanceResponse | null>(null)
+  const [timeline, setTimeline] = useState<TimelineAnalysisResponse | null>(null)
+
+  // Auto-open Documents tab for brand-new cases (0 docs, created <60s ago)
+  const [defaultTabSet, setDefaultTabSet] = useState(false)
+  useEffect(() => {
+    if (case_ && !defaultTabSet) {
+      setDefaultTabSet(true)
+      const isNew = case_.document_count === 0 &&
+        (Date.now() - new Date(case_.created_at).getTime()) < 60_000
+      if (isNew) setTab('documents')
+    }
+  }, [case_, defaultTabSet])
 
   if (loading) return <p className="text-sm text-zinc-500">Loading case...</p>
   if (error) return <p className="text-sm text-red-400">{error}</p>
@@ -74,7 +90,7 @@ export default function ERCaseDetail() {
         <div className="col-span-2">
           {/* Tabs */}
           <div className="flex gap-1 mb-4">
-            {(['notes', 'documents', 'guidance'] as const).map((t) => (
+            {(['notes', 'documents', 'guidance', 'timeline'] as const).map((t) => (
               <Button
                 key={t}
                 variant={tab === t ? 'primary' : 'ghost'}
@@ -97,7 +113,10 @@ export default function ERCaseDetail() {
               <ERDocumentList caseId={caseId!} onUploadComplete={refetch} />
             )}
             {tab === 'guidance' && (
-              <ERGuidancePanel caseId={caseId!} />
+              <ERGuidancePanel caseId={caseId!} guidance={guidance} onGuidanceChange={setGuidance} />
+            )}
+            {tab === 'timeline' && (
+              <ERTimelinePanel caseId={caseId!} timeline={timeline} onTimelineChange={setTimeline} />
             )}
           </Card>
         </div>

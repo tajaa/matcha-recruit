@@ -11,11 +11,12 @@ const priorityVariant: Record<string, BadgeVariant> = {
 
 type ERGuidancePanelProps = {
   caseId: string
+  guidance: SuggestedGuidanceResponse | null
+  onGuidanceChange: (g: SuggestedGuidanceResponse | null) => void
   onActionClick?: (action: { type: string; label: string }) => void
 }
 
-export function ERGuidancePanel({ caseId, onActionClick }: ERGuidancePanelProps) {
-  const [guidance, setGuidance] = useState<SuggestedGuidanceResponse | null>(null)
+export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionClick }: ERGuidancePanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -26,7 +27,7 @@ export function ERGuidancePanel({ caseId, onActionClick }: ERGuidancePanelProps)
       const res = await api.post<SuggestedGuidanceResponse>(
         `/er/cases/${caseId}/guidance/suggested`,
       )
-      setGuidance(res)
+      onGuidanceChange(res)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to generate guidance')
     } finally {

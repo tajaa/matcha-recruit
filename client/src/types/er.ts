@@ -92,6 +92,27 @@ export type CaseListResponse = {
   total: number
 }
 
+export type TimelineEvent = {
+  date: string
+  time: string | null
+  description: string
+  participants: string[]
+  source_document_id: string
+  source_location: string
+  confidence: 'high' | 'medium' | 'low'
+  evidence_quote: string
+}
+
+export type TimelineAnalysisResponse = {
+  analysis: {
+    events: TimelineEvent[]
+    gaps_identified: string[]
+    timeline_summary: string
+  }
+  source_documents: string[]
+  generated_at: string | null
+}
+
 // Helpers
 
 export const CATEGORIES: ERCaseCategory[] = [
