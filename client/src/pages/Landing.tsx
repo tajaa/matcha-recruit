@@ -89,6 +89,9 @@ export default function Landing() {
           <div className="flex items-center justify-between max-w-7xl mx-auto">
             <p className="text-[10px] tracking-[0.15em] text-zinc-600 font-[Space_Mono] uppercase">
               &copy; {new Date().getFullYear()} Matcha Systems Inc.
+              {import.meta.env.VITE_LANDING_BUILD_VERSION ? (
+                <span className="ml-2 text-zinc-700">build {import.meta.env.VITE_LANDING_BUILD_VERSION}</span>
+              ) : null}
             </p>
             <div className="flex gap-6">
               {['Terms', 'Privacy', 'Status'].map((link) => (
