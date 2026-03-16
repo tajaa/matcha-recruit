@@ -113,6 +113,42 @@ export type TimelineAnalysisResponse = {
   generated_at: string | null
 }
 
+// Discrepancies
+export interface DiscrepancyItem {
+  subject: string
+  statement_a: string
+  statement_b: string
+  severity: 'high' | 'medium' | 'low'
+  source_a: string
+  source_b: string
+  notes?: string
+}
+export interface CredibilityNote { witness: string; note: string; factors: string[] }
+export interface DiscrepancyAnalysis { discrepancies: DiscrepancyItem[]; credibility_notes: CredibilityNote[]; summary: string }
+export interface DiscrepancyAnalysisResponse { analysis: DiscrepancyAnalysis; source_documents: string[]; generated_at: string | null }
+
+// Similar Cases
+export interface SimilarCaseMatch {
+  case_id: string; case_number: string; title: string
+  category: ERCaseCategory | null; outcome: ERCaseOutcome | null; status: ERCaseStatus
+  created_at: string; closed_at: string | null; resolution_days: number | null
+  outcome_effective: boolean | null; similarity_score: number
+  score_breakdown: { category_match: number; outcome_relevance: number; status_maturity: number; evidence_profile: number; temporal_recency: number; intake_context_overlap: number; text_similarity: number; investigation_pattern_similarity: number }
+  common_factors: string[]; relevance_note: string | null
+}
+export interface SimilarCasesAnalysis { matches: SimilarCaseMatch[]; pattern_summary: string | null; outcome_distribution: Record<string, number>; generated_at: string; from_cache: boolean; cache_reason: string | null }
+
+// Evidence Search
+export interface EvidenceSearchResult { chunk_id: string; content: string; speaker: string | null; source_file: string; document_type: ERDocumentType; page_number: number | null; line_range: string | null; similarity: number; metadata: Record<string, unknown> | null }
+export interface EvidenceSearchResponse { results: EvidenceSearchResult[]; query: string; total_chunks: number }
+
+// Outcome Analysis
+export interface OutcomeOption { determination: 'substantiated' | 'unsubstantiated' | 'inconclusive'; recommended_action: ERCaseOutcome; action_label: string; reasoning: string; policy_basis: string; hr_considerations: string; precedent_note: string; confidence: 'high' | 'medium' | 'low' }
+export interface OutcomeAnalysisResponse { outcomes: OutcomeOption[]; case_summary: string; generated_at: string; model: string }
+
+// Export
+export interface ShareLink { id: string; token: string; created_at: string; expires_at: string | null; revoked_at: string | null; download_count: number; last_downloaded_at: string | null; filename: string }
+
 // Helpers
 
 export const CATEGORIES: ERCaseCategory[] = [

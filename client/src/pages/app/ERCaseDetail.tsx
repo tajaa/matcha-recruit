@@ -6,6 +6,10 @@ import { ERDocumentList } from '../../components/er/ERDocumentList'
 import { ERGuidancePanel } from '../../components/er/ERGuidancePanel'
 import { ERTimelinePanel } from '../../components/er/ERTimelinePanel'
 import { ERPolicyCheckPanel } from '../../components/er/ERPolicyCheckPanel'
+import { ERDiscrepanciesPanel } from '../../components/er/ERDiscrepanciesPanel'
+import { ERSimilarCasesPanel } from '../../components/er/ERSimilarCasesPanel'
+import { EREvidenceSearch } from '../../components/er/EREvidenceSearch'
+import { EROutcomePanel } from '../../components/er/EROutcomePanel'
 import { useERCase } from '../../hooks/er/useERCase'
 import {
   categoryLabel,
@@ -16,7 +20,9 @@ import {
   type ERCaseOutcome,
   type SuggestedGuidanceResponse,
   type TimelineAnalysisResponse,
+  type ShareLink,
 } from '../../types/er'
+import { api } from '../../api/client'
 
 const statusVariant: Record<string, BadgeVariant> = {
   open: 'warning',
@@ -38,7 +44,28 @@ const NOTE_TYPE_CONFIG = NOTE_TYPES.map((t) => ({
   variant: (t.value === 'guidance' ? 'success' : t.value === 'question' ? 'warning' : 'neutral') as BadgeVariant,
 }))
 
-type Tab = 'notes' | 'documents' | 'guidance' | 'policy' | 'timeline'
+type Tab = 'notes' | 'documents' | 'guidance' | 'discrepancies' | 'similar' | 'evidence' | 'outcome' | 'policy' | 'timeline'
+
+const TAB_LABELS: Record<Tab, string> = {
+  notes: 'Notes',
+  documents: 'Documents',
+  guidance: 'Guidance',
+  discrepancies: 'Discrepancies',
+  similar: 'Similar Cases',
+  evidence: 'Evidence',
+  outcome: 'Outcome',
+  policy: 'Policy Check',
+  timeline: 'Timeline',
+}
+
+const ALL_TABS: Tab[] = ['notes', 'documents', 'guidance', 'discrepancies', 'similar', 'evidence', 'outcome', 'policy', 'timeline']
+
+const EXPIRY_OPTIONS = [
+  { value: '7', label: '7 days' },
+  { value: '30', label: '30 days' },
+  { value: '90', label: '90 days' },
+  { value: '', label: 'No expiry' },
+]
 
 export default function ERCaseDetail() {
   const { caseId } = useParams<{ caseId: string }>()
@@ -47,6 +74,74 @@ export default function ERCaseDetail() {
   const [tab, setTab] = useState<Tab>('guidance')
   const [guidance, setGuidance] = useState<SuggestedGuidanceResponse | null>(null)
   const [timeline, setTimeline] = useState<TimelineAnalysisResponse | null>(null)
+
+  // Export sidebar state
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportPassword, setExportPassword] = useState('')
+  const [sharePassword, setSharePassword] = useState('')
+  const [shareExpiry, setShareExpiry] = useState('7')
+  const [shareLinks, setShareLinks] = useState<ShareLink[]>([])
+  const [exporting, setExporting] = useState(false)
+  const [creatingLink, setCreatingLink] = useState(false)
+  const [newShareUrl, setNewShareUrl] = useState('')
+
+  async function loadShareLinks() {
+    try {
+      const res = await api.get<{ links: ShareLink[] }>(`/er/cases/${caseId}/export/links`)
+      setShareLinks(res.links ?? [])
+    } catch { /* no links */ }
+  }
+
+  async function handleDownloadPdf() {
+    if (!exportPassword.trim()) return
+    setExporting(true)
+    try {
+      const BASE = import.meta.env.VITE_API_URL ?? '/api'
+      const token = localStorage.getItem('matcha_access_token')
+      const res = await fetch(`${BASE}/er/cases/${caseId}/export`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ password: exportPassword }),
+      })
+      if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${case_?.case_number ?? 'case'}-export.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+      setExportPassword('')
+    } catch { /* error handled silently */ } finally {
+      setExporting(false)
+    }
+  }
+
+  async function handleCreateShareLink() {
+    if (!sharePassword.trim()) return
+    setCreatingLink(true)
+    setNewShareUrl('')
+    try {
+      const body: Record<string, unknown> = { password: sharePassword }
+      if (shareExpiry) body.expires_in_days = Number(shareExpiry)
+      const res = await api.post<{ url: string }>(`/er/cases/${caseId}/export/share`, body)
+      setNewShareUrl(res.url)
+      setSharePassword('')
+      loadShareLinks()
+    } catch { /* error */ } finally {
+      setCreatingLink(false)
+    }
+  }
+
+  async function handleRevokeLink(linkId: string) {
+    try {
+      await api.delete(`/er/cases/${caseId}/export/links/${linkId}`)
+      loadShareLinks()
+    } catch { /* error */ }
+  }
 
   // Auto-open Documents tab for brand-new cases (0 docs, created <60s ago)
   const [defaultTabSet, setDefaultTabSet] = useState(false)
@@ -91,15 +186,16 @@ export default function ERCaseDetail() {
         {/* Main column */}
         <div className="col-span-2">
           {/* Tabs */}
-          <div className="flex gap-1 mb-4">
-            {(['notes', 'documents', 'guidance', 'policy', 'timeline'] as const).map((t) => (
+          <div className="flex gap-1 mb-4 overflow-x-auto">
+            {ALL_TABS.map((t) => (
               <Button
                 key={t}
                 variant={tab === t ? 'primary' : 'ghost'}
                 size="sm"
+                className="whitespace-nowrap"
                 onClick={() => setTab(t)}
               >
-                {t === 'policy' ? 'Policy Check' : t.charAt(0).toUpperCase() + t.slice(1)}
+                {TAB_LABELS[t]}
               </Button>
             ))}
           </div>
@@ -123,6 +219,18 @@ export default function ERCaseDetail() {
                   await updateCase({ status: 'closed' as ERCaseStatus, outcome })
                 }}
               />
+            )}
+            {tab === 'discrepancies' && (
+              <ERDiscrepanciesPanel caseId={caseId!} />
+            )}
+            {tab === 'similar' && (
+              <ERSimilarCasesPanel caseId={caseId!} />
+            )}
+            {tab === 'evidence' && (
+              <EREvidenceSearch caseId={caseId!} />
+            )}
+            {tab === 'outcome' && (
+              <EROutcomePanel caseId={caseId!} onApplyOutcome={async () => { await refetch() }} />
             )}
             {tab === 'policy' && (
               <ERPolicyCheckPanel caseId={caseId!} />
@@ -196,6 +304,96 @@ export default function ERCaseDetail() {
               </div>
             </Card>
           )}
+
+          {/* Export Case */}
+          <Card className="p-0 overflow-hidden">
+            <button
+              type="button"
+              className="w-full px-5 py-3 flex items-center justify-between border-b border-zinc-800/60 bg-zinc-900/40 hover:bg-zinc-900/60 transition-colors"
+              onClick={() => { setExportOpen(!exportOpen); if (!exportOpen) loadShareLinks() }}
+            >
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Export Case</h3>
+              <span className="text-zinc-500 text-xs">{exportOpen ? '▾' : '▸'}</span>
+            </button>
+            {exportOpen && (
+              <div className="px-5 py-4 space-y-4">
+                {/* Direct download */}
+                <div className="space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Download PDF</p>
+                  <input
+                    type="password"
+                    value={exportPassword}
+                    onChange={(e) => setExportPassword(e.target.value)}
+                    placeholder="Password"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                  />
+                  <Button size="sm" disabled={exporting || !exportPassword.trim()} onClick={handleDownloadPdf}>
+                    {exporting ? 'Downloading...' : 'Download PDF'}
+                  </Button>
+                </div>
+
+                <div className="border-t border-zinc-800" />
+
+                {/* Share link */}
+                <div className="space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Create Share Link</p>
+                  <input
+                    type="password"
+                    value={sharePassword}
+                    onChange={(e) => setSharePassword(e.target.value)}
+                    placeholder="Password"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+                  />
+                  <select
+                    value={shareExpiry}
+                    onChange={(e) => setShareExpiry(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-300 focus:outline-none focus:border-zinc-500"
+                  >
+                    {EXPIRY_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                  <Button size="sm" disabled={creatingLink || !sharePassword.trim()} onClick={handleCreateShareLink}>
+                    {creatingLink ? 'Creating...' : 'Create Link'}
+                  </Button>
+                  {newShareUrl && (
+                    <div className="rounded-lg bg-zinc-900 border border-zinc-700 p-2">
+                      <p className="text-[11px] text-zinc-500 mb-1">Share URL:</p>
+                      <p className="text-xs text-emerald-400 break-all select-all">{newShareUrl}</p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Existing links */}
+                {shareLinks.length > 0 && (
+                  <>
+                    <div className="border-t border-zinc-800" />
+                    <div className="space-y-2">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Active Links</p>
+                      {shareLinks.filter((l) => !l.revoked_at).map((link) => (
+                        <div key={link.id} className="flex items-center justify-between text-xs border border-zinc-800 rounded-lg px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="text-zinc-300 truncate">{link.filename}</p>
+                            <p className="text-zinc-600">
+                              {new Date(link.created_at).toLocaleDateString()} &middot; {link.download_count} downloads
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            className="text-zinc-600 hover:text-red-400 ml-2 shrink-0"
+                            onClick={() => handleRevokeLink(link.id)}
+                            title="Revoke"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </Card>
 
           {/* Actions */}
           <div className="pt-2">
