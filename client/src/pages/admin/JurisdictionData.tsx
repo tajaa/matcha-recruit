@@ -65,14 +65,34 @@ function getCategoryLabel(cat: string) {
 }
 
 const SHORT_LABELS: Record<string, string> = {
+  // General labor
   minimum_wage: 'Wage', overtime: 'OT', sick_leave: 'Sick', family_leave: 'FMLA',
   anti_discrimination: 'Disc', workplace_safety: 'Safety', workers_comp: 'WC',
   tax_withholding: 'Tax', pay_frequency: 'Pay', meal_breaks: 'Meals',
   rest_breaks: 'Rest', final_pay: 'Final', posting_requirements: 'Post',
   pto: 'PTO', fair_scheduling: 'Sched', ban_the_box: 'BtB', non_compete: 'NC',
   harassment_training: 'Train', data_privacy: 'Priv', whistleblower: 'Whistle',
-  accommodations: 'ADA', other: 'Other',
+  accommodations: 'ADA', minor_work_permit: 'Minor', scheduling_reporting: 'Sched',
+  // Healthcare
+  hipaa_privacy: 'HIPAA', billing_integrity: 'Billing', clinical_safety: 'Clinical',
+  healthcare_workforce: 'HC Workforce', corporate_integrity: 'Corp Integrity',
+  research_consent: 'Research', state_licensing: 'Licensing', emergency_preparedness: 'Emergency',
+  // Oncology
+  radiation_safety: 'Radiation', chemotherapy_handling: 'Chemo', tumor_registry: 'Tumor',
+  oncology_clinical_trials: 'Onc Trials', oncology_patient_rights: 'Onc Rights',
+  other: 'Other',
 }
+
+const HEALTHCARE_CATS = new Set([
+  'hipaa_privacy', 'billing_integrity', 'clinical_safety', 'healthcare_workforce',
+  'corporate_integrity', 'research_consent', 'state_licensing', 'emergency_preparedness',
+])
+const ONCOLOGY_CATS = new Set([
+  'radiation_safety', 'chemotherapy_handling', 'tumor_registry',
+  'oncology_clinical_trials', 'oncology_patient_rights',
+])
+
+type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology'
 
 function fmtDate(d: string | null) {
   if (!d) return '—'
@@ -92,8 +112,10 @@ export default function JurisdictionData() {
   const [bookmarks, setBookmarks] = useState<BookmarkedReq[]>([])
   const [loadingBookmarks, setLoadingBookmarks] = useState(false)
 
-  // Missing data filters
+  // Filters
+  const [specialtyFilter, setSpecialtyFilter] = useState<SpecialtyFilter>('all')
   const [filterState, setFilterState] = useState('')
+  const [filterCategory, setFilterCategory] = useState('')
   const [filterStaleOnly, setFilterStaleOnly] = useState(false)
 
   // Top metro SSE
@@ -166,7 +188,15 @@ export default function JurisdictionData() {
   }
 
   const sum = overview?.summary
-  const requiredCats = sum?.required_categories ?? []
+  const allRequiredCats = sum?.required_categories ?? []
+  // Filter categories by specialty
+  const requiredCats = useMemo(() => {
+    if (specialtyFilter === 'all') return allRequiredCats
+    if (specialtyFilter === 'healthcare') return allRequiredCats.filter((c) => HEALTHCARE_CATS.has(c) || ONCOLOGY_CATS.has(c))
+    if (specialtyFilter === 'oncology') return allRequiredCats.filter((c) => ONCOLOGY_CATS.has(c))
+    // general = exclude healthcare & oncology
+    return allRequiredCats.filter((c) => !HEALTHCARE_CATS.has(c) && !ONCOLOGY_CATS.has(c))
+  }, [allRequiredCats, specialtyFilter])
   const allStates = overview?.states ?? []
 
   const filteredStates = useMemo(() => {
@@ -177,19 +207,25 @@ export default function JurisdictionData() {
     })
   }, [allStates, search])
 
-  // Missing data: cities sorted by most missing categories
+  // Missing data: cities sorted by most missing categories, filtered by specialty + category
   const missingCities = useMemo(() => {
-    const rows: (CityEntry & { stateName: string })[] = []
+    const rows: (CityEntry & { stateName: string; filteredMissing: string[] })[] = []
     for (const st of allStates) {
       if (filterState && st.state !== filterState) continue
       for (const city of st.cities) {
-        if (city.categories_missing.length === 0) continue
+        // Filter missing categories by specialty
+        let missing = city.categories_missing
+        if (specialtyFilter === 'healthcare') missing = missing.filter((c) => HEALTHCARE_CATS.has(c) || ONCOLOGY_CATS.has(c))
+        else if (specialtyFilter === 'oncology') missing = missing.filter((c) => ONCOLOGY_CATS.has(c))
+        else if (specialtyFilter === 'general') missing = missing.filter((c) => !HEALTHCARE_CATS.has(c) && !ONCOLOGY_CATS.has(c))
+        if (filterCategory && !missing.includes(filterCategory)) continue
+        if (missing.length === 0) continue
         if (filterStaleOnly && !city.is_stale) continue
-        rows.push({ ...city, stateName: st.state })
+        rows.push({ ...city, stateName: st.state, filteredMissing: missing })
       }
     }
-    return rows.sort((a, b) => b.categories_missing.length - a.categories_missing.length)
-  }, [allStates, filterState, filterStaleOnly])
+    return rows.sort((a, b) => b.filteredMissing.length - a.filteredMissing.length)
+  }, [allStates, filterState, filterStaleOnly, specialtyFilter, filterCategory])
 
   // Preemption rules grouped by state
   const preemptionByState = useMemo(() => {
@@ -215,6 +251,13 @@ export default function JurisdictionData() {
           <p className="mt-1 text-sm text-zinc-500">Compliance data repository overview</p>
         </div>
         <div className="flex items-center gap-2">
+          <select value={specialtyFilter} onChange={(e) => setSpecialtyFilter(e.target.value as SpecialtyFilter)}
+            className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5">
+            <option value="all">All Specialties</option>
+            <option value="general">General Labor</option>
+            <option value="healthcare">Healthcare</option>
+            <option value="oncology">Oncology</option>
+          </select>
           <Button variant="secondary" size="sm" disabled={metroScanning} onClick={startMetroCheck}>
             {metroScanning ? 'Running Top 15...' : 'Run Top 15 Metros'}
           </Button>
@@ -363,17 +406,22 @@ export default function JurisdictionData() {
       {tab === 'missing' && (
         <div>
           {/* Filters */}
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex gap-1">
-              <Button variant={!filterState ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilterState('')}>All States</Button>
-              {stateOptions.map((s) => (
-                <Button key={s} variant={filterState === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilterState(s)}>{s}</Button>
-              ))}
-            </div>
+          <div className="flex flex-wrap items-center gap-3 mb-4">
+            <select value={filterState} onChange={(e) => setFilterState(e.target.value)}
+              className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5">
+              <option value="">All States</option>
+              {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
+              className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5">
+              <option value="">All Categories</option>
+              {requiredCats.map((c) => <option key={c} value={c}>{SHORT_LABELS[c] || getCategoryLabel(c)}</option>)}
+            </select>
             <button type="button" onClick={() => setFilterStaleOnly(!filterStaleOnly)}
               className={`text-xs px-2.5 py-1 rounded transition-colors ${filterStaleOnly ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
               Stale only
             </button>
+            <span className="text-[11px] text-zinc-600 ml-auto">{missingCities.length} jurisdictions</span>
           </div>
 
           {missingCities.length === 0 ? (
@@ -386,7 +434,7 @@ export default function JurisdictionData() {
             <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60 max-h-[70vh] overflow-y-auto">
               {missingCities.map((city) => (
                 <button key={city.id} type="button"
-                  onClick={() => { setSelectedCityId(city.id); setSelectedCityMeta({ city: city.city, state: city.stateName, missing: city.categories_missing }); setTab('coverage') }}
+                  onClick={() => { setSelectedCityId(city.id); setSelectedCityMeta({ city: city.city, state: city.stateName, missing: city.filteredMissing }); setTab('coverage') }}
                   className="w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-zinc-800/30 transition-colors">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -394,14 +442,14 @@ export default function JurisdictionData() {
                       {city.is_stale && <span className="text-[10px] text-amber-400/70">stale</span>}
                     </div>
                     <div className="flex flex-wrap gap-1 mt-1.5">
-                      {city.categories_missing.map((cat) => (
+                      {city.filteredMissing.map((cat) => (
                         <span key={cat} className="text-[10px] text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded">
-                          {getCategoryLabel(cat)}
+                          {SHORT_LABELS[cat] || getCategoryLabel(cat)}
                         </span>
                       ))}
                     </div>
                   </div>
-                  <span className="text-[11px] text-red-400/70 shrink-0 mt-0.5">−{city.categories_missing.length}</span>
+                  <span className="text-[11px] text-red-400/70 shrink-0 mt-0.5">−{city.filteredMissing.length}</span>
                 </button>
               ))}
             </div>
