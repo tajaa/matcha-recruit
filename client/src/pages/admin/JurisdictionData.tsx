@@ -31,6 +31,16 @@ type PreemptionRule = {
   notes: string | null
 }
 
+type StructuredSource = {
+  source_name: string
+  source_type: string
+  categories: string[]
+  record_count: number
+  last_fetched_at: string | null
+  last_fetch_status: string | null
+  is_active: boolean
+}
+
 type DataOverview = {
   summary: {
     total_states: number
@@ -45,6 +55,7 @@ type DataOverview = {
   }
   states: StateEntry[]
   preemption_rules: PreemptionRule[]
+  structured_sources: StructuredSource[]
 }
 
 type BookmarkedReq = {
@@ -117,6 +128,9 @@ export default function JurisdictionData() {
   const [filterState, setFilterState] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterStaleOnly, setFilterStaleOnly] = useState(false)
+
+  // Preemption matrix hover
+  const [hoveredCell, setHoveredCell] = useState<{ state: string; cat: string } | null>(null)
 
   // Top metro SSE
   const [metroScanning, setMetroScanning] = useState(false)
@@ -227,14 +241,16 @@ export default function JurisdictionData() {
     return rows.sort((a, b) => b.filteredMissing.length - a.filteredMissing.length)
   }, [allStates, filterState, filterStaleOnly, specialtyFilter, filterCategory])
 
-  // Preemption rules grouped by state
-  const preemptionByState = useMemo(() => {
-    const map: Record<string, PreemptionRule[]> = {}
-    for (const rule of overview?.preemption_rules ?? []) {
-      if (!map[rule.state]) map[rule.state] = []
-      map[rule.state].push(rule)
+  // Preemption matrix: state → category → { allows, notes }
+  const preemptionMatrix = useMemo(() => {
+    const matrix: Record<string, Record<string, { allows: boolean; notes: string | null }>> = {}
+    const stateSet = new Set<string>()
+    for (const r of overview?.preemption_rules ?? []) {
+      stateSet.add(r.state)
+      if (!matrix[r.state]) matrix[r.state] = {}
+      matrix[r.state][r.category] = { allows: r.allows_local_override, notes: r.notes }
     }
-    return map
+    return { states: [...stateSet].sort(), matrix }
   }, [overview])
 
   // Unique states for missing data filter
@@ -427,31 +443,52 @@ export default function JurisdictionData() {
           {missingCities.length === 0 ? (
             <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
               <p className="text-sm text-zinc-600">
-                {filterState || filterStaleOnly ? 'No cities match these filters.' : 'All cities have complete category coverage.'}
+                {filterState || filterStaleOnly || filterCategory ? 'No cities match these filters.' : 'All cities have complete category coverage.'}
               </p>
             </div>
           ) : (
-            <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60 max-h-[70vh] overflow-y-auto">
-              {missingCities.map((city) => (
-                <button key={city.id} type="button"
-                  onClick={() => { setSelectedCityId(city.id); setSelectedCityMeta({ city: city.city, state: city.stateName, missing: city.filteredMissing }); setTab('coverage') }}
-                  className="w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-zinc-800/30 transition-colors">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm text-zinc-200">{city.city}, {city.stateName}</p>
-                      {city.is_stale && <span className="text-[10px] text-amber-400/70">stale</span>}
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {city.filteredMissing.map((cat) => (
-                        <span key={cat} className="text-[10px] text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded">
-                          {SHORT_LABELS[cat] || getCategoryLabel(cat)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <span className="text-[11px] text-red-400/70 shrink-0 mt-0.5">−{city.filteredMissing.length}</span>
-                </button>
-              ))}
+            <div className="border border-zinc-800 rounded-lg overflow-hidden">
+              <div className="max-h-[70vh] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-900/50 text-zinc-400 sticky top-0">
+                    <tr>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">ST</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">City</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Missing</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Gaps</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Verified</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {missingCities.slice(0, 100).map((city) => (
+                      <tr key={city.id} className="hover:bg-zinc-800/30 cursor-pointer"
+                        onClick={() => { setSelectedCityId(city.id); setSelectedCityMeta({ city: city.city, state: city.stateName, missing: city.filteredMissing }); setTab('coverage') }}>
+                        <td className="py-2 px-3 font-mono font-bold text-zinc-200">{city.stateName}</td>
+                        <td className="py-2 px-3 text-zinc-200 hover:underline">{city.city}</td>
+                        <td className="py-2 px-3">
+                          <div className="flex flex-wrap gap-1">
+                            {city.filteredMissing.map((cat) => (
+                              <span key={cat} className="text-[10px] text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded">
+                                {SHORT_LABELS[cat] || getCategoryLabel(cat)}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className={`py-2 px-3 font-mono ${city.filteredMissing.length >= 4 ? 'text-red-400' : 'text-amber-400'}`}>
+                          {city.filteredMissing.length}/{requiredCats.length}
+                        </td>
+                        <td className="py-2 px-3 text-zinc-500 whitespace-nowrap text-[11px]">
+                          {fmtDate(city.last_verified_at)}
+                          {city.is_stale && <span className="text-amber-400/70 ml-1">⚠</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {missingCities.length > 100 && (
+                  <p className="text-center py-2 text-[10px] text-zinc-600">Showing 100 of {missingCities.length}</p>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -491,50 +528,125 @@ export default function JurisdictionData() {
             <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Data Freshness</h2>
             <div className="grid grid-cols-4 gap-3">
               {[
-                { label: '< 7 days', value: sum.freshness['7d'], color: 'text-emerald-400' },
-                { label: '< 30 days', value: sum.freshness['30d'], color: 'text-zinc-100' },
-                { label: '< 90 days', value: sum.freshness['90d'], color: 'text-amber-400' },
-                { label: 'Stale', value: sum.freshness['stale'], color: 'text-red-400' },
-              ].map((f) => (
-                <div key={f.label} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
-                  <p className={`text-2xl font-bold ${f.color}`}>{f.value}</p>
-                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{f.label}</p>
-                </div>
-              ))}
+                { label: '≤ 7 days', value: sum.freshness['7d'], color: 'text-emerald-400' },
+                { label: '8–30 days', value: sum.freshness['30d'], color: 'text-zinc-100' },
+                { label: '31–90 days', value: sum.freshness['90d'], color: 'text-amber-400' },
+                { label: '> 90 days', value: sum.freshness['stale'], color: 'text-red-400' },
+              ].map((f) => {
+                const freshTotal = sum.freshness['7d'] + sum.freshness['30d'] + sum.freshness['90d'] + sum.freshness['stale']
+                const pct = freshTotal > 0 ? Math.round((f.value / freshTotal) * 100) : 0
+                return (
+                  <div key={f.label} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
+                    <p className={`text-2xl font-bold ${f.color}`}>{f.value.toLocaleString()}</p>
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{f.label}</p>
+                    <p className="text-[10px] font-mono text-zinc-600">{pct}%</p>
+                  </div>
+                )
+              })}
             </div>
           </div>
+
+          {/* Structured Data Sources */}
+          {overview!.structured_sources.length > 0 && (
+            <div>
+              <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Structured Data Sources</h2>
+              <div className="border border-zinc-800 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-zinc-900/50 text-zinc-400">
+                    <tr>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Source</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Type</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Categories</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Records</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Last Fetch</th>
+                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-800">
+                    {overview!.structured_sources.map((src, i) => (
+                      <tr key={i} className="hover:bg-zinc-800/30">
+                        <td className="py-2 px-3 text-zinc-200 font-medium">{src.source_name}</td>
+                        <td className="py-2 px-3 text-zinc-500 font-mono text-xs">{src.source_type}</td>
+                        <td className="py-2 px-3">
+                          <div className="flex flex-wrap gap-1">
+                            {src.categories.map((c) => (
+                              <span key={c} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">
+                                {SHORT_LABELS[c] || getCategoryLabel(c)}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="py-2 px-3 font-mono text-zinc-400">{src.record_count.toLocaleString()}</td>
+                        <td className="py-2 px-3 text-zinc-500 text-[11px]">{fmtDate(src.last_fetched_at)}</td>
+                        <td className="py-2 px-3">
+                          <span className={`text-xs ${src.is_active ? 'text-emerald-400' : 'text-red-400'}`}>
+                            {src.is_active ? 'Active' : 'Inactive'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Preemption Rules Tab ── */}
+      {/* ── Preemption Rules Tab — Matrix ── */}
       {tab === 'preemption' && (
         <div>
-          {Object.keys(preemptionByState).length === 0 ? (
+          {preemptionMatrix.states.length === 0 ? (
             <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
-              <p className="text-sm text-zinc-600">No preemption rules loaded.</p>
+              <p className="text-sm text-zinc-600">No preemption rules in the database yet.</p>
             </div>
           ) : (
-            <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60 max-h-[70vh] overflow-y-auto">
-              {Object.entries(preemptionByState).sort(([a], [b]) => a.localeCompare(b)).map(([state, rules]) => (
-                <div key={state}>
-                  <div className="px-4 pt-3 pb-1">
-                    <p className="text-xs uppercase tracking-wide text-zinc-400 font-bold font-mono">{state}</p>
-                  </div>
-                  {rules.map((rule, i) => (
-                    <div key={i} className="flex items-start gap-3 px-4 py-2 border-t border-zinc-800/30">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-zinc-200">{getCategoryLabel(rule.category)}</p>
-                        {rule.notes && <p className="text-xs text-zinc-500 mt-0.5">{rule.notes}</p>}
-                      </div>
-                      <span className={`text-[11px] shrink-0 px-2 py-0.5 rounded ${
-                        rule.allows_local_override ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
-                      }`}>
-                        {rule.allows_local_override ? 'Local OK' : 'Preempted'}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ))}
+            <div className="border border-zinc-800 rounded-lg p-4">
+              <p className="text-[11px] text-zinc-500 mb-3">
+                Green = allows local override · Red = state preempts local law · Hover for notes
+              </p>
+              <div className="overflow-x-auto">
+                <table className="text-xs">
+                  <thead>
+                    <tr>
+                      <th className="py-1.5 px-2 text-left text-[10px] text-zinc-500 uppercase tracking-wide">State</th>
+                      {requiredCats.map((c) => (
+                        <th key={c} className="py-1.5 px-1.5 text-center text-[10px] text-zinc-500 uppercase tracking-wide whitespace-nowrap">
+                          {SHORT_LABELS[c] || c}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {preemptionMatrix.states.map((state) => (
+                      <tr key={state} className="hover:bg-zinc-800/30">
+                        <td className="py-1 px-2 font-mono font-bold text-zinc-200">{state}</td>
+                        {requiredCats.map((cat) => {
+                          const cell = preemptionMatrix.matrix[state]?.[cat]
+                          if (!cell) return <td key={cat} className="py-1 px-1.5 text-center text-zinc-700">—</td>
+                          const isHovered = hoveredCell?.state === state && hoveredCell?.cat === cat
+                          return (
+                            <td key={cat} className="py-1 px-1.5 text-center relative"
+                              onMouseEnter={() => setHoveredCell({ state, cat })}
+                              onMouseLeave={() => setHoveredCell(null)}>
+                              <span className={`inline-flex items-center justify-center w-6 h-6 rounded text-[11px] font-bold ${
+                                cell.allows ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
+                              }`}>
+                                {cell.allows ? '✓' : '✗'}
+                              </span>
+                              {isHovered && cell.notes && (
+                                <div className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-1.5 px-2.5 py-1.5 rounded-lg text-[10px] max-w-[220px] bg-zinc-800 text-zinc-200 shadow-lg whitespace-normal">
+                                  {cell.notes}
+                                </div>
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>
