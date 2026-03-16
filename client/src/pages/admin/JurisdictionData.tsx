@@ -1,8 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '../../api/client'
 import { Button, Input } from '../../components/ui'
-import { categoryLabel } from '../../types/compliance'
-import type { RequirementCategory } from '../../types/compliance'
+import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -33,28 +32,8 @@ type DataOverview = {
     tier_breakdown: Record<string, number>
     stale_count: number
     freshness: { '7d': number; '30d': number; '90d': number; stale: number }
-    required_categories: string[]
   }
   states: StateEntry[]
-}
-
-type JurisdictionReq = {
-  id: string
-  category: string
-  jurisdiction_level: string
-  jurisdiction_name: string
-  title: string
-  current_value: string | null
-  effective_date: string | null
-  is_bookmarked: boolean
-}
-
-type JurisdictionDetail = {
-  id: string
-  city: string
-  state: string
-  requirements: JurisdictionReq[]
-  locations: { id: string; name: string | null; city: string; company_name: string }[]
 }
 
 type CoverageRequest = {
@@ -71,10 +50,6 @@ type CoverageRequest = {
 
 type Tab = 'overview' | 'jurisdictions' | 'requests'
 
-function getCategoryLabel(cat: string) {
-  return categoryLabel[cat as RequirementCategory] ?? cat
-}
-
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function JurisdictionData() {
@@ -88,10 +63,7 @@ export default function JurisdictionData() {
   const [search, setSearch] = useState('')
   const [expandedState, setExpandedState] = useState<string | null>(null)
   const [selectedCity, setSelectedCity] = useState<CityEntry | null>(null)
-  const [detail, setDetail] = useState<JurisdictionDetail | null>(null)
-  const [loadingDetail, setLoadingDetail] = useState(false)
-  const [scanning, setScanning] = useState(false)
-  const [scanMessages, setScanMessages] = useState<string[]>([])
+  const [selectedCityState, setSelectedCityState] = useState<string>('')
 
   // Top metro SSE
   const [metroScanning, setMetroScanning] = useState(false)
@@ -121,46 +93,6 @@ export default function JurisdictionData() {
     if (tab === 'requests' && requests.length === 0) fetchRequests()
   }, [tab, fetchRequests, requests.length])
 
-  const fetchDetail = useCallback(async (city: CityEntry) => {
-    setDetail(null); setLoadingDetail(true); setScanMessages([])
-    try { setDetail(await api.get<JurisdictionDetail>(`/admin/jurisdictions/${city.id}`)) }
-    catch { setDetail(null) }
-    finally { setLoadingDetail(false) }
-  }, [])
-
-  useEffect(() => {
-    if (selectedCity) fetchDetail(selectedCity)
-  }, [selectedCity, fetchDetail])
-
-  function startJurisdictionCheck(jurisdictionId: string) {
-    setScanning(true); setScanMessages([])
-    const token = localStorage.getItem('matcha_access_token')
-    const base = import.meta.env.VITE_API_URL || '/api'
-    fetch(`${base}/admin/jurisdictions/${jurisdictionId}/check`, {
-      method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue // heartbeat
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setScanning(false); if (selectedCity) fetchDetail(selectedCity); fetchOverview(); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setScanning(false); return }
-            if (ev.message) setScanMessages((p) => [...p, ev.message])
-          } catch {}
-        }
-      }
-      setScanning(false)
-    }).catch(() => setScanning(false))
-  }
-
   function startMetroCheck() {
     setMetroScanning(true); setMetroMessages([])
     const token = localStorage.getItem('matcha_access_token')
@@ -182,7 +114,7 @@ export default function JurisdictionData() {
           try {
             const ev = JSON.parse(data)
             if (ev.type === 'run_completed') { setMetroScanning(false); fetchOverview(); return }
-            const msg = ev.message || ev.city && `${ev.city}, ${ev.state}` || null
+            const msg = ev.message || (ev.city && `${ev.city}, ${ev.state}`) || null
             if (msg) setMetroMessages((p) => [...p, msg])
           } catch {}
         }
@@ -205,19 +137,11 @@ export default function JurisdictionData() {
     setRequests((prev) => prev.filter((r) => r.id !== id))
   }
 
-  // Filter states/cities by search
   const filteredStates = (overview?.states ?? []).filter((s) => {
     if (!search) return true
     const q = search.toLowerCase()
     return s.state.toLowerCase().includes(q) || s.cities.some((c) => c.city.toLowerCase().includes(q))
   })
-
-  // Group requirements by category for detail panel
-  const groupedReqs = (detail?.requirements ?? []).reduce<Record<string, JurisdictionReq[]>>((acc, r) => {
-    if (!acc[r.category]) acc[r.category] = []
-    acc[r.category].push(r)
-    return acc
-  }, {})
 
   const sum = overview?.summary
 
@@ -248,7 +172,6 @@ export default function JurisdictionData() {
             <p className="text-sm text-zinc-600">Failed to load data overview.</p>
           ) : (
             <>
-              {/* Summary stats */}
               <div className="grid grid-cols-3 gap-3">
                 {[
                   { label: 'States', value: sum.total_states },
@@ -265,20 +188,20 @@ export default function JurisdictionData() {
                 ))}
               </div>
 
-              {/* Tier breakdown */}
               <div>
                 <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Tier Breakdown</h2>
                 <div className="grid grid-cols-3 gap-3">
                   {[1, 2, 3].map((t) => (
                     <div key={t} className="border border-zinc-800 rounded-lg px-4 py-3 text-center">
                       <p className="text-lg font-semibold text-zinc-100">{sum.tier_breakdown[t] ?? 0}</p>
-                      <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">Tier {t} {t === 1 ? '(Structured)' : t === 2 ? '(Repository)' : '(Gemini)'}</p>
+                      <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">
+                        Tier {t} {t === 1 ? '(Structured)' : t === 2 ? '(Repository)' : '(Gemini)'}
+                      </p>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Freshness */}
               <div>
                 <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Data Freshness</h2>
                 <div className="grid grid-cols-4 gap-3">
@@ -296,7 +219,6 @@ export default function JurisdictionData() {
                 </div>
               </div>
 
-              {/* Top metro run */}
               <div>
                 <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Bulk Research</h2>
                 <div className="border border-zinc-800 rounded-lg px-4 py-3">
@@ -328,12 +250,7 @@ export default function JurisdictionData() {
         <div className="grid grid-cols-5 gap-4">
           {/* Left: states + cities */}
           <div className="col-span-2 space-y-2">
-            <Input
-              label=""
-              placeholder="Search state or city..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            <Input label="" placeholder="Search state or city..." value={search} onChange={(e) => setSearch(e.target.value)} />
 
             {loadingOverview ? (
               <p className="text-sm text-zinc-500">Loading...</p>
@@ -348,7 +265,6 @@ export default function JurisdictionData() {
                     : s.cities
                   return (
                     <div key={s.state}>
-                      {/* State header */}
                       <button
                         type="button"
                         onClick={() => setExpandedState(isOpen && !search ? null : s.state)}
@@ -365,13 +281,11 @@ export default function JurisdictionData() {
                           <span className="text-zinc-600">{isOpen && !search ? '▾' : '▸'}</span>
                         </div>
                       </button>
-
-                      {/* Cities */}
-                      {(isOpen) && citiesToShow.map((city) => (
+                      {isOpen && citiesToShow.map((city) => (
                         <button
                           key={city.id}
                           type="button"
-                          onClick={() => { setSelectedCity(city); setExpandedState(s.state) }}
+                          onClick={() => { setSelectedCity(city); setSelectedCityState(s.state); setExpandedState(s.state) }}
                           className={`w-full flex items-start justify-between px-4 py-2 text-left border-t border-zinc-800/40 transition-colors border-l-2 ${
                             selectedCity?.id === city.id ? 'bg-zinc-800/60 border-zinc-300' : 'hover:bg-zinc-800/20 border-transparent'
                           }`}
@@ -386,9 +300,7 @@ export default function JurisdictionData() {
                             </p>
                           </div>
                           {city.categories_missing.length > 0 && (
-                            <span className="text-[11px] text-zinc-600 shrink-0 ml-2">
-                              −{city.categories_missing.length}
-                            </span>
+                            <span className="text-[11px] text-zinc-600 shrink-0 ml-2">−{city.categories_missing.length}</span>
                           )}
                         </button>
                       ))}
@@ -399,115 +311,20 @@ export default function JurisdictionData() {
             )}
           </div>
 
-          {/* Right: jurisdiction detail */}
+          {/* Right: shared detail panel */}
           <div className="col-span-3">
             {!selectedCity ? (
               <div className="flex items-center justify-center h-48 border border-zinc-800 rounded-lg">
                 <p className="text-sm text-zinc-600">Select a city to view requirements</p>
               </div>
-            ) : loadingDetail ? (
-              <p className="text-sm text-zinc-500">Loading...</p>
-            ) : !detail ? (
-              <p className="text-sm text-zinc-600">Failed to load jurisdiction detail.</p>
             ) : (
-              <div>
-                {/* Header */}
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h2 className="text-base font-medium text-zinc-100">
-                      {detail.city}, {detail.state}
-                    </h2>
-                    <p className="text-[11px] text-zinc-500 mt-0.5">
-                      {detail.requirements.length} requirements · {detail.locations.length} linked locations
-                    </p>
-                  </div>
-                  <Button
-                    variant="secondary" size="sm"
-                    disabled={scanning}
-                    onClick={() => startJurisdictionCheck(detail.id)}
-                  >
-                    {scanning ? 'Scanning...' : 'Run Check'}
-                  </Button>
-                </div>
-
-                {/* Missing categories */}
-                {selectedCity.categories_missing.length > 0 && (
-                  <div className="mb-3 border border-zinc-800 rounded-lg px-3 py-2.5">
-                    <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-1.5">Missing categories</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {selectedCity.categories_missing.map((cat) => (
-                        <span key={cat} className="text-[11px] text-zinc-500 bg-zinc-800/60 px-2 py-0.5 rounded">
-                          {getCategoryLabel(cat)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* SSE scan log */}
-                {scanning && scanMessages.length > 0 && (
-                  <div className="border border-zinc-800 rounded-lg px-3 py-2.5 mb-3 max-h-28 overflow-y-auto">
-                    {scanMessages.map((msg, i) => (
-                      <p key={i} className="text-xs text-zinc-500 leading-5">{msg}</p>
-                    ))}
-                  </div>
-                )}
-
-                {/* Requirements by category */}
-                {detail.requirements.length === 0 ? (
-                  <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
-                    <p className="text-sm text-zinc-600">No requirements yet — run a check to populate.</p>
-                  </div>
-                ) : (
-                  <div className="border border-zinc-800 rounded-lg max-h-[60vh] overflow-y-auto">
-                    {Object.entries(groupedReqs).map(([cat, reqs], catIdx) => (
-                      <div key={cat}>
-                        {catIdx > 0 && <div className="border-t border-zinc-800/60" />}
-                        <div className="px-4 pt-3 pb-1">
-                          <p className="text-xs uppercase tracking-wide text-zinc-400">{getCategoryLabel(cat)}</p>
-                        </div>
-                        {reqs.map((req) => (
-                          <div key={req.id} className="flex items-start gap-3 px-4 py-2 border-t border-zinc-800/30">
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm text-zinc-200">{req.title}</p>
-                              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                <span className="text-[11px] text-zinc-500">{req.jurisdiction_level}</span>
-                                {req.current_value && (
-                                  <>
-                                    <span className="text-[11px] text-zinc-600">·</span>
-                                    <span className="text-[11px] text-zinc-400">{req.current_value}</span>
-                                  </>
-                                )}
-                                {req.effective_date && (
-                                  <span className="text-[11px] text-zinc-600">eff. {req.effective_date}</span>
-                                )}
-                              </div>
-                            </div>
-                            {req.is_bookmarked && (
-                              <span className="text-[11px] text-zinc-500 shrink-0">★</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Linked locations */}
-                {detail.locations.length > 0 && (
-                  <div className="mt-3">
-                    <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-1.5">Linked Business Locations</p>
-                    <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
-                      {detail.locations.map((loc) => (
-                        <div key={loc.id} className="flex items-center justify-between px-3 py-2">
-                          <p className="text-sm text-zinc-300">{loc.company_name}</p>
-                          <p className="text-[11px] text-zinc-500">{loc.name || `${loc.city}`}</p>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
+              <JurisdictionDetailPanel
+                id={selectedCity.id}
+                city={selectedCity.city}
+                state={selectedCityState}
+                categoriesMissing={selectedCity.categories_missing}
+                onCheckComplete={fetchOverview}
+              />
             )}
           </div>
         </div>
@@ -547,19 +364,12 @@ export default function JurisdictionData() {
                         </>
                       )}
                     </div>
-                    {req.admin_notes && (
-                      <p className="text-xs text-zinc-600 mt-0.5">{req.admin_notes}</p>
-                    )}
+                    {req.admin_notes && <p className="text-xs text-zinc-600 mt-0.5">{req.admin_notes}</p>}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
-                    <Button variant="secondary" size="sm" onClick={() => processRequest(req)}>
-                      Process
-                    </Button>
-                    <button
-                      type="button"
-                      onClick={() => dismissRequest(req.id)}
-                      className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors"
-                    >
+                    <Button variant="secondary" size="sm" onClick={() => processRequest(req)}>Process</Button>
+                    <button type="button" onClick={() => dismissRequest(req.id)}
+                      className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors">
                       Dismiss
                     </button>
                   </div>
