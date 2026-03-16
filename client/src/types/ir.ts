@@ -255,6 +255,23 @@ export type InvestigationInterviewCreate = {
   custom_message?: string | null
 }
 
+// ── Shared constants ──
+
+export const INCIDENT_TYPE_OPTIONS = [
+  { value: 'safety', label: 'Safety' },
+  { value: 'behavioral', label: 'Behavioral' },
+  { value: 'property', label: 'Property Damage' },
+  { value: 'near_miss', label: 'Near Miss' },
+  { value: 'other', label: 'Other' },
+]
+
+export const SEVERITY_OPTIONS = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'critical', label: 'Critical' },
+]
+
 // ── Label helpers ──
 
 export function typeLabel(t: string): string {
