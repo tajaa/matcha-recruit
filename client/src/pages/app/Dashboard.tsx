@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Card, Badge } from '../../components/ui'
 import { api } from '../../api/client'
 import { Users, Shield, FileText, AlertTriangle } from 'lucide-react'
+import { ComplianceWidget } from '../../components/compliance/ComplianceWidget'
 
 type DashboardStats = {
   total_employees: number
@@ -84,6 +85,11 @@ export default function Dashboard() {
           )}
         </div>
       )}
+
+      {/* Compliance widget */}
+      <div className="mt-6">
+        <ComplianceWidget />
+      </div>
 
       {/* Pending incidents */}
       {stats.pending_incidents.length > 0 && (

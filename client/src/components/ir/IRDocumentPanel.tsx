@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '../../api/client'
-import { Badge, Button, Select, FileUpload } from '../ui'
+import { Badge, Select, FileUpload } from '../ui'
 import type { IRDocument } from '../../types/ir'
 
 const DOC_TYPE_OPTIONS = [
