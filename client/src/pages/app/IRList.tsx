@@ -120,7 +120,7 @@ export default function IRList() {
   // Fetch summary for stat boxes (always) and analytics tab
   useEffect(() => {
     setLoadingSummary(true)
-    api.get<AnalyticsSummary>('/ir/analytics/summary')
+    api.get<AnalyticsSummary>('/ir/incidents/analytics/summary')
       .then((res) => setSummary(res))
       .catch(() => setSummary(null))
       .finally(() => setLoadingSummary(false))
