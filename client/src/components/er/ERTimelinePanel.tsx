@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { api } from '../../api/client'
 import { Badge, Button, type BadgeVariant } from '../ui'
 import type { TimelineAnalysisResponse, TimelineEvent } from '../../types/er'
@@ -53,11 +53,14 @@ export function ERTimelinePanel({ caseId, timeline, onTimelineChange }: ERTimeli
     }
   }
 
-  // On first render with no timeline, try fetching existing
-  if (!timeline && !loading && !error) {
-    fetchExisting()
-    return <p className="text-sm text-zinc-500 py-8 text-center">Checking for timeline...</p>
-  }
+  // On first mount with no timeline, try fetching existing
+  const [fetched, setFetched] = useState(false)
+  useEffect(() => {
+    if (!timeline && !fetched) {
+      setFetched(true)
+      fetchExisting()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return <p className="text-sm text-zinc-500 py-8 text-center">Analyzing timeline...</p>
