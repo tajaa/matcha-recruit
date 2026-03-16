@@ -74,8 +74,7 @@ app = FastAPI(
 )
 
 # CORS - allow frontend dev server
-app.add_middleware(
-    CORSMiddleware,
+_cors_kwargs: dict = dict(
     allow_origins=[
         "http://localhost:5173",
         "http://localhost:5174",
@@ -86,11 +85,15 @@ app.add_middleware(
         "https://hey-matcha.com",
         "https://www.hey-matcha.com",
     ],
-    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Only allow the wildcard localhost regex in development
+if os.getenv("DEBUG", "").lower() in ("1", "true"):
+    _cors_kwargs["allow_origin_regex"] = r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 # Trusted hosts — reject requests with spoofed Host headers
 app.add_middleware(
@@ -112,6 +115,16 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-Frame-Options"] = "DENY"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' wss: https:; "
+        "font-src 'self' https:; "
+        "frame-ancestors 'none'"
+    )
+    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 

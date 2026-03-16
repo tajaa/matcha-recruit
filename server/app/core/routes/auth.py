@@ -3,6 +3,8 @@ import json
 import logging
 import re
 import secrets
+import time
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
@@ -54,6 +56,41 @@ TEST_ACCOUNT_FEATURES = {
 }
 
 BROKER_BRANDING_KEY_RE = re.compile(r"^[a-z0-9-]{2,120}$")
+
+# ---------------------------------------------------------------------------
+# Login rate limiting: 5 per minute, 20 per hour per IP
+# ---------------------------------------------------------------------------
+_LOGIN_MINUTE_LIMIT = 5
+_LOGIN_MINUTE_WINDOW = 60  # seconds
+_LOGIN_HOUR_LIMIT = 20
+_LOGIN_HOUR_WINDOW = 3600  # seconds
+_login_attempts: dict[str, list[float]] = defaultdict(list)
+
+
+def _check_login_rate_limit(ip: str) -> None:
+    """Raise 429 if IP exceeds login attempt limits."""
+    now = time.monotonic()
+    # Prune entries older than the hour window
+    _login_attempts[ip] = [t for t in _login_attempts[ip] if t > now - _LOGIN_HOUR_WINDOW]
+
+    minute_count = sum(1 for t in _login_attempts[ip] if t > now - _LOGIN_MINUTE_WINDOW)
+    hour_count = len(_login_attempts[ip])
+
+    if minute_count >= _LOGIN_MINUTE_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again in a minute.",
+            headers={"Retry-After": "60"},
+        )
+
+    if hour_count >= _LOGIN_HOUR_LIMIT:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later.",
+            headers={"Retry-After": "3600"},
+        )
+
+    _login_attempts[ip].append(now)
 
 
 def _json_object(value) -> dict:
@@ -1075,8 +1112,11 @@ async def _seed_test_account_data(
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(request: LoginRequest):
+async def login(request: LoginRequest, req: Request):
     """Authenticate user and return tokens."""
+    client_ip = req.client.host if req.client else "unknown"
+    _check_login_rate_limit(client_ip)
+
     async with get_connection() as conn:
         user = await conn.fetchrow(
             "SELECT id, email, password_hash, role, is_active, created_at, last_login FROM users WHERE lower(email) = lower($1)",
@@ -1120,7 +1160,7 @@ async def login(request: LoginRequest):
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(request: RefreshTokenRequest):
     """Refresh access token using refresh token."""
-    payload = decode_token(request.refresh_token)
+    payload = decode_token(request.refresh_token, expected_type="refresh")
 
     if payload is None:
         raise HTTPException(
@@ -1422,9 +1462,6 @@ async def validate_broker_client_invite(token: str):
 @router.post("/broker-client-invite/{token}/accept")
 async def accept_broker_client_invite(token: str, request: BrokerClientInviteAcceptRequest):
     """Accept a broker client invite and provision the first company client admin user."""
-    if len(request.password) < 8:
-        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
-
     async with get_connection() as conn:
         async with conn.transaction():
             invite = await conn.fetchrow(
@@ -2316,12 +2353,7 @@ async def change_password(
                 detail="Current password is incorrect"
             )
 
-        # Validate new password
-        if len(request.new_password) < 8:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="New password must be at least 8 characters"
-            )
+        # min_length=8 is enforced by ChangePasswordRequest model
 
         # Update password
         new_hash = hash_password(request.new_password)

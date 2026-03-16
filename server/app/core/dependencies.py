@@ -18,7 +18,7 @@ async def get_token_payload(
     from .services.auth import decode_token
 
     token = credentials.credentials
-    payload = decode_token(token)
+    payload = decode_token(token, expected_type="access")
 
     if payload is None:
         raise HTTPException(

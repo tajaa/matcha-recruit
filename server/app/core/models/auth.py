@@ -43,6 +43,7 @@ class TokenPayload(BaseModel):
     email: str
     role: UserRole
     exp: int
+    token_type: Optional[str] = None  # "access" or "refresh"
 
 
 class RefreshTokenRequest(BaseModel):
@@ -52,13 +53,13 @@ class RefreshTokenRequest(BaseModel):
 # Registration models for each user type
 class AdminRegister(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
     name: str
 
 
 class ClientRegister(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
     name: str
     company_id: UUID
     phone: Optional[str] = None
@@ -67,14 +68,14 @@ class ClientRegister(BaseModel):
 
 class CandidateRegister(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
     name: str
     phone: Optional[str] = None
 
 
 class EmployeeRegister(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
     first_name: str
     last_name: str
     company_id: UUID
@@ -96,7 +97,7 @@ class BusinessRegister(BaseModel):
 
     # First admin user info
     email: EmailStr
-    password: str
+    password: str = Field(min_length=8)
     name: str
     phone: Optional[str] = None
     job_title: Optional[str] = None
@@ -214,7 +215,7 @@ class CurrentUser(BaseModel):
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
-    new_password: str
+    new_password: str = Field(min_length=8)
 
 
 class ChangeEmailRequest(BaseModel):
@@ -247,7 +248,7 @@ class BrokerClientInviteDetailsResponse(BaseModel):
 
 
 class BrokerClientInviteAcceptRequest(BaseModel):
-    password: str
+    password: str = Field(min_length=8)
     name: Optional[str] = None
     phone: Optional[str] = None
     job_title: Optional[str] = None

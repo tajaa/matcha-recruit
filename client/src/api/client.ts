@@ -1,5 +1,35 @@
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
+let _refreshing: Promise<boolean> | null = null
+
+async function _tryRefresh(): Promise<boolean> {
+  const refreshToken = localStorage.getItem('matcha_refresh_token')
+  if (!refreshToken) return false
+
+  try {
+    const res = await fetch(`${BASE}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+
+    if (!res.ok) return false
+
+    const data = await res.json()
+    localStorage.setItem('matcha_access_token', data.access_token)
+    localStorage.setItem('matcha_refresh_token', data.refresh_token)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function _logout() {
+  localStorage.removeItem('matcha_access_token')
+  localStorage.removeItem('matcha_refresh_token')
+  window.location.href = '/login'
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('matcha_access_token')
   const res = await fetch(`${BASE}${path}`, {
@@ -10,6 +40,33 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   })
+
+  if (res.status === 401 && token) {
+    // Deduplicate concurrent refresh attempts
+    if (!_refreshing) {
+      _refreshing = _tryRefresh().finally(() => { _refreshing = null })
+    }
+
+    const ok = await _refreshing
+    if (ok) {
+      // Retry with new token
+      const newToken = localStorage.getItem('matcha_access_token')
+      const retry = await fetch(`${BASE}${path}`, {
+        ...init,
+        headers: {
+          'Content-Type': 'application/json',
+          ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}),
+          ...init?.headers,
+        },
+      })
+      if (!retry.ok) throw new Error(`${retry.status} ${retry.statusText}`)
+      return retry.json()
+    }
+
+    _logout()
+    throw new Error('Session expired')
+  }
+
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   return res.json()
 }

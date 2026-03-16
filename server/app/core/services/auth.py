@@ -109,8 +109,14 @@ def decode_interview_ws_token(token: str) -> tuple[Optional[UUID], bool]:
         return None, False
 
 
-def decode_token(token: str) -> Optional[TokenPayload]:
-    """Decode and validate a JWT token."""
+def decode_token(token: str, expected_type: Optional[str] = None) -> Optional[TokenPayload]:
+    """Decode and validate a JWT token.
+
+    Args:
+        token: The JWT token string.
+        expected_type: If set, reject tokens whose 'type' field doesn't match
+                       (e.g. "refresh" to ensure only refresh tokens are accepted).
+    """
     settings = get_settings()
 
     try:
@@ -119,11 +125,18 @@ def decode_token(token: str) -> Optional[TokenPayload]:
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm]
         )
+
+        token_type = payload.get("type")
+
+        if expected_type and token_type != expected_type:
+            return None
+
         return TokenPayload(
             sub=payload["sub"],
             email=payload["email"],
             role=payload["role"],
-            exp=payload["exp"]
+            exp=payload["exp"],
+            token_type=token_type,
         )
     except (JWTError, KeyError, TypeError):
         return None
