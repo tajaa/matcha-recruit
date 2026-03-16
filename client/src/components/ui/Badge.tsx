@@ -7,8 +7,10 @@ const variants = {
   neutral: 'bg-zinc-800 text-zinc-400 border-zinc-700',
 } as const
 
+export type BadgeVariant = keyof typeof variants
+
 type BadgeProps = ComponentProps<'span'> & {
-  variant?: keyof typeof variants
+  variant?: BadgeVariant
 }
 
 export function Badge({ variant = 'neutral', className = '', ...props }: BadgeProps) {

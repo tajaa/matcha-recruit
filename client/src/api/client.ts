@@ -30,15 +30,20 @@ function _logout() {
   window.location.href = '/login'
 }
 
+function _buildHeaders(init?: RequestInit, token?: string | null): HeadersInit {
+  const isFormData = init?.body instanceof FormData
+  return {
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    ...init?.headers,
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const token = localStorage.getItem('matcha_access_token')
   const res = await fetch(`${BASE}${path}`, {
     ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...init?.headers,
-    },
+    headers: _buildHeaders(init, token),
   })
 
   if (res.status === 401 && token) {
@@ -53,11 +58,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       const newToken = localStorage.getItem('matcha_access_token')
       const retry = await fetch(`${BASE}${path}`, {
         ...init,
-        headers: {
-          'Content-Type': 'application/json',
-          ...(newToken ? { Authorization: `Bearer ${newToken}` } : {}),
-          ...init?.headers,
-        },
+        headers: _buildHeaders(init, newToken),
       })
       if (!retry.ok) throw new Error(`${retry.status} ${retry.statusText}`)
       return retry.json()
@@ -80,4 +81,6 @@ export const api = {
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  upload: <T>(path: string, formData: FormData) =>
+    request<T>(path, { method: 'POST', body: formData }),
 }
