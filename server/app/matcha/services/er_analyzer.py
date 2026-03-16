@@ -400,6 +400,13 @@ Return ONLY a JSON object with this structure:
   ]
 }}
 
+HEALTHCARE / CLINICAL ENVIRONMENT RULES:
+- If the case involves a clinical, hospital, or healthcare setting, you MUST distinguish between EMPLOYEES and NON-EMPLOYEES (patients, patient family members, visitors).
+- NEVER recommend that HR conduct formal interviews with patients or patient family members. HR has no authority over non-employees and doing so violates the organization's duty of care.
+- For patient/family witness accounts, recommend that HR obtain statements through the Patient Advocate, Risk Management, or existing formal grievance/complaint channels — NOT through direct HR interrogation.
+- When evidence references a patient or family member as a witness, recommend "Request the Patient Advocate's formal grievance report" or "Obtain the documented complaint through Risk Management" — not "Interview [family member name]."
+- Clinical staff (nurses, doctors, aides) ARE employees and can be interviewed by HR, but be sensitive to clinical scheduling and patient care responsibilities.
+
 Constraints:
 1. Provide 3 to 4 cards, sorted by urgency.
 2. Allowed action.type values: "run_analysis", "open_tab", "search_evidence", "upload_document".
@@ -411,6 +418,7 @@ Constraints:
 8. Never include legal conclusions; focus on next investigative steps.
 9. Focus on what the HUMAN must do: interview people, collect records, request documents. Do NOT recommend running system analyses that are already completed.
 10. Always use real names from the documents — never use generic placeholders like "the employee" or "reporting party" when names are available.
+11. In healthcare settings, never recommend HR interview patients, patient family members, or other non-employees. Use Patient Advocate or Risk Management channels instead.
 """
 
 
