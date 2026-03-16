@@ -1307,45 +1307,291 @@ Separate JWT system. Base path: `/api/chat`
 
 Base path: `/api/risk-assessment`
 
-### GET `/`
-Auth: admin or client. **Query:** `company_id?` (admin override)
+### Access Matrix
 
-**Response:**
-```json
-{
-  "overall_score": "int", "overall_band": "string",
-  "dimensions": { "compliance": {}, "incidents": {}, "er_cases": {}, "workforce": {}, "legislative": {} },
-  "computed_at": "datetime", "weights": {},
-  "report?": "string", "recommendations": [{ "dimension", "priority", "title", "guidance" }]
+| Endpoint group | client / employee | admin |
+|---|---|---|
+| `GET /` | ✅ own company snapshot | ✅ any company via `?company_id=` |
+| `GET /history` | ✅ | ✅ + `?company_id=` |
+| `GET /monte-carlo` | ✅ | ✅ + `?company_id=` |
+| `GET /cohorts` | ✅ | ✅ + `?company_id=` |
+| `GET /benchmarks` | ✅ | ✅ + `?company_id=` |
+| `GET /anomalies` | ✅ | ✅ + `?company_id=` |
+| `GET/POST/PUT /action-items` | ✅ own company | ✅ |
+| `GET /assignable-users` | ✅ | ✅ |
+| `GET/PUT /admin/weights` | ❌ | ✅ |
+| `POST /admin/run/{company_id}` | ❌ | ✅ |
+| `POST /admin/monte-carlo/{company_id}` | ❌ | ✅ |
+
+### Architecture Notes
+- **Snapshot pattern**: Admin triggers computation; the result is stored once. Client always reads the latest stored snapshot — no live computation on client requests.
+- **`company_id` query param**: Admin-only override on all read endpoints. For client/employee roles the param is ignored and their own company is used.
+- **Gemini AI**: Generates `report` (narrative string) and `recommendations[]` during snapshot computation (`POST /admin/run/{company_id}`).
+- **Cost of Risk**: Nested inside each dimension as `dimensions.{dim}.raw_data.cost_of_risk` — a `CostOfRisk` object with line-item array.
+- **Dimension weights**: Stored in `platform_settings` table, adjustable via admin weights endpoints. Default: `compliance=0.30`, `incidents=0.25`, `er_cases=0.25`, `workforce=0.15`, `legislative=0.05`.
+
+---
+
+### TypeScript Types
+
+```typescript
+// ── Shared primitives ──────────────────────────────────────────────────
+
+interface CostLineItem {
+  label: string;
+  amount: number;          // USD estimate
+  basis: string;           // explanation of how the amount was derived
+}
+
+interface CostOfRisk {
+  total: number;
+  items: CostLineItem[];
+}
+
+interface DimensionResult {
+  score: number;           // 0–100
+  weight: number;          // e.g. 0.30
+  weighted_score: number;
+  details: Record<string, unknown>;   // dimension-specific sub-metrics
+  raw_data: {
+    cost_of_risk?: CostOfRisk;
+    [key: string]: unknown;
+  };
+}
+
+interface RiskRecommendation {
+  dimension: string;       // "compliance" | "incidents" | "er_cases" | "workforce" | "legislative"
+  priority: "high" | "medium" | "low";
+  title: string;
+  guidance: string;
+}
+
+interface RiskAssessmentResult {
+  overall_score: number;   // 0–100
+  overall_band: "Low" | "Moderate" | "High" | "Critical";
+  dimensions: {
+    compliance: DimensionResult;
+    incidents: DimensionResult;
+    er_cases: DimensionResult;
+    workforce: DimensionResult;
+    legislative: DimensionResult;
+  };
+  weights: {
+    compliance: number;
+    incidents: number;
+    er_cases: number;
+    workforce: number;
+    legislative: number;
+  };
+  computed_at: string;     // ISO datetime
+  report?: string;         // Gemini narrative
+  recommendations: RiskRecommendation[];
+}
+
+// ── History ────────────────────────────────────────────────────────────
+
+interface RiskHistoryEntry {
+  computed_at: string;
+  overall_score: number;
+  overall_band: string;
+  dimension_scores: {
+    compliance: number;
+    incidents: number;
+    er_cases: number;
+    workforce: number;
+    legislative: number;
+  };
+}
+
+// ── Monte Carlo ────────────────────────────────────────────────────────
+
+interface MonteCarloCategoryResult {
+  category: string;
+  expected_loss: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  p95: number;
+}
+
+interface MonteCarloAggregateResult {
+  expected_loss: number;
+  p50: number;
+  p75: number;
+  p90: number;
+  p95: number;
+  histogram: Array<{ bin_start: number; bin_end: number; frequency: number }>;
+}
+
+interface MonteCarloResult {
+  simulations: number;            // number of iterations run
+  aggregate: MonteCarloAggregateResult;
+  by_category: MonteCarloCategoryResult[];
+  computed_at: string;
+}
+
+// ── Cohorts ────────────────────────────────────────────────────────────
+
+interface CohortResult {
+  cohort_key: string;             // e.g. "Engineering", "2023-Q1"
+  dimension: string;
+  score: number;
+  count: number;                  // number of employees in cohort
+}
+
+// ── Benchmarks ────────────────────────────────────────────────────────
+
+interface BenchmarkMetric {
+  dimension: string;
+  company_score: number;
+  industry_median: number;
+  industry_p25: number;
+  industry_p75: number;
+  percentile_rank: number;        // 0–100, where company falls vs peers
+}
+
+interface BenchmarkResult {
+  naics_code: string;
+  naics_label: string;
+  peer_count: number;
+  metrics: BenchmarkMetric[];
+  computed_at: string;
+}
+
+// ── Anomaly Detection ─────────────────────────────────────────────────
+
+interface MetricTimeSeries {
+  metric: string;
+  points: Array<{ date: string; value: number }>;
+}
+
+interface AnomalyItem {
+  metric: string;
+  detected_at: string;
+  value: number;
+  expected_range: [number, number];
+  sigma: number;                  // standard deviations from mean
+  dimension: string;
+}
+
+interface AnomalyDetectionResult {
+  anomalies: AnomalyItem[];
+  time_series: MetricTimeSeries[];
+  months_analyzed: number;
+}
+
+// ── Action Items ──────────────────────────────────────────────────────
+
+interface RiskActionItem {
+  id: number;
+  company_id: number;
+  title: string;
+  description?: string;
+  source_type?: "wage_violation" | "er_case" | string;
+  source_ref?: string;
+  assigned_to?: number;           // user_id
+  assigned_to_name?: string;      // resolved display name
+  due_date?: string;              // ISO date
+  status: "open" | "completed";
+  created_at: string;
+  updated_at: string;
+}
+
+interface RiskActionItemCreate {
+  title: string;
+  description?: string;
+  source_type?: string;
+  source_ref?: string;
+  assigned_to?: number;
+  due_date?: string;
+}
+
+interface RiskActionItemUpdate {
+  assigned_to?: number;
+  due_date?: string;
+  status?: "open" | "completed";
+  title?: string;
+  description?: string;
+}
+
+// ── Assignable Users ──────────────────────────────────────────────────
+
+interface AssignableUser {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
 }
 ```
 
-### GET `/history`
-**Query:** `months` (1-36, default 12). Time-series points with dimension scores.
+---
 
-### GET `/monte-carlo`
-Simulation results from latest snapshot.
+### Endpoints
 
-### GET `/cohorts`
-**Query:** `dimension` (department|location|hire_quarter|tenure). Heat maps.
+#### `GET /`
+Auth: admin or client/employee.
+**Query:** `company_id?` (admin-only override)
+**Response:** `RiskAssessmentResult`
 
-### GET `/benchmarks`
-NAICS industry peer comparison.
+#### `GET /history`
+**Query:** `months` (int, 1–36, default 12)
+**Response:** `RiskHistoryEntry[]` — ordered oldest → newest
 
-### GET `/anomalies`
-**Query:** `months` (6-36, default 24). Statistical process control.
+#### `GET /monte-carlo`
+**Query:** `company_id?` (admin-only)
+**Response:** `MonteCarloResult` — pulled from latest stored snapshot
 
-### Admin:
-- **GET `/admin/weights`** → `{ "compliance", "incidents", "er_cases", "workforce", "legislative" }` (must sum to 1.0)
-- **PUT `/admin/weights`**
-- **POST `/admin/run/{company_id}`** — compute + store snapshot
-- **POST `/admin/monte-carlo/{company_id}`**
+#### `GET /cohorts`
+**Query:** `dimension` — `"department" | "location" | "hire_quarter" | "tenure"`, `company_id?` (admin-only)
+**Response:** `CohortResult[]`
 
-### Action Items:
-- **GET `/action-items`** — Query: `status` (open|all). Returns items with `assigned_to_name`, `due_date`, `status`
-- **POST `/action-items`** — `{ "title", "description?", "source_type": "wage_violation|er_case", "source_ref?", "assigned_to?", "due_date?" }`
-- **PUT `/action-items/{item_id}`** — `{ "assigned_to?", "due_date?", "status?": "open|completed" }`
-- **GET `/assignable-users`** — company owner + all admins
+#### `GET /benchmarks`
+**Query:** `company_id?` (admin-only)
+**Response:** `BenchmarkResult`
+
+#### `GET /anomalies`
+**Query:** `months` (int, 6–36, default 24), `company_id?` (admin-only)
+**Response:** `AnomalyDetectionResult`
+
+#### `GET /action-items`
+**Query:** `status` — `"open"` (default) | `"all"`
+**Response:** `RiskActionItem[]`
+
+#### `POST /action-items`
+**Body:** `RiskActionItemCreate`
+**Response:** `RiskActionItem`
+
+#### `PUT /action-items/{item_id}`
+**Body:** `RiskActionItemUpdate`
+**Response:** `RiskActionItem`
+
+#### `GET /assignable-users`
+Returns company owner + all users with admin role for the company.
+**Response:** `AssignableUser[]`
+
+#### Admin: `GET /admin/weights`
+**Response:**
+```typescript
+{
+  compliance: number;
+  incidents: number;
+  er_cases: number;
+  workforce: number;
+  legislative: number;   // all five must sum to 1.0
+}
+```
+
+#### Admin: `PUT /admin/weights`
+**Body:** same shape as above (all five fields required, must sum to 1.0)
+**Response:** updated weights object
+
+#### Admin: `POST /admin/run/{company_id}`
+Triggers full snapshot computation: scores all 5 dimensions, runs Gemini for `report` + `recommendations`, persists result.
+**Response:** `RiskAssessmentResult`
+
+#### Admin: `POST /admin/monte-carlo/{company_id}`
+Re-runs Monte Carlo simulation for the company's latest snapshot and updates stored simulation result.
+**Response:** `MonteCarloResult`
 
 ---
 
