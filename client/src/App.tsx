@@ -7,6 +7,7 @@ import ClientSidebar from './components/ClientSidebar'
 import Companies from './pages/admin/Companies'
 import Features from './pages/admin/Features'
 import Settings from './pages/admin/Settings'
+import JurisdictionData from './pages/admin/JurisdictionData'
 import Dashboard from './pages/app/Dashboard'
 import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="companies" element={<Companies />} />
         <Route path="features" element={<Features />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="jurisdiction-data" element={<JurisdictionData />} />
       </Route>
       <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
         <Route index element={<Dashboard />} />
