@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { api } from '../../api/client'
 import { Button, Input } from '../../components/ui'
 import { categoryLabel } from '../../types/compliance'
 import type { RequirementCategory } from '../../types/compliance'
+import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -63,6 +64,21 @@ function getCategoryLabel(cat: string) {
   return categoryLabel[cat as RequirementCategory] ?? cat
 }
 
+const SHORT_LABELS: Record<string, string> = {
+  minimum_wage: 'Wage', overtime: 'OT', sick_leave: 'Sick', family_leave: 'FMLA',
+  anti_discrimination: 'Disc', workplace_safety: 'Safety', workers_comp: 'WC',
+  tax_withholding: 'Tax', pay_frequency: 'Pay', meal_breaks: 'Meals',
+  rest_breaks: 'Rest', final_pay: 'Final', posting_requirements: 'Post',
+  pto: 'PTO', fair_scheduling: 'Sched', ban_the_box: 'BtB', non_compete: 'NC',
+  harassment_training: 'Train', data_privacy: 'Priv', whistleblower: 'Whistle',
+  accommodations: 'ADA', other: 'Other',
+}
+
+function fmtDate(d: string | null) {
+  if (!d) return '—'
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function JurisdictionData() {
@@ -70,9 +86,15 @@ export default function JurisdictionData() {
   const [overview, setOverview] = useState<DataOverview | null>(null)
   const [loadingOverview, setLoadingOverview] = useState(true)
   const [search, setSearch] = useState('')
-  const [expandedState, setExpandedState] = useState<string | null>(null)
+  const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set())
+  const [selectedCityId, setSelectedCityId] = useState<string | null>(null)
+  const [selectedCityMeta, setSelectedCityMeta] = useState<{ city: string; state: string; missing: string[] } | null>(null)
   const [bookmarks, setBookmarks] = useState<BookmarkedReq[]>([])
   const [loadingBookmarks, setLoadingBookmarks] = useState(false)
+
+  // Missing data filters
+  const [filterState, setFilterState] = useState('')
+  const [filterStaleOnly, setFilterStaleOnly] = useState(false)
 
   // Top metro SSE
   const [metroScanning, setMetroScanning] = useState(false)
@@ -94,6 +116,19 @@ export default function JurisdictionData() {
 
   useEffect(() => { fetchOverview() }, [fetchOverview])
   useEffect(() => { if (tab === 'bookmarks') fetchBookmarks() }, [tab, fetchBookmarks])
+
+  function toggleState(state: string) {
+    setExpandedStates((prev) => {
+      const next = new Set(prev)
+      next.has(state) ? next.delete(state) : next.add(state)
+      return next
+    })
+  }
+
+  function openCity(cityEntry: CityEntry, state: string) {
+    setSelectedCityId(cityEntry.id)
+    setSelectedCityMeta({ city: cityEntry.city, state, missing: cityEntry.categories_missing })
+  }
 
   function startMetroCheck() {
     setMetroScanning(true); setMetroMessages([])
@@ -131,45 +166,60 @@ export default function JurisdictionData() {
   }
 
   const sum = overview?.summary
-
-  // Filter states/cities by search
+  const requiredCats = sum?.required_categories ?? []
   const allStates = overview?.states ?? []
-  const filteredStates = allStates.filter((s) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return s.state.toLowerCase().includes(q) || s.cities.some((c) => c.city.toLowerCase().includes(q))
-  })
+
+  const filteredStates = useMemo(() => {
+    return allStates.filter((s) => {
+      if (!search) return true
+      const q = search.toLowerCase()
+      return s.state.toLowerCase().includes(q) || s.cities.some((c) => c.city.toLowerCase().includes(q))
+    })
+  }, [allStates, search])
 
   // Missing data: cities sorted by most missing categories
-  const missingCities: (CityEntry & { stateName: string })[] = []
-  for (const st of allStates) {
-    for (const city of st.cities) {
-      if (city.categories_missing.length > 0) {
-        missingCities.push({ ...city, stateName: st.state })
+  const missingCities = useMemo(() => {
+    const rows: (CityEntry & { stateName: string })[] = []
+    for (const st of allStates) {
+      if (filterState && st.state !== filterState) continue
+      for (const city of st.cities) {
+        if (city.categories_missing.length === 0) continue
+        if (filterStaleOnly && !city.is_stale) continue
+        rows.push({ ...city, stateName: st.state })
       }
     }
-  }
-  missingCities.sort((a, b) => b.categories_missing.length - a.categories_missing.length)
+    return rows.sort((a, b) => b.categories_missing.length - a.categories_missing.length)
+  }, [allStates, filterState, filterStaleOnly])
 
   // Preemption rules grouped by state
-  const preemptionByState: Record<string, PreemptionRule[]> = {}
-  for (const rule of overview?.preemption_rules ?? []) {
-    if (!preemptionByState[rule.state]) preemptionByState[rule.state] = []
-    preemptionByState[rule.state].push(rule)
-  }
+  const preemptionByState = useMemo(() => {
+    const map: Record<string, PreemptionRule[]> = {}
+    for (const rule of overview?.preemption_rules ?? []) {
+      if (!map[rule.state]) map[rule.state] = []
+      map[rule.state].push(rule)
+    }
+    return map
+  }, [overview])
 
-  if (loadingOverview && tab !== 'bookmarks') return <p className="text-sm text-zinc-500">Loading...</p>
+  // Unique states for missing data filter
+  const stateOptions = useMemo(() => [...new Set(allStates.map((s) => s.state))].sort(), [allStates])
+
+  if (loadingOverview) return <p className="text-sm text-zinc-500">Loading...</p>
+  if (!overview || !sum) return <p className="text-sm text-zinc-600">Failed to load data. Check that the server is running and you're logged in as admin.</p>
 
   return (
     <div>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Jurisdiction Data</h1>
-          <p className="mt-1 text-sm text-zinc-500">Repository analytics — coverage, data quality, and gaps.</p>
+          <p className="mt-1 text-sm text-zinc-500">Compliance data repository overview</p>
         </div>
-        <Button variant="secondary" size="sm" disabled={metroScanning} onClick={startMetroCheck}>
-          {metroScanning ? 'Running Top 15...' : 'Run Top 15 Metros'}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" size="sm" disabled={metroScanning} onClick={startMetroCheck}>
+            {metroScanning ? 'Running Top 15...' : 'Run Top 15 Metros'}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={fetchOverview}>Refresh</Button>
+        </div>
       </div>
 
       {/* Metro SSE progress */}
@@ -181,8 +231,24 @@ export default function JurisdictionData() {
         </div>
       )}
 
+      {/* KPI Bar */}
+      <div className="mt-4 grid grid-cols-5 gap-3">
+        {[
+          { label: 'States', value: `${sum.total_states}/50` },
+          { label: 'Cities', value: sum.total_cities.toLocaleString() },
+          { label: 'Coverage', value: `${sum.category_coverage_pct}%`, color: sum.category_coverage_pct >= 70 ? 'text-emerald-400' : sum.category_coverage_pct >= 40 ? 'text-amber-400' : 'text-red-400' },
+          { label: 'Tier 1', value: `${sum.tier1_pct}%`, color: sum.tier1_pct >= 50 ? 'text-emerald-400' : sum.tier1_pct >= 20 ? 'text-amber-400' : 'text-red-400' },
+          { label: 'Stale >90d', value: sum.stale_count.toString(), color: sum.stale_count === 0 ? 'text-emerald-400' : sum.stale_count <= 10 ? 'text-amber-400' : 'text-red-400' },
+        ].map((s) => (
+          <div key={s.label} className="border border-zinc-800 rounded-lg px-3 py-3">
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">{s.label}</p>
+            <p className={`text-2xl font-bold tracking-tight mt-0.5 ${'color' in s ? s.color : 'text-zinc-100'}`}>{s.value}</p>
+          </div>
+        ))}
+      </div>
+
       {/* Tabs */}
-      <div className="flex items-center gap-1 mt-4 mb-5">
+      <div className="flex items-center gap-1 mt-5 mb-5">
         {([
           { id: 'coverage' as Tab, label: 'Coverage' },
           { id: 'missing' as Tab, label: `Missing Data${missingCities.length ? ` (${missingCities.length})` : ''}` },
@@ -196,151 +262,185 @@ export default function JurisdictionData() {
         ))}
       </div>
 
-      {/* ── Coverage ── */}
+      {/* ── Coverage Tab ── */}
       {tab === 'coverage' && (
-        <div className="space-y-3">
-          {sum && (
-            <div className="grid grid-cols-3 gap-3 mb-4">
-              {[
-                { label: 'States', value: sum.total_states },
-                { label: 'Cities', value: sum.total_cities },
-                { label: 'Requirements', value: sum.total_requirements },
-              ].map((s) => (
-                <div key={s.label} className="border border-zinc-800 rounded-lg px-4 py-3 text-center">
-                  <p className="text-xl font-semibold text-zinc-100">{s.value}</p>
-                  <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">{s.label}</p>
+        <div className={selectedCityId ? 'grid grid-cols-5 gap-4' : ''}>
+          <div className={selectedCityId ? 'col-span-2' : ''}>
+            <div className="border border-zinc-800 rounded-lg">
+              {/* Search */}
+              <div className="px-3 py-2 border-b border-zinc-800/60">
+                <Input label="" placeholder="Filter states / cities..." value={search} onChange={(e) => setSearch(e.target.value)} />
+              </div>
+
+              {/* Category legend */}
+              {requiredCats.length > 0 && !selectedCityId && (
+                <div className="px-3 py-2 border-b border-zinc-800/60 flex flex-wrap gap-x-3 gap-y-1">
+                  {requiredCats.map((cat) => (
+                    <span key={cat} className="text-[10px] text-zinc-500 font-medium" title={getCategoryLabel(cat)}>
+                      {SHORT_LABELS[cat] || cat}
+                    </span>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
+              )}
 
-          <Input label="" placeholder="Search state or city..." value={search} onChange={(e) => setSearch(e.target.value)} />
-
-          <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60 max-h-[65vh] overflow-y-auto">
-            {filteredStates.map((s) => {
-              const isOpen = expandedState === s.state || !!search
-              const citiesToShow = search
-                ? s.cities.filter((c) => c.city.toLowerCase().includes(search.toLowerCase()))
-                : s.cities
-              return (
-                <div key={s.state}>
-                  <button type="button" onClick={() => setExpandedState(isOpen && !search ? null : s.state)}
-                    className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-zinc-800/30 transition-colors">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-zinc-200">{s.state}</span>
-                      <span className="text-[11px] text-zinc-500">{s.city_count} cities</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`text-[11px] ${s.coverage_pct >= 80 ? 'text-zinc-400' : s.coverage_pct >= 50 ? 'text-amber-400/70' : 'text-red-400/70'}`}>
-                        {s.coverage_pct}%
-                      </span>
-                      <span className="text-zinc-600">{isOpen && !search ? '▾' : '▸'}</span>
-                    </div>
-                  </button>
-                  {isOpen && citiesToShow.map((city) => (
-                    <div key={city.id} className="px-4 py-2 border-t border-zinc-800/40">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5">
-                          {city.is_stale && <span className="text-[10px] text-amber-400/70">⚠</span>}
-                          <span className="text-sm text-zinc-300">{city.city}</span>
-                          <span className="text-[11px] text-zinc-600 ml-1">
-                            {city.categories_present.length}/{city.categories_present.length + city.categories_missing.length}
-                          </span>
+              {/* State rows */}
+              <div className="max-h-[60vh] overflow-y-auto divide-y divide-zinc-800/60">
+                {filteredStates.map((s) => {
+                  const isOpen = expandedStates.has(s.state) || !!search
+                  const citiesToShow = search
+                    ? s.cities.filter((c) => c.city.toLowerCase().includes(search.toLowerCase()))
+                    : s.cities
+                  return (
+                    <div key={s.state}>
+                      <button type="button" onClick={() => { if (!search) toggleState(s.state) }}
+                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-zinc-800/30 transition-colors">
+                        <span className="text-zinc-600 w-4 text-center text-xs">{isOpen ? '▾' : '▸'}</span>
+                        <span className="text-sm font-bold text-zinc-200 w-8 font-mono">{s.state}</span>
+                        <span className="text-[11px] text-zinc-500 w-16">{s.city_count} {s.city_count === 1 ? 'city' : 'cities'}</span>
+                        <div className="flex-1 flex items-center gap-2">
+                          <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all ${s.coverage_pct >= 80 ? 'bg-emerald-500' : s.coverage_pct >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
+                              style={{ width: `${s.coverage_pct}%` }}
+                            />
+                          </div>
+                          <span className="text-[11px] font-mono text-zinc-500 w-10 text-right">{s.coverage_pct}%</span>
                         </div>
-                        {city.last_verified_at && (
-                          <span className="text-[11px] text-zinc-600">{new Date(city.last_verified_at).toLocaleDateString()}</span>
-                        )}
-                      </div>
-                      {/* Category dots */}
-                      {(city.categories_present.length > 0 || city.categories_missing.length > 0) && (
-                        <div className="flex flex-wrap gap-1 mt-1.5">
-                          {city.categories_present.map((cat) => (
-                            <span key={cat} className="text-[10px] text-zinc-500 bg-zinc-800/80 px-1.5 py-0.5 rounded" title={getCategoryLabel(cat)}>
-                              {getCategoryLabel(cat)}
-                            </span>
-                          ))}
-                          {city.categories_missing.map((cat) => (
-                            <span key={cat} className="text-[10px] text-red-400/60 bg-red-500/10 px-1.5 py-0.5 rounded" title={`Missing: ${getCategoryLabel(cat)}`}>
-                              {getCategoryLabel(cat)}
-                            </span>
+                      </button>
+
+                      {isOpen && citiesToShow.length > 0 && (
+                        <div className="bg-zinc-900/30 border-t border-zinc-800/40">
+                          {citiesToShow.map((city) => (
+                            <button key={city.id} type="button"
+                              onClick={() => openCity(city, s.state)}
+                              className={`w-full flex items-center gap-2 px-4 py-1.5 text-left transition-colors group ${
+                                selectedCityId === city.id ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/30'
+                              }`}>
+                              <span className={`text-sm w-36 truncate ${city.is_stale ? 'text-amber-300/80' : 'text-zinc-300'}`}>
+                                {city.city}
+                              </span>
+                              {/* Category dots */}
+                              <div className="flex gap-1">
+                                {requiredCats.map((cat) => (
+                                  <div key={cat}
+                                    className={`w-2.5 h-2.5 rounded-full ${city.categories_present.includes(cat) ? 'bg-emerald-500' : 'bg-red-500/60'}`}
+                                    title={`${getCategoryLabel(cat)}: ${city.categories_present.includes(cat) ? 'Present' : 'Missing'}`}
+                                  />
+                                ))}
+                              </div>
+                              <span className="text-[11px] font-mono text-zinc-600 ml-auto">{fmtDate(city.last_verified_at)}</span>
+                            </button>
                           ))}
                         </div>
                       )}
                     </div>
-                  ))}
-                </div>
-              )
-            })}
+                  )
+                })}
+              </div>
+            </div>
           </div>
+
+          {/* City detail panel */}
+          {selectedCityId && selectedCityMeta && (
+            <div className="col-span-3">
+              <div className="flex items-center justify-between mb-2">
+                <button type="button" onClick={() => { setSelectedCityId(null); setSelectedCityMeta(null) }}
+                  className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">← Back to list</button>
+              </div>
+              <JurisdictionDetailPanel
+                id={selectedCityId}
+                city={selectedCityMeta.city}
+                state={selectedCityMeta.state}
+                categoriesMissing={selectedCityMeta.missing}
+                onCheckComplete={fetchOverview}
+              />
+            </div>
+          )}
         </div>
       )}
 
-      {/* ── Missing Data ── */}
+      {/* ── Missing Data Tab ── */}
       {tab === 'missing' && (
         <div>
+          {/* Filters */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className="flex gap-1">
+              <Button variant={!filterState ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilterState('')}>All States</Button>
+              {stateOptions.map((s) => (
+                <Button key={s} variant={filterState === s ? 'secondary' : 'ghost'} size="sm" onClick={() => setFilterState(s)}>{s}</Button>
+              ))}
+            </div>
+            <button type="button" onClick={() => setFilterStaleOnly(!filterStaleOnly)}
+              className={`text-xs px-2.5 py-1 rounded transition-colors ${filterStaleOnly ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
+              Stale only
+            </button>
+          </div>
+
           {missingCities.length === 0 ? (
             <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
-              <p className="text-sm text-zinc-600">All cities have complete category coverage.</p>
+              <p className="text-sm text-zinc-600">
+                {filterState || filterStaleOnly ? 'No cities match these filters.' : 'All cities have complete category coverage.'}
+              </p>
             </div>
           ) : (
             <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60 max-h-[70vh] overflow-y-auto">
               {missingCities.map((city) => (
-                <div key={city.id} className="px-4 py-2.5">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm text-zinc-200">{city.city}, {city.stateName}</p>
-                    <span className="text-[11px] text-red-400/70">−{city.categories_missing.length} missing</span>
+                <button key={city.id} type="button"
+                  onClick={() => { setSelectedCityId(city.id); setSelectedCityMeta({ city: city.city, state: city.stateName, missing: city.categories_missing }); setTab('coverage') }}
+                  className="w-full flex items-start gap-3 px-4 py-2.5 text-left hover:bg-zinc-800/30 transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-zinc-200">{city.city}, {city.stateName}</p>
+                      {city.is_stale && <span className="text-[10px] text-amber-400/70">stale</span>}
+                    </div>
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {city.categories_missing.map((cat) => (
+                        <span key={cat} className="text-[10px] text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded">
+                          {getCategoryLabel(cat)}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {city.categories_missing.map((cat) => (
-                      <span key={cat} className="text-[10px] text-red-400/60 bg-red-500/10 px-1.5 py-0.5 rounded">
-                        {getCategoryLabel(cat)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
+                  <span className="text-[11px] text-red-400/70 shrink-0 mt-0.5">−{city.categories_missing.length}</span>
+                </button>
               ))}
             </div>
           )}
         </div>
       )}
 
-      {/* ── Data Quality ── */}
-      {tab === 'quality' && sum && (
+      {/* ── Data Quality Tab ── */}
+      {tab === 'quality' && (
         <div className="space-y-5">
-          {/* Coverage / tier-1 */}
-          <div className="grid grid-cols-3 gap-3">
-            {[
-              { label: 'Category Coverage', value: `${sum.category_coverage_pct}%` },
-              { label: 'Tier-1 Data', value: `${sum.tier1_pct}%` },
-              { label: 'Stale (>90d)', value: sum.stale_count },
-            ].map((s) => (
-              <div key={s.label} className="border border-zinc-800 rounded-lg px-4 py-3 text-center">
-                <p className="text-xl font-semibold text-zinc-100">{s.value}</p>
-                <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">{s.label}</p>
-              </div>
-            ))}
-          </div>
-
-          {/* Tier breakdown */}
+          {/* Tier breakdown with bars */}
           <div>
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Tier Breakdown</h2>
-            <div className="grid grid-cols-3 gap-3">
+            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Tier Breakdown</h2>
+            <div className="border border-zinc-800 rounded-lg p-4 space-y-3">
               {[
-                { tier: 1, label: 'Structured', color: 'text-emerald-400' },
-                { tier: 2, label: 'Repository', color: 'text-amber-400' },
-                { tier: 3, label: 'Gemini', color: 'text-red-400' },
-              ].map(({ tier, label, color }) => (
-                <div key={tier} className="border border-zinc-800 rounded-lg px-4 py-3 text-center">
-                  <p className={`text-lg font-semibold ${color}`}>{sum.tier_breakdown[tier] ?? 0}</p>
-                  <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">Tier {tier} ({label})</p>
-                </div>
-              ))}
+                { tier: 1, label: 'Tier 1 — Structured (government feeds)', count: sum.tier_breakdown[1] ?? 0, color: 'bg-emerald-500', textColor: 'text-emerald-400' },
+                { tier: 2, label: 'Tier 2 — Repository (verified data)', count: sum.tier_breakdown[2] ?? 0, color: 'bg-amber-400', textColor: 'text-amber-400' },
+                { tier: 3, label: 'Tier 3 — Gemini (AI research)', count: sum.tier_breakdown[3] ?? 0, color: 'bg-red-400', textColor: 'text-red-400' },
+              ].map(({ tier, label, count, color, textColor }) => {
+                const total = (sum.tier_breakdown[1] ?? 0) + (sum.tier_breakdown[2] ?? 0) + (sum.tier_breakdown[3] ?? 0)
+                const pct = total > 0 ? Math.round((count / total) * 100) : 0
+                return (
+                  <div key={tier}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-sm text-zinc-300">{label}</span>
+                      <span className={`text-sm font-mono font-bold ${textColor}`}>{count} ({pct}%)</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+                      <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
           {/* Freshness */}
           <div>
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">Data Freshness</h2>
+            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Data Freshness</h2>
             <div className="grid grid-cols-4 gap-3">
               {[
                 { label: '< 7 days', value: sum.freshness['7d'], color: 'text-emerald-400' },
@@ -348,9 +448,9 @@ export default function JurisdictionData() {
                 { label: '< 90 days', value: sum.freshness['90d'], color: 'text-amber-400' },
                 { label: 'Stale', value: sum.freshness['stale'], color: 'text-red-400' },
               ].map((f) => (
-                <div key={f.label} className="border border-zinc-800 rounded-lg px-3 py-2.5 text-center">
-                  <p className={`text-lg font-semibold ${f.color}`}>{f.value}</p>
-                  <p className="text-[11px] text-zinc-500 uppercase tracking-wide mt-0.5">{f.label}</p>
+                <div key={f.label} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
+                  <p className={`text-2xl font-bold ${f.color}`}>{f.value}</p>
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{f.label}</p>
                 </div>
               ))}
             </div>
@@ -358,7 +458,7 @@ export default function JurisdictionData() {
         </div>
       )}
 
-      {/* ── Preemption Rules ── */}
+      {/* ── Preemption Rules Tab ── */}
       {tab === 'preemption' && (
         <div>
           {Object.keys(preemptionByState).length === 0 ? (
@@ -370,7 +470,7 @@ export default function JurisdictionData() {
               {Object.entries(preemptionByState).sort(([a], [b]) => a.localeCompare(b)).map(([state, rules]) => (
                 <div key={state}>
                   <div className="px-4 pt-3 pb-1">
-                    <p className="text-xs uppercase tracking-wide text-zinc-400 font-medium">{state}</p>
+                    <p className="text-xs uppercase tracking-wide text-zinc-400 font-bold font-mono">{state}</p>
                   </div>
                   {rules.map((rule, i) => (
                     <div key={i} className="flex items-start gap-3 px-4 py-2 border-t border-zinc-800/30">
@@ -379,9 +479,7 @@ export default function JurisdictionData() {
                         {rule.notes && <p className="text-xs text-zinc-500 mt-0.5">{rule.notes}</p>}
                       </div>
                       <span className={`text-[11px] shrink-0 px-2 py-0.5 rounded ${
-                        rule.allows_local_override
-                          ? 'bg-emerald-500/10 text-emerald-400'
-                          : 'bg-red-500/10 text-red-400'
+                        rule.allows_local_override ? 'bg-emerald-500/15 text-emerald-400' : 'bg-red-500/15 text-red-400'
                       }`}>
                         {rule.allows_local_override ? 'Local OK' : 'Preempted'}
                       </span>
@@ -394,7 +492,7 @@ export default function JurisdictionData() {
         </div>
       )}
 
-      {/* ── Bookmarks ── */}
+      {/* ── Bookmarks Tab ── */}
       {tab === 'bookmarks' && (
         <div>
           {loadingBookmarks ? (
