@@ -13,6 +13,7 @@ import {
   outcomeLabel,
   NOTE_TYPES,
   type ERCaseStatus,
+  type ERCaseOutcome,
   type SuggestedGuidanceResponse,
   type TimelineAnalysisResponse,
 } from '../../types/er'
@@ -118,9 +119,8 @@ export default function ERCaseDetail() {
                 caseId={caseId!}
                 guidance={guidance}
                 onGuidanceChange={setGuidance}
-                onBeginDetermination={async () => {
-                  await updateCase({ status: 'pending_determination' as ERCaseStatus })
-                  setTab('guidance')
+                onBeginDetermination={async (outcome: ERCaseOutcome) => {
+                  await updateCase({ status: 'closed' as ERCaseStatus, outcome })
                 }}
               />
             )}

@@ -2232,6 +2232,36 @@ async def get_similar_cases(
         return analysis
 
 
+@router.get("/{case_id}/guidance/suggested", response_model=SuggestedGuidanceResponse)
+async def get_cached_guidance(
+    case_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return the last cached guidance stored in intake_context.last_guidance."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Case not found")
+
+    async with get_connection() as conn:
+        await _verify_case_company(conn, case_id, company_id, current_user.role == "admin")
+        row = await conn.fetchrow(
+            "SELECT intake_context FROM er_cases WHERE id = $1",
+            case_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        intake_context = _normalize_intake_context(row["intake_context"]) or {}
+        last_guidance = intake_context.get("last_guidance") if isinstance(intake_context, dict) else None
+        if not last_guidance:
+            raise HTTPException(status_code=404, detail="No cached guidance")
+
+        try:
+            return SuggestedGuidanceResponse(**last_guidance)
+        except Exception:
+            raise HTTPException(status_code=404, detail="No cached guidance")
+
+
 @router.post("/{case_id}/guidance/suggested", response_model=SuggestedGuidanceResponse)
 async def generate_suggested_guidance(
     case_id: UUID,
@@ -2495,7 +2525,23 @@ async def generate_suggested_guidance(
         payload["determination_confidence"] = round(confidence, 2)
         payload["determination_signals"] = determination_signals
 
-        return SuggestedGuidanceResponse(**payload)
+        result = SuggestedGuidanceResponse(**payload)
+
+        # Cache result in intake_context.last_guidance
+        try:
+            existing_intake = _normalize_intake_context(case_row["intake_context"]) or {}
+            if not isinstance(existing_intake, dict):
+                existing_intake = {}
+            existing_intake["last_guidance"] = result.model_dump(mode="json")
+            await conn.execute(
+                "UPDATE er_cases SET intake_context = $1::jsonb WHERE id = $2",
+                json.dumps(existing_intake),
+                case_id,
+            )
+        except Exception as cache_err:
+            logger.warning("Failed to cache guidance for case %s: %s", case_id, cache_err)
+
+        return result
     except Exception as exc:
         logger.warning("Suggested guidance generation failed for case %s: %s", case_id, exc)
         fallback_payload["determination_confidence"] = floor_confidence
