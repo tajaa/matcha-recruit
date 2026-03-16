@@ -7,6 +7,11 @@ const backendWsTarget = backendTarget.replace(/^http/, 'ws')
 
 export default defineConfig({
   plugins: [react()],
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.ts',
+  },
   build: {
     rollupOptions: {
       output: {
