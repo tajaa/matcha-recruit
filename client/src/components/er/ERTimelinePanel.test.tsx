@@ -20,6 +20,7 @@ const CASE_ID = 'fc421ec9-22db-408e-89ae-2faaf3855839'
 
 const mockTimeline = {
   generated_at: '2026-03-15T10:00:00Z',
+  source_documents: ['doc1.pdf'],
   analysis: {
     events: [
       {
