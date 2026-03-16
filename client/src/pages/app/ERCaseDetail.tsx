@@ -114,7 +114,15 @@ export default function ERCaseDetail() {
               <ERDocumentList caseId={caseId!} onUploadComplete={() => { refetch(); setGuidance(null); setTimeline(null) }} />
             )}
             {tab === 'guidance' && (
-              <ERGuidancePanel caseId={caseId!} guidance={guidance} onGuidanceChange={setGuidance} />
+              <ERGuidancePanel
+                caseId={caseId!}
+                guidance={guidance}
+                onGuidanceChange={setGuidance}
+                onBeginDetermination={async () => {
+                  await updateCase({ status: 'pending_determination' as ERCaseStatus })
+                  setTab('guidance')
+                }}
+              />
             )}
             {tab === 'policy' && (
               <ERPolicyCheckPanel caseId={caseId!} />

@@ -14,11 +14,13 @@ type ERGuidancePanelProps = {
   guidance: SuggestedGuidanceResponse | null
   onGuidanceChange: (g: SuggestedGuidanceResponse | null) => void
   onActionClick?: (action: { type: string; label: string }) => void
+  onBeginDetermination?: () => void
 }
 
-export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionClick }: ERGuidancePanelProps) {
+export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionClick, onBeginDetermination }: ERGuidancePanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [determinationDismissed, setDeterminationDismissed] = useState(false)
 
   async function generate() {
     setLoading(true)
@@ -68,6 +70,54 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
         <p className="text-sm text-zinc-300">{guidance.summary}</p>
       </div>
 
+      {/* Preponderance of evidence threshold banner */}
+      {guidance.determination_suggested && !determinationDismissed && (
+        <div className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-4 py-4">
+          <div className="flex items-start gap-3">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-emerald-300">Preponderance of Evidence Reached</p>
+              <p className="text-xs text-emerald-400/70 mt-1 leading-relaxed">
+                Based on the evidence gathered ({Math.round(guidance.determination_confidence * 100)}% confidence),
+                this case has reached the preponderance of evidence threshold.
+                You can begin generating case determination options or continue investigating to strengthen the record.
+              </p>
+              {guidance.determination_signals.length > 0 && (
+                <ul className="mt-2 space-y-0.5">
+                  {guidance.determination_signals.map((signal, i) => (
+                    <li key={i} className="text-[11px] text-emerald-400/60">- {signal}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <Button size="sm" onClick={onBeginDetermination}>
+              Begin Case Determination
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => setDeterminationDismissed(true)}>
+              Continue Investigating
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Confidence meter (when below threshold) */}
+      {!guidance.determination_suggested && guidance.determination_confidence > 0 && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-3">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[11px] text-zinc-500 uppercase tracking-wide">Evidence Confidence</span>
+            <span className="text-[11px] font-mono text-zinc-400">{Math.round(guidance.determination_confidence * 100)}%</span>
+          </div>
+          <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${guidance.determination_confidence >= 0.5 ? 'bg-amber-400' : 'bg-zinc-600'}`}
+              style={{ width: `${Math.round(guidance.determination_confidence * 100)}%` }}
+            />
+          </div>
+          <p className="text-[11px] text-zinc-600 mt-1">Preponderance threshold: 65%</p>
+        </div>
+      )}
+
       {guidance.cards.length > 0 && (
         <div className="space-y-3">
           {guidance.cards.map((card: SuggestedGuidanceCard) => (
@@ -95,17 +145,6 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
               </div>
             </Card>
           ))}
-        </div>
-      )}
-
-      {guidance.determination_signals.length > 0 && (
-        <div className="rounded-lg border border-zinc-800 px-4 py-3">
-          <p className="text-xs font-medium text-zinc-400 mb-2">Determination Signals</p>
-          <ul className="space-y-1">
-            {guidance.determination_signals.map((signal, i) => (
-              <li key={i} className="text-xs text-zinc-500">- {signal}</li>
-            ))}
-          </ul>
         </div>
       )}
 
