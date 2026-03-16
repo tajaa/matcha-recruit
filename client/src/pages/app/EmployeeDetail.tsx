@@ -4,7 +4,7 @@ import { Badge, Button, Card, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { OnboardingTaskList } from '../../components/employees/OnboardingTaskList'
 import { useEmployeeDetail } from '../../hooks/employees/useEmployeeDetail'
-import { typeLabel, statusLabel, TYPE_OPTIONS } from '../../types/employee'
+import { typeLabel, statusLabel } from '../../types/employee'
 
 const STATUS_OPTIONS = Object.entries(statusLabel).map(([value, label]) => ({ value, label }))
 

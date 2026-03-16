@@ -16,7 +16,7 @@ export default function Employees() {
   const [showBatch, setShowBatch] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
     debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300)
     return () => clearTimeout(debounceRef.current)
