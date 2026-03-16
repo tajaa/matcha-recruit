@@ -122,13 +122,16 @@ export default function ERCaseDetail() {
         </div>
 
         {/* Sidebar */}
-        <div>
-          <Card className="p-5">
-            <h3 className="text-sm font-medium text-zinc-300 mb-4">Case Details</h3>
-            <dl className="space-y-3 text-sm">
+        <div className="space-y-4">
+          {/* Status & Classification */}
+          <Card className="p-0 overflow-hidden">
+            <div className="px-5 py-3 border-b border-zinc-800/60 bg-zinc-900/40">
+              <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Case Details</h3>
+            </div>
+            <div className="px-5 py-4 space-y-4">
               <div>
-                <dt className="text-zinc-500 text-xs">Status</dt>
-                <dd className="mt-1">
+                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1.5">Status</dt>
+                <dd>
                   <Select
                     label=""
                     options={STATUS_OPTIONS}
@@ -137,40 +140,56 @@ export default function ERCaseDetail() {
                   />
                 </dd>
               </div>
-              <div>
-                <dt className="text-zinc-500 text-xs">Category</dt>
-                <dd className="text-zinc-200">{categoryLabel[case_.category ?? ''] ?? '—'}</dd>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Category</dt>
+                  <dd className="text-sm text-zinc-200">{categoryLabel[case_.category ?? ''] ?? '—'}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Outcome</dt>
+                  <dd className="text-sm text-zinc-200">{case_.outcome ? (outcomeLabel[case_.outcome] ?? case_.outcome) : '—'}</dd>
+                </div>
               </div>
-              <div>
-                <dt className="text-zinc-500 text-xs">Outcome</dt>
-                <dd className="text-zinc-200">{case_.outcome ? (outcomeLabel[case_.outcome] ?? case_.outcome) : '—'}</dd>
-              </div>
-              <div>
-                <dt className="text-zinc-500 text-xs">Created</dt>
-                <dd className="text-zinc-200">{new Date(case_.created_at).toLocaleDateString()}</dd>
-              </div>
-              <div>
-                <dt className="text-zinc-500 text-xs">Updated</dt>
-                <dd className="text-zinc-200">{new Date(case_.updated_at).toLocaleDateString()}</dd>
-              </div>
-              <div>
-                <dt className="text-zinc-500 text-xs">Documents</dt>
-                <dd className="text-zinc-200">{case_.document_count}</dd>
-              </div>
-            </dl>
-            {case_.description && (
-              <div className="mt-4 pt-4 border-t border-zinc-800">
-                <p className="text-xs text-zinc-500 mb-1">Description</p>
-                <p className="text-sm text-zinc-300 whitespace-pre-wrap">{case_.description}</p>
-              </div>
-            )}
+            </div>
           </Card>
 
-          <div className="mt-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-red-400"
+          {/* Dates & Metadata */}
+          <Card className="p-0 overflow-hidden">
+            <div className="px-5 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Created</dt>
+                  <dd className="text-sm text-zinc-200">{new Date(case_.created_at).toLocaleDateString()}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500 mb-1">Updated</dt>
+                  <dd className="text-sm text-zinc-200">{new Date(case_.updated_at).toLocaleDateString()}</dd>
+                </div>
+              </div>
+              <div className="mt-4 flex items-center justify-between">
+                <dt className="text-[11px] font-medium uppercase tracking-wide text-zinc-500">Documents</dt>
+                <dd className="text-sm font-medium text-zinc-200">{case_.document_count}</dd>
+              </div>
+            </div>
+          </Card>
+
+          {/* Description */}
+          {case_.description && (
+            <Card className="p-0 overflow-hidden">
+              <div className="px-5 py-3 border-b border-zinc-800/60 bg-zinc-900/40">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Description</h3>
+              </div>
+              <div className="px-5 py-4">
+                <p className="text-sm text-zinc-300 leading-relaxed whitespace-pre-wrap">{case_.description}</p>
+              </div>
+            </Card>
+          )}
+
+          {/* Actions */}
+          <div className="pt-2">
+            <button
+              type="button"
+              className="text-xs text-zinc-600 hover:text-red-400 transition-colors"
               onClick={async () => {
                 if (confirm('Delete this case? This cannot be undone.')) {
                   await deleteCase()
@@ -178,8 +197,8 @@ export default function ERCaseDetail() {
                 }
               }}
             >
-              Delete Case
-            </Button>
+              Delete case
+            </button>
           </div>
         </div>
       </div>

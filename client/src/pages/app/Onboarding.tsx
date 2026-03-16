@@ -125,34 +125,34 @@ export default function Onboarding() {
 
       {/* Analytics funnel */}
       {analytics && (
-        <div className="mt-6 grid gap-4 sm:grid-cols-5">
+        <div className="mt-6 grid gap-3 sm:grid-cols-5">
           {Object.entries(analytics.funnel).map(([key, val]) => (
-            <Card key={key} className="p-4 text-center">
-              <p className="text-2xl font-semibold text-zinc-100">{val}</p>
-              <p className="text-xs text-zinc-500 mt-1">
-                {key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())}
+            <div key={key} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
+              <p className="text-xl font-semibold text-zinc-100">{val}</p>
+              <p className="text-[11px] text-zinc-500 mt-0.5 uppercase tracking-wide">
+                {key.replace(/_/g, ' ')}
               </p>
-            </Card>
+            </div>
           ))}
         </div>
       )}
 
       {/* KPIs */}
       {analytics?.kpis.time_to_ready_p50_days != null && (
-        <div className="mt-4 flex gap-4">
-          <Card className="flex-1 p-4">
-            <p className="text-sm text-zinc-400">Median time to ready</p>
-            <p className="text-lg font-semibold text-zinc-100 mt-1">
+        <div className="mt-3 flex gap-3">
+          <div className="flex-1 border border-zinc-800 rounded-lg px-3 py-3">
+            <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Median time to ready</p>
+            <p className="text-lg font-semibold text-zinc-100 mt-0.5">
               {analytics.kpis.time_to_ready_p50_days.toFixed(1)} days
             </p>
-          </Card>
+          </div>
           {analytics.kpis.completion_before_start_rate != null && (
-            <Card className="flex-1 p-4">
-              <p className="text-sm text-zinc-400">Completed before start date</p>
-              <p className="text-lg font-semibold text-zinc-100 mt-1">
+            <div className="flex-1 border border-zinc-800 rounded-lg px-3 py-3">
+              <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Completed before start</p>
+              <p className="text-lg font-semibold text-zinc-100 mt-0.5">
                 {analytics.kpis.completion_before_start_rate.toFixed(0)}%
               </p>
-            </Card>
+            </div>
           )}
         </div>
       )}
@@ -160,24 +160,24 @@ export default function Onboarding() {
       {/* Bottlenecks */}
       {analytics && analytics.bottlenecks.length > 0 && (
         <div className="mt-4">
-          <h2 className="text-sm font-medium text-zinc-300 mb-2">Bottlenecks</h2>
-          <Card className="p-0 divide-y divide-zinc-800">
+          <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Bottlenecks</h2>
+          <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
             {analytics.bottlenecks.map((b) => (
-              <div key={b.task_title} className="flex items-center justify-between px-5 py-3">
+              <div key={b.task_title} className="flex items-center justify-between px-4 py-2.5">
                 <p className="text-sm text-zinc-200">{b.task_title}</p>
-                <Badge variant="warning">
+                <span className="text-xs text-zinc-500">
                   {b.overdue_count} overdue · {b.avg_days_overdue.toFixed(0)}d avg
-                </Badge>
+                </span>
               </div>
             ))}
-          </Card>
+          </div>
         </div>
       )}
 
       {/* Create form */}
       {showForm && (
-        <Card className="mt-6">
-          <form onSubmit={handleCreate} className="grid gap-4 sm:grid-cols-2">
+        <div className="mt-5 border border-zinc-800 rounded-lg p-4">
+          <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2">
             <Input
               id="title"
               label="Task title"
@@ -194,14 +194,14 @@ export default function Onboarding() {
               placeholder="Optional details"
             />
             <div>
-              <label htmlFor="category" className="block text-sm font-medium text-zinc-300 mb-1.5">
+              <label htmlFor="category" className="block text-xs font-medium text-zinc-400 mb-1">
                 Category
               </label>
               <select
                 id="category"
                 value={form.category}
                 onChange={(e) => setForm({ ...form, category: e.target.value })}
-                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3.5 py-2.5 text-sm text-zinc-100 outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+                className="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500 focus:ring-1 focus:ring-zinc-500 transition-colors"
               >
                 {CATEGORIES.map((c) => (
                   <option key={c} value={c}>{categoryLabel[c]}</option>
@@ -222,9 +222,9 @@ export default function Onboarding() {
                 type="checkbox"
                 checked={form.is_employee_task}
                 onChange={(e) => setForm({ ...form, is_employee_task: e.target.checked })}
-                className="rounded border-zinc-700 bg-zinc-900 text-emerald-600 focus:ring-emerald-500"
+                className="rounded border-zinc-700 bg-zinc-900 text-zinc-400 focus:ring-zinc-500"
               />
-              <label htmlFor="is_employee" className="text-sm text-zinc-300">
+              <label htmlFor="is_employee" className="text-sm text-zinc-400">
                 Employee is responsible (vs. HR/admin)
               </label>
             </div>
@@ -234,42 +234,50 @@ export default function Onboarding() {
               </Button>
             </div>
           </form>
-        </Card>
+        </div>
       )}
 
       {/* Task templates by category */}
-      <div className="mt-6 space-y-6">
+      <div className="mt-6 space-y-5">
         {Object.entries(grouped).map(([cat, items]) => (
           <div key={cat}>
-            <h2 className="text-sm font-medium text-zinc-300 mb-2">{categoryLabel[cat]}</h2>
-            <Card className="p-0 divide-y divide-zinc-800">
+            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-1.5">{categoryLabel[cat]}</h2>
+            <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60">
               {items.map((t) => (
-                <div key={t.id} className="flex items-center gap-4 px-5 py-3">
+                <div key={t.id} className="flex items-center gap-3 px-4 py-2.5">
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm font-medium ${t.is_active ? 'text-zinc-100' : 'text-zinc-500 line-through'}`}>
+                    <p className={`text-sm ${t.is_active ? 'text-zinc-200' : 'text-zinc-600 line-through'}`}>
                       {t.title}
                     </p>
                     {t.description && (
-                      <p className="text-xs text-zinc-500 truncate">{t.description}</p>
+                      <p className="text-xs text-zinc-600 truncate">{t.description}</p>
                     )}
                   </div>
-                  <Badge variant={t.is_employee_task ? 'success' : 'neutral'}>
+                  <span className="text-[11px] text-zinc-500">
                     {t.is_employee_task ? 'Employee' : 'HR'}
-                  </Badge>
-                  <span className="text-xs text-zinc-500 w-16 text-right">
+                  </span>
+                  <span className="text-xs text-zinc-600 w-10 text-right">
                     {t.due_days}d
                   </span>
-                  <div className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => toggleActive(t)}>
+                  <div className="flex gap-0.5">
+                    <button
+                      type="button"
+                      className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors"
+                      onClick={() => toggleActive(t)}
+                    >
                       {t.is_active ? 'Disable' : 'Enable'}
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => deleteTemplate(t.id)}>
+                    </button>
+                    <button
+                      type="button"
+                      className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors"
+                      onClick={() => deleteTemplate(t.id)}
+                    >
                       Delete
-                    </Button>
+                    </button>
                   </div>
                 </div>
               ))}
-            </Card>
+            </div>
           </div>
         ))}
       </div>
