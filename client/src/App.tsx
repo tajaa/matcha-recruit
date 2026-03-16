@@ -16,6 +16,8 @@ import ERCopilot from './pages/app/ERCopilot'
 import ERCaseDetail from './pages/app/ERCaseDetail'
 import Compliance from './pages/app/Compliance'
 import EmployeeDetail from './pages/app/EmployeeDetail'
+import IRList from './pages/app/IRList'
+import Handbooks from './pages/app/Handbooks'
 
 export default function App() {
   return (
@@ -38,6 +40,8 @@ export default function App() {
         <Route path="er-copilot" element={<ERCopilot />} />
         <Route path="er-copilot/:caseId" element={<ERCaseDetail />} />
         <Route path="compliance" element={<Compliance />} />
+        <Route path="ir" element={<IRList />} />
+        <Route path="handbooks" element={<Handbooks />} />
       </Route>
     </Routes>
   )
