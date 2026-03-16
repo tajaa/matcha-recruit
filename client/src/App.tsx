@@ -12,6 +12,7 @@ import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
 import ERCopilot from './pages/app/ERCopilot'
 import ERCaseDetail from './pages/app/ERCaseDetail'
+import EmployeeDetail from './pages/app/EmployeeDetail'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
       <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
         <Route index element={<Dashboard />} />
         <Route path="employees" element={<Employees />} />
+        <Route path="employees/:employeeId" element={<EmployeeDetail />} />
         <Route path="onboarding" element={<Onboarding />} />
         <Route path="er-copilot" element={<ERCopilot />} />
         <Route path="er-copilot/:caseId" element={<ERCaseDetail />} />

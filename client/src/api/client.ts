@@ -83,4 +83,18 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
   upload: <T>(path: string, formData: FormData) =>
     request<T>(path, { method: 'POST', body: formData }),
+  download: async (path: string, filename?: string) => {
+    const token = localStorage.getItem('matcha_access_token')
+    const res = await fetch(`${BASE}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename ?? path.split('/').pop() ?? 'download'
+    a.click()
+    URL.revokeObjectURL(url)
+  },
 }

@@ -5,13 +5,14 @@ type ModalProps = {
   onClose: () => void
   title: string
   children: ReactNode
-  width?: 'sm' | 'md' | 'lg'
+  width?: 'sm' | 'md' | 'lg' | 'xl'
 }
 
 const widthClass = {
   sm: 'max-w-sm',
   md: 'max-w-lg',
   lg: 'max-w-2xl',
+  xl: 'max-w-4xl',
 } as const
 
 export function Modal({ open, onClose, title, children, width = 'md' }: ModalProps) {

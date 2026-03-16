@@ -1,108 +1,37 @@
-import { useEffect, useState } from 'react'
-import { Badge, Button, Input, Modal, Select } from '../../components/ui'
-import { api } from '../../api/client'
-
-type Employee = {
-  id: string
-  first_name: string
-  last_name: string
-  work_email: string | null
-  personal_email: string | null
-  job_title: string | null
-  department: string | null
-  employment_type: string | null
-  employment_status: string | null
-  start_date: string | null
-}
-
-const emptyForm = {
-  first_name: '',
-  last_name: '',
-  work_email: '',
-  personal_email: '',
-  job_title: '',
-  department: '',
-  work_state: '',
-  employment_type: 'full_time',
-  start_date: '',
-}
-
-const statusBadge = (status: string | null) => {
-  switch (status) {
-    case 'active': return <Badge variant="success">Active</Badge>
-    case 'on_leave': return <Badge variant="warning">On Leave</Badge>
-    case 'terminated':
-    case 'offboarded': return <Badge variant="danger">{status === 'terminated' ? 'Terminated' : 'Offboarded'}</Badge>
-    case 'suspended': return <Badge variant="danger">Suspended</Badge>
-    default: return <Badge variant="neutral">{status ?? 'Active'}</Badge>
-  }
-}
-
-const typeLabel = (t: string | null) => {
-  switch (t) {
-    case 'full_time': return 'Full-time'
-    case 'part_time': return 'Part-time'
-    case 'contractor': return 'Contractor'
-    default: return '—'
-  }
-}
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Button, Input, Select } from '../../components/ui'
+import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
+import { MultiBatchModal } from '../../components/employees/MultiBatchModal'
+import { BulkUploadModal } from '../../components/employees/BulkUploadModal'
+import { useEmployees } from '../../hooks/employees/useEmployees'
+import { typeLabel } from '../../types/employee'
 
 export default function Employees() {
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [filter, setFilter] = useState<'all' | 'active' | 'on_leave' | 'terminated'>('all')
+  const navigate = useNavigate()
+  const [status, setStatus] = useState('all')
   const [search, setSearch] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState(emptyForm)
-  const [saving, setSaving] = useState(false)
-  const [formError, setFormError] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [department, setDepartment] = useState('')
+  const [showBatch, setShowBatch] = useState(false)
+  const [showUpload, setShowUpload] = useState(false)
 
-  const loadEmployees = () => {
-    setLoading(true)
-    const params = filter !== 'all' ? `?employment_status=${filter}` : ''
-    api.get<Employee[]>(`/employees${params}`)
-      .then(setEmployees)
-      .catch(() => setEmployees([]))
-      .finally(() => setLoading(false))
-  }
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => {
+    debounceRef.current = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(debounceRef.current)
+  }, [search])
 
-  useEffect(() => { loadEmployees() }, [filter])
-
-  const handleSubmit = async () => {
-    if (!form.first_name.trim() || !form.last_name.trim() || !form.work_email.trim()) {
-      setFormError('First name, last name, and work email are required.')
-      return
-    }
-    setSaving(true)
-    setFormError('')
-    try {
-      await api.post('/employees', {
-        first_name: form.first_name.trim(),
-        last_name: form.last_name.trim(),
-        work_email: form.work_email.trim(),
-        personal_email: form.personal_email.trim() || undefined,
-        job_title: form.job_title.trim() || undefined,
-        department: form.department.trim() || undefined,
-        work_state: form.work_state.trim() || undefined,
-        employment_type: form.employment_type || undefined,
-        start_date: form.start_date || undefined,
-      })
-      setShowAdd(false)
-      setForm(emptyForm)
-      loadEmployees()
-    } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Failed to add employee')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const filtered = employees.filter((e) => {
-    const name = `${e.first_name} ${e.last_name}`.toLowerCase()
-    const email = (e.work_email ?? e.personal_email ?? '').toLowerCase()
-    const q = search.toLowerCase()
-    return name.includes(q) || email.includes(q)
+  const { employees, departments, onboardingProgress, loading, error, refetch } = useEmployees({
+    status,
+    search: debouncedSearch || undefined,
+    department: department || undefined,
   })
+
+  const deptOptions = [
+    { value: '', label: 'All Departments' },
+    ...departments.map((d) => ({ value: d, label: d })),
+  ]
 
   return (
     <div>
@@ -115,52 +44,23 @@ export default function Employees() {
             {employees.length} total employee{employees.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <Button onClick={() => setShowAdd(true)}>Add Employee</Button>
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={() => setShowUpload(true)}>Upload CSV</Button>
+          <Button onClick={() => setShowBatch(true)}>Add Employees</Button>
+        </div>
       </div>
 
-      <Modal open={showAdd} onClose={() => { setShowAdd(false); setForm(emptyForm); setFormError('') }} title="Add Employee">
-        {formError && (
-          <p className="text-sm text-red-400 bg-red-400/10 rounded-lg px-3 py-2 mb-4">{formError}</p>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <Input label="First Name" value={form.first_name}
-            onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
-          <Input label="Last Name" value={form.last_name}
-            onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
-          <Input label="Work Email" value={form.work_email}
-            onChange={(e) => setForm({ ...form, work_email: e.target.value })} className="col-span-2" />
-          <Input label="Personal Email" value={form.personal_email}
-            onChange={(e) => setForm({ ...form, personal_email: e.target.value })} className="col-span-2" />
-          <Input label="Job Title" value={form.job_title}
-            onChange={(e) => setForm({ ...form, job_title: e.target.value })} />
-          <Input label="Department" value={form.department}
-            onChange={(e) => setForm({ ...form, department: e.target.value })} />
-          <Input label="Work State" value={form.work_state} placeholder="e.g. CA"
-            onChange={(e) => setForm({ ...form, work_state: e.target.value })} />
-          <Select
-            label="Employment Type"
-            value={form.employment_type}
-            onChange={(e) => setForm({ ...form, employment_type: e.target.value })}
-            options={[
-              { value: 'full_time', label: 'Full-time' },
-              { value: 'part_time', label: 'Part-time' },
-              { value: 'contractor', label: 'Contractor' },
-            ]}
-          />
-          <Input label="Start Date" type="date" value={form.start_date}
-            onChange={(e) => setForm({ ...form, start_date: e.target.value })} className="col-span-2" />
-        </div>
-
-        <div className="flex justify-end gap-2 mt-6">
-          <Button variant="ghost" onClick={() => { setShowAdd(false); setForm(emptyForm); setFormError('') }}>
-            Cancel
-          </Button>
-          <Button onClick={handleSubmit} disabled={saving}>
-            {saving ? 'Adding...' : 'Add Employee'}
-          </Button>
-        </div>
-      </Modal>
+      <MultiBatchModal
+        open={showBatch}
+        onClose={() => setShowBatch(false)}
+        onSuccess={refetch}
+        departments={departments}
+      />
+      <BulkUploadModal
+        open={showUpload}
+        onClose={() => setShowUpload(false)}
+        onSuccess={refetch}
+      />
 
       {/* Filters */}
       <div className="mt-6 flex items-center gap-3">
@@ -171,13 +71,22 @@ export default function Employees() {
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-xs"
         />
+        {departments.length > 0 && (
+          <Select
+            label=""
+            options={deptOptions}
+            value={department}
+            onChange={(e) => setDepartment(e.target.value)}
+            className="w-44"
+          />
+        )}
         <div className="flex gap-1 ml-auto">
           {(['all', 'active', 'on_leave', 'terminated'] as const).map((s) => (
             <Button
               key={s}
-              variant={filter === s ? 'primary' : 'ghost'}
+              variant={status === s ? 'primary' : 'ghost'}
               size="sm"
-              onClick={() => setFilter(s)}
+              onClick={() => setStatus(s)}
             >
               {s === 'on_leave' ? 'On Leave' : s.charAt(0).toUpperCase() + s.slice(1)}
             </Button>
@@ -187,9 +96,11 @@ export default function Employees() {
 
       {/* Table */}
       <div className="mt-6">
-        {loading ? (
+        {error ? (
+          <p className="text-sm text-red-400">{error}</p>
+        ) : loading ? (
           <p className="text-sm text-zinc-500">Loading...</p>
-        ) : filtered.length === 0 ? (
+        ) : employees.length === 0 ? (
           <p className="text-sm text-zinc-500">No employees found.</p>
         ) : (
           <div className="overflow-hidden rounded-xl border border-zinc-800">
@@ -201,25 +112,56 @@ export default function Employees() {
                   <th className="px-4 py-3 font-medium">Department</th>
                   <th className="px-4 py-3 font-medium">Type</th>
                   <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium">Onboarding</th>
+                  <th className="px-4 py-3 font-medium">Start Date</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
-                {filtered.map((e) => (
-                  <tr key={e.id} className="text-zinc-300 hover:bg-zinc-900/30 transition-colors">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-zinc-100">
-                        {e.first_name} {e.last_name}
-                      </p>
-                      <p className="text-xs text-zinc-500">
-                        {e.work_email ?? e.personal_email ?? '—'}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3">{e.job_title ?? '—'}</td>
-                    <td className="px-4 py-3">{e.department ?? '—'}</td>
-                    <td className="px-4 py-3">{typeLabel(e.employment_type)}</td>
-                    <td className="px-4 py-3">{statusBadge(e.employment_status)}</td>
-                  </tr>
-                ))}
+                {employees.map((e) => {
+                  const progress = onboardingProgress[e.id]
+                  return (
+                    <tr
+                      key={e.id}
+                      className="text-zinc-300 hover:bg-zinc-900/30 transition-colors cursor-pointer"
+                      onClick={() => navigate(`/app/employees/${e.id}`)}
+                    >
+                      <td className="px-4 py-3">
+                        <p className="font-medium text-zinc-100">
+                          {e.first_name} {e.last_name}
+                        </p>
+                        <p className="text-xs text-zinc-500">
+                          {e.work_email ?? e.personal_email ?? '—'}
+                        </p>
+                      </td>
+                      <td className="px-4 py-3">{e.job_title ?? '—'}</td>
+                      <td className="px-4 py-3">{e.department ?? '—'}</td>
+                      <td className="px-4 py-3">{typeLabel[e.employment_type ?? ''] ?? '—'}</td>
+                      <td className="px-4 py-3">
+                        <EmployeeStatusBadge status={e.employment_status} />
+                      </td>
+                      <td className="px-4 py-3">
+                        {progress?.has_onboarding ? (
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 w-16 rounded-full bg-zinc-800 overflow-hidden">
+                              <div
+                                className="h-full rounded-full bg-emerald-500"
+                                style={{ width: `${progress.total ? (progress.completed / progress.total) * 100 : 0}%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-zinc-500">
+                              {progress.completed}/{progress.total}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-zinc-600">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-500">
+                        {e.start_date ? new Date(e.start_date).toLocaleDateString() : '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
