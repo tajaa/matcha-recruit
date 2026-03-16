@@ -12,6 +12,7 @@ import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
 import ERCopilot from './pages/app/ERCopilot'
 import ERCaseDetail from './pages/app/ERCaseDetail'
+import Compliance from './pages/app/Compliance'
 import EmployeeDetail from './pages/app/EmployeeDetail'
 
 export default function App() {
@@ -32,6 +33,7 @@ export default function App() {
         <Route path="onboarding" element={<Onboarding />} />
         <Route path="er-copilot" element={<ERCopilot />} />
         <Route path="er-copilot/:caseId" element={<ERCaseDetail />} />
+        <Route path="compliance" element={<Compliance />} />
       </Route>
     </Routes>
   )
