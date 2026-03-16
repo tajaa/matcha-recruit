@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../api/client'
-import { Badge, Button, type BadgeVariant } from '../ui'
+import { Badge, Button } from '../ui'
 import type { SimilarCasesAnalysis, SimilarCaseMatch } from '../../types/er'
 import { categoryLabel, outcomeLabel, statusLabel } from '../../types/er'
 
