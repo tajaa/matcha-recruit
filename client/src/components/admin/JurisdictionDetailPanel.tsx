@@ -1,8 +1,11 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { api } from '../../api/client'
-import { Button, Input } from '../ui'
-import { categoryLabel } from '../../types/compliance'
-import type { RequirementCategory } from '../../types/compliance'
+import { Button, Input, Textarea } from '../ui'
+import {
+  CATEGORY_LABELS,
+  CATEGORY_GROUPS,
+} from '../../generated/complianceCategories'
+import type { PreemptionRule, IndustryProfile } from './jurisdiction/types'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -47,7 +50,7 @@ type JurisdictionDetail = {
   locations: LinkedLocation[]
 }
 
-type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology'
+type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology' | 'medical'
 type ViewMode = 'requirements' | 'hierarchy' | 'legislation'
 
 type Props = {
@@ -55,18 +58,11 @@ type Props = {
   city: string
   state: string
   categoriesMissing?: string[]
+  preemptionRules?: PreemptionRule[]
+  selectedProfile?: IndustryProfile | null
   onCheckComplete?: () => void
   onNavigate?: (id: string) => void
 }
-
-const HEALTHCARE_CATS = new Set([
-  'hipaa_privacy', 'billing_integrity', 'clinical_safety', 'healthcare_workforce',
-  'corporate_integrity', 'research_consent', 'state_licensing', 'emergency_preparedness',
-])
-const ONCOLOGY_CATS = new Set([
-  'radiation_safety', 'chemotherapy_handling', 'tumor_registry',
-  'oncology_clinical_trials', 'oncology_patient_rights',
-])
 
 const LEVEL_ORDER = ['federal', 'state', 'county', 'city']
 const LEVEL_COLORS: Record<string, string> = {
@@ -77,12 +73,21 @@ const LEVEL_COLORS: Record<string, string> = {
 }
 
 function getCategoryLabel(cat: string) {
-  return categoryLabel[cat as RequirementCategory] ?? cat
+  return CATEGORY_LABELS[cat] ?? cat
+}
+
+function matchesSpecialty(cat: string, filter: SpecialtyFilter): boolean {
+  if (filter === 'all') return true
+  const group = CATEGORY_GROUPS[cat]
+  if (filter === 'healthcare') return group === 'healthcare' || group === 'oncology'
+  if (filter === 'oncology') return group === 'oncology'
+  if (filter === 'medical') return group === 'medical_compliance'
+  return group !== 'healthcare' && group !== 'oncology' && group !== 'medical_compliance'
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
-export default function JurisdictionDetailPanel({ id, city, state, categoriesMissing, onCheckComplete, onNavigate }: Props) {
+export default function JurisdictionDetailPanel({ id, city, state, categoriesMissing, preemptionRules, selectedProfile, onCheckComplete, onNavigate }: Props) {
   const [detail, setDetail] = useState<JurisdictionDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
@@ -90,8 +95,9 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
   const [viewMode, setViewMode] = useState<ViewMode>('requirements')
   const [specialtyFilter, setSpecialtyFilter] = useState<SpecialtyFilter>('all')
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [editForm, setEditForm] = useState({ title: '', current_value: '', effective_date: '', source_url: '', source_name: '' })
+  const [editForm, setEditForm] = useState({ title: '', description: '', current_value: '', effective_date: '', source_url: '', source_name: '' })
   const [saving, setSaving] = useState(false)
+  const [reordering, setReordering] = useState(false)
 
   const fetchDetail = useCallback(async () => {
     setLoading(true); setDetail(null); setScanMessages([])
@@ -140,7 +146,8 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
   function startEditing(req: JurisdictionReq) {
     setEditingId(req.id)
     setEditForm({
-      title: req.title || '', current_value: req.current_value || '',
+      title: req.title || '', description: req.description || '',
+      current_value: req.current_value || '',
       effective_date: req.effective_date || '', source_url: req.source_url || '',
       source_name: req.source_name || '',
     })
@@ -154,6 +161,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       if (!original) return
       const changes: Record<string, string> = {}
       if (editForm.title !== (original.title || '')) changes.title = editForm.title
+      if (editForm.description !== (original.description || '')) changes.description = editForm.description
       if (editForm.current_value !== (original.current_value || '')) changes.current_value = editForm.current_value
       if (editForm.effective_date !== (original.effective_date || '')) changes.effective_date = editForm.effective_date
       if (editForm.source_url !== (original.source_url || '')) changes.source_url = editForm.source_url
@@ -165,15 +173,65 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     } finally { setSaving(false) }
   }
 
-  // Filter requirements by specialty
+  async function reorderReq(reqId: string, direction: -1 | 1) {
+    if (!detail || reordering) return
+    const reqs = [...detail.requirements]
+    const idx = reqs.findIndex((r) => r.id === reqId)
+    if (idx < 0) return
+    // Find neighbors in the same category
+    const cat = reqs[idx].category
+    const catReqs = reqs.filter((r) => r.category === cat)
+    const catIdx = catReqs.findIndex((r) => r.id === reqId)
+    const targetCatIdx = catIdx + direction
+    if (targetCatIdx < 0 || targetCatIdx >= catReqs.length) return
+
+    // Swap sort_order
+    const a = catReqs[catIdx]
+    const b = catReqs[targetCatIdx]
+    const aOrder = a.sort_order ?? catIdx
+    const bOrder = b.sort_order ?? targetCatIdx
+
+    setReordering(true)
+    try {
+      await api.put('/admin/jurisdictions/requirements/reorder', {
+        order: [
+          { id: a.id, sort_order: bOrder },
+          { id: b.id, sort_order: aOrder },
+        ],
+      })
+      setDetail({
+        ...detail,
+        requirements: detail.requirements.map((r) => {
+          if (r.id === a.id) return { ...r, sort_order: bOrder }
+          if (r.id === b.id) return { ...r, sort_order: aOrder }
+          return r
+        }),
+      })
+    } finally { setReordering(false) }
+  }
+
+  // Filter requirements by specialty + profile
   const filteredReqs = useMemo(() => {
     if (!detail) return []
     let reqs = detail.requirements
-    if (specialtyFilter === 'healthcare') reqs = reqs.filter((r) => HEALTHCARE_CATS.has(r.category) || ONCOLOGY_CATS.has(r.category))
-    else if (specialtyFilter === 'oncology') reqs = reqs.filter((r) => ONCOLOGY_CATS.has(r.category))
-    else if (specialtyFilter === 'general') reqs = reqs.filter((r) => !HEALTHCARE_CATS.has(r.category) && !ONCOLOGY_CATS.has(r.category))
+    reqs = reqs.filter((r) => matchesSpecialty(r.category, specialtyFilter))
+    if (selectedProfile) {
+      const rateTypes = new Set(selectedProfile.rate_types)
+      // Sort by profile's category_order
+      const orderMap = new Map(selectedProfile.category_order.map((c, i) => [c, i]))
+      reqs = [...reqs].sort((a, b) => {
+        const oa = orderMap.get(a.category) ?? 999
+        const ob = orderMap.get(b.category) ?? 999
+        return oa - ob || (a.sort_order ?? 0) - (b.sort_order ?? 0)
+      })
+      // Mark non-focused but don't filter them out (they'll be de-emphasized in render)
+      // Filter by rate_types if profile has them
+      if (rateTypes.size > 0) {
+        // rate_type filtering only if requirements have rate_type field — keep all for now
+      }
+    }
     return reqs
-  }, [detail, specialtyFilter])
+  }, [detail, specialtyFilter, selectedProfile])
 
   // Group by category
   const groupedByCategory = useMemo(() => {
@@ -196,7 +254,6 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       if (!map[cat][level]) map[cat][level] = []
       map[cat][level].push(r)
     }
-    // Sort within each level
     for (const cat of Object.keys(map)) {
       for (const level of Object.keys(map[cat])) {
         map[cat][level].sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.title.localeCompare(b.title))
@@ -205,11 +262,31 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     return map
   }, [filteredReqs])
 
+  // Build preemption lookup for this jurisdiction's state
+  const preemptionLookup = useMemo(() => {
+    if (!preemptionRules) return null
+    const lookup: Record<string, { allows: boolean; notes: string | null }> = {}
+    for (const r of preemptionRules) {
+      if (r.state === state) {
+        lookup[r.category] = { allows: r.allows_local_override, notes: r.notes }
+      }
+    }
+    return Object.keys(lookup).length > 0 ? lookup : null
+  }, [preemptionRules, state])
+
+  // Profile focused check
+  const profileFocused = selectedProfile ? new Set(selectedProfile.focused_categories) : null
+  const profileEvidence = selectedProfile?.category_evidence ?? null
+
   function renderReqRow(req: JurisdictionReq) {
+    const isFocused = !profileFocused || profileFocused.has(req.category)
+    const confidence = profileEvidence?.[req.category]?.confidence
+
     if (editingId === req.id) {
       return (
         <div key={req.id} className="px-4 py-3 border-t border-zinc-800/30 bg-zinc-900/50 space-y-2">
           <Input label="Title" value={editForm.title} onChange={(e) => setEditForm({ ...editForm, title: e.target.value })} />
+          <Textarea label="Description" value={editForm.description} onChange={(e) => setEditForm({ ...editForm, description: e.target.value })} rows={2} placeholder="Optional description" />
           <div className="grid grid-cols-2 gap-2">
             <Input label="Current Value" value={editForm.current_value} onChange={(e) => setEditForm({ ...editForm, current_value: e.target.value })} />
             <Input label="Effective Date" value={editForm.effective_date} onChange={(e) => setEditForm({ ...editForm, effective_date: e.target.value })} placeholder="YYYY-MM-DD" />
@@ -227,12 +304,20 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     }
 
     return (
-      <div key={req.id} className="group flex items-start gap-2 px-4 py-2 border-t border-zinc-800/30">
+      <div key={req.id} className={`group flex items-start gap-2 px-4 py-2 border-t border-zinc-800/30 ${!isFocused ? 'opacity-40' : ''}`}>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <p className="text-sm text-zinc-200">{req.title}</p>
             {req.is_bookmarked && <span className="text-[10px] text-amber-400">★</span>}
+            {confidence !== undefined && (
+              <span className={`w-2 h-2 rounded-full shrink-0 ${
+                confidence >= 0.8 ? 'bg-emerald-500' : confidence >= 0.5 ? 'bg-amber-400' : 'bg-red-400'
+              }`} title={`Confidence: ${(confidence * 100).toFixed(0)}%`} />
+            )}
           </div>
+          {req.description && (
+            <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">{req.description}</p>
+          )}
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
             <span className={`text-[10px] px-1.5 py-0.5 rounded ${LEVEL_COLORS[req.jurisdiction_level] || 'text-zinc-400 bg-zinc-500/10'}`}>
               {req.jurisdiction_level}
@@ -247,6 +332,11 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
           </div>
         </div>
         <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+          {/* Reorder arrows */}
+          <button type="button" onClick={() => reorderReq(req.id, -1)} disabled={reordering}
+            className="text-[11px] text-zinc-600 hover:text-zinc-300 px-0.5 transition-colors" title="Move up">▲</button>
+          <button type="button" onClick={() => reorderReq(req.id, 1)} disabled={reordering}
+            className="text-[11px] text-zinc-600 hover:text-zinc-300 px-0.5 transition-colors" title="Move down">▼</button>
           <button type="button" onClick={() => toggleBookmark(req.id)}
             className="text-[11px] text-zinc-600 hover:text-amber-400 px-1.5 py-0.5 transition-colors">
             {req.is_bookmarked ? 'Unbookmark' : 'Bookmark'}
@@ -330,6 +420,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
           <option value="general">General Labor</option>
           <option value="healthcare">Healthcare</option>
           <option value="oncology">Oncology</option>
+          <option value="medical">Medical Compliance</option>
         </select>
       </div>
 
@@ -378,8 +469,21 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
                 {Object.entries(hierarchyGrouped).map(([cat, levels], catIdx) => (
                   <div key={cat}>
                     {catIdx > 0 && <div className="border-t border-zinc-800/60" />}
-                    <div className="px-4 pt-3 pb-1">
+                    <div className="px-4 pt-3 pb-1 flex items-center gap-2">
                       <p className="text-xs uppercase tracking-wide text-zinc-400 font-medium">{getCategoryLabel(cat)}</p>
+                      {/* Preemption badge */}
+                      {preemptionLookup?.[cat] && (
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${
+                            preemptionLookup[cat].allows
+                              ? 'bg-emerald-500/15 text-emerald-400'
+                              : 'bg-red-500/15 text-red-400'
+                          }`}
+                          title={preemptionLookup[cat].notes ?? undefined}
+                        >
+                          {preemptionLookup[cat].allows ? 'Local override OK' : 'State preempts'}
+                        </span>
+                      )}
                     </div>
                     {LEVEL_ORDER.filter((l) => levels[l]?.length > 0).map((level) => (
                       <div key={level}>

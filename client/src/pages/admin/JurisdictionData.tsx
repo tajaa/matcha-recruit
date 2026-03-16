@@ -1,140 +1,64 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { api } from '../../api/client'
-import { Button, Input } from '../../components/ui'
-import { categoryLabel } from '../../types/compliance'
-import type { RequirementCategory } from '../../types/compliance'
+import { Button } from '../../components/ui'
+import {
+  CATEGORY_LABELS,
+  CATEGORY_SHORT_LABELS,
+  CATEGORY_GROUPS,
+} from '../../generated/complianceCategories'
 import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
+import ExplorerTab from '../../components/admin/jurisdiction/ExplorerTab'
+import ProfileEditorModal from '../../components/admin/jurisdiction/ProfileEditorModal'
+import { useIndustryProfiles } from '../../components/admin/jurisdiction/useIndustryProfiles'
+import type { DataOverview, BookmarkedReq, FlatCity, CatCoverage } from '../../components/admin/jurisdiction/types'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type CityEntry = {
-  id: string
-  city: string
-  categories_present: string[]
-  categories_missing: string[]
-  tier_breakdown: Record<string, number>
-  last_verified_at: string | null
-  is_stale: boolean
-}
-
-type StateEntry = {
-  state: string
-  city_count: number
-  coverage_pct: number
-  cities: CityEntry[]
-}
-
-type PreemptionRule = {
-  state: string
-  category: string
-  allows_local_override: boolean
-  notes: string | null
-}
-
-type StructuredSource = {
-  source_name: string
-  source_type: string
-  categories: string[]
-  record_count: number
-  last_fetched_at: string | null
-  last_fetch_status: string | null
-  is_active: boolean
-}
-
-type DataOverview = {
-  summary: {
-    total_states: number
-    total_cities: number
-    total_requirements: number
-    category_coverage_pct: number
-    tier1_pct: number
-    tier_breakdown: Record<string, number>
-    stale_count: number
-    freshness: { '7d': number; '30d': number; '90d': number; stale: number }
-    required_categories: string[]
-  }
-  states: StateEntry[]
-  preemption_rules: PreemptionRule[]
-  structured_sources: StructuredSource[]
-}
-
-type BookmarkedReq = {
-  id: string
-  category: string
-  jurisdiction_level: string
-  title: string
-  current_value: string | null
-  effective_date: string | null
-  city: string
-  state: string
-}
-
-type Tab = 'coverage' | 'missing' | 'quality' | 'preemption' | 'bookmarks'
+type Tab = 'explorer' | 'quality' | 'preemption' | 'bookmarks'
+type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology' | 'medical'
 
 function getCategoryLabel(cat: string) {
-  return categoryLabel[cat as RequirementCategory] ?? cat
+  return CATEGORY_LABELS[cat] ?? cat
 }
 
-const SHORT_LABELS: Record<string, string> = {
-  // General labor
-  minimum_wage: 'Wage', overtime: 'OT', sick_leave: 'Sick', family_leave: 'FMLA',
-  anti_discrimination: 'Disc', workplace_safety: 'Safety', workers_comp: 'WC',
-  tax_withholding: 'Tax', pay_frequency: 'Pay', meal_breaks: 'Meals',
-  rest_breaks: 'Rest', final_pay: 'Final', posting_requirements: 'Post',
-  pto: 'PTO', fair_scheduling: 'Sched', ban_the_box: 'BtB', non_compete: 'NC',
-  harassment_training: 'Train', data_privacy: 'Priv', whistleblower: 'Whistle',
-  accommodations: 'ADA', minor_work_permit: 'Minor', scheduling_reporting: 'Sched',
-  // Healthcare
-  hipaa_privacy: 'HIPAA', billing_integrity: 'Billing', clinical_safety: 'Clinical',
-  healthcare_workforce: 'HC Workforce', corporate_integrity: 'Corp Integrity',
-  research_consent: 'Research', state_licensing: 'Licensing', emergency_preparedness: 'Emergency',
-  // Oncology
-  radiation_safety: 'Radiation', chemotherapy_handling: 'Chemo', tumor_registry: 'Tumor',
-  oncology_clinical_trials: 'Onc Trials', oncology_patient_rights: 'Onc Rights',
-  other: 'Other',
+function getShortLabel(cat: string) {
+  return CATEGORY_SHORT_LABELS[cat] ?? cat
 }
-
-const HEALTHCARE_CATS = new Set([
-  'hipaa_privacy', 'billing_integrity', 'clinical_safety', 'healthcare_workforce',
-  'corporate_integrity', 'research_consent', 'state_licensing', 'emergency_preparedness',
-])
-const ONCOLOGY_CATS = new Set([
-  'radiation_safety', 'chemotherapy_handling', 'tumor_registry',
-  'oncology_clinical_trials', 'oncology_patient_rights',
-])
-
-type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology'
 
 function fmtDate(d: string | null) {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
 }
 
+function matchesSpecialty(cat: string, filter: SpecialtyFilter): boolean {
+  if (filter === 'all') return true
+  const group = CATEGORY_GROUPS[cat]
+  if (filter === 'healthcare') return group === 'healthcare' || group === 'oncology'
+  if (filter === 'oncology') return group === 'oncology'
+  if (filter === 'medical') return group === 'medical_compliance'
+  // general = exclude healthcare, oncology, medical_compliance
+  return group !== 'healthcare' && group !== 'oncology' && group !== 'medical_compliance'
+}
+
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function JurisdictionData() {
-  const [tab, setTab] = useState<Tab>('coverage')
+  const [tab, setTab] = useState<Tab>('explorer')
   const [overview, setOverview] = useState<DataOverview | null>(null)
   const [loadingOverview, setLoadingOverview] = useState(true)
-  const [search, setSearch] = useState('')
-  const [expandedStates, setExpandedStates] = useState<Set<string>>(new Set())
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null)
   const [selectedCityMeta, setSelectedCityMeta] = useState<{ city: string; state: string; missing: string[] } | null>(null)
   const [bookmarks, setBookmarks] = useState<BookmarkedReq[]>([])
   const [loadingBookmarks, setLoadingBookmarks] = useState(false)
-
-  // Filters
   const [specialtyFilter, setSpecialtyFilter] = useState<SpecialtyFilter>('all')
-  const [filterState, setFilterState] = useState('')
-  const [filterCategory, setFilterCategory] = useState('')
-  const [filterStaleOnly, setFilterStaleOnly] = useState(false)
-
-  // Preemption matrix hover
   const [hoveredCell, setHoveredCell] = useState<{ state: string; cat: string } | null>(null)
-
-  // Top metro SSE
   const [metroScanning, setMetroScanning] = useState(false)
   const [metroMessages, setMetroMessages] = useState<string[]>([])
+  const [profileModalOpen, setProfileModalOpen] = useState(false)
+  const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+
+  const { profiles, create: createProfile, update: updateProfile, remove: removeProfile } = useIndustryProfiles()
+  const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? null
 
   const fetchOverview = useCallback(async () => {
     setLoadingOverview(true)
@@ -153,17 +77,9 @@ export default function JurisdictionData() {
   useEffect(() => { fetchOverview() }, [fetchOverview])
   useEffect(() => { if (tab === 'bookmarks') fetchBookmarks() }, [tab, fetchBookmarks])
 
-  function toggleState(state: string) {
-    setExpandedStates((prev) => {
-      const next = new Set(prev)
-      next.has(state) ? next.delete(state) : next.add(state)
-      return next
-    })
-  }
-
-  function openCity(cityEntry: CityEntry, state: string) {
-    setSelectedCityId(cityEntry.id)
-    setSelectedCityMeta({ city: cityEntry.city, state, missing: cityEntry.categories_missing })
+  function openCity(flat: FlatCity) {
+    setSelectedCityId(flat.id)
+    setSelectedCityMeta({ city: flat.city, state: flat.stateName, missing: flat.categories_missing })
   }
 
   function startMetroCheck() {
@@ -203,45 +119,53 @@ export default function JurisdictionData() {
 
   const sum = overview?.summary
   const allRequiredCats = sum?.required_categories ?? []
-  // Filter categories by specialty
-  const requiredCats = useMemo(() => {
-    if (specialtyFilter === 'all') return allRequiredCats
-    if (specialtyFilter === 'healthcare') return allRequiredCats.filter((c) => HEALTHCARE_CATS.has(c) || ONCOLOGY_CATS.has(c))
-    if (specialtyFilter === 'oncology') return allRequiredCats.filter((c) => ONCOLOGY_CATS.has(c))
-    // general = exclude healthcare & oncology
-    return allRequiredCats.filter((c) => !HEALTHCARE_CATS.has(c) && !ONCOLOGY_CATS.has(c))
-  }, [allRequiredCats, specialtyFilter])
   const allStates = overview?.states ?? []
 
-  const filteredStates = useMemo(() => {
-    return allStates.filter((s) => {
-      if (!search) return true
-      const q = search.toLowerCase()
-      return s.state.toLowerCase().includes(q) || s.cities.some((c) => c.city.toLowerCase().includes(q))
-    })
-  }, [allStates, search])
+  // Filter categories by specialty
+  const requiredCats = useMemo(() => {
+    return allRequiredCats.filter((c) => matchesSpecialty(c, specialtyFilter))
+  }, [allRequiredCats, specialtyFilter])
 
-  // Missing data: cities sorted by most missing categories, filtered by specialty + category
-  const missingCities = useMemo(() => {
-    const rows: (CityEntry & { stateName: string; filteredMissing: string[] })[] = []
+  // Flat city array for explorer
+  const allCities = useMemo<FlatCity[]>(() => {
+    const rows: FlatCity[] = []
     for (const st of allStates) {
-      if (filterState && st.state !== filterState) continue
       for (const city of st.cities) {
-        // Filter missing categories by specialty
-        let missing = city.categories_missing
-        if (specialtyFilter === 'healthcare') missing = missing.filter((c) => HEALTHCARE_CATS.has(c) || ONCOLOGY_CATS.has(c))
-        else if (specialtyFilter === 'oncology') missing = missing.filter((c) => ONCOLOGY_CATS.has(c))
-        else if (specialtyFilter === 'general') missing = missing.filter((c) => !HEALTHCARE_CATS.has(c) && !ONCOLOGY_CATS.has(c))
-        if (filterCategory && !missing.includes(filterCategory)) continue
-        if (missing.length === 0) continue
-        if (filterStaleOnly && !city.is_stale) continue
-        rows.push({ ...city, stateName: st.state, filteredMissing: missing })
+        const present = city.categories_present.filter((c) => matchesSpecialty(c, specialtyFilter))
+        const missing = city.categories_missing.filter((c) => matchesSpecialty(c, specialtyFilter))
+        const total = present.length + missing.length
+        rows.push({
+          ...city,
+          stateName: st.state,
+          coveragePct: total > 0 ? Math.round((present.length / total) * 100) : 0,
+          gapCount: missing.length,
+        })
       }
     }
-    return rows.sort((a, b) => b.filteredMissing.length - a.filteredMissing.length)
-  }, [allStates, filterState, filterStaleOnly, specialtyFilter, filterCategory])
+    return rows
+  }, [allStates, specialtyFilter])
 
-  // Preemption matrix: state → category → { allows, notes }
+  // Per-category coverage stats
+  const categoryCoverage = useMemo<CatCoverage[]>(() => {
+    const totalCities = allCities.length
+    if (totalCities === 0) return []
+    const counts: Record<string, number> = {}
+    for (const city of allCities) {
+      for (const cat of city.categories_present) {
+        counts[cat] = (counts[cat] ?? 0) + 1
+      }
+    }
+    return requiredCats.map((cat) => ({
+      category: cat,
+      label: getCategoryLabel(cat),
+      shortLabel: getShortLabel(cat),
+      count: counts[cat] ?? 0,
+      total: totalCities,
+      pct: Math.round(((counts[cat] ?? 0) / totalCities) * 100),
+    }))
+  }, [allCities, requiredCats])
+
+  // Preemption matrix
   const preemptionMatrix = useMemo(() => {
     const matrix: Record<string, Record<string, { allows: boolean; notes: string | null }>> = {}
     const stateSet = new Set<string>()
@@ -253,7 +177,6 @@ export default function JurisdictionData() {
     return { states: [...stateSet].sort(), matrix }
   }, [overview])
 
-  // Unique states for missing data filter
   const stateOptions = useMemo(() => [...new Set(allStates.map((s) => s.state))].sort(), [allStates])
 
   if (loadingOverview) return <p className="text-sm text-zinc-500">Loading...</p>
@@ -267,13 +190,38 @@ export default function JurisdictionData() {
           <p className="mt-1 text-sm text-zinc-500">Compliance data repository overview</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Industry profile selector */}
+          {profiles.length > 0 && (
+            <select
+              value={selectedProfileId ?? ''}
+              onChange={(e) => setSelectedProfileId(e.target.value || null)}
+              className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
+            >
+              <option value="">No Profile</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+          )}
           <select value={specialtyFilter} onChange={(e) => setSpecialtyFilter(e.target.value as SpecialtyFilter)}
             className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5">
             <option value="all">All Specialties</option>
             <option value="general">General Labor</option>
             <option value="healthcare">Healthcare</option>
             <option value="oncology">Oncology</option>
+            <option value="medical">Medical Compliance</option>
           </select>
+          <button
+            type="button"
+            onClick={() => setProfileModalOpen(true)}
+            className="text-zinc-500 hover:text-zinc-300 transition-colors p-1.5"
+            title="Industry Profiles"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
           <Button variant="secondary" size="sm" disabled={metroScanning} onClick={startMetroCheck}>
             {metroScanning ? 'Running Top 15...' : 'Run Top 15 Metros'}
           </Button>
@@ -309,8 +257,7 @@ export default function JurisdictionData() {
       {/* Tabs */}
       <div className="flex items-center gap-1 mt-5 mb-5">
         {([
-          { id: 'coverage' as Tab, label: 'Coverage' },
-          { id: 'missing' as Tab, label: `Missing Data${missingCities.length ? ` (${missingCities.length})` : ''}` },
+          { id: 'explorer' as Tab, label: 'Explorer' },
           { id: 'quality' as Tab, label: 'Data Quality' },
           { id: 'preemption' as Tab, label: 'Preemption' },
           { id: 'bookmarks' as Tab, label: 'Bookmarks' },
@@ -321,87 +268,19 @@ export default function JurisdictionData() {
         ))}
       </div>
 
-      {/* ── Coverage Tab ── */}
-      {tab === 'coverage' && (
-        <div className={selectedCityId ? 'grid grid-cols-5 gap-4' : ''}>
-          <div className={selectedCityId ? 'col-span-2' : ''}>
-            <div className="border border-zinc-800 rounded-lg">
-              {/* Search */}
-              <div className="px-3 py-2 border-b border-zinc-800/60">
-                <Input label="" placeholder="Filter states / cities..." value={search} onChange={(e) => setSearch(e.target.value)} />
-              </div>
-
-              {/* Category legend */}
-              {requiredCats.length > 0 && !selectedCityId && (
-                <div className="px-3 py-2 border-b border-zinc-800/60 flex flex-wrap gap-x-3 gap-y-1">
-                  {requiredCats.map((cat) => (
-                    <span key={cat} className="text-[10px] text-zinc-500 font-medium" title={getCategoryLabel(cat)}>
-                      {SHORT_LABELS[cat] || cat}
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              {/* State rows */}
-              <div className="max-h-[60vh] overflow-y-auto divide-y divide-zinc-800/60">
-                {filteredStates.map((s) => {
-                  const isOpen = expandedStates.has(s.state) || !!search
-                  const citiesToShow = search
-                    ? s.cities.filter((c) => c.city.toLowerCase().includes(search.toLowerCase()))
-                    : s.cities
-                  return (
-                    <div key={s.state}>
-                      <button type="button" onClick={() => { if (!search) toggleState(s.state) }}
-                        className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-zinc-800/30 transition-colors">
-                        <span className="text-zinc-600 w-4 text-center text-xs">{isOpen ? '▾' : '▸'}</span>
-                        <span className="text-sm font-bold text-zinc-200 w-8 font-mono">{s.state}</span>
-                        <span className="text-[11px] text-zinc-500 w-16">{s.city_count} {s.city_count === 1 ? 'city' : 'cities'}</span>
-                        <div className="flex-1 flex items-center gap-2">
-                          <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-                            <div
-                              className={`h-full rounded-full transition-all ${s.coverage_pct >= 80 ? 'bg-emerald-500' : s.coverage_pct >= 50 ? 'bg-amber-400' : 'bg-red-400'}`}
-                              style={{ width: `${s.coverage_pct}%` }}
-                            />
-                          </div>
-                          <span className="text-[11px] font-mono text-zinc-500 w-10 text-right">{s.coverage_pct}%</span>
-                        </div>
-                      </button>
-
-                      {isOpen && citiesToShow.length > 0 && (
-                        <div className="bg-zinc-900/30 border-t border-zinc-800/40">
-                          {citiesToShow.map((city) => (
-                            <button key={city.id} type="button"
-                              onClick={() => openCity(city, s.state)}
-                              className={`w-full flex items-center gap-2 px-4 py-1.5 text-left transition-colors group ${
-                                selectedCityId === city.id ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/30'
-                              }`}>
-                              <span className={`text-sm w-36 truncate ${city.is_stale ? 'text-amber-300/80' : 'text-zinc-300'}`}>
-                                {city.city}
-                              </span>
-                              {/* Category dots */}
-                              <div className="flex gap-1">
-                                {requiredCats.map((cat) => (
-                                  <div key={cat}
-                                    className={`w-2.5 h-2.5 rounded-full ${city.categories_present.includes(cat) ? 'bg-emerald-500' : 'bg-red-500/60'}`}
-                                    title={`${getCategoryLabel(cat)}: ${city.categories_present.includes(cat) ? 'Present' : 'Missing'}`}
-                                  />
-                                ))}
-                              </div>
-                              <span className="text-[11px] font-mono text-zinc-600 ml-auto">{fmtDate(city.last_verified_at)}</span>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* City detail panel */}
+      {/* ── Explorer Tab ── */}
+      {tab === 'explorer' && (
+        <>
+          <ExplorerTab
+            allCities={allCities}
+            categoryCoverage={categoryCoverage}
+            stateOptions={stateOptions}
+            onSelectCity={openCity}
+            selectedCityId={selectedCityId}
+          />
+          {/* Detail panel — shown alongside explorer when city selected */}
           {selectedCityId && selectedCityMeta && (
-            <div className="col-span-3">
+            <div className="mt-4">
               <div className="flex items-center justify-between mb-2">
                 <button type="button" onClick={() => { setSelectedCityId(null); setSelectedCityMeta(null) }}
                   className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">← Back to list</button>
@@ -411,93 +290,18 @@ export default function JurisdictionData() {
                 city={selectedCityMeta.city}
                 state={selectedCityMeta.state}
                 categoriesMissing={selectedCityMeta.missing}
+                preemptionRules={overview.preemption_rules}
+                selectedProfile={selectedProfile}
                 onCheckComplete={fetchOverview}
               />
             </div>
           )}
-        </div>
-      )}
-
-      {/* ── Missing Data Tab ── */}
-      {tab === 'missing' && (
-        <div>
-          {/* Filters */}
-          <div className="flex flex-wrap items-center gap-3 mb-4">
-            <select value={filterState} onChange={(e) => setFilterState(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5">
-              <option value="">All States</option>
-              {stateOptions.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <select value={filterCategory} onChange={(e) => setFilterCategory(e.target.value)}
-              className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5">
-              <option value="">All Categories</option>
-              {requiredCats.map((c) => <option key={c} value={c}>{SHORT_LABELS[c] || getCategoryLabel(c)}</option>)}
-            </select>
-            <button type="button" onClick={() => setFilterStaleOnly(!filterStaleOnly)}
-              className={`text-xs px-2.5 py-1 rounded transition-colors ${filterStaleOnly ? 'bg-amber-500/20 text-amber-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
-              Stale only
-            </button>
-            <span className="text-[11px] text-zinc-600 ml-auto">{missingCities.length} jurisdictions</span>
-          </div>
-
-          {missingCities.length === 0 ? (
-            <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
-              <p className="text-sm text-zinc-600">
-                {filterState || filterStaleOnly || filterCategory ? 'No cities match these filters.' : 'All cities have complete category coverage.'}
-              </p>
-            </div>
-          ) : (
-            <div className="border border-zinc-800 rounded-lg overflow-hidden">
-              <div className="max-h-[70vh] overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-zinc-900/50 text-zinc-400 sticky top-0">
-                    <tr>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">ST</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">City</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Missing</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Gaps</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Verified</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800">
-                    {missingCities.slice(0, 100).map((city) => (
-                      <tr key={city.id} className="hover:bg-zinc-800/30 cursor-pointer"
-                        onClick={() => { setSelectedCityId(city.id); setSelectedCityMeta({ city: city.city, state: city.stateName, missing: city.filteredMissing }); setTab('coverage') }}>
-                        <td className="py-2 px-3 font-mono font-bold text-zinc-200">{city.stateName}</td>
-                        <td className="py-2 px-3 text-zinc-200 hover:underline">{city.city}</td>
-                        <td className="py-2 px-3">
-                          <div className="flex flex-wrap gap-1">
-                            {city.filteredMissing.map((cat) => (
-                              <span key={cat} className="text-[10px] text-red-400/70 bg-red-500/10 px-1.5 py-0.5 rounded">
-                                {SHORT_LABELS[cat] || getCategoryLabel(cat)}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className={`py-2 px-3 font-mono ${city.filteredMissing.length >= 4 ? 'text-red-400' : 'text-amber-400'}`}>
-                          {city.filteredMissing.length}/{requiredCats.length}
-                        </td>
-                        <td className="py-2 px-3 text-zinc-500 whitespace-nowrap text-[11px]">
-                          {fmtDate(city.last_verified_at)}
-                          {city.is_stale && <span className="text-amber-400/70 ml-1">⚠</span>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {missingCities.length > 100 && (
-                  <p className="text-center py-2 text-[10px] text-zinc-600">Showing 100 of {missingCities.length}</p>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        </>
       )}
 
       {/* ── Data Quality Tab ── */}
       {tab === 'quality' && (
         <div className="space-y-5">
-          {/* Tier breakdown with bars */}
           <div>
             <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Tier Breakdown</h2>
             <div className="border border-zinc-800 rounded-lg p-4 space-y-3">
@@ -523,7 +327,6 @@ export default function JurisdictionData() {
             </div>
           </div>
 
-          {/* Freshness */}
           <div>
             <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Data Freshness</h2>
             <div className="grid grid-cols-4 gap-3">
@@ -546,7 +349,6 @@ export default function JurisdictionData() {
             </div>
           </div>
 
-          {/* Structured Data Sources */}
           {overview!.structured_sources.length > 0 && (
             <div>
               <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Structured Data Sources</h2>
@@ -571,7 +373,7 @@ export default function JurisdictionData() {
                           <div className="flex flex-wrap gap-1">
                             {src.categories.map((c) => (
                               <span key={c} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">
-                                {SHORT_LABELS[c] || getCategoryLabel(c)}
+                                {getShortLabel(c)}
                               </span>
                             ))}
                           </div>
@@ -612,7 +414,7 @@ export default function JurisdictionData() {
                       <th className="py-1.5 px-2 text-left text-[10px] text-zinc-500 uppercase tracking-wide">State</th>
                       {requiredCats.map((c) => (
                         <th key={c} className="py-1.5 px-1.5 text-center text-[10px] text-zinc-500 uppercase tracking-wide whitespace-nowrap">
-                          {SHORT_LABELS[c] || c}
+                          {getShortLabel(c)}
                         </th>
                       ))}
                     </tr>
@@ -691,6 +493,16 @@ export default function JurisdictionData() {
           )}
         </div>
       )}
+
+      {/* Profile Editor Modal */}
+      <ProfileEditorModal
+        open={profileModalOpen}
+        onClose={() => setProfileModalOpen(false)}
+        profiles={profiles}
+        onCreate={createProfile}
+        onUpdate={updateProfile}
+        onDelete={removeProfile}
+      />
     </div>
   )
 }
