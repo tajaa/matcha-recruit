@@ -160,7 +160,7 @@ async def get_risk_history(
     if company_id is None:
         raise HTTPException(status_code=403, detail="No company associated")
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+    cutoff = datetime.utcnow() - timedelta(days=months * 30)
 
     async with get_connection() as conn:
         rows = await conn.fetch(
