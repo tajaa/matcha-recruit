@@ -111,10 +111,10 @@ describe('ERTimelinePanel', () => {
     })
   })
 
-  it('generates timeline when button is clicked', async () => {
+  it('generates timeline synchronously when backend returns completed', async () => {
     const user = userEvent.setup()
     mockGet.mockResolvedValueOnce({ generated_at: null }) // initial fetch
-    mockPost.mockResolvedValueOnce({}) // POST to generate
+    mockPost.mockResolvedValueOnce({ status: 'completed' }) // POST returns completed (sync)
     mockGet.mockResolvedValueOnce(mockTimeline) // GET after generate
     const onChange = vi.fn()
 
@@ -122,7 +122,6 @@ describe('ERTimelinePanel', () => {
       <ERTimelinePanel caseId={CASE_ID} timeline={null} onTimelineChange={onChange} />,
     )
 
-    // Wait for generate button to appear
     await waitFor(() => {
       expect(screen.getByText('Generate Timeline')).toBeInTheDocument()
     })
@@ -133,6 +132,34 @@ describe('ERTimelinePanel', () => {
       expect(mockPost).toHaveBeenCalledWith(`/er/cases/${CASE_ID}/analysis/timeline`)
       expect(onChange).toHaveBeenCalledWith(mockTimeline)
     })
+  })
+
+  it('polls for results when backend returns queued', async () => {
+    const user = userEvent.setup()
+    mockGet.mockResolvedValueOnce({ generated_at: null }) // initial fetch
+    mockPost.mockResolvedValueOnce({ status: 'queued' }) // POST returns queued (Celery)
+    // First poll: not ready yet
+    mockGet.mockResolvedValueOnce({ analysis: { events: [], gaps_identified: [], timeline_summary: '' }, source_documents: [], generated_at: null })
+    // Second poll: ready
+    mockGet.mockResolvedValueOnce(mockTimeline)
+    const onChange = vi.fn()
+
+    render(
+      <ERTimelinePanel caseId={CASE_ID} timeline={null} onTimelineChange={onChange} />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Generate Timeline')).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText('Generate Timeline'))
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith(mockTimeline)
+    }, { timeout: 10000 })
+
+    // POST once, then initial fetch + 2 polls = 3 GETs total
+    expect(mockGet).toHaveBeenCalledTimes(3)
   })
 
   it('renders timeline events and gaps', () => {

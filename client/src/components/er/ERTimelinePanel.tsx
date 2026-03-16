@@ -24,11 +24,29 @@ export function ERTimelinePanel({ caseId, timeline, onTimelineChange }: ERTimeli
     setLoading(true)
     setError('')
     try {
-      await api.post(`/er/cases/${caseId}/analysis/timeline`)
-      const res = await api.get<TimelineAnalysisResponse>(
-        `/er/cases/${caseId}/analysis/timeline`,
-      )
-      onTimelineChange(res)
+      const postRes = await api.post<{ status: string }>(`/er/cases/${caseId}/analysis/timeline`)
+
+      // If queued via Celery, poll until the analysis is ready
+      if (postRes.status === 'queued') {
+        const maxAttempts = 30
+        for (let i = 0; i < maxAttempts; i++) {
+          await new Promise((r) => setTimeout(r, 2000))
+          const res = await api.get<TimelineAnalysisResponse>(
+            `/er/cases/${caseId}/analysis/timeline`,
+          )
+          if (res.generated_at) {
+            onTimelineChange(res)
+            return
+          }
+        }
+        setError('Timeline generation is taking longer than expected. Please refresh the page.')
+      } else {
+        // Sync fallback — data is already available
+        const res = await api.get<TimelineAnalysisResponse>(
+          `/er/cases/${caseId}/analysis/timeline`,
+        )
+        onTimelineChange(res)
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to generate timeline')
     } finally {
