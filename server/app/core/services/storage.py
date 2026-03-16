@@ -1,9 +1,11 @@
+import asyncio
 import os
 import urllib.request
 from typing import Optional
 from uuid import uuid4
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 from ...config import get_settings
@@ -26,6 +28,11 @@ class StorageService:
                 region_name=self.region,
                 aws_access_key_id=settings.aws_access_key_id,
                 aws_secret_access_key=settings.aws_secret_access_key,
+                config=BotoConfig(
+                    connect_timeout=10,
+                    read_timeout=30,
+                    retries={"max_attempts": 2},
+                ),
             )
         else:
             self.s3_client = None
@@ -103,12 +110,16 @@ class StorageService:
                 extra_args["ContentType"] = content_type
 
             try:
-                self.s3_client.put_object(
-                    Bucket=self.bucket,
-                    Key=key,
-                    Body=file_bytes,
-                    ServerSideEncryption="AES256",
-                    **extra_args,
+                loop = asyncio.get_event_loop()
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.s3_client.put_object(
+                        Bucket=self.bucket,
+                        Key=key,
+                        Body=file_bytes,
+                        ServerSideEncryption="AES256",
+                        **extra_args,
+                    ),
                 )
                 return self._get_cloudfront_url(key)
             except ClientError as e:

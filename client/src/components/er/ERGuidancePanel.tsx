@@ -70,8 +70,14 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
 
     hasFetchedCache.current = true
     api.get<SuggestedGuidanceResponse>(`/er/cases/${caseId}/guidance/suggested`)
-      .then((cached) => onGuidanceChange(cached))
-      .catch(() => generate()) // cache miss → generate fresh
+      .then((cached) => {
+        if (cached) {
+          onGuidanceChange(cached)
+        } else {
+          generate() // 204 empty response → generate fresh
+        }
+      })
+      .catch(() => generate()) // error → generate fresh
   }, [guidance, caseId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleCloseCase() {
@@ -181,7 +187,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
               style={{ width: `${Math.round(guidance.determination_confidence * 100)}%` }}
             />
           </div>
-          <p className="text-[11px] text-zinc-600 mt-1">Preponderance threshold: 65%</p>
+          <p className="text-[11px] text-zinc-600 mt-1">Preponderance threshold: 80%</p>
         </div>
       )}
 

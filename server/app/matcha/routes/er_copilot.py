@@ -21,7 +21,7 @@ from uuid import UUID
 
 from io import BytesIO
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, UploadFile, File, Form, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Response, UploadFile, File, Form, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -1350,63 +1350,43 @@ async def upload_document(
         except Exception as e:
             logger.warning(f"Celery unavailable ({e}), will process document synchronously")
 
-        # Fallback: process synchronously if Celery not available
+        # Fallback: process in background if Celery not available
         if not celery_available:
-            try:
-                from app.workers.tasks.er_document_processing import _process_document
-                logger.info(f"Starting synchronous processing for document {row['id']}")
-                result = await asyncio.wait_for(
-                    _process_document(str(row["id"]), str(case_id)),
-                    timeout=120.0,
-                )
-                logger.info(f"Document {row['id']} processed successfully: {result}")
-                # Refresh document data after processing
-                row = await conn.fetchrow(
-                    """
-                    SELECT id, case_id, document_type, filename, file_path, mime_type, file_size,
-                           pii_scrubbed, processing_status, processing_error, parsed_at, uploaded_by, created_at
-                    FROM er_case_documents WHERE id = $1
-                    """,
-                    row["id"],
-                )
-            except asyncio.TimeoutError:
-                logger.error(f"Document {row['id']} processing timed out after 120s")
-                await conn.execute(
-                    """UPDATE er_case_documents
-                       SET processing_status = 'failed',
-                           processing_error = 'Processing timed out. Try a smaller document.'
-                       WHERE id = $1 AND processing_status = 'processing'""",
-                    row["id"],
-                )
-                row = await conn.fetchrow(
-                    """
-                    SELECT id, case_id, document_type, filename, file_path, mime_type, file_size,
-                           pii_scrubbed, processing_status, processing_error, parsed_at, uploaded_by, created_at
-                    FROM er_case_documents WHERE id = $1
-                    """,
-                    row["id"],
-                )
-            except Exception as sync_error:
-                logger.error(f"Document {row['id']} processing failed: {sync_error}", exc_info=True)
-                error_detail = str(sync_error).strip() or "Document processing failed"
-                if len(error_detail) > 1000:
-                    error_detail = error_detail[:997] + "..."
-                await conn.execute(
-                    """UPDATE er_case_documents
-                       SET processing_status = 'failed', processing_error = $1
-                       WHERE id = $2""",
-                    error_detail,
-                    row["id"],
-                )
-                # Refresh document data after failure
-                row = await conn.fetchrow(
-                    """
-                    SELECT id, case_id, document_type, filename, file_path, mime_type, file_size,
-                           pii_scrubbed, processing_status, processing_error, parsed_at, uploaded_by, created_at
-                    FROM er_case_documents WHERE id = $1
-                    """,
-                    row["id"],
-                )
+            async def _background_process(doc_id: str, c_id: str):
+                """Process document in background, updating status on completion/failure."""
+                try:
+                    from app.workers.tasks.er_document_processing import _process_document
+                    logger.info(f"Starting background processing for document {doc_id}")
+                    result = await asyncio.wait_for(
+                        _process_document(doc_id, c_id),
+                        timeout=120.0,
+                    )
+                    logger.info(f"Document {doc_id} processed successfully: {result}")
+                except asyncio.TimeoutError:
+                    logger.error(f"Document {doc_id} processing timed out after 120s")
+                    async with get_connection() as bg_conn:
+                        await bg_conn.execute(
+                            """UPDATE er_case_documents
+                               SET processing_status = 'failed',
+                                   processing_error = 'Processing timed out. Try a smaller document.'
+                               WHERE id = $1::uuid AND processing_status = 'processing'""",
+                            doc_id,
+                        )
+                except Exception as sync_error:
+                    logger.error(f"Document {doc_id} processing failed: {sync_error}", exc_info=True)
+                    error_detail = str(sync_error).strip() or "Document processing failed"
+                    if len(error_detail) > 1000:
+                        error_detail = error_detail[:997] + "..."
+                    async with get_connection() as bg_conn:
+                        await bg_conn.execute(
+                            """UPDATE er_case_documents
+                               SET processing_status = 'failed', processing_error = $1
+                               WHERE id = $2::uuid""",
+                            error_detail,
+                            doc_id,
+                        )
+
+            asyncio.create_task(_background_process(str(row["id"]), str(case_id)))
 
         document = ERDocumentResponse(
             id=row["id"],
@@ -2232,7 +2212,7 @@ async def get_similar_cases(
         return analysis
 
 
-@router.get("/{case_id}/guidance/suggested", response_model=SuggestedGuidanceResponse)
+@router.get("/{case_id}/guidance/suggested", response_model=Optional[SuggestedGuidanceResponse])
 async def get_cached_guidance(
     case_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
@@ -2254,12 +2234,12 @@ async def get_cached_guidance(
         intake_context = _normalize_intake_context(row["intake_context"]) or {}
         last_guidance = intake_context.get("last_guidance") if isinstance(intake_context, dict) else None
         if not last_guidance:
-            raise HTTPException(status_code=404, detail="No cached guidance")
+            return Response(status_code=204)
 
         try:
             return SuggestedGuidanceResponse(**last_guidance)
         except Exception:
-            raise HTTPException(status_code=404, detail="No cached guidance")
+            return Response(status_code=204)
 
 
 @router.post("/{case_id}/guidance/suggested", response_model=SuggestedGuidanceResponse)
@@ -2521,7 +2501,7 @@ async def generate_suggested_guidance(
         signals = [s for s in confidence_result.get("signals", []) if isinstance(s, dict) and s.get("present")]
         determination_signals = [s["reasoning"] for s in signals if isinstance(s.get("reasoning"), str)]
 
-        payload["determination_suggested"] = confidence >= 0.65
+        payload["determination_suggested"] = confidence >= 0.80
         payload["determination_confidence"] = round(confidence, 2)
         payload["determination_signals"] = determination_signals
 
@@ -2800,7 +2780,7 @@ async def generate_suggested_guidance_stream(
             present_signals = [s for s in conf_result.get("signals", []) if isinstance(s, dict) and s.get("present")]
             det_signals = [s["reasoning"] for s in present_signals if isinstance(s.get("reasoning"), str)]
 
-            payload["determination_suggested"] = conf >= 0.65
+            payload["determination_suggested"] = conf >= 0.80
             payload["determination_confidence"] = round(conf, 2)
             payload["determination_signals"] = det_signals
 
