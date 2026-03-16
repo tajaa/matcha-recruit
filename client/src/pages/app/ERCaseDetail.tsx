@@ -42,7 +42,7 @@ export default function ERCaseDetail() {
   const { caseId } = useParams<{ caseId: string }>()
   const navigate = useNavigate()
   const { case_, loading, error, updateCase, deleteCase, refetch } = useERCase(caseId!)
-  const [tab, setTab] = useState<Tab>('notes')
+  const [tab, setTab] = useState<Tab>('guidance')
   const [guidance, setGuidance] = useState<SuggestedGuidanceResponse | null>(null)
   const [timeline, setTimeline] = useState<TimelineAnalysisResponse | null>(null)
 
@@ -110,7 +110,7 @@ export default function ERCaseDetail() {
               />
             )}
             {tab === 'documents' && (
-              <ERDocumentList caseId={caseId!} onUploadComplete={refetch} />
+              <ERDocumentList caseId={caseId!} onUploadComplete={() => { refetch(); setGuidance(null); setTimeline(null) }} />
             )}
             {tab === 'guidance' && (
               <ERGuidancePanel caseId={caseId!} guidance={guidance} onGuidanceChange={setGuidance} />
