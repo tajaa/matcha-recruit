@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Pin, Archive, Loader2 } from 'lucide-react'
-import type { MWThread, MWTaskType } from '../../types/matcha-work'
+import type { MWThread } from '../../types/matcha-work'
 import { listThreads, createThread, pinThread, archiveThread } from '../../api/matchaWork'
 
 const TASK_LABELS: Record<string, string> = {

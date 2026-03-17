@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X } from 'lucide-react'
-import type { MWMessage, MWThreadDetail, MWTaskType, MWSendResponse } from '../../types/matcha-work'
+import type { MWMessage, MWThreadDetail, MWSendResponse } from '../../types/matcha-work'
 import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl } from '../../api/matchaWork'
 
 const TASK_LABELS: Record<string, string> = {
@@ -42,7 +42,6 @@ export default function MatchaWorkThread() {
         setThread(data)
         setMessages(data.messages)
         // Check if there's already a PDF-worthy task type
-        const state = data.current_state
         if (data.task_type === 'offer_letter' || data.task_type === 'presentation') {
           setPdfUrl(getPdfProxyUrl(threadId, data.version))
         }
