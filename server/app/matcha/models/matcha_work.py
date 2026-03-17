@@ -223,6 +223,7 @@ class CreateThreadResponse(BaseModel):
     version: int
     task_type: Optional[str] = None
     is_pinned: bool = False
+    node_mode: bool = False
     created_at: datetime
     assistant_reply: Optional[str] = None
     pdf_url: Optional[str] = None
@@ -268,6 +269,7 @@ class ThreadListItem(BaseModel):
     version: int
     task_type: Optional[str] = None
     is_pinned: bool = False
+    node_mode: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -292,6 +294,7 @@ class ThreadDetailResponse(BaseModel):
     version: int
     task_type: Optional[str] = None
     is_pinned: bool = False
+    node_mode: bool = False
     linked_offer_letter_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -332,6 +335,10 @@ class UpdateTitleRequest(BaseModel):
 
 class PinThreadRequest(BaseModel):
     is_pinned: bool = True
+
+
+class NodeModeRequest(BaseModel):
+    node_mode: bool = True
 
 
 class UsageTotals(BaseModel):

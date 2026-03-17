@@ -36,6 +36,7 @@ from ..models.matcha_work import (
     SendMessageRequest,
     SendMessageResponse,
     PinThreadRequest,
+    NodeModeRequest,
     ThreadDetailResponse,
     ThreadListItem,
     OfferLetterDocument,
@@ -68,6 +69,7 @@ from ..services.matcha_work_handbook_upload import (
     parse_handbook_sections,
 )
 from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation
+from ..services.matcha_work_node import build_node_context
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -253,6 +255,7 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: UUID) -> Th
         version=thread["version"],
         task_type=_infer_skill_from_state(thread["current_state"]),
         is_pinned=thread.get("is_pinned", False),
+        node_mode=thread.get("node_mode", False),
         linked_offer_letter_id=thread.get("linked_offer_letter_id"),
         created_at=thread["created_at"],
         updated_at=thread["updated_at"],
@@ -1102,6 +1105,7 @@ async def create_thread(
         version=thread["version"],
         task_type=_infer_skill_from_state(thread["current_state"]),
         is_pinned=thread.get("is_pinned", False),
+        node_mode=thread.get("node_mode", False),
         created_at=thread["created_at"],
         assistant_reply=assistant_reply,
         pdf_url=pdf_url,
@@ -1674,6 +1678,9 @@ async def send_message(
     # Call AI with company context
     ai_provider = get_ai_provider()
     ctx = _build_company_context(profile)
+    if thread.get("node_mode"):
+        node_ctx = await build_node_context(company_id)
+        ctx += "\n\n" + node_ctx
     ai_resp = await ai_provider.generate(
         msg_dicts, thread["current_state"], company_context=ctx,
         slide_index=body.slide_index, context_summary=context_summary,
@@ -1831,6 +1838,9 @@ async def send_message_stream(
 
     ai_provider = get_ai_provider()
     ctx = _build_company_context(profile)
+    if thread.get("node_mode"):
+        node_ctx = await build_node_context(company_id)
+        ctx += "\n\n" + node_ctx
     estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
 
     async def event_stream():
@@ -2425,7 +2435,7 @@ async def update_thread_title(
             UPDATE mw_threads
             SET title=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, node_mode, created_at, updated_at, current_state
             """,
             body.title,
             thread_id,
@@ -2461,6 +2471,31 @@ async def set_thread_pin(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     return ThreadListItem(**row)
+
+
+@router.post("/threads/{thread_id}/node-mode", response_model=ThreadListItem)
+async def set_thread_node_mode(
+    thread_id: UUID,
+    body: NodeModeRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Enable or disable Node mode (internal data search) for a thread."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row = await doc_svc.set_thread_node_mode(thread_id, company_id, body.node_mode)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row_dict = dict(row)
+    current_state = _json_object(row_dict.pop("current_state", {}))
+    return ThreadListItem(
+        **{
+            **row_dict,
+            "task_type": _infer_skill_from_state(current_state),
+        }
+    )
 
 
 @public_router.get("/review-requests/{token}", response_model=PublicReviewRequestResponse)

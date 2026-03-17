@@ -141,6 +141,11 @@ export default function MatchaWorkList() {
                       {TASK_LABELS[t.task_type] ?? t.task_type}
                     </span>
                   )}
+                  {t.node_mode && (
+                    <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-purple-700 text-purple-200">
+                      Node
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
                   <span>v{t.version}</span>

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse } from '../../types/matcha-work'
-import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl } from '../../api/matchaWork'
+import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode } from '../../api/matchaWork'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -25,6 +25,10 @@ export default function MatchaWorkThread() {
   const [error, setError] = useState('')
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
 
+  // Node mode
+  const [nodeMode, setNodeModeState] = useState(false)
+  const [togglingNode, setTogglingNode] = useState(false)
+
   // Title editing
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -41,6 +45,7 @@ export default function MatchaWorkThread() {
       .then((data) => {
         setThread(data)
         setMessages(data.messages)
+        setNodeModeState(data.node_mode)
         // Check if there's already a PDF-worthy task type
         if (data.task_type === 'offer_letter' || data.task_type === 'presentation') {
           setPdfUrl(getPdfProxyUrl(threadId, data.version))
@@ -127,6 +132,17 @@ export default function MatchaWorkThread() {
     } catch {}
   }
 
+  async function handleNodeToggle() {
+    if (!threadId || togglingNode) return
+    const newVal = !nodeMode
+    setTogglingNode(true)
+    try {
+      await setNodeMode(threadId, newVal)
+      setNodeModeState(newVal)
+    } catch {}
+    setTogglingNode(false)
+  }
+
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -196,6 +212,20 @@ export default function MatchaWorkThread() {
               {TASK_LABELS[thread.task_type] ?? thread.task_type}
             </span>
           )}
+
+          <button
+            onClick={handleNodeToggle}
+            disabled={togglingNode}
+            title={nodeMode ? 'Node mode ON — AI uses internal company data' : 'Node mode OFF — click to enable internal data search'}
+            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
+              nodeMode
+                ? 'bg-purple-600 text-white hover:bg-purple-500'
+                : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200'
+            }`}
+          >
+            <Database size={12} />
+            Node
+          </button>
         </div>
 
         {/* Messages */}

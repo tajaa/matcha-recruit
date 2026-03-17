@@ -33,6 +33,10 @@ export function pinThread(id: string, is_pinned = true) {
   return api.post<MWThread>(`/matcha-work/threads/${id}/pin`, { is_pinned })
 }
 
+export function setNodeMode(id: string, node_mode: boolean) {
+  return api.post<MWThread>(`/matcha-work/threads/${id}/node-mode`, { node_mode })
+}
+
 export function archiveThread(id: string) {
   return api.delete(`/matcha-work/threads/${id}`)
 }
