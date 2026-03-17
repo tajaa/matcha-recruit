@@ -67,7 +67,7 @@ export default function HandbookForm() {
   const [draftStatus, setDraftStatus] = useState<'saved' | 'saving' | 'unsaved'>('unsaved')
   const [loadingDraft, setLoadingDraft] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
   // Build draft state for save/restore
   const buildDraftState = useCallback((): HandbookWizardDraftState => ({
