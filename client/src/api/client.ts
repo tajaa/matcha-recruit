@@ -73,6 +73,88 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json()
 }
 
+import type {
+  HandbookListItem,
+  HandbookDetail,
+  HandbookCreate,
+  HandbookUpdate,
+  HandbookChangeRequest,
+  HandbookDistributionResult,
+  HandbookDistributionRecipient,
+  HandbookAcknowledgementSummary,
+  HandbookFreshnessCheck,
+  HandbookCoverage,
+  CompanyHandbookProfile,
+  CompanyHandbookProfileInput,
+  HandbookGuidedDraftRequest,
+  HandbookGuidedDraftResponse,
+  HandbookWizardDraft,
+  HandbookWizardDraftState,
+  HandbookPublishResponse,
+  HandbookSection,
+} from '../types/handbook'
+
+export const handbooks = {
+  list: () => request<HandbookListItem[]>('/handbooks'),
+  get: (id: string) => request<HandbookDetail>(`/handbooks/${id}`),
+  create: (data: HandbookCreate) =>
+    request<HandbookDetail>('/handbooks', { method: 'POST', body: JSON.stringify(data) }),
+  update: (id: string, data: HandbookUpdate) =>
+    request<HandbookDetail>(`/handbooks/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  publish: (id: string) =>
+    request<HandbookPublishResponse>(`/handbooks/${id}/publish`, { method: 'POST' }),
+  archive: (id: string) =>
+    request<{ message: string }>(`/handbooks/${id}/archive`, { method: 'POST' }),
+
+  getProfile: () => request<CompanyHandbookProfile>('/handbooks/profile'),
+  updateProfile: (data: CompanyHandbookProfileInput) =>
+    request<CompanyHandbookProfile>('/handbooks/profile', { method: 'PUT', body: JSON.stringify(data) }),
+  getAutoScopes: () => request<{ state: string; city: string | null }[]>('/handbooks/auto-scopes'),
+
+  uploadFile: (file: File) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    return request<{ url: string; filename: string; company_id: string }>('/handbooks/upload', { method: 'POST', body: fd })
+  },
+  downloadPdf: (id: string, title: string) =>
+    api.download(`/handbooks/${id}/pdf`, `${title}.pdf`),
+
+  generateGuidedDraft: (data: HandbookGuidedDraftRequest) =>
+    request<HandbookGuidedDraftResponse>('/handbooks/guided-draft', { method: 'POST', body: JSON.stringify(data) }),
+  getWizardDraft: () => request<HandbookWizardDraft | null>('/handbooks/wizard-draft'),
+  saveWizardDraft: (state: HandbookWizardDraftState) =>
+    request<HandbookWizardDraft>('/handbooks/wizard-draft', { method: 'PUT', body: JSON.stringify({ state }) }),
+  clearWizardDraft: () =>
+    request<{ deleted: boolean }>('/handbooks/wizard-draft', { method: 'DELETE' }),
+
+  listChanges: (id: string) =>
+    request<HandbookChangeRequest[]>(`/handbooks/${id}/changes`),
+  acceptChange: (handbookId: string, changeId: string) =>
+    request<HandbookChangeRequest>(`/handbooks/${handbookId}/changes/${changeId}/accept`, { method: 'POST' }),
+  rejectChange: (handbookId: string, changeId: string) =>
+    request<HandbookChangeRequest>(`/handbooks/${handbookId}/changes/${changeId}/reject`, { method: 'POST' }),
+
+  distribute: (id: string, employeeIds?: string[]) =>
+    request<HandbookDistributionResult>(`/handbooks/${id}/distribute`, {
+      method: 'POST',
+      body: employeeIds ? JSON.stringify({ employee_ids: employeeIds }) : undefined,
+    }),
+  listDistributionRecipients: (id: string) =>
+    request<HandbookDistributionRecipient[]>(`/handbooks/${id}/distribution-recipients`),
+  acknowledgements: (id: string) =>
+    request<HandbookAcknowledgementSummary>(`/handbooks/${id}/acknowledgements`),
+
+  getLatestFreshnessCheck: (id: string) =>
+    request<HandbookFreshnessCheck | null>(`/handbooks/${id}/freshness-check/latest`),
+  runFreshnessCheck: (id: string) =>
+    request<HandbookFreshnessCheck>(`/handbooks/${id}/freshness-check`, { method: 'POST' }),
+
+  getCoverage: (id: string) =>
+    request<HandbookCoverage>(`/handbooks/${id}/coverage`),
+  markSectionReviewed: (handbookId: string, sectionId: string) =>
+    request<HandbookSection>(`/handbooks/${handbookId}/sections/${sectionId}/mark-reviewed`, { method: 'POST' }),
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>

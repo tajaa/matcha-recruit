@@ -19,6 +19,8 @@ import EmployeeDetail from './pages/app/EmployeeDetail'
 import IRList from './pages/app/IRList'
 import IRDetail from './pages/app/IRDetail'
 import Handbooks from './pages/app/Handbooks'
+import HandbookDetail from './pages/app/HandbookDetail'
+import HandbookForm from './pages/app/HandbookForm'
 import RiskAssessment from './pages/app/RiskAssessment'
 import ERExportDownload from './pages/shared/ERExportDownload'
 
@@ -47,6 +49,9 @@ export default function App() {
         <Route path="ir" element={<IRList />} />
         <Route path="ir/:incidentId" element={<IRDetail />} />
         <Route path="handbooks" element={<Handbooks />} />
+        <Route path="handbook/new" element={<HandbookForm />} />
+        <Route path="handbook/:id" element={<HandbookDetail />} />
+        <Route path="handbook/:id/edit" element={<HandbookForm />} />
         <Route path="risk-assessment" element={<RiskAssessment />} />
       </Route>
     </Routes>
