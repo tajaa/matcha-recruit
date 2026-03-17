@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale, AlertTriangle, BookOpen, BarChart2 } from 'lucide-react'
+import { LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale, AlertTriangle, BookOpen, BarChart2, Sparkles } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 
 const nav = [
@@ -11,6 +11,7 @@ const nav = [
   { to: '/app/compliance', icon: Shield, label: 'Compliance' },
   { to: '/app/policies', icon: FileText, label: 'Policies' },
   { to: '/app/handbooks', icon: BookOpen, label: 'Handbooks' },
+  { to: '/work', icon: Sparkles, label: 'Matcha Work' },
 ]
 
 export default function ClientSidebar() {

@@ -23,6 +23,9 @@ import HandbookDetail from './pages/app/HandbookDetail'
 import HandbookForm from './pages/app/HandbookForm'
 import RiskAssessment from './pages/app/RiskAssessment'
 import ERExportDownload from './pages/shared/ERExportDownload'
+import WorkLayout from './layouts/WorkLayout'
+import MatchaWorkList from './pages/work/MatchaWorkList'
+import MatchaWorkThread from './pages/work/MatchaWorkThread'
 
 export default function App() {
   return (
@@ -30,6 +33,10 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
       <Route path="/s/:token" element={<ERExportDownload />} />
+      <Route path="/work" element={<WorkLayout />}>
+        <Route index element={<MatchaWorkList />} />
+        <Route path=":threadId" element={<MatchaWorkThread />} />
+      </Route>
       <Route path="/admin" element={<AppLayout sidebar={<AdminSidebar />} />}>
         <Route index element={<Navigate to="companies" replace />} />
         <Route path="companies" element={<Companies />} />
