@@ -125,6 +125,10 @@ export default function Jurisdictions() {
   const [activityStats, setActivityStats] = useState<{ checks_24h: number; failed_24h: number } | null>(null)
   const [loadingActivity, setLoadingActivity] = useState(false)
 
+  // Top metros
+  const [topMetroRunning, setTopMetroRunning] = useState(false)
+  const [topMetroMessages, setTopMetroMessages] = useState<string[]>([])
+
   // Schedulers
   const [schedulers, setSchedulers] = useState<SchedulerSetting[]>([])
   const [loadingJobs, setLoadingJobs] = useState(false)
@@ -235,6 +239,35 @@ export default function Jurisdictions() {
     }).catch(() => setResearchingId(null))
   }
 
+  function handleRunTopMetros() {
+    setTopMetroRunning(true); setTopMetroMessages([])
+    const token = localStorage.getItem('matcha_access_token')
+    const base = import.meta.env.VITE_API_URL || '/api'
+    fetch(`${base}/admin/jurisdictions/top-metros/check`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    }).then(async (res) => {
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) return
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (line.startsWith(': ')) continue
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6)
+          if (data === '[DONE]') { setTopMetroRunning(false); fetchJurisdictions(); return }
+          try {
+            const ev = JSON.parse(data)
+            if (ev.type === 'error') { setTopMetroMessages((p) => [...p, `Error: ${ev.message}`]); setTopMetroRunning(false); return }
+            if (ev.message) setTopMetroMessages((p) => [...p, ev.message])
+          } catch {}
+        }
+      }
+      setTopMetroRunning(false)
+    }).catch(() => setTopMetroRunning(false))
+  }
+
   async function processRequest(req: CoverageRequest) {
     await api.post(`/admin/jurisdiction-requests/${req.id}/process`, {
       has_local_ordinance: false, county: req.county || null, admin_notes: null,
@@ -287,6 +320,9 @@ export default function Jurisdictions() {
           <p className="mt-1 text-sm text-zinc-500">Manage the jurisdiction registry — add, research, and remove entries.</p>
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" disabled={topMetroRunning} onClick={handleRunTopMetros}>
+            {topMetroRunning ? 'Running Top 15...' : 'Run Top 15 Metros'}
+          </Button>
           <Button variant="ghost" size="sm" disabled={cleaning} onClick={handleCleanup}>
             {cleaning ? 'Cleaning...' : 'Cleanup Duplicates'}
           </Button>
@@ -302,6 +338,15 @@ export default function Jurisdictions() {
           </Button>
         ))}
       </div>
+
+      {/* Top metros SSE progress */}
+      {topMetroRunning && topMetroMessages.length > 0 && (
+        <div className="border border-zinc-800 rounded-lg px-3 py-2.5 mb-3 max-h-28 overflow-y-auto">
+          {topMetroMessages.map((msg, i) => (
+            <p key={i} className="text-xs text-zinc-500 leading-5">{msg}</p>
+          ))}
+        </div>
+      )}
 
       {/* ── Jurisdictions ── */}
       {tab === 'jurisdictions' && (

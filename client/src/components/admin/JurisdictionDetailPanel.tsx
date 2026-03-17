@@ -85,6 +85,8 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
   const [detail, setDetail] = useState<JurisdictionDetail | null>(null)
   const [loading, setLoading] = useState(false)
   const [scanning, setScanning] = useState(false)
+  const [specialtyRunning, setSpecialtyRunning] = useState(false)
+  const [medicalRunning, setMedicalRunning] = useState(false)
   const [scanMessages, setScanMessages] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>('requirements')
   const [specialtyFilter, setSpecialtyFilter] = useState<SpecialtyFilter>('all')
@@ -129,6 +131,64 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       }
       setScanning(false)
     }).catch(() => setScanning(false))
+  }
+
+  function startSpecialtyCheck() {
+    setSpecialtyRunning(true); setScanMessages([])
+    const token = localStorage.getItem('matcha_access_token')
+    const base = import.meta.env.VITE_API_URL || '/api'
+    fetch(`${base}/admin/jurisdictions/${id}/check-specialty`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    }).then(async (res) => {
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) return
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (line.startsWith(': ')) continue
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6)
+          if (data === '[DONE]') { setSpecialtyRunning(false); fetchDetail(); onCheckComplete?.(); return }
+          try {
+            const ev = JSON.parse(data)
+            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setSpecialtyRunning(false); return }
+            if (ev.message) setScanMessages((p) => [...p, ev.message])
+          } catch {}
+        }
+      }
+      setSpecialtyRunning(false)
+    }).catch(() => setSpecialtyRunning(false))
+  }
+
+  function startMedicalCheck() {
+    setMedicalRunning(true); setScanMessages([])
+    const token = localStorage.getItem('matcha_access_token')
+    const base = import.meta.env.VITE_API_URL || '/api'
+    fetch(`${base}/admin/jurisdictions/${id}/check-medical-compliance`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    }).then(async (res) => {
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) return
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (line.startsWith(': ')) continue
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6)
+          if (data === '[DONE]') { setMedicalRunning(false); fetchDetail(); onCheckComplete?.(); return }
+          try {
+            const ev = JSON.parse(data)
+            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setMedicalRunning(false); return }
+            if (ev.message) setScanMessages((p) => [...p, ev.message])
+          } catch {}
+        }
+      }
+      setMedicalRunning(false)
+    }).catch(() => setMedicalRunning(false))
   }
 
   async function toggleBookmark(reqId: string) {
@@ -359,9 +419,23 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
             </p>
           )}
         </div>
-        <Button variant="secondary" size="sm" disabled={scanning || loading} onClick={startCheck}>
-          {scanning ? 'Scanning...' : 'Run Check'}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button variant="secondary" size="sm" disabled={scanning || specialtyRunning || medicalRunning || loading} onClick={startCheck}>
+            {scanning ? 'Scanning...' : 'Run Check'}
+          </Button>
+          <button onClick={startSpecialtyCheck} disabled={scanning || specialtyRunning || medicalRunning || loading}
+            className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
+              text-purple-400 border-purple-500/40 hover:bg-purple-500/10 disabled:opacity-30"
+            title="Research healthcare + oncology specialty policies">
+            {specialtyRunning ? 'Running...' : 'Specialty'}
+          </button>
+          <button onClick={startMedicalCheck} disabled={scanning || specialtyRunning || medicalRunning || loading}
+            className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
+              text-teal-400 border-teal-500/40 hover:bg-teal-500/10 disabled:opacity-30"
+            title="Research health specs (17 categories)">
+            {medicalRunning ? 'Running...' : 'Health Specs'}
+          </button>
+        </div>
       </div>
 
       {/* Metro group (parent/children) */}
@@ -414,7 +488,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       </div>
 
       {/* SSE scan log */}
-      {scanning && scanMessages.length > 0 && (
+      {(scanning || specialtyRunning || medicalRunning) && scanMessages.length > 0 && (
         <div className="border border-zinc-800 rounded-lg px-3 py-2.5 mb-3 max-h-28 overflow-y-auto">
           {scanMessages.map((msg, i) => <p key={i} className="text-xs text-zinc-500 leading-5">{msg}</p>)}
         </div>
