@@ -25,6 +25,9 @@ server/uploads/
 .DS_Store
 Thumbs.db
 
+# Screenshots
+Screenshot *.png
+
 # Logs
 *.log
 .landing-build-version

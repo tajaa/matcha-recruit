@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { api } from '../../api/client'
-import { Badge, Button, Card, Select, type BadgeVariant } from '../ui'
-import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome } from '../../types/er'
-import { outcomeLabel } from '../../types/er'
+import { Badge, Button, Card, type BadgeVariant } from '../ui'
+import type { SuggestedGuidanceResponse, SuggestedGuidanceCard, ERCaseOutcome, OutcomeOption, OutcomeAnalysisResponse } from '../../types/er'
+
+const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 const priorityVariant: Record<string, BadgeVariant> = {
   high: 'danger',
@@ -10,15 +11,17 @@ const priorityVariant: Record<string, BadgeVariant> = {
   low: 'neutral',
 }
 
-const OUTCOME_OPTIONS = [
-  { value: '', label: 'Select outcome...' },
-  { value: 'termination', label: outcomeLabel.termination },
-  { value: 'disciplinary_action', label: outcomeLabel.disciplinary_action },
-  { value: 'retraining', label: outcomeLabel.retraining },
-  { value: 'no_action', label: outcomeLabel.no_action },
-  { value: 'resignation', label: outcomeLabel.resignation },
-  { value: 'other', label: outcomeLabel.other },
-]
+const determinationVariant: Record<string, BadgeVariant> = {
+  substantiated: 'danger',
+  unsubstantiated: 'success',
+  inconclusive: 'warning',
+}
+
+const confidenceVariant: Record<string, BadgeVariant> = {
+  high: 'success',
+  medium: 'warning',
+  low: 'neutral',
+}
 
 type ERGuidancePanelProps = {
   caseId: string
@@ -33,8 +36,13 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
   const [error, setError] = useState('')
   const [determinationDismissed, setDeterminationDismissed] = useState(false)
   const [showDetermination, setShowDetermination] = useState(false)
-  const [selectedOutcome, setSelectedOutcome] = useState<string>('')
-  const [closingCase, setClosingCase] = useState(false)
+  const [outcomeData, setOutcomeData] = useState<OutcomeAnalysisResponse | null>(null)
+  const [outcomeLoading, setOutcomeLoading] = useState(false)
+  const [outcomePhase, setOutcomePhase] = useState('')
+  const [outcomeError, setOutcomeError] = useState('')
+  const [applying, setApplying] = useState<string | null>(null)
+  const [expandedOutcomes, setExpandedOutcomes] = useState<Set<number>>(new Set())
+  const abortRef = useRef<AbortController | null>(null)
 
   // Tracks whether we've already done the initial cache-fetch on this mount.
   // Distinguishes "first mount with no guidance" (→ try cache first)
@@ -80,14 +88,85 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
       .catch(() => generate()) // error → generate fresh
   }, [guidance, caseId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function handleCloseCase() {
-    if (!selectedOutcome || !onBeginDetermination) return
-    setClosingCase(true)
+  function streamOutcomes() {
+    setOutcomeLoading(true)
+    setOutcomeError('')
+    setOutcomePhase('')
+    setOutcomeData(null)
+    setExpandedOutcomes(new Set())
+    abortRef.current?.abort()
+    const ctrl = new AbortController()
+    abortRef.current = ctrl
+
+    const token = localStorage.getItem('matcha_access_token')
+
+    fetch(`${BASE}/er/cases/${caseId}/guidance/outcomes/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      signal: ctrl.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+        const reader = res.body?.getReader()
+        if (!reader) throw new Error('No response body')
+        const decoder = new TextDecoder()
+        let buf = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+
+          const lines = buf.split('\n')
+          buf = lines.pop() ?? ''
+
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const raw = line.slice(6).trim()
+            if (raw === '[DONE]') { setOutcomeLoading(false); return }
+            try {
+              const msg = JSON.parse(raw)
+              if (msg.type === 'phase') setOutcomePhase(msg.message ?? '')
+              if (msg.type === 'complete') { setOutcomeData(msg.data); setOutcomeLoading(false); return }
+            } catch { /* skip malformed */ }
+          }
+        }
+        setOutcomeLoading(false)
+      })
+      .catch((e) => {
+        if (e.name !== 'AbortError') {
+          setOutcomeError(e instanceof Error ? e.message : 'Failed to generate outcomes')
+          setOutcomeLoading(false)
+        }
+      })
+  }
+
+  function handleBeginDetermination() {
+    setShowDetermination(true)
+    streamOutcomes()
+  }
+
+  function toggleOutcomeExpand(idx: number) {
+    setExpandedOutcomes((prev) => {
+      const next = new Set(prev)
+      next.has(idx) ? next.delete(idx) : next.add(idx)
+      return next
+    })
+  }
+
+  async function handleApplyOutcome(outcome: ERCaseOutcome) {
+    if (!onBeginDetermination) return
+    setApplying(outcome)
     try {
-      await onBeginDetermination(selectedOutcome as ERCaseOutcome)
-    } finally {
-      setClosingCase(false)
+      await onBeginDetermination(outcome)
       setShowDetermination(false)
+    } catch (e) {
+      setOutcomeError(e instanceof Error ? e.message : 'Failed to apply outcome')
+    } finally {
+      setApplying(null)
     }
   }
 
@@ -136,7 +215,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
             </div>
           </div>
           <div className="flex items-center gap-2 mt-3">
-            <Button size="sm" onClick={() => setShowDetermination(true)}>
+            <Button size="sm" onClick={handleBeginDetermination}>
               Begin Case Determination
             </Button>
             <Button variant="ghost" size="sm" onClick={() => setDeterminationDismissed(true)}>
@@ -146,28 +225,78 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
         </div>
       )}
 
-      {/* Inline determination form */}
+      {/* Inline AI-powered determination */}
       {showDetermination && (
         <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 px-4 py-4 space-y-4">
           <div>
-            <p className="text-sm font-medium text-zinc-200 mb-1">Close Case with Outcome</p>
-            <p className="text-xs text-zinc-500">Select the determination outcome and close this case.</p>
+            <p className="text-sm font-medium text-zinc-200 mb-1">Case Determination</p>
+            <p className="text-xs text-zinc-500">AI-ranked outcome recommendations based on evidence, policy, and precedent.</p>
           </div>
-          <Select
-            label="Outcome"
-            options={OUTCOME_OPTIONS}
-            value={selectedOutcome}
-            onChange={(e) => setSelectedOutcome(e.target.value)}
-          />
+
+          {outcomeLoading && (
+            <div className="text-center py-4">
+              <p className="text-sm text-zinc-500">{outcomePhase || 'Generating outcome analysis...'}</p>
+            </div>
+          )}
+
+          {outcomeError && <p className="text-xs text-red-400">{outcomeError}</p>}
+
+          {outcomeData && outcomeData.outcomes.map((opt: OutcomeOption, i: number) => (
+            <div key={i} className="border border-zinc-800 rounded-lg p-3 space-y-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <Badge variant={determinationVariant[opt.determination] ?? 'neutral'}>
+                  {opt.determination}
+                </Badge>
+                <span className="text-sm font-medium text-zinc-100">{opt.action_label}</span>
+                <Badge variant={confidenceVariant[opt.confidence] ?? 'neutral'}>
+                  {opt.confidence} confidence
+                </Badge>
+              </div>
+
+              <button
+                type="button"
+                className="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                onClick={() => toggleOutcomeExpand(i)}
+              >
+                {expandedOutcomes.has(i) ? 'Hide details' : 'Show details'}
+              </button>
+
+              {expandedOutcomes.has(i) && (
+                <div className="space-y-2 border-l-2 border-zinc-700 pl-3">
+                  <div>
+                    <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-0.5">Reasoning</p>
+                    <p className="text-sm text-zinc-300 leading-relaxed">{opt.reasoning}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-0.5">Policy Basis</p>
+                    <p className="text-sm text-zinc-300 leading-relaxed">{opt.policy_basis}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-0.5">HR Considerations</p>
+                    <p className="text-sm text-zinc-300 leading-relaxed">{opt.hr_considerations}</p>
+                  </div>
+                </div>
+              )}
+
+              {opt.precedent_note && (
+                <p className="text-xs text-zinc-500 italic">{opt.precedent_note}</p>
+              )}
+
+              <Button
+                size="sm"
+                disabled={applying !== null}
+                onClick={() => handleApplyOutcome(opt.recommended_action)}
+              >
+                {applying === opt.recommended_action ? 'Applying...' : 'Apply This Outcome'}
+              </Button>
+            </div>
+          ))}
+
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              disabled={!selectedOutcome || closingCase}
-              onClick={handleCloseCase}
-            >
-              {closingCase ? 'Closing...' : 'Close Case'}
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setShowDetermination(false)}>
+            {outcomeData && (
+              <Button variant="ghost" size="sm" onClick={streamOutcomes}>Regenerate</Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => { abortRef.current?.abort(); setShowDetermination(false) }}>
               Cancel
             </Button>
           </div>

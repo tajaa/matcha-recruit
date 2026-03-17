@@ -100,7 +100,7 @@ export function ERPolicyCheckPanel({ caseId }: Props) {
 
       if (postRes.status === 'queued') {
         // Poll until ready
-        for (let i = 0; i < 30; i++) {
+        for (let i = 0; i < 90; i++) {
           await new Promise((r) => setTimeout(r, 2000))
           const res = await api.get<PolicyCheckResponse>(`/er/cases/${caseId}/analysis/policy-check`)
           if (res.generated_at && res.generated_at !== generatedAt) {
@@ -110,7 +110,7 @@ export function ERPolicyCheckPanel({ caseId }: Props) {
             return
           }
         }
-        setError('Policy check is taking longer than expected. Please refresh.')
+        setError('Policy check is still running in the background. Please check back shortly.')
       } else {
         // Sync — fetch result
         const res = await api.get<PolicyCheckResponse>(`/er/cases/${caseId}/analysis/policy-check`)

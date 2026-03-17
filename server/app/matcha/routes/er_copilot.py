@@ -2508,16 +2508,18 @@ async def generate_suggested_guidance(
         result = SuggestedGuidanceResponse(**payload)
 
         # Cache result in intake_context.last_guidance
+        # Use a fresh connection — the original `async with get_connection()` scope has closed
         try:
             existing_intake = _normalize_intake_context(case_row["intake_context"]) or {}
             if not isinstance(existing_intake, dict):
                 existing_intake = {}
             existing_intake["last_guidance"] = result.model_dump(mode="json")
-            await conn.execute(
-                "UPDATE er_cases SET intake_context = $1::jsonb WHERE id = $2",
-                json.dumps(existing_intake),
-                case_id,
-            )
+            async with get_connection() as cache_conn:
+                await cache_conn.execute(
+                    "UPDATE er_cases SET intake_context = $1::jsonb WHERE id = $2",
+                    json.dumps(existing_intake),
+                    case_id,
+                )
         except Exception as cache_err:
             logger.warning("Failed to cache guidance for case %s: %s", case_id, cache_err)
 
