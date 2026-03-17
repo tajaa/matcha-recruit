@@ -27,11 +27,13 @@ type ERGuidancePanelProps = {
   caseId: string
   guidance: SuggestedGuidanceResponse | null
   onGuidanceChange: (g: SuggestedGuidanceResponse | null) => void
+  documentCount: number
+  hasDescription: boolean
   onActionClick?: (action: { type: string; label: string }) => void
   onBeginDetermination?: (outcome: ERCaseOutcome) => Promise<void>
 }
 
-export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionClick, onBeginDetermination }: ERGuidancePanelProps) {
+export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, documentCount, hasDescription, onActionClick, onBeginDetermination }: ERGuidancePanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [determinationDismissed, setDeterminationDismissed] = useState(false)
@@ -43,6 +45,8 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
   const [applying, setApplying] = useState<string | null>(null)
   const [expandedOutcomes, setExpandedOutcomes] = useState<Set<number>>(new Set())
   const abortRef = useRef<AbortController | null>(null)
+
+  const hasContent = documentCount > 0 || hasDescription
 
   // Tracks whether we've already done the initial cache-fetch on this mount.
   // Distinguishes "first mount with no guidance" (→ try cache first)
@@ -69,6 +73,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
   // If guidance is null and we've already fetched cache once (invalidation path), regenerate directly.
   useEffect(() => {
     if (guidance !== null) return
+    if (!hasContent) return
 
     if (hasFetchedCache.current) {
       // Parent cleared guidance (e.g. after document upload) — regenerate
@@ -86,7 +91,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
         }
       })
       .catch(() => generate()) // error → generate fresh
-  }, [guidance, caseId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [guidance, caseId, hasContent]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function streamOutcomes() {
     setOutcomeLoading(true)
@@ -171,6 +176,15 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
   }
 
   if (!guidance && !loading) {
+    if (!hasContent) {
+      return (
+        <div className="text-center py-8">
+          <p className="text-sm text-zinc-500">
+            Upload documents or add a case description before generating guidance.
+          </p>
+        </div>
+      )
+    }
     return (
       <div className="text-center py-8">
         <p className="text-sm text-zinc-500 mb-4">
@@ -241,7 +255,14 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onActionCl
 
           {outcomeError && <p className="text-xs text-red-400">{outcomeError}</p>}
 
-          {outcomeData && outcomeData.outcomes.map((opt: OutcomeOption, i: number) => (
+          {!outcomeLoading && !outcomeData && !outcomeError && (
+            <div className="text-center py-4">
+              <p className="text-sm text-zinc-500 mb-2">No outcome data was returned. Try again.</p>
+              <Button size="sm" onClick={streamOutcomes}>Retry</Button>
+            </div>
+          )}
+
+          {outcomeData && (outcomeData.outcomes ?? []).map((opt: OutcomeOption, i: number) => (
             <div key={i} className="border border-zinc-800 rounded-lg p-3 space-y-2">
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant={determinationVariant[opt.determination] ?? 'neutral'}>

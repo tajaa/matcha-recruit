@@ -215,6 +215,8 @@ export default function ERCaseDetail() {
                 caseId={caseId!}
                 guidance={guidance}
                 onGuidanceChange={setGuidance}
+                documentCount={case_.document_count}
+                hasDescription={!!case_.description}
                 onBeginDetermination={async (outcome: ERCaseOutcome) => {
                   await updateCase({ status: 'closed' as ERCaseStatus, outcome })
                 }}

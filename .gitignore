@@ -27,6 +27,9 @@ Thumbs.db
 
 # Screenshots
 Screenshot *.png
+.screenshots/*.png
+.screenshots/*.jpg
+.screenshots/*.gif
 
 # Logs
 *.log

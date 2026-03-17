@@ -69,7 +69,9 @@ export function ERDiscrepanciesPanel({ caseId }: Props) {
     )
   }
 
-  const { discrepancies, credibility_notes, summary } = data.analysis
+  const discrepancies = data.analysis?.discrepancies ?? []
+  const credibility_notes = data.analysis?.credibility_notes ?? []
+  const summary = data.analysis?.summary
 
   return (
     <div className="space-y-4">
