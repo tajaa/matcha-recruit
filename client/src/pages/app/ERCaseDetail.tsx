@@ -74,6 +74,7 @@ export default function ERCaseDetail() {
   const [tab, setTab] = useState<Tab>('guidance')
   const [guidance, setGuidance] = useState<SuggestedGuidanceResponse | null>(null)
   const [timeline, setTimeline] = useState<TimelineAnalysisResponse | null>(null)
+  const [skipGuidanceCache, setSkipGuidanceCache] = useState(false)
 
   // Export sidebar state
   const [exportOpen, setExportOpen] = useState(false)
@@ -223,7 +224,7 @@ export default function ERCaseDetail() {
               />
             )}
             {tab === 'documents' && (
-              <ERDocumentList caseId={caseId!} onUploadComplete={() => { refetch(); setGuidance(null); setTimeline(null) }} />
+              <ERDocumentList caseId={caseId!} onUploadComplete={() => { refetch(); setGuidance(null); setTimeline(null); setSkipGuidanceCache(true) }} />
             )}
             {tab === 'guidance' && (
               <ERGuidancePanel
@@ -234,6 +235,8 @@ export default function ERCaseDetail() {
                 documentCount={case_.document_count}
                 hasDescription={!!case_.description}
                 caseStatus={case_.status}
+                skipCache={skipGuidanceCache}
+                onCacheSkipped={() => setSkipGuidanceCache(false)}
                 onBeginDetermination={async (outcome: ERCaseOutcome, adminNotes: string) => {
                   await updateCase({ status: 'closed' as ERCaseStatus, outcome })
                   try {

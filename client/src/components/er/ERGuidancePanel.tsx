@@ -33,9 +33,11 @@ type ERGuidancePanelProps = {
   caseStatus?: string
   onActionClick?: (action: { type: string; label: string }) => void
   onBeginDetermination?: (outcome: ERCaseOutcome, adminNotes: string) => Promise<void>
+  skipCache?: boolean
+  onCacheSkipped?: () => void
 }
 
-export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidanceGenerated, documentCount, hasDescription, caseStatus, onActionClick, onBeginDetermination }: ERGuidancePanelProps) {
+export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidanceGenerated, documentCount, hasDescription, caseStatus, onActionClick, onBeginDetermination, skipCache, onCacheSkipped }: ERGuidancePanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [determinationDismissed, setDeterminationDismissed] = useState(false)
@@ -77,12 +79,14 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
   // On mount (or caseId change): try cached guidance first.
   // If guidance is already in parent state, skip.
   // If guidance is null and we've already fetched cache once (invalidation path), regenerate directly.
+  // If skipCache is true (e.g. after document upload on another tab), skip cache and regenerate.
   useEffect(() => {
     if (guidance !== null) return
     if (!hasContent) return
 
-    if (hasFetchedCache.current) {
+    if (skipCache || hasFetchedCache.current) {
       // Parent cleared guidance (e.g. after document upload) — regenerate
+      if (skipCache) onCacheSkipped?.()
       generate()
       return
     }
@@ -97,7 +101,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
         }
       })
       .catch(() => generate()) // error → generate fresh
-  }, [guidance, caseId, hasContent]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [guidance, caseId, hasContent, skipCache]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function streamOutcomes() {
     setOutcomeLoading(true)

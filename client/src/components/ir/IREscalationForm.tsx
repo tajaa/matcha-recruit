@@ -29,6 +29,7 @@ export function IREscalationForm({ incidentId, incident, onEscalated }: Props) {
     category: IR_TYPE_TO_ER_CATEGORY[incident.incident_type] || 'other',
   })
   const [escalating, setEscalating] = useState(false)
+  const [error, setError] = useState('')
 
   if (incident.er_case_id) {
     return (
@@ -56,15 +57,21 @@ export function IREscalationForm({ incidentId, incident, onEscalated }: Props) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setEscalating(true)
+    setError('')
     try {
       const res = await api.post<{ id: string }>('/er/cases', {
         title: form.title,
         description: form.description || null,
         category: form.category,
       })
-      await api.put(`/ir/incidents/${incidentId}`, { er_case_id: res.id })
+      // Link incident back — best-effort, don't block navigation
+      api.put(`/ir/incidents/${incidentId}`, { er_case_id: res.id }).catch(() => {})
       onEscalated(res.id)
-    } finally { setEscalating(false) }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create ER case')
+    } finally {
+      setEscalating(false)
+    }
   }
 
   return (
@@ -79,6 +86,7 @@ export function IREscalationForm({ incidentId, incident, onEscalated }: Props) {
           placeholder="Description..."
         />
         <Select label="Category" options={ER_CATEGORY_OPTIONS} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />
+        {error && <p className="text-xs text-red-400">{error}</p>}
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" type="button" onClick={() => setShow(false)}>Cancel</Button>
           <Button size="sm" type="submit" disabled={escalating}>{escalating ? 'Creating...' : 'Create ER Case'}</Button>
