@@ -233,12 +233,15 @@ export default function ERCaseDetail() {
                 onGuidanceGenerated={handleGuidanceGenerated}
                 documentCount={case_.document_count}
                 hasDescription={!!case_.description}
-                onBeginDetermination={async (outcome: ERCaseOutcome) => {
+                caseStatus={case_.status}
+                onBeginDetermination={async (outcome: ERCaseOutcome, adminNotes: string) => {
                   await updateCase({ status: 'closed' as ERCaseStatus, outcome })
                   try {
+                    const noteLines = [`Case closed with outcome: ${outcomeLabel[outcome] ?? outcome}`]
+                    if (adminNotes.trim()) noteLines.push(`\nAdmin notes: ${adminNotes.trim()}`)
                     await api.post(`/er/cases/${caseId}/notes`, {
                       note_type: 'system',
-                      content: `Case closed with outcome: ${outcomeLabel[outcome] ?? outcome}`,
+                      content: noteLines.join(''),
                       metadata: { source: 'determination', note_purpose: 'determination' },
                     })
                   } catch { /* note is supplementary */ }

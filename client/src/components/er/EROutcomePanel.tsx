@@ -29,6 +29,7 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
   const [error, setError] = useState('')
   const [applying, setApplying] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<number>>(new Set())
+  const [adminNotes, setAdminNotes] = useState<Record<number, string>>({})
   const abortRef = useRef<AbortController | null>(null)
 
   function generate() {
@@ -93,10 +94,18 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
     })
   }
 
-  async function handleApply(outcome: ERCaseOutcome) {
+  async function handleApply(outcome: ERCaseOutcome, outcomeIdx: number) {
     setApplying(outcome)
     try {
-      await api.put(`/er/cases/${caseId}`, { outcome, status: 'pending_determination' })
+      await api.put(`/er/cases/${caseId}`, { outcome, status: 'closed' })
+      const notes = adminNotes[outcomeIdx]?.trim()
+      if (notes) {
+        await api.post(`/er/cases/${caseId}/notes`, {
+          note_type: 'system',
+          content: `Determination notes: ${notes}`,
+          metadata: { source: 'determination', note_purpose: 'admin_notes' },
+        })
+      }
       await onApplyOutcome(outcome)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to apply outcome')
@@ -151,10 +160,10 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
           {/* Expandable sections */}
           <button
             type="button"
-            className="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
+            className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
             onClick={() => toggleExpand(i)}
           >
-            {expanded.has(i) ? 'Hide details' : 'Show details'}
+            {expanded.has(i) ? '▾ Hide details' : '▸ Show details'}
           </button>
 
           {expanded.has(i) && (
@@ -178,10 +187,21 @@ export function EROutcomePanel({ caseId, onApplyOutcome }: Props) {
             <p className="text-xs text-zinc-500 italic">{opt.precedent_note}</p>
           )}
 
+          <div className="space-y-1.5 pt-1">
+            <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Admin Notes</p>
+            <textarea
+              value={adminNotes[i] ?? ''}
+              onChange={(e) => setAdminNotes((prev) => ({ ...prev, [i]: e.target.value }))}
+              placeholder="Add notes before closing this case..."
+              rows={2}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+            />
+          </div>
+
           <Button
             size="sm"
             disabled={applying !== null}
-            onClick={() => handleApply(opt.recommended_action)}
+            onClick={() => handleApply(opt.recommended_action, i)}
           >
             {applying === opt.recommended_action ? 'Applying...' : 'Apply This Outcome'}
           </Button>

@@ -30,11 +30,12 @@ type ERGuidancePanelProps = {
   onGuidanceGenerated?: (g: SuggestedGuidanceResponse) => void
   documentCount: number
   hasDescription: boolean
+  caseStatus?: string
   onActionClick?: (action: { type: string; label: string }) => void
-  onBeginDetermination?: (outcome: ERCaseOutcome) => Promise<void>
+  onBeginDetermination?: (outcome: ERCaseOutcome, adminNotes: string) => Promise<void>
 }
 
-export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidanceGenerated, documentCount, hasDescription, onActionClick, onBeginDetermination }: ERGuidancePanelProps) {
+export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidanceGenerated, documentCount, hasDescription, caseStatus, onActionClick, onBeginDetermination }: ERGuidancePanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [determinationDismissed, setDeterminationDismissed] = useState(false)
@@ -45,7 +46,10 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
   const [outcomeError, setOutcomeError] = useState('')
   const [applying, setApplying] = useState<string | null>(null)
   const [expandedOutcomes, setExpandedOutcomes] = useState<Set<number>>(new Set())
+  const [adminNotes, setAdminNotes] = useState<Record<number, string>>({})
   const abortRef = useRef<AbortController | null>(null)
+
+  const isClosed = caseStatus === 'closed'
 
   const hasContent = documentCount > 0 || hasDescription
 
@@ -164,11 +168,11 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
     })
   }
 
-  async function handleApplyOutcome(outcome: ERCaseOutcome) {
+  async function handleApplyOutcome(outcome: ERCaseOutcome, outcomeIdx: number) {
     if (!onBeginDetermination) return
     setApplying(outcome)
     try {
-      await onBeginDetermination(outcome)
+      await onBeginDetermination(outcome, adminNotes[outcomeIdx] ?? '')
       setShowDetermination(false)
     } catch (e) {
       setOutcomeError(e instanceof Error ? e.message : 'Failed to apply outcome')
@@ -211,7 +215,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
       </div>
 
       {/* Preponderance of evidence threshold banner */}
-      {guidance.determination_suggested && !determinationDismissed && !showDetermination && (
+      {guidance.determination_suggested && !determinationDismissed && !showDetermination && !isClosed && (
         <div className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-4 py-4">
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
@@ -242,7 +246,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
       )}
 
       {/* Inline AI-powered determination */}
-      {showDetermination && (
+      {showDetermination && !isClosed && (
         <div className="rounded-lg border border-zinc-700 bg-zinc-900/60 px-4 py-4 space-y-4">
           <div>
             <p className="text-sm font-medium text-zinc-200 mb-1">Case Determination</p>
@@ -278,10 +282,10 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
 
               <button
                 type="button"
-                className="text-xs text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                className="text-xs px-2 py-1 rounded border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 transition-colors"
                 onClick={() => toggleOutcomeExpand(i)}
               >
-                {expandedOutcomes.has(i) ? 'Hide details' : 'Show details'}
+                {expandedOutcomes.has(i) ? '▾ Hide details' : '▸ Show details'}
               </button>
 
               {expandedOutcomes.has(i) && (
@@ -305,10 +309,21 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
                 <p className="text-xs text-zinc-500 italic">{opt.precedent_note}</p>
               )}
 
+              <div className="space-y-1.5 pt-1">
+                <p className="text-[11px] text-zinc-500 uppercase tracking-wide">Admin Notes</p>
+                <textarea
+                  value={adminNotes[i] ?? ''}
+                  onChange={(e) => setAdminNotes((prev) => ({ ...prev, [i]: e.target.value }))}
+                  placeholder="Add notes before closing this case..."
+                  rows={2}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
+                />
+              </div>
+
               <Button
                 size="sm"
                 disabled={applying !== null}
-                onClick={() => handleApplyOutcome(opt.recommended_action)}
+                onClick={() => handleApplyOutcome(opt.recommended_action, i)}
               >
                 {applying === opt.recommended_action ? 'Applying...' : 'Apply This Outcome'}
               </Button>
@@ -326,8 +341,15 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
         </div>
       )}
 
+      {/* Closed case banner */}
+      {isClosed && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-3">
+          <p className="text-sm text-zinc-400">This case has been closed. Review the Notes tab for determination details.</p>
+        </div>
+      )}
+
       {/* Confidence meter (when below threshold) */}
-      {!guidance.determination_suggested && guidance.determination_confidence > 0 && (
+      {!isClosed && !guidance.determination_suggested && guidance.determination_confidence > 0 && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/30 px-4 py-3">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-[11px] text-zinc-500 uppercase tracking-wide">Evidence Confidence</span>
