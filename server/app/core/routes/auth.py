@@ -1661,10 +1661,11 @@ async def register_business(request: BusinessRegister):
 
             # Step 1: Create company
             company = await conn.fetchrow(
-                """INSERT INTO companies (name, industry, size, status, approved_at, enabled_features)
-                   VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                """INSERT INTO companies (name, industry, size, healthcare_specialties, status, approved_at, enabled_features)
+                   VALUES ($1, $2, $3, $4::text[], $5, $6, $7::jsonb)
                    RETURNING id, name""",
                 request.company_name, request.industry, request.company_size,
+                request.healthcare_specialties,
                 company_status,
                 datetime.utcnow() if (invitation or referring_broker_id) else None,
                 default_company_features_json(),

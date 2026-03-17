@@ -203,6 +203,7 @@ class BusinessRegistrationResponse(BaseModel):
     id: UUID
     company_name: str
     industry: Optional[str]
+    healthcare_specialties: Optional[list[str]] = None
     company_size: Optional[str]
     owner_email: str
     owner_name: str
@@ -248,6 +249,7 @@ async def list_business_registrations(
                 comp.id,
                 comp.name as company_name,
                 comp.industry,
+                comp.healthcare_specialties,
                 comp.size as company_size,
                 u.email as owner_email,
                 c.name as owner_name,
@@ -279,6 +281,7 @@ async def list_business_registrations(
                 id=row["id"],
                 company_name=row["company_name"],
                 industry=row["industry"],
+                healthcare_specialties=list(row["healthcare_specialties"] or []) or None,
                 company_size=row["company_size"],
                 owner_email=row["owner_email"],
                 owner_name=row["owner_name"],
@@ -309,6 +312,7 @@ async def get_business_registration(company_id: UUID):
                 comp.id,
                 comp.name as company_name,
                 comp.industry,
+                comp.healthcare_specialties,
                 comp.size as company_size,
                 u.email as owner_email,
                 c.name as owner_name,
@@ -338,6 +342,7 @@ async def get_business_registration(company_id: UUID):
             id=row["id"],
             company_name=row["company_name"],
             industry=row["industry"],
+            healthcare_specialties=list(row["healthcare_specialties"] or []) or None,
             company_size=row["company_size"],
             owner_email=row["owner_email"],
             owner_name=row["owner_name"],

@@ -93,6 +93,7 @@ class BusinessRegister(BaseModel):
     company_name: str
     industry: Optional[str] = None
     company_size: Optional[str] = None  # e.g., "1-10", "11-50", etc.
+    healthcare_specialties: Optional[list[str]] = None
     headcount: int = Field(..., ge=1)
 
     # First admin user info
