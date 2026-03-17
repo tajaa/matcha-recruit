@@ -68,7 +68,13 @@ export function NoteThread({
       ) : (
         <div className={`space-y-3 mb-4 ${maxHeight} overflow-y-auto`}>
           {notes.map((n) => (
-            <div key={n.id} className="rounded-lg bg-zinc-900/50 border border-zinc-800 px-4 py-3">
+            <div
+              key={n.id}
+              className={`rounded-lg bg-zinc-900/50 border border-zinc-800 px-4 py-3 ${
+                n.note_type === 'guidance' ? 'border-l-2 border-l-emerald-600' :
+                n.note_type === 'system' ? 'border-l-2 border-l-violet-600' : ''
+              }`}
+            >
               <div className="flex items-center gap-2 mb-1">
                 <span className="text-[10px] text-zinc-500">
                   {new Date(n.created_at).toLocaleString()}

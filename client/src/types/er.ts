@@ -195,4 +195,5 @@ export const NOTE_TYPES: { value: ERNoteType; label: string }[] = [
   { value: 'question', label: 'Question' },
   { value: 'answer', label: 'Answer' },
   { value: 'guidance', label: 'Guidance' },
+  { value: 'system', label: 'System' },
 ]

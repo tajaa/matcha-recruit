@@ -119,11 +119,13 @@ export function ERDiscrepanciesPanel({ caseId }: Props) {
             <div key={i} className="space-y-1">
               <p className="text-sm text-zinc-200">{cn.witness}</p>
               <p className="text-xs text-zinc-400">{cn.note}</p>
-              <div className="flex flex-wrap gap-1.5">
-                {cn.factors.map((f, j) => (
-                  <span key={j} className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{f}</span>
-                ))}
-              </div>
+              {cn.factors && cn.factors.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {cn.factors.map((f, j) => (
+                    <span key={j} className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400">{f}</span>
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>

@@ -345,7 +345,7 @@ async def create_incident(
             incident.reported_by_email,
             json.dumps([w.model_dump() for w in incident.witnesses]),
             json.dumps(incident.category_data or {}),
-            [str(uid) for uid in incident.involved_employee_ids],
+            [str(uid) for uid in incident.involved_employee_ids] if incident.involved_employee_ids else None,
             effective_company_id,
             str(incident.location_id) if incident.location_id else None,
             str(current_user.id),

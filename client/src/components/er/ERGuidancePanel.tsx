@@ -27,13 +27,14 @@ type ERGuidancePanelProps = {
   caseId: string
   guidance: SuggestedGuidanceResponse | null
   onGuidanceChange: (g: SuggestedGuidanceResponse | null) => void
+  onGuidanceGenerated?: (g: SuggestedGuidanceResponse) => void
   documentCount: number
   hasDescription: boolean
   onActionClick?: (action: { type: string; label: string }) => void
   onBeginDetermination?: (outcome: ERCaseOutcome) => Promise<void>
 }
 
-export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, documentCount, hasDescription, onActionClick, onBeginDetermination }: ERGuidancePanelProps) {
+export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidanceGenerated, documentCount, hasDescription, onActionClick, onBeginDetermination }: ERGuidancePanelProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [determinationDismissed, setDeterminationDismissed] = useState(false)
@@ -61,6 +62,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, documentCo
         `/er/cases/${caseId}/guidance/suggested`,
       )
       onGuidanceChange(res)
+      onGuidanceGenerated?.(res)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to generate guidance')
     } finally {
@@ -135,7 +137,7 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, documentCo
             try {
               const msg = JSON.parse(raw)
               if (msg.type === 'phase') setOutcomePhase(msg.message ?? '')
-              if (msg.type === 'complete') { setOutcomeData(msg.data); setOutcomeLoading(false); return }
+              if (msg.type === 'complete' || msg.type === 'result') { setOutcomeData(msg.data); setOutcomeLoading(false); return }
             } catch { /* skip malformed */ }
           }
         }

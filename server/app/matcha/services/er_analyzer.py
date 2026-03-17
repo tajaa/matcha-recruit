@@ -89,29 +89,20 @@ Return ONLY a JSON object with this structure:
 {{
     "discrepancies": [
         {{
-            "type": "contradiction",
+            "subject": "Whether the door was open or closed during the conversation",
             "severity": "high",
-            "description": "Witnesses disagree on whether the door was open or closed",
-            "statement_1": {{
-                "source_document_id": "doc-uuid-1",
-                "speaker": "Jane Smith",
-                "quote": "The door was open the entire time",
-                "location": "Page 3, Line 15"
-            }},
-            "statement_2": {{
-                "source_document_id": "doc-uuid-2",
-                "speaker": "Bob Johnson",
-                "quote": "I knocked because the door was closed",
-                "location": "Page 2, Line 8"
-            }},
-            "analysis": "This discrepancy is significant because it affects whether the conversation could have been overheard"
+            "statement_a": "The door was open the entire time",
+            "statement_b": "I knocked because the door was closed",
+            "source_a": "Jane Smith — Page 3, Line 15",
+            "source_b": "Bob Johnson — Page 2, Line 8",
+            "notes": "This discrepancy is significant because it affects whether the conversation could have been overheard"
         }}
     ],
     "credibility_notes": [
         {{
             "witness": "Jane Smith",
-            "assessment": "Generally consistent account",
-            "reasoning": "Timeline aligns with other evidence, no internal contradictions"
+            "note": "Generally consistent account",
+            "factors": ["Timeline aligns with other evidence", "No internal contradictions"]
         }}
     ],
     "summary": "Overview of key discrepancies and their implications for the investigation"

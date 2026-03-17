@@ -41,7 +41,7 @@ const STATUS_OPTIONS = [
 const NOTE_TYPE_CONFIG = NOTE_TYPES.map((t) => ({
   value: t.value,
   label: t.label,
-  variant: (t.value === 'guidance' ? 'success' : t.value === 'question' ? 'warning' : 'neutral') as BadgeVariant,
+  variant: (t.value === 'guidance' ? 'success' : t.value === 'system' ? 'warning' : t.value === 'question' ? 'warning' : 'neutral') as BadgeVariant,
 }))
 
 type Tab = 'notes' | 'documents' | 'guidance' | 'discrepancies' | 'similar' | 'evidence' | 'outcome' | 'policy' | 'timeline'
@@ -154,6 +154,21 @@ export default function ERCaseDetail() {
     }
   }, [case_, defaultTabSet])
 
+  async function handleGuidanceGenerated(g: SuggestedGuidanceResponse) {
+    setGuidance(g)
+    const lines = [g.summary]
+    g.cards.forEach((card, i) => {
+      lines.push(`${i + 1}. ${card.title}: ${card.recommendation}`)
+    })
+    try {
+      await api.post(`/er/cases/${caseId}/notes`, {
+        note_type: 'guidance',
+        content: lines.join('\n'),
+        metadata: { source: 'auto_guidance', note_purpose: 'next_steps' },
+      })
+    } catch { /* note is supplementary */ }
+  }
+
   if (loading) return <p className="text-sm text-zinc-500">Loading case...</p>
   if (error) return <p className="text-sm text-red-400">{error}</p>
   if (!case_) return <p className="text-sm text-zinc-500">Case not found.</p>
@@ -215,10 +230,18 @@ export default function ERCaseDetail() {
                 caseId={caseId!}
                 guidance={guidance}
                 onGuidanceChange={setGuidance}
+                onGuidanceGenerated={handleGuidanceGenerated}
                 documentCount={case_.document_count}
                 hasDescription={!!case_.description}
                 onBeginDetermination={async (outcome: ERCaseOutcome) => {
                   await updateCase({ status: 'closed' as ERCaseStatus, outcome })
+                  try {
+                    await api.post(`/er/cases/${caseId}/notes`, {
+                      note_type: 'system',
+                      content: `Case closed with outcome: ${outcomeLabel[outcome] ?? outcome}`,
+                      metadata: { source: 'determination', note_purpose: 'determination' },
+                    })
+                  } catch { /* note is supplementary */ }
                 }}
               />
             )}

@@ -1944,6 +1944,24 @@ async def get_discrepancies(
         if isinstance(analysis, str):
             analysis = json.loads(analysis)
 
+        # Normalize old-format discrepancy data to match frontend types
+        for d in analysis.get("discrepancies", []):
+            if "statement_1" in d and "statement_a" not in d:
+                s1 = d.pop("statement_1", {})
+                s2 = d.pop("statement_2", {})
+                d.setdefault("subject", d.pop("description", ""))
+                d.setdefault("statement_a", s1.get("quote", ""))
+                d.setdefault("statement_b", s2.get("quote", ""))
+                d.setdefault("source_a", f"{s1.get('speaker', '')} — {s1.get('location', '')}".strip(" —"))
+                d.setdefault("source_b", f"{s2.get('speaker', '')} — {s2.get('location', '')}".strip(" —"))
+                d.setdefault("notes", d.pop("analysis", None))
+        for cn in analysis.get("credibility_notes", []):
+            if "note" not in cn and "assessment" in cn:
+                cn["note"] = cn.pop("assessment", "")
+            if "factors" not in cn:
+                reasoning = cn.pop("reasoning", None)
+                cn["factors"] = [reasoning] if reasoning else []
+
         source_docs = row["source_documents"]
         if isinstance(source_docs, str):
             source_docs = json.loads(source_docs)
