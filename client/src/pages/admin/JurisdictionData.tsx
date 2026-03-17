@@ -4,18 +4,18 @@ import { Button } from '../../components/ui'
 import {
   CATEGORY_LABELS,
   CATEGORY_SHORT_LABELS,
-  CATEGORY_GROUPS,
 } from '../../generated/complianceCategories'
 import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 import ExplorerTab from '../../components/admin/jurisdiction/ExplorerTab'
 import ProfileEditorModal from '../../components/admin/jurisdiction/ProfileEditorModal'
+import SpecialtyFilterSelect from '../../components/admin/jurisdiction/SpecialtyFilterSelect'
 import { useIndustryProfiles } from '../../components/admin/jurisdiction/useIndustryProfiles'
-import type { DataOverview, BookmarkedReq, FlatCity, CatCoverage } from '../../components/admin/jurisdiction/types'
+import { fmtDate, matchesSpecialty } from '../../components/admin/jurisdiction/utils'
+import type { DataOverview, BookmarkedReq, FlatCity, CatCoverage, SpecialtyFilter } from '../../components/admin/jurisdiction/types'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type Tab = 'explorer' | 'quality' | 'preemption' | 'bookmarks'
-type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology' | 'medical'
 
 function getCategoryLabel(cat: string) {
   return CATEGORY_LABELS[cat] ?? cat
@@ -23,21 +23,6 @@ function getCategoryLabel(cat: string) {
 
 function getShortLabel(cat: string) {
   return CATEGORY_SHORT_LABELS[cat] ?? cat
-}
-
-function fmtDate(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
-}
-
-function matchesSpecialty(cat: string, filter: SpecialtyFilter): boolean {
-  if (filter === 'all') return true
-  const group = CATEGORY_GROUPS[cat]
-  if (filter === 'healthcare') return group === 'healthcare' || group === 'oncology'
-  if (filter === 'oncology') return group === 'oncology'
-  if (filter === 'medical') return group === 'medical_compliance'
-  // general = exclude healthcare, oncology, medical_compliance
-  return group !== 'healthcare' && group !== 'oncology' && group !== 'medical_compliance'
 }
 
 // ── Component ──────────────────────────────────────────────────────────────────
@@ -76,6 +61,15 @@ export default function JurisdictionData() {
 
   useEffect(() => { fetchOverview() }, [fetchOverview])
   useEffect(() => { if (tab === 'bookmarks') fetchBookmarks() }, [tab, fetchBookmarks])
+
+  async function handleDeleteCity(id: string) {
+    await api.delete(`/admin/jurisdictions/${id}`)
+    if (selectedCityId === id) {
+      setSelectedCityId(null)
+      setSelectedCityMeta(null)
+    }
+    await fetchOverview()
+  }
 
   function openCity(flat: FlatCity) {
     setSelectedCityId(flat.id)
@@ -139,6 +133,8 @@ export default function JurisdictionData() {
           stateName: st.state,
           coveragePct: total > 0 ? Math.round((present.length / total) * 100) : 0,
           gapCount: missing.length,
+          presentCount: present.length,
+          totalCount: total,
         })
       }
     }
@@ -203,14 +199,11 @@ export default function JurisdictionData() {
               ))}
             </select>
           )}
-          <select value={specialtyFilter} onChange={(e) => setSpecialtyFilter(e.target.value as SpecialtyFilter)}
-            className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5">
-            <option value="all">All Specialties</option>
-            <option value="general">General Labor</option>
-            <option value="healthcare">Healthcare</option>
-            <option value="oncology">Oncology</option>
-            <option value="medical">Medical Compliance</option>
-          </select>
+          <SpecialtyFilterSelect
+            value={specialtyFilter}
+            onChange={setSpecialtyFilter}
+            className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5"
+          />
           <button
             type="button"
             onClick={() => setProfileModalOpen(true)}
@@ -277,6 +270,7 @@ export default function JurisdictionData() {
             stateOptions={stateOptions}
             onSelectCity={openCity}
             selectedCityId={selectedCityId}
+            onDelete={handleDeleteCity}
           />
           {/* Detail panel — shown alongside explorer when city selected */}
           {selectedCityId && selectedCityMeta && (
@@ -455,44 +449,91 @@ export default function JurisdictionData() {
       )}
 
       {/* ── Bookmarks Tab ── */}
-      {tab === 'bookmarks' && (
-        <div>
-          {loadingBookmarks ? (
-            <p className="text-sm text-zinc-500">Loading...</p>
-          ) : bookmarks.length === 0 ? (
-            <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
-              <p className="text-sm text-zinc-600">No bookmarked requirements. Bookmark items from the Jurisdictions page.</p>
-            </div>
-          ) : (
-            <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800/60 max-h-[70vh] overflow-y-auto">
-              {bookmarks.map((req) => (
-                <div key={req.id} className="flex items-start gap-3 px-4 py-2.5">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-zinc-200">{req.title}</p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span className="text-[11px] text-zinc-400">{req.city}, {req.state}</span>
-                      <span className="text-[11px] text-zinc-600">·</span>
-                      <span className="text-[11px] text-zinc-500">{getCategoryLabel(req.category)}</span>
-                      <span className="text-[11px] text-zinc-600">·</span>
-                      <span className="text-[11px] text-zinc-500">{req.jurisdiction_level}</span>
-                      {req.current_value && (
-                        <>
-                          <span className="text-[11px] text-zinc-600">·</span>
-                          <span className="text-[11px] text-zinc-400">{req.current_value}</span>
-                        </>
-                      )}
+      {tab === 'bookmarks' && (() => {
+        // Group bookmarks by state → city
+        const grouped: Record<string, Record<string, BookmarkedReq[]>> = {}
+        let stateCount = 0
+        for (const b of bookmarks) {
+          if (!grouped[b.state]) { grouped[b.state] = {}; stateCount++ }
+          if (!grouped[b.state][b.city]) grouped[b.state][b.city] = []
+          grouped[b.state][b.city].push(b)
+        }
+        return (
+          <div>
+            {loadingBookmarks ? (
+              <p className="text-sm text-zinc-500">Loading...</p>
+            ) : bookmarks.length === 0 ? (
+              <div className="border border-zinc-800 rounded-lg px-4 py-8 text-center">
+                <p className="text-sm text-zinc-600">No bookmarked requirements. Bookmark items from the Jurisdictions page.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-[11px] text-zinc-500 mb-2">
+                  {bookmarks.length} bookmarked requirement{bookmarks.length !== 1 ? 's' : ''} across {stateCount} state{stateCount !== 1 ? 's' : ''}
+                </p>
+                <div className="border border-zinc-800 rounded-lg max-h-[70vh] overflow-y-auto">
+                  {Object.entries(grouped).sort(([a], [b]) => a.localeCompare(b)).map(([st, cities]) => (
+                    <div key={st}>
+                      <div className="px-4 pt-3 pb-1 bg-zinc-900/50 sticky top-0">
+                        <p className="text-xs uppercase tracking-wide text-zinc-400 font-medium">{st}</p>
+                      </div>
+                      {Object.entries(cities).sort(([a], [b]) => a.localeCompare(b)).map(([cityName, reqs]) => (
+                        <div key={cityName}>
+                          <div className="px-4 pt-2 pb-1">
+                            <button
+                              type="button"
+                              className="text-[11px] text-blue-400 hover:text-blue-300 transition-colors"
+                              onClick={() => {
+                                const cityFlat = allCities.find(c => c.city === cityName && c.stateName === st)
+                                if (cityFlat) {
+                                  setTab('explorer')
+                                  openCity(cityFlat)
+                                }
+                              }}
+                            >
+                              {cityName} →
+                            </button>
+                          </div>
+                          <div className="divide-y divide-zinc-800/60">
+                            {reqs.map((req) => (
+                              <div key={req.id} className="flex items-start gap-3 px-4 py-2.5">
+                                <div className="flex-1 min-w-0">
+                                  <p className="text-sm text-zinc-200">{req.title}</p>
+                                  {req.description && (
+                                    <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">{req.description}</p>
+                                  )}
+                                  <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">
+                                      {getShortLabel(req.category)}
+                                    </span>
+                                    <span className="text-[11px] text-zinc-500">{req.jurisdiction_level}</span>
+                                    {req.current_value && <span className="text-[11px] text-zinc-400">{req.current_value}</span>}
+                                    {req.effective_date && <span className="text-[11px] text-zinc-600">eff. {req.effective_date}</span>}
+                                    {req.last_verified_at && <span className="text-[11px] text-zinc-600">verified {fmtDate(req.last_verified_at)}</span>}
+                                    {req.source_name && (
+                                      req.source_url
+                                        ? <a href={req.source_url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-zinc-600 hover:text-zinc-400 underline">{req.source_name}</a>
+                                        : <span className="text-[11px] text-zinc-600">{req.source_name}</span>
+                                    )}
+                                  </div>
+                                </div>
+                                <button type="button" onClick={() => toggleBookmark(req.id)}
+                                  className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors shrink-0">
+                                  Unbookmark
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                  <button type="button" onClick={() => toggleBookmark(req.id)}
-                    className="text-xs text-zinc-600 hover:text-zinc-300 px-2 py-1 transition-colors shrink-0">
-                    Unbookmark
-                  </button>
+                  ))}
                 </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+              </>
+            )}
+          </div>
+        )
+      })()}
 
       {/* Profile Editor Modal */}
       <ProfileEditorModal

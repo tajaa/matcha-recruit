@@ -1,5 +1,7 @@
 // Shared types for Jurisdiction Data admin page
 
+export type SpecialtyFilter = string
+
 export type CityEntry = {
   id: string
   city: string
@@ -60,12 +62,20 @@ export type BookmarkedReq = {
   effective_date: string | null
   city: string
   state: string
+  description: string | null
+  previous_value: string | null
+  last_verified_at: string | null
+  jurisdiction_id: string
+  source_url: string | null
+  source_name: string | null
 }
 
 export type FlatCity = CityEntry & {
   stateName: string
   coveragePct: number
   gapCount: number
+  presentCount: number
+  totalCount: number
 }
 
 export type CatCoverage = {

@@ -19,7 +19,7 @@ type Props = {
 }
 
 const RATE_TYPE_OPTIONS = [
-  'hourly', 'salary', 'tipped', 'commission', 'piece_rate', 'per_diem',
+  'general', 'tipped', 'exempt_salary', 'hotel', 'fast_food', 'healthcare', 'large_employer', 'small_employer',
 ]
 
 const GROUP_LABELS: Record<CategoryGroup | 'supplementary', string> = {
@@ -64,10 +64,12 @@ export default function ProfileEditorModal({
   const [form, setForm] = useState<EditState>(EMPTY)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const [expandedEvidence, setExpandedEvidence] = useState<string | null>(null)
 
   // Load profile into form when selected
   useEffect(() => {
+    setConfirmDelete(false)
     if (!selectedId) {
       setForm(EMPTY)
       return
@@ -349,22 +351,49 @@ export default function ProfileEditorModal({
             </div>
           )}
 
+          {/* Confidence Summary */}
+          {form.category_order.length > 0 && (() => {
+            const catsWithEvidence = form.category_order.filter(c => form.category_evidence[c]?.confidence !== undefined)
+            const catsWithoutEvidence = form.category_order.length - catsWithEvidence.length
+            const avgConfidence = catsWithEvidence.length > 0
+              ? catsWithEvidence.reduce((sum, c) => sum + (form.category_evidence[c]?.confidence ?? 0), 0) / catsWithEvidence.length
+              : 0
+            const lowConfidence = catsWithEvidence.filter(c => (form.category_evidence[c]?.confidence ?? 0) < 0.7).length
+            return (
+              <p className="text-[11px] text-zinc-500">
+                Avg confidence: <span className="text-zinc-300">{(avgConfidence * 100).toFixed(0)}%</span>
+                {lowConfidence > 0 && <span className="text-amber-400 ml-2">{lowConfidence} below 70%</span>}
+                {catsWithoutEvidence > 0 && <span className="text-zinc-600 ml-2">{catsWithoutEvidence} no evidence</span>}
+              </p>
+            )
+          })()}
+
           {/* Actions */}
           <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
-            <Button size="sm" disabled={saving || !form.name.trim()} onClick={handleSave}>
+            <Button size="sm" disabled={saving || !form.name.trim()} onClick={() => { setConfirmDelete(false); handleSave() }}>
               {saving ? 'Saving...' : selectedId ? 'Update' : 'Create'}
             </Button>
-            <Button variant="ghost" size="sm" onClick={onClose}>
+            <Button variant="ghost" size="sm" onClick={() => { setConfirmDelete(false); onClose() }}>
               Close
             </Button>
             {selectedId && (
               <button
                 type="button"
                 disabled={deleting}
-                onClick={handleDelete}
-                className="ml-auto text-xs text-red-400/60 hover:text-red-400 transition-colors"
+                onClick={() => {
+                  if (confirmDelete) {
+                    handleDelete()
+                  } else {
+                    setConfirmDelete(true)
+                  }
+                }}
+                className={`ml-auto text-xs transition-colors ${
+                  confirmDelete
+                    ? 'text-red-400 font-medium'
+                    : 'text-red-400/60 hover:text-red-400'
+                }`}
               >
-                {deleting ? 'Deleting...' : 'Delete Profile'}
+                {deleting ? 'Deleting...' : confirmDelete ? 'Confirm delete?' : 'Delete Profile'}
               </button>
             )}
           </div>

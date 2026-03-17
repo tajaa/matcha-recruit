@@ -2,6 +2,7 @@ import { useState, useMemo } from 'react'
 import { Button, Input } from '../../ui'
 import { CATEGORY_SHORT_LABELS } from '../../../generated/complianceCategories'
 import type { FlatCity, CatCoverage } from './types'
+import { fmtDate } from './utils'
 import CategoryCoveragePanel from './CategoryCoveragePanel'
 
 type SortKey = 'state' | 'city' | 'coveragePct' | 'gapCount' | 'lastVerified'
@@ -13,14 +14,10 @@ type Props = {
   stateOptions: string[]
   onSelectCity: (city: FlatCity) => void
   selectedCityId: string | null
+  onDelete: (id: string) => Promise<void>
 }
 
 const PAGE_SIZE = 50
-
-function fmtDate(d: string | null) {
-  if (!d) return '—'
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
-}
 
 export default function ExplorerTab({
   allCities,
@@ -28,24 +25,47 @@ export default function ExplorerTab({
   stateOptions,
   onSelectCity,
   selectedCityId,
+  onDelete,
 }: Props) {
   const [search, setSearch] = useState('')
   const [filterState, setFilterState] = useState('')
   const [filterCategory, setFilterCategory] = useState('')
   const [filterStaleOnly, setFilterStaleOnly] = useState(false)
-  const [sortKey, setSortKey] = useState<SortKey>('state')
-  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [sortKey, setSortKey] = useState<SortKey>('gapCount')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
       setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
     } else {
       setSortKey(key)
-      setSortDir('asc')
+      // Smart default: alpha columns asc, numeric columns desc
+      const numericKeys: SortKey[] = ['coveragePct', 'gapCount', 'lastVerified']
+      setSortDir(numericKeys.includes(key) ? 'desc' : 'asc')
     }
     setPage(0)
+  }
+
+  async function handleDeleteCity(cityId: string) {
+    setDeleting(true)
+    setDeleteError(null)
+    try {
+      await onDelete(cityId)
+      setDeleteConfirm(null)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      if (msg.includes('409') || msg.toLowerCase().includes('linked')) {
+        setDeleteError('Cannot delete — linked locations exist')
+      } else {
+        setDeleteError(msg || 'Delete failed')
+      }
+    } finally {
+      setDeleting(false)
+    }
   }
 
   const filtered = useMemo(() => {
@@ -194,6 +214,11 @@ export default function ExplorerTab({
                         {label}{sortIcon(key)}
                       </th>
                     ))}
+                    {filterCategory && (
+                      <th className="py-2 px-3 font-medium text-[10px] uppercase tracking-wide text-center">
+                        {CATEGORY_SHORT_LABELS[filterCategory] || filterCategory}
+                      </th>
+                    )}
                     <th className="py-2 px-3 w-8" />
                   </tr>
                 </thead>
@@ -229,14 +254,14 @@ export default function ExplorerTab({
                               style={{ width: `${city.coveragePct}%` }}
                             />
                           </div>
-                          <span className="text-[11px] font-mono text-zinc-500 w-10 text-right">
-                            {city.coveragePct}%
+                          <span className="text-[11px] font-mono text-zinc-500 text-right">
+                            {city.presentCount}/{city.totalCount} {city.coveragePct}%
                           </span>
                         </div>
                       </td>
                       <td
                         className={`py-2 px-3 font-mono ${
-                          city.gapCount >= 4
+                          city.totalCount > 0 && city.gapCount >= city.totalCount / 2
                             ? 'text-red-400'
                             : city.gapCount > 0
                               ? 'text-amber-400'
@@ -248,19 +273,28 @@ export default function ExplorerTab({
                       <td className="py-2 px-3 text-zinc-500 whitespace-nowrap text-[11px]">
                         {fmtDate(city.last_verified_at)}
                       </td>
+                      {filterCategory && (
+                        <td className="py-2 px-3 text-center">
+                          <span className={`inline-block w-2.5 h-2.5 rounded-full ${
+                            city.categories_present.includes(filterCategory)
+                              ? 'bg-emerald-500'
+                              : 'bg-red-400'
+                          }`} />
+                        </td>
+                      )}
                       <td className="py-2 px-3">
                         {deleteConfirm === city.id ? (
-                          <div className="flex items-center gap-1">
+                          <div className="flex items-center gap-1 flex-wrap">
                             <button
                               type="button"
                               className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                              disabled={deleting}
                               onClick={(e) => {
                                 e.stopPropagation()
-                                // TODO: call delete endpoint if backend supports it
-                                setDeleteConfirm(null)
+                                handleDeleteCity(city.id)
                               }}
                             >
-                              Confirm
+                              {deleting ? '...' : 'Confirm'}
                             </button>
                             <button
                               type="button"
@@ -268,10 +302,14 @@ export default function ExplorerTab({
                               onClick={(e) => {
                                 e.stopPropagation()
                                 setDeleteConfirm(null)
+                                setDeleteError(null)
                               }}
                             >
                               Cancel
                             </button>
+                            {deleteError && (
+                              <span className="text-[10px] text-red-400/80 block w-full">{deleteError}</span>
+                            )}
                           </div>
                         ) : (
                           <button
@@ -280,6 +318,7 @@ export default function ExplorerTab({
                             onClick={(e) => {
                               e.stopPropagation()
                               setDeleteConfirm(city.id)
+                              setDeleteError(null)
                             }}
                             title="Delete"
                           >

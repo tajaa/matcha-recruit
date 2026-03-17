@@ -3,9 +3,10 @@ import { api } from '../../api/client'
 import { Button, Input, Textarea } from '../ui'
 import {
   CATEGORY_LABELS,
-  CATEGORY_GROUPS,
 } from '../../generated/complianceCategories'
-import type { PreemptionRule, IndustryProfile } from './jurisdiction/types'
+import type { PreemptionRule, IndustryProfile, SpecialtyFilter } from './jurisdiction/types'
+import { matchesSpecialty, matchesProfileRateTypes } from './jurisdiction/utils'
+import SpecialtyFilterSelect from './jurisdiction/SpecialtyFilterSelect'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -23,6 +24,8 @@ type JurisdictionReq = {
   effective_date: string | null
   is_bookmarked: boolean
   sort_order: number | null
+  previous_value: string | null
+  last_verified_at: string | null
 }
 
 type LinkedLocation = {
@@ -50,7 +53,6 @@ type JurisdictionDetail = {
   locations: LinkedLocation[]
 }
 
-type SpecialtyFilter = 'all' | 'general' | 'healthcare' | 'oncology' | 'medical'
 type ViewMode = 'requirements' | 'hierarchy' | 'legislation'
 
 type Props = {
@@ -76,14 +78,6 @@ function getCategoryLabel(cat: string) {
   return CATEGORY_LABELS[cat] ?? cat
 }
 
-function matchesSpecialty(cat: string, filter: SpecialtyFilter): boolean {
-  if (filter === 'all') return true
-  const group = CATEGORY_GROUPS[cat]
-  if (filter === 'healthcare') return group === 'healthcare' || group === 'oncology'
-  if (filter === 'oncology') return group === 'oncology'
-  if (filter === 'medical') return group === 'medical_compliance'
-  return group !== 'healthcare' && group !== 'oncology' && group !== 'medical_compliance'
-}
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -227,7 +221,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       // Mark non-focused but don't filter them out (they'll be de-emphasized in render)
       // Filter by rate_types if profile has them
       if (rateTypes.size > 0) {
-        // rate_type filtering only if requirements have rate_type field — keep all for now
+        reqs = reqs.filter(r => matchesProfileRateTypes(r.requirement_key, rateTypes))
       }
     }
     return reqs
@@ -323,7 +317,9 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
               {req.jurisdiction_level}
             </span>
             {req.current_value && <span className="text-[11px] text-zinc-400">{req.current_value}</span>}
+            {req.previous_value && <span className="text-[11px] text-zinc-600">Prev: {req.previous_value}</span>}
             {req.effective_date && <span className="text-[11px] text-zinc-600">eff. {req.effective_date}</span>}
+            {req.last_verified_at && <span className="text-[11px] text-zinc-600">verified {new Date(req.last_verified_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}</span>}
             {req.source_name && (
               req.source_url
                 ? <a href={req.source_url} target="_blank" rel="noopener noreferrer" className="text-[11px] text-zinc-600 hover:text-zinc-400 underline">{req.source_name}</a>
@@ -414,14 +410,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
             </Button>
           ))}
         </div>
-        <select value={specialtyFilter} onChange={(e) => setSpecialtyFilter(e.target.value as SpecialtyFilter)}
-          className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-xs px-2.5 py-1.5 focus:border-zinc-500">
-          <option value="all">All Specialties</option>
-          <option value="general">General Labor</option>
-          <option value="healthcare">Healthcare</option>
-          <option value="oncology">Oncology</option>
-          <option value="medical">Medical Compliance</option>
-        </select>
+        <SpecialtyFilterSelect value={specialtyFilter} onChange={setSpecialtyFilter} />
       </div>
 
       {/* SSE scan log */}
@@ -485,16 +474,31 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
                         </span>
                       )}
                     </div>
-                    {LEVEL_ORDER.filter((l) => levels[l]?.length > 0).map((level) => (
-                      <div key={level}>
-                        <div className="px-4 pt-2 pb-0.5">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-medium ${LEVEL_COLORS[level] || 'text-zinc-400 bg-zinc-500/10'}`}>
-                            {level}
-                          </span>
+                    {LEVEL_ORDER.map((level) => {
+                      const levelLabel = level === 'state' ? `state (${state})`
+                        : level === 'city' ? `city (${city})`
+                        : level
+                      if (!levels[level]?.length) {
+                        return (
+                          <div key={level} className="px-4 pt-2 pb-1.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-medium ${LEVEL_COLORS[level] || 'text-zinc-400 bg-zinc-500/10'}`}>
+                              {levelLabel}
+                            </span>
+                            <p className="text-[11px] text-zinc-600 mt-1 pl-1">No {level}-level rules</p>
+                          </div>
+                        )
+                      }
+                      return (
+                        <div key={level}>
+                          <div className="px-4 pt-2 pb-0.5">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wider font-medium ${LEVEL_COLORS[level] || 'text-zinc-400 bg-zinc-500/10'}`}>
+                              {levelLabel}
+                            </span>
+                          </div>
+                          {levels[level].map(renderReqRow)}
                         </div>
-                        {levels[level].map(renderReqRow)}
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 ))}
               </div>
