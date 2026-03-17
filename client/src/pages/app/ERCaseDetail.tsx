@@ -85,6 +85,7 @@ export default function ERCaseDetail() {
   const [exporting, setExporting] = useState(false)
   const [creatingLink, setCreatingLink] = useState(false)
   const [newShareUrl, setNewShareUrl] = useState('')
+  const [shareLinkError, setShareLinkError] = useState('')
 
   async function loadShareLinks() {
     try {
@@ -125,6 +126,7 @@ export default function ERCaseDetail() {
     if (!sharePassword.trim()) return
     setCreatingLink(true)
     setNewShareUrl('')
+    setShareLinkError('')
     try {
       const body: Record<string, unknown> = { password: sharePassword }
       if (shareExpiry) body.expires_in_days = Number(shareExpiry)
@@ -132,7 +134,9 @@ export default function ERCaseDetail() {
       setNewShareUrl(window.location.origin + res.url)
       setSharePassword('')
       loadShareLinks()
-    } catch { /* error */ } finally {
+    } catch (err) {
+      setShareLinkError(err instanceof Error ? err.message : 'Failed to create share link')
+    } finally {
       setCreatingLink(false)
     }
   }
@@ -387,9 +391,19 @@ export default function ERCaseDetail() {
                   <Button size="sm" disabled={creatingLink || !sharePassword.trim()} onClick={handleCreateShareLink}>
                     {creatingLink ? 'Creating...' : 'Create Link'}
                   </Button>
+                  {shareLinkError && <p className="text-xs text-red-400">{shareLinkError}</p>}
                   {newShareUrl && (
                     <div className="rounded-lg bg-zinc-900 border border-zinc-700 p-2">
-                      <p className="text-[11px] text-zinc-500 mb-1">Share URL:</p>
+                      <div className="flex items-center justify-between mb-1">
+                        <p className="text-[11px] text-zinc-500">Share URL:</p>
+                        <button
+                          type="button"
+                          className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
+                          onClick={() => navigator.clipboard.writeText(newShareUrl)}
+                        >
+                          Copy
+                        </button>
+                      </div>
                       <p className="text-xs text-emerald-400 break-all select-all">{newShareUrl}</p>
                     </div>
                   )}
