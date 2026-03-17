@@ -15,6 +15,9 @@ import { IRCategoryDataDisplay } from '../../components/ir/IRCategoryDataDisplay
 import {
   typeLabel, statusLabel, severityLabel,
   SEVERITY_BADGE, STATUS_BADGE, SEVERITY_OPTIONS,
+  type IRCategorizationAnalysis,
+  type IRRootCauseAnalysis,
+  type IRRecommendationsAnalysis,
 } from '../../types/ir'
 
 const STATUS_OPTIONS = [
@@ -37,6 +40,11 @@ export default function IRDetail() {
   const [correctiveActions, setCorrectiveActions] = useState('')
   const [savingFields, setSavingFields] = useState(false)
   const [initialized, setInitialized] = useState(false)
+
+  // Persist AI analysis results across tab switches
+  const [categorizationResult, setCategorizationResult] = useState<IRCategorizationAnalysis | null>(null)
+  const [rootCauseResult, setRootCauseResult] = useState<IRRootCauseAnalysis | null>(null)
+  const [recommendationsResult, setRecommendationsResult] = useState<IRRecommendationsAnalysis | null>(null)
 
   // Sync local textarea state from incident on first load
   if (incident && !initialized) {
@@ -176,9 +184,9 @@ export default function IRDetail() {
 
             {tab === 'analysis' && (
               <div className="space-y-6">
-                <IRCategorizationPanel incidentId={incidentId!} />
-                <IRRootCausePanel incidentId={incidentId!} />
-                <IRRecommendationsPanel incidentId={incidentId!} />
+                <IRCategorizationPanel incidentId={incidentId!} result={categorizationResult} onResult={setCategorizationResult} />
+                <IRRootCausePanel incidentId={incidentId!} result={rootCauseResult} onResult={setRootCauseResult} />
+                <IRRecommendationsPanel incidentId={incidentId!} result={recommendationsResult} onResult={setRecommendationsResult} />
                 <IRSimilarIncidentsPanel incidentId={incidentId!} />
               </div>
             )}

@@ -4,13 +4,25 @@ import { Button } from '../ui'
 import type { IRCategorizationAnalysis } from '../../types/ir'
 import { typeLabel } from '../../types/ir'
 
-export function IRCategorizationPanel({ incidentId }: { incidentId: string }) {
-  const [result, setResult] = useState<IRCategorizationAnalysis | null>(null)
+type Props = {
+  incidentId: string
+  result?: IRCategorizationAnalysis | null
+  onResult?: (r: IRCategorizationAnalysis) => void
+}
+
+export function IRCategorizationPanel({ incidentId, result: externalResult, onResult }: Props) {
+  const [localResult, setLocalResult] = useState<IRCategorizationAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
+
+  const result = externalResult ?? localResult
 
   async function run() {
     setLoading(true)
-    try { setResult(await api.post<IRCategorizationAnalysis>(`/ir/incidents/${incidentId}/analyze/categorize`)) }
+    try {
+      const res = await api.post<IRCategorizationAnalysis>(`/ir/incidents/${incidentId}/analyze/categorize`)
+      setLocalResult(res)
+      onResult?.(res)
+    }
     catch { /* silently fail */ }
     finally { setLoading(false) }
   }

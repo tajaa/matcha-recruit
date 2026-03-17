@@ -3,15 +3,25 @@ import { useIRAnalysisStream } from '../../hooks/ir/useIRAnalysisStream'
 import { Button } from '../ui'
 import type { IRRootCauseAnalysis } from '../../types/ir'
 
-export function IRRootCausePanel({ incidentId }: { incidentId: string }) {
+type Props = {
+  incidentId: string
+  result?: IRRootCauseAnalysis | null
+  onResult?: (r: IRRootCauseAnalysis) => void
+}
+
+export function IRRootCausePanel({ incidentId, result: externalResult, onResult }: Props) {
   const stream = useIRAnalysisStream(incidentId)
-  const [result, setResult] = useState<IRRootCauseAnalysis | null>(null)
+  const [localResult, setLocalResult] = useState<IRRootCauseAnalysis | null>(null)
+
+  const result = externalResult ?? localResult
 
   useEffect(() => {
     if (!stream.streaming && stream.result && stream.analysisType === 'root-cause') {
-      setResult(stream.result as IRRootCauseAnalysis)
+      const res = stream.result as IRRootCauseAnalysis
+      setLocalResult(res)
+      onResult?.(res)
     }
-  }, [stream.streaming, stream.result, stream.analysisType])
+  }, [stream.streaming, stream.result, stream.analysisType]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>

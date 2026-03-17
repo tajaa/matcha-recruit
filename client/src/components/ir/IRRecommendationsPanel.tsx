@@ -3,15 +3,25 @@ import { useIRAnalysisStream } from '../../hooks/ir/useIRAnalysisStream'
 import { Badge, Button } from '../ui'
 import type { IRRecommendationsAnalysis } from '../../types/ir'
 
-export function IRRecommendationsPanel({ incidentId }: { incidentId: string }) {
+type Props = {
+  incidentId: string
+  result?: IRRecommendationsAnalysis | null
+  onResult?: (r: IRRecommendationsAnalysis) => void
+}
+
+export function IRRecommendationsPanel({ incidentId, result: externalResult, onResult }: Props) {
   const stream = useIRAnalysisStream(incidentId)
-  const [result, setResult] = useState<IRRecommendationsAnalysis | null>(null)
+  const [localResult, setLocalResult] = useState<IRRecommendationsAnalysis | null>(null)
+
+  const result = externalResult ?? localResult
 
   useEffect(() => {
     if (!stream.streaming && stream.result && stream.analysisType === 'recommendations') {
-      setResult(stream.result as IRRecommendationsAnalysis)
+      const res = stream.result as IRRecommendationsAnalysis
+      setLocalResult(res)
+      onResult?.(res)
     }
-  }, [stream.streaming, stream.result, stream.analysisType])
+  }, [stream.streaming, stream.result, stream.analysisType]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>
