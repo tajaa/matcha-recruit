@@ -976,7 +976,7 @@ async def create_share_link(
         logger.error("Failed to create share link record for case %s: %s", case_id, exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to create share link") from exc
 
-    url = f"/shared/er-export/{token}"
+    url = f"/s/{token}"
 
     return ShareLinkResponse(
         token=token,

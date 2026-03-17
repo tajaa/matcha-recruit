@@ -128,7 +128,7 @@ export default function ERCaseDetail() {
       const body: Record<string, unknown> = { password: sharePassword }
       if (shareExpiry) body.expires_in_days = Number(shareExpiry)
       const res = await api.post<{ url: string }>(`/er/cases/${caseId}/export/share`, body)
-      setNewShareUrl(res.url)
+      setNewShareUrl(window.location.origin + res.url)
       setSharePassword('')
       loadShareLinks()
     } catch { /* error */ } finally {

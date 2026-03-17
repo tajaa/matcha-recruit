@@ -27,7 +27,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
-      <Route path="/shared/er-export/:token" element={<ERExportDownload />} />
+      <Route path="/s/:token" element={<ERExportDownload />} />
       <Route path="/admin" element={<AppLayout sidebar={<AdminSidebar />} />}>
         <Route index element={<Navigate to="companies" replace />} />
         <Route path="companies" element={<Companies />} />
