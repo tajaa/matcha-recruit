@@ -20,12 +20,14 @@ import IRList from './pages/app/IRList'
 import IRDetail from './pages/app/IRDetail'
 import Handbooks from './pages/app/Handbooks'
 import RiskAssessment from './pages/app/RiskAssessment'
+import ERExportDownload from './pages/shared/ERExportDownload'
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/shared/er-export/:token" element={<ERExportDownload />} />
       <Route path="/admin" element={<AppLayout sidebar={<AdminSidebar />} />}>
         <Route index element={<Navigate to="companies" replace />} />
         <Route path="companies" element={<Companies />} />
