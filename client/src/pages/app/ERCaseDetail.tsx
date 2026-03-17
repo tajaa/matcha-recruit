@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Copy, Check } from 'lucide-react'
 import { Badge, Button, Card, Select, type BadgeVariant } from '../../components/ui'
 import { NoteThread } from '../../components/NoteThread'
 import { ERDocumentList } from '../../components/er/ERDocumentList'
@@ -86,11 +87,12 @@ export default function ERCaseDetail() {
   const [creatingLink, setCreatingLink] = useState(false)
   const [newShareUrl, setNewShareUrl] = useState('')
   const [shareLinkError, setShareLinkError] = useState('')
+  const [copied, setCopied] = useState(false)
 
   async function loadShareLinks() {
     try {
-      const res = await api.get<{ links: ShareLink[] }>(`/er/cases/${caseId}/export/links`)
-      setShareLinks(res.links ?? [])
+      const res = await api.get<ShareLink[]>(`/er/cases/${caseId}/export/links`)
+      setShareLinks(Array.isArray(res) ? res : [])
     } catch { /* no links */ }
   }
 
@@ -376,6 +378,7 @@ export default function ERCaseDetail() {
                     type="password"
                     value={sharePassword}
                     onChange={(e) => setSharePassword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleCreateShareLink()}
                     placeholder="Password"
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
                   />
@@ -388,20 +391,25 @@ export default function ERCaseDetail() {
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
                   </select>
-                  <Button size="sm" disabled={creatingLink || !sharePassword.trim()} onClick={handleCreateShareLink}>
+                  <Button type="button" size="sm" disabled={creatingLink || !sharePassword.trim()} onClick={handleCreateShareLink}>
                     {creatingLink ? 'Creating...' : 'Create Link'}
                   </Button>
                   {shareLinkError && <p className="text-xs text-red-400">{shareLinkError}</p>}
                   {newShareUrl && (
                     <div className="rounded-lg bg-zinc-900 border border-zinc-700 p-2">
                       <div className="flex items-center justify-between mb-1">
-                        <p className="text-[11px] text-zinc-500">Share URL:</p>
+                        <p className="text-[11px] text-zinc-500">Share URL</p>
                         <button
                           type="button"
-                          className="text-[11px] text-zinc-500 hover:text-zinc-300 transition-colors"
-                          onClick={() => navigator.clipboard.writeText(newShareUrl)}
+                          className="flex items-center gap-1 text-[11px] text-zinc-400 hover:text-white transition-colors"
+                          onClick={() => {
+                            navigator.clipboard.writeText(newShareUrl)
+                            setCopied(true)
+                            setTimeout(() => setCopied(false), 2000)
+                          }}
                         >
-                          Copy
+                          {copied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                          {copied ? 'Copied!' : 'Copy'}
                         </button>
                       </div>
                       <p className="text-xs text-emerald-400 break-all select-all">{newShareUrl}</p>
