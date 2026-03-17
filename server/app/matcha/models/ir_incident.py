@@ -80,6 +80,7 @@ class IRIncidentCreate(BaseModel):
     reported_by_email: Optional[str] = None
     witnesses: list[Witness] = []
     category_data: Optional[dict[str, Any]] = None
+    involved_employee_ids: list[UUID] = []
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
 
