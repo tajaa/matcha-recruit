@@ -2659,6 +2659,54 @@ async def _sync_requirements_to_location(
     }
 
 
+def _resolve_regulation_key(raw_key: str, category: str) -> Optional[str]:
+    """Validate a Gemini-provided regulation_key against the canonical registry.
+
+    Returns the matched canonical key if found, or None to signal fallback
+    to title-based keying. Handles normalization and token-overlap matching
+    so Gemini variants like 'california_paid_sick_leave' can resolve to
+    'state_paid_sick_leave'.
+    """
+    from ..compliance_registry import EXPECTED_REGULATION_KEYS
+
+    known_keys = EXPECTED_REGULATION_KEYS.get(category, frozenset())
+    norm = _normalize_title_key(raw_key).strip().replace(" ", "_")
+    if not norm:
+        return None
+
+    # Exact match
+    if norm in known_keys:
+        return norm
+
+    # No known keys for this category — accept Gemini's key as-is
+    if not known_keys:
+        return norm
+
+    # Token-overlap match: pick the known key with the highest Jaccard similarity
+    norm_tokens = set(norm.split("_"))
+    best_key = None
+    best_score = 0.0
+    for known in known_keys:
+        known_tokens = set(known.split("_"))
+        intersection = len(norm_tokens & known_tokens)
+        union = len(norm_tokens | known_tokens)
+        if union == 0:
+            continue
+        score = intersection / union
+        if score > best_score:
+            best_score = score
+            best_key = known
+
+    # Require >= 50% token overlap to accept the match
+    if best_score >= 0.5 and best_key:
+        return best_key
+
+    # Gemini invented a key we can't match — accept it as-is so it's still
+    # stable across runs (better than title-based), but it won't merge with
+    # known keys.
+    return norm
+
+
 def _compute_requirement_key(req) -> str:
     cat = req.get("category") if isinstance(req, dict) else req.category
     title = req.get("title") if isinstance(req, dict) else req.title
@@ -2674,16 +2722,17 @@ def _compute_requirement_key(req) -> str:
     )
     cat_key = _normalize_category(cat) or ""
 
-    # Prefer Gemini-provided regulation_key when present — gives stable dedup
-    # across runs regardless of how the title is phrased.
+    # Prefer Gemini-provided regulation_key when present — but validate it
+    # against the known canonical keys. If Gemini invents a key not in the
+    # registry, try to match it; if no match, fall back to title-based key.
     reg_key = req.get("regulation_key") if isinstance(req, dict) else getattr(req, "regulation_key", None)
     if reg_key and isinstance(reg_key, str):
-        reg_key_norm = _normalize_title_key(reg_key).strip().replace(" ", "_")
-        if reg_key_norm:
+        resolved = _resolve_regulation_key(reg_key, cat_key)
+        if resolved:
             aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
             if aet and isinstance(aet, list) and len(aet) > 0:
-                return f"{aet[0]}:{cat_key}:{reg_key_norm}"
-            return f"{cat_key}:{reg_key_norm}"
+                return f"{aet[0]}:{cat_key}:{resolved}"
+            return f"{cat_key}:{resolved}"
 
     # Fallback: title-based key computation
     base_title = _base_title(title or "", jname)
