@@ -19,7 +19,11 @@ from ..services.policy_service import PolicyService, SignatureService
 from ..services.email import get_email_service
 from ..services.storage import get_storage
 from ..models.auth import CurrentUser
+from ...matcha.services.er_document_parser import ERDocumentParser
 from uuid import UUID
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/policies", tags=["policies"])
 
@@ -41,13 +45,14 @@ async def send_signature_emails_task(signatures: List[PolicySignatureWithToken],
 @router.get("", response_model=List[PolicyResponse])
 async def list_policies(
     status: Optional[PolicyStatus] = None,
+    category: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
-    
-    policies = await PolicyService.get_policies(str(company_id), status)
+
+    policies = await PolicyService.get_policies(str(company_id), status, category)
     return policies
 
 
@@ -58,22 +63,30 @@ async def create_policy(
     content: str = Form(""),
     version: str = Form("1.0"),
     status: PolicyStatus = Form("draft"),
+    category: Optional[str] = Form(None),
+    effective_date: Optional[str] = Form(None),
+    review_date: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
+    from datetime import date as date_type
+
     data = PolicyCreate(
         title=title,
         description=description,
         content=content,
         version=version,
-        status=status
+        status=status,
+        category=category,
+        effective_date=date_type.fromisoformat(effective_date) if effective_date else None,
+        review_date=date_type.fromisoformat(review_date) if review_date else None,
     )
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
-    # Upload file if provided
+    # Upload file if provided — extract text content from PDF/DOCX
     if file:
         storage = get_storage()
         file_content = await file.read()
@@ -84,6 +97,19 @@ async def create_policy(
             content_type=file.content_type,
         )
         data.file_url = file_url
+        data.source_type = "uploaded"
+        data.original_filename = file.filename
+        data.mime_type = file.content_type
+
+        # Extract text if no explicit content was provided
+        if not content.strip():
+            try:
+                parser = ERDocumentParser()
+                text, page_count = parser.extract_text_from_bytes(file_content, file.filename or "policy.pdf")
+                data.content = text or ""
+                data.page_count = page_count
+            except Exception as exc:
+                logger.warning("Policy text extraction failed: %s", exc)
 
     policy = await PolicyService.create_policy(str(company_id), data, str(current_user.id))
     return policy

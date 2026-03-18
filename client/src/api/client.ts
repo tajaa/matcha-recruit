@@ -155,6 +155,27 @@ export const handbooks = {
     request<HandbookSection>(`/handbooks/${handbookId}/sections/${sectionId}/mark-reviewed`, { method: 'POST' }),
 }
 
+import type { PolicyResponse } from '../types/policy'
+
+export const policies = {
+  list: (status?: string, category?: string) => {
+    const params = new URLSearchParams()
+    if (status) params.set('status', status)
+    if (category) params.set('category', category)
+    const qs = params.toString()
+    return request<PolicyResponse[]>(`/policies${qs ? `?${qs}` : ''}`)
+  },
+  get: (id: string) => request<PolicyResponse>(`/policies/${id}`),
+  create: (data: FormData) =>
+    request<PolicyResponse>('/policies', { method: 'POST', body: data }),
+  update: (id: string, data: Record<string, unknown>) =>
+    request<PolicyResponse>(`/policies/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: string) => request<void>(`/policies/${id}`, { method: 'DELETE' }),
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
   post: <T>(path: string, body?: unknown) =>

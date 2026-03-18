@@ -25,8 +25,12 @@ class PolicyService:
         async with get_connection() as conn:
             policy_id = await conn.fetchval(
                 """
-                    INSERT INTO policies (company_id, title, description, content, file_url, version, status, created_by)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                    INSERT INTO policies (
+                        company_id, title, description, content, file_url, version, status, created_by,
+                        category, source_type, effective_date, review_date,
+                        original_filename, mime_type, page_count
+                    )
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                     RETURNING id
                 """,
                 company_id,
@@ -37,6 +41,13 @@ class PolicyService:
                 data.version or "1.0",
                 data.status or "draft",
                 created_by,
+                data.category,
+                data.source_type or "manual",
+                data.effective_date,
+                data.review_date,
+                data.original_filename,
+                data.mime_type,
+                data.page_count,
             )
             return await PolicyService.get_policy_by_id(policy_id)
 
@@ -83,7 +94,7 @@ class PolicyService:
             return PolicyResponse(**dict(row))
 
     @staticmethod
-    async def get_policies(company_id: str, status: Optional[str] = None) -> List[PolicyResponse]:
+    async def get_policies(company_id: str, status: Optional[str] = None, category: Optional[str] = None) -> List[PolicyResponse]:
         async with get_connection() as conn:
             query = """
                 SELECT
@@ -97,11 +108,18 @@ class PolicyService:
                 LEFT JOIN policy_signatures ps ON p.id = ps.policy_id
                 WHERE p.company_id = $1
             """
-            params = [company_id]
+            params: list = [company_id]
+            idx = 2
 
             if status:
-                query += " AND p.status = $2"
+                query += f" AND p.status = ${idx}"
                 params.append(status)
+                idx += 1
+
+            if category:
+                query += f" AND p.category = ${idx}"
+                params.append(category)
+                idx += 1
 
             query += " GROUP BY p.id, c.name ORDER BY p.updated_at DESC"
 
@@ -143,6 +161,21 @@ class PolicyService:
             if data.status is not None:
                 updates.append(f"status = ${param_idx}")
                 params.append(data.status)
+                param_idx += 1
+
+            if data.category is not None:
+                updates.append(f"category = ${param_idx}")
+                params.append(data.category)
+                param_idx += 1
+
+            if data.effective_date is not None:
+                updates.append(f"effective_date = ${param_idx}")
+                params.append(data.effective_date)
+                param_idx += 1
+
+            if data.review_date is not None:
+                updates.append(f"review_date = ${param_idx}")
+                params.append(data.review_date)
                 param_idx += 1
 
             if not updates:

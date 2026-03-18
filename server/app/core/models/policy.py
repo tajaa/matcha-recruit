@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional, Literal
 from uuid import UUID
 
@@ -6,6 +6,11 @@ from pydantic import BaseModel, EmailStr
 
 
 PolicyStatus = Literal["draft", "active", "archived"]
+PolicyCategory = Literal[
+    "clinical", "hr", "compliance", "operational",
+    "safety", "infection_control", "hipaa", "other",
+]
+PolicySourceType = Literal["uploaded", "manual"]
 SignatureStatus = Literal["pending", "signed", "declined", "expired"]
 SignerType = Literal["candidate", "employee", "external"]
 
@@ -19,6 +24,13 @@ class Policy(BaseModel):
     file_url: Optional[str] = None
     version: str
     status: PolicyStatus
+    category: Optional[str] = None
+    source_type: Optional[str] = "manual"
+    effective_date: Optional[date] = None
+    review_date: Optional[date] = None
+    original_filename: Optional[str] = None
+    mime_type: Optional[str] = None
+    page_count: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     created_by: Optional[UUID] = None
@@ -31,6 +43,13 @@ class PolicyCreate(BaseModel):
     file_url: Optional[str] = None
     version: Optional[str] = "1.0"
     status: Optional[PolicyStatus] = "draft"
+    category: Optional[str] = None
+    source_type: str = "manual"
+    effective_date: Optional[date] = None
+    review_date: Optional[date] = None
+    original_filename: Optional[str] = None
+    mime_type: Optional[str] = None
+    page_count: Optional[int] = None
 
 
 class PolicyUpdate(BaseModel):
@@ -40,6 +59,9 @@ class PolicyUpdate(BaseModel):
     file_url: Optional[str] = None
     version: Optional[str] = None
     status: Optional[PolicyStatus] = None
+    category: Optional[str] = None
+    effective_date: Optional[date] = None
+    review_date: Optional[date] = None
 
 
 class PolicyResponse(BaseModel):
@@ -52,6 +74,13 @@ class PolicyResponse(BaseModel):
     file_url: Optional[str] = None
     version: str
     status: PolicyStatus
+    category: Optional[str] = None
+    source_type: Optional[str] = None
+    effective_date: Optional[date] = None
+    review_date: Optional[date] = None
+    original_filename: Optional[str] = None
+    mime_type: Optional[str] = None
+    page_count: Optional[int] = None
     signature_count: Optional[int] = None
     pending_signatures: Optional[int] = None
     signed_count: Optional[int] = None

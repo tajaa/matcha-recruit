@@ -2182,6 +2182,13 @@ async def init_db():
                 file_url VARCHAR(500),
                 version VARCHAR(50) NOT NULL DEFAULT '1.0',
                 status VARCHAR(20) NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'archived')),
+                category VARCHAR(50),
+                source_type VARCHAR(20) NOT NULL DEFAULT 'manual',
+                effective_date DATE,
+                review_date DATE,
+                original_filename VARCHAR(500),
+                mime_type VARCHAR(100),
+                page_count INTEGER,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),
                 created_by UUID REFERENCES users(id)
@@ -2192,6 +2199,9 @@ async def init_db():
         """)
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_policies_status ON policies(status)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_policies_category ON policies(category)
         """)
 
         # Policy signatures table

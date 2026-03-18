@@ -88,10 +88,10 @@ class AIChatService:
                                 f"({req['jurisdiction_level']}: {req['jurisdiction_name']})"
                             )
 
-            # Policies — capped to avoid blowing context window
+            # Policies — include category and content excerpt for AI context
             policies = await conn.fetch(
-                """SELECT title, description FROM policies
-                   WHERE company_id = $1 ORDER BY title
+                """SELECT title, description, content, category FROM policies
+                   WHERE company_id = $1 AND status = 'active' ORDER BY title
                    LIMIT $2""",
                 company_id,
                 MAX_POLICIES,
@@ -99,10 +99,14 @@ class AIChatService:
             if policies:
                 parts.append("\n## Company Policies")
                 for pol in policies:
+                    cat = f"[{pol['category']}] " if pol["category"] else ""
                     desc = pol["description"] or ""
                     if len(desc) > 200:
                         desc = desc[:200] + "..."
-                    parts.append(f"- {pol['title']}: {desc}")
+                    parts.append(f"- {cat}{pol['title']}: {desc}")
+                    content_preview = (pol["content"] or "")[:400].strip()
+                    if content_preview:
+                        parts.append(f"  Content: {content_preview}...")
 
             return "\n".join(parts)
 
