@@ -1,6 +1,6 @@
 """06: Insert additive precedence rules for healthcare billing categories
 
-Revision ID: za1b2c3d4e5f
+Revision ID: za1b2c3d4e5f6
 Revises: zp4q5r6s7t8u
 Create Date: 2026-03-17
 """
@@ -8,7 +8,7 @@ Create Date: 2026-03-17
 from alembic import op
 
 
-revision = "za1b2c3d4e5f"
+revision = "za1b2c3d4e5f6"
 down_revision = "zp4q5r6s7t8u"
 branch_labels = None
 depends_on = None
