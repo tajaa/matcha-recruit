@@ -5051,6 +5051,147 @@ async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
     )
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Specialization Research Wizard
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class SpecializationDiscoverRequest(BaseModel):
+    specialization: str
+    parent_industry: str = "healthcare"
+
+
+class SpecializationResearchRequest(BaseModel):
+    specialization: str
+    parent_industry: str = "healthcare"
+    industry_tag: str
+    categories: List[str]
+    states: List[str]
+    cities: List[dict] = []
+    industry_context: str
+
+
+@router.post("/specialization-research/discover", dependencies=[Depends(require_admin)])
+async def discover_specialization_categories_endpoint(req: SpecializationDiscoverRequest):
+    """Discover regulatory categories for a specialization via Gemini."""
+    from ..services.compliance_service import discover_specialization_categories
+
+    result = await discover_specialization_categories(req.specialization, req.parent_industry)
+    return result
+
+
+@router.post("/specialization-research/run", dependencies=[Depends(require_admin)])
+async def run_specialization_research(req: SpecializationResearchRequest):
+    """Research specialization categories across jurisdictions. Returns SSE stream."""
+    from ..services.compliance_service import (
+        _get_or_create_jurisdiction,
+        research_specialization_for_jurisdiction,
+        get_specialization_completeness,
+    )
+
+    async def event_stream():
+        try:
+            async with get_connection() as conn:
+                # Phase 1: Resolve jurisdictions
+                yield _to_sse({"type": "status", "message": "Resolving jurisdictions..."})
+                jurisdictions = []
+
+                for state in req.states:
+                    state_norm = state.strip().upper()
+                    jid = await _get_or_create_jurisdiction(conn, "", state_norm)
+                    jurisdictions.append({"id": jid, "label": state_norm, "city": "", "state": state_norm})
+
+                for city_entry in req.cities:
+                    city = city_entry.get("city", "").strip()
+                    state = city_entry.get("state", "").strip().upper()
+                    if city and state:
+                        jid = await _get_or_create_jurisdiction(conn, city, state)
+                        jurisdictions.append({"id": jid, "label": f"{city}, {state}", "city": city, "state": state})
+
+                yield _to_sse({
+                    "type": "status",
+                    "message": f"Resolved {len(jurisdictions)} jurisdictions. Starting research...",
+                })
+
+                # Phase 2: Research each jurisdiction
+                grand_total = 0
+                grand_failed = []
+
+                for j_idx, j in enumerate(jurisdictions, 1):
+                    yield _to_sse({
+                        "type": "researching",
+                        "jurisdiction": j["label"],
+                        "progress": j_idx,
+                        "total": len(jurisdictions),
+                    })
+
+                    def progress_cb(cat_idx, cat_total, message):
+                        pass  # inner progress handled by category events
+
+                    result = await research_specialization_for_jurisdiction(
+                        conn,
+                        j["id"],
+                        req.categories,
+                        req.industry_tag,
+                        industry_context=req.industry_context,
+                        progress_callback=progress_cb,
+                    )
+
+                    grand_total += result.get("new", 0)
+                    grand_failed.extend(result.get("failed", []))
+
+                    yield _to_sse({
+                        "type": "jurisdiction_complete",
+                        "jurisdiction": j["label"],
+                        "requirements_found": result.get("new", 0),
+                        "categories_researched": len(result.get("categories", [])),
+                        "failed": result.get("failed", []),
+                        "skipped": result.get("skipped", False),
+                    })
+
+                # Phase 3: Completeness summary
+                completeness = await get_specialization_completeness(
+                    conn, req.industry_tag, expected_categories=req.categories,
+                )
+
+                yield _to_sse({
+                    "type": "completed",
+                    "summary": {
+                        "specialization": req.specialization,
+                        "industry_tag": req.industry_tag,
+                        "total_requirements": grand_total,
+                        "jurisdictions_researched": len(jurisdictions),
+                        "categories_requested": len(req.categories),
+                        "failed_categories": list(set(grand_failed)),
+                        "completeness": completeness,
+                    },
+                })
+        except Exception:
+            logger.error("Specialization research failed", exc_info=True)
+            yield _to_sse({"type": "error", "message": "Specialization research failed"})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/specialization-research/completeness", dependencies=[Depends(require_admin)])
+async def get_specialization_completeness_endpoint(
+    industry_tag: str = Query(...),
+    categories: str = Query(""),
+):
+    """Get completeness data for a specialization across jurisdictions."""
+    from ..services.compliance_service import get_specialization_completeness
+
+    expected = [c.strip() for c in categories.split(",") if c.strip()] or None
+    async with get_connection() as conn:
+        result = await get_specialization_completeness(conn, industry_tag, expected_categories=expected)
+    return result
+
+
 @router.get("/schedulers", dependencies=[Depends(require_admin)])
 async def list_schedulers():
     """List all scheduler settings with live stats."""

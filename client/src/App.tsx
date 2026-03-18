@@ -10,6 +10,7 @@ import Settings from './pages/admin/Settings'
 import JurisdictionData from './pages/admin/JurisdictionData'
 import Jurisdictions from './pages/admin/Jurisdictions'
 import IndustryRequirements from './pages/admin/IndustryRequirements'
+import SpecializationResearch from './pages/admin/SpecializationResearch'
 import Dashboard from './pages/app/Dashboard'
 import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
@@ -22,6 +23,7 @@ import IRDetail from './pages/app/IRDetail'
 import Handbooks from './pages/app/Handbooks'
 import HandbookDetail from './pages/app/HandbookDetail'
 import HandbookForm from './pages/app/HandbookForm'
+import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
 import ERExportDownload from './pages/shared/ERExportDownload'
 import WorkLayout from './layouts/WorkLayout'
@@ -46,6 +48,7 @@ export default function App() {
         <Route path="jurisdiction-data" element={<JurisdictionData />} />
         <Route path="jurisdictions" element={<Jurisdictions />} />
         <Route path="industry-requirements" element={<IndustryRequirements />} />
+        <Route path="specialization-research" element={<SpecializationResearch />} />
       </Route>
       <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
         <Route index element={<Dashboard />} />
@@ -57,6 +60,7 @@ export default function App() {
         <Route path="compliance" element={<Compliance />} />
         <Route path="ir" element={<IRList />} />
         <Route path="ir/:incidentId" element={<IRDetail />} />
+        <Route path="policies" element={<Policies />} />
         <Route path="handbooks" element={<Handbooks />} />
         <Route path="handbook/new" element={<HandbookForm />} />
         <Route path="handbook/:id" element={<HandbookDetail />} />

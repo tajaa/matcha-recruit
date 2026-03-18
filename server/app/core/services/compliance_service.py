@@ -8025,3 +8025,200 @@ async def search_company_requirements(
         limit,
     )
     return [dict(row) for row in rows]
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Specialization Research Wizard
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+async def discover_specialization_categories(
+    specialization: str,
+    parent_industry: str = "healthcare",
+) -> Dict[str, Any]:
+    """Use Gemini to discover regulatory categories for a given specialization."""
+    from .gemini_compliance import get_gemini_compliance_service
+    from ..compliance_registry import CATEGORY_KEYS
+
+    service = get_gemini_compliance_service()
+    industry_tag = f"{parent_industry}:{specialization.lower().replace(' ', '_')}"
+
+    prompt = (
+        f"You are a compliance expert. For a **{specialization}** practice under the "
+        f"**{parent_industry}** industry, identify the regulatory compliance categories that "
+        f"require specific research beyond the general {parent_industry} baseline.\n\n"
+        f"Return a JSON object with two keys:\n"
+        f"1. \"categories\": an array of objects, each with:\n"
+        f"   - \"key\": a snake_case slug (e.g., \"cardiac_catheterization_safety\")\n"
+        f"   - \"label\": a human-readable name\n"
+        f"   - \"description\": what specific regulations/standards to research for this category\n"
+        f"   - \"authority_sources\": array of authoritative domains (e.g., [\"cms.gov\", \"acc.org\"])\n"
+        f"2. \"research_context\": a paragraph describing the key regulatory bodies, federal statutes, "
+        f"and common state-level variations for {specialization} compliance. This will be used as "
+        f"context for subsequent research calls.\n\n"
+        f"Focus on categories unique to {specialization} — do NOT include general {parent_industry} "
+        f"categories like HIPAA, billing integrity, or clinical safety unless {specialization} has "
+        f"specific sub-requirements. Aim for 5-15 categories."
+    )
+
+    result = await service._call_with_retry(
+        prompt,
+        response_key=None,
+        max_retries=1,
+        label=f"discover_{specialization}_categories",
+    )
+
+    categories = result.get("categories", [])
+    for cat in categories:
+        cat["is_existing"] = cat.get("key", "") in CATEGORY_KEYS
+
+    industry_context = (
+        f"\n\nINDUSTRY CONTEXT -- {specialization.upper()} ({parent_industry.upper()}):\n"
+        + result.get("research_context", "")
+        + f"\n\nTag each requirement with 'applicable_industries': ['{industry_tag}']."
+    )
+
+    return {
+        "specialization": specialization,
+        "industry_tag": industry_tag,
+        "categories": categories,
+        "industry_context": industry_context,
+    }
+
+
+async def research_specialization_for_jurisdiction(
+    conn,
+    jurisdiction_id: UUID,
+    categories: List[str],
+    industry_tag: str,
+    industry_context: str = "",
+    batch_size: int = 4,
+    progress_callback: Optional[Callable] = None,
+) -> Dict[str, Any]:
+    """Research specialization-specific categories for a jurisdiction.
+
+    Generalized version of _research_healthcare/_oncology/_medical_compliance functions.
+    """
+    from .gemini_compliance import get_gemini_compliance_service
+    from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
+
+    j = await conn.fetchrow(
+        "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
+        jurisdiction_id,
+    )
+    if not j:
+        return {"error": "Jurisdiction not found", "new": 0, "categories": [], "failed": []}
+
+    city = j["city"]
+    state = j["state"]
+    county = j.get("county")
+    location_name = f"{city}, {state}" if city else state
+
+    has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
+    known_sources = await get_known_sources(conn, jurisdiction_id)
+    source_context = build_context_prompt(known_sources)
+    source_context += get_global_authority_sources(categories)
+    corrections = await get_recent_corrections(jurisdiction_id)
+    corrections_context = format_corrections_for_prompt(corrections)
+
+    try:
+        preemption_rows = await conn.fetch(
+            "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+            state.upper(),
+        )
+        preemption_rules = {row["category"]: row["allows_local_override"] for row in preemption_rows}
+    except Exception:
+        preemption_rules = {}
+
+    existing = await conn.fetch(
+        "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+        jurisdiction_id,
+    )
+    existing_cats = {r["category"] for r in existing}
+    missing = sorted(cat for cat in categories if cat not in existing_cats)
+
+    if not missing:
+        return {"new": 0, "location": location_name, "categories": [], "failed": [], "requirements": [], "skipped": True}
+
+    service = get_gemini_compliance_service()
+    total_new = 0
+    failed_categories: List[str] = []
+    added_requirements: List[Dict[str, Any]] = []
+
+    # Batch categories
+    batches = [missing[i:i + batch_size] for i in range(0, len(missing), batch_size)]
+    progress_idx = 0
+
+    for batch in batches:
+        batch_label = ", ".join(c.replace("_", " ") for c in batch)
+        progress_idx += len(batch)
+        if progress_callback:
+            progress_callback(progress_idx, len(missing), f"Researching {batch_label} for {location_name}...")
+
+        try:
+            reqs = await service.research_location_compliance(
+                city=city,
+                state=state,
+                county=county,
+                categories=batch,
+                source_context=source_context,
+                corrections_context=corrections_context,
+                preemption_rules=preemption_rules,
+                has_local_ordinance=has_local_ordinance,
+                industry_context=industry_context,
+            )
+            reqs = reqs or []
+
+            for req in reqs:
+                _clamp_varchar_fields(req)
+                if not req.get("applicable_industries"):
+                    req["applicable_industries"] = [industry_tag]
+
+            if reqs:
+                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                total_new += len(reqs)
+                added_requirements.extend(reqs)
+        except Exception as e:
+            failed_categories.extend(batch)
+            print(f"[Specialization Research] Error researching {batch_label} for {location_name}: {e}")
+
+    return {
+        "new": total_new,
+        "location": location_name,
+        "categories": [c for c in missing if c not in failed_categories],
+        "failed": failed_categories,
+        "requirements": added_requirements,
+    }
+
+
+async def get_specialization_completeness(
+    conn,
+    industry_tag: str,
+    expected_categories: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
+    """Get completeness data for a specialization across jurisdictions."""
+    rows = await conn.fetch(
+        """
+        SELECT j.state, j.city,
+               COUNT(DISTINCT jr.category) AS categories_covered,
+               COUNT(*) AS total_requirements
+        FROM jurisdiction_requirements jr
+        JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+        WHERE jr.applicable_industries @> ARRAY[$1::text]
+        GROUP BY j.state, j.city
+        ORDER BY j.state, j.city
+        """,
+        industry_tag,
+    )
+    result = []
+    for r in rows:
+        entry = {
+            "state": r["state"],
+            "city": r["city"] or "",
+            "categories_covered": r["categories_covered"],
+            "total_requirements": r["total_requirements"],
+        }
+        if expected_categories:
+            entry["coverage_pct"] = round(r["categories_covered"] / len(expected_categories) * 100, 1)
+        result.append(entry)
+    return result
