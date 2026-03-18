@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Card, Badge } from '../ui'
+import { Card } from '../ui'
 import type {
   CredentialExpirationSummary,
   CredentialExpiration,
@@ -28,13 +28,22 @@ export function CredentialAlerts({ summary, expirations }: CredentialAlertsProps
 
       <div className="flex gap-2 mb-4">
         {summary.expired > 0 && (
-          <Badge variant="danger">{summary.expired} Expired</Badge>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-red-900/30 text-red-400 border border-red-800/40">
+            <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+            {summary.expired} Expired
+          </span>
         )}
         {summary.critical > 0 && (
-          <Badge variant="warning">{summary.critical} Critical</Badge>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-900/30 text-amber-400 border border-amber-800/40">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+            {summary.critical} Critical
+          </span>
         )}
         {summary.warning > 0 && (
-          <Badge variant="neutral">{summary.warning} Warning</Badge>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-yellow-900/30 text-yellow-400 border border-yellow-800/40">
+            <span className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
+            {summary.warning} Warning
+          </span>
         )}
       </div>
 

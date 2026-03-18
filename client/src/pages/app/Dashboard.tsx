@@ -8,7 +8,7 @@ import {
 
 import { useMe } from '../../hooks/useMe'
 import { fetchDashboardStats, fetchCredentialExpirations, fetchUpcoming } from '../../api/dashboard'
-import { fetchPinnedRequirements, pinRequirement } from '../../api/compliance'
+import { fetchPinnedRequirements, pinRequirement, fetchComplianceDashboard } from '../../api/compliance'
 import { ComplianceWidget } from '../../components/compliance/ComplianceWidget'
 
 import {
@@ -25,7 +25,7 @@ import {
   UpcomingDeadlines,
 } from '../../components/dashboard'
 
-import type { DashboardStats, CredentialExpirationsResponse, UpcomingResponse } from '../../types/dashboard'
+import type { DashboardStats, CredentialExpirationsResponse, UpcomingResponse, ComplianceDashboard } from '../../types/dashboard'
 import type { PinnedRequirement } from '../../types/compliance'
 
 export default function Dashboard() {
@@ -36,6 +36,7 @@ export default function Dashboard() {
   const [credentials, setCredentials] = useState<CredentialExpirationsResponse | null>(null)
   const [upcoming, setUpcoming] = useState<UpcomingResponse | null>(null)
   const [pinned, setPinned] = useState<PinnedRequirement[]>([])
+  const [complianceDash, setComplianceDash] = useState<ComplianceDashboard | null>(null)
   const [loading, setLoading] = useState(true)
   const [pinnedLoading, setPinnedLoading] = useState(true)
   const [upcomingLoading, setUpcomingLoading] = useState(true)
@@ -75,6 +76,11 @@ export default function Dashboard() {
           .catch(() => setPinned([]))
           .finally(() => setPinnedLoading(false))
       )
+      promises.push(
+        fetchComplianceDashboard(90)
+          .then(setComplianceDash)
+          .catch(() => setComplianceDash(null))
+      )
     } else {
       setPinnedLoading(false)
     }
@@ -98,6 +104,23 @@ export default function Dashboard() {
   const isClient = me?.user?.role === 'client'
   const hasZeroEmployees = (stats?.total_employees ?? 0) === 0
   const hasZeroPolicies = (stats?.active_policies ?? 0) === 0
+
+  // Score + sort compliance actions for PendingActions (top 3)
+  const compliancePendingActions = (() => {
+    if (!complianceDash?.coming_up) return []
+    const severityScore: Record<string, number> = { critical: 50, warning: 20, info: 5 }
+    const slaScore: Record<string, number> = { overdue: 100, due_soon: 50, unassigned: 30, on_track: 10, completed: 0 }
+    return [...complianceDash.coming_up]
+      .filter(item => item.sla_state !== 'completed')
+      .sort((a, b) => {
+        const aTime = a.days_until ?? 365
+        const bTime = b.days_until ?? 365
+        const aS = (severityScore[a.severity] ?? 0) + (slaScore[a.sla_state] ?? 0) + Math.max(0, 30 - aTime)
+        const bS = (severityScore[b.severity] ?? 0) + (slaScore[b.sla_state] ?? 0) + Math.max(0, 30 - bTime)
+        return bS - aS
+      })
+      .slice(0, 3)
+  })()
 
   return (
     <div>
@@ -141,8 +164,12 @@ export default function Dashboard() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
         <StatCard
           label="Compliance Alerts"
-          value={stats?.critical_compliance_alerts ?? 0}
-          subtitle={stats?.warning_compliance_alerts ? `+${stats.warning_compliance_alerts} warnings` : undefined}
+          value={(stats?.critical_compliance_alerts ?? 0) + (stats?.warning_compliance_alerts ?? 0)}
+          subtitle={
+            (stats?.critical_compliance_alerts ?? 0) + (stats?.warning_compliance_alerts ?? 0) > 0
+              ? `${stats?.critical_compliance_alerts ?? 0} critical · ${stats?.warning_compliance_alerts ?? 0} warning`
+              : 'All clear'
+          }
           icon={Shield}
           href="/app/compliance"
           urgent={(stats?.critical_compliance_alerts ?? 0) > 0}
@@ -150,14 +177,22 @@ export default function Dashboard() {
         <StatCard
           label="Open ER Cases"
           value={stats?.er_case_summary?.open_cases ?? 0}
-          subtitle={stats?.er_case_summary?.investigating ? `${stats.er_case_summary.investigating} investigating` : undefined}
+          subtitle={
+            (stats?.er_case_summary?.open_cases ?? 0) > 0
+              ? `${stats?.er_case_summary?.investigating ?? 0} investigating · ${stats?.er_case_summary?.pending_action ?? 0} pending`
+              : 'No open cases'
+          }
           icon={Briefcase}
           href="/app/er-copilot"
         />
         <StatCard
           label="Open Incidents"
           value={stats?.incident_summary?.total_open ?? 0}
-          subtitle={stats?.incident_summary?.recent_7_days ? `+${stats.incident_summary.recent_7_days} this week` : undefined}
+          subtitle={
+            (stats?.incident_summary?.total_open ?? 0) > 0
+              ? `${stats?.incident_summary?.critical ?? 0} critical · ${stats?.incident_summary?.high ?? 0} high`
+              : 'No open incidents'
+          }
           icon={AlertTriangle}
           href="/app/ir"
           urgent={(stats?.incident_summary?.critical ?? 0) > 0}
@@ -165,7 +200,11 @@ export default function Dashboard() {
         <StatCard
           label="Stale Policies"
           value={stats?.stale_policies?.stale_count ?? 0}
-          subtitle={stats?.stale_policies?.oldest_days ? `oldest: ${stats.stale_policies.oldest_days}d` : undefined}
+          subtitle={
+            (stats?.stale_policies?.stale_count ?? 0) > 0
+              ? `Oldest: ${stats?.stale_policies?.oldest_days ?? 0}d ago`
+              : 'All up to date'
+          }
           icon={FileText}
           href="/app/handbooks"
         />
@@ -217,7 +256,7 @@ export default function Dashboard() {
                 wageAlerts={stats?.wage_alerts ?? null}
                 credentialSummary={credentials?.summary}
                 complianceAlerts={stats?.critical_compliance_alerts ?? 0}
-                compliancePendingActions={[]}
+                compliancePendingActions={compliancePendingActions}
               />
               <ComplianceWidget />
               {isHealthcare && credentials && (

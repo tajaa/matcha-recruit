@@ -109,5 +109,7 @@ desktop/Matcha/build/
 # Proposals / docs
 *.pdf
 DEAL_PROPOSAL_HEALTHCARE.md
+HEALTHCARE_SAVINGS_MODEL.md
 NOTES - Matcha_Healthcare_Proposal.pdf
+PLAN-*.md
 scripts/grab-ss.sh
