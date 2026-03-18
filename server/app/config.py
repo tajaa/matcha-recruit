@@ -77,7 +77,7 @@ class Settings:
     compliance_emails_enabled: bool = True
 
     # Gemini API Rate Limits (research at scale needs higher ceilings)
-    gemini_hourly_limit: int = 500
+    gemini_hourly_limit: int = 200
     gemini_daily_limit: int = 5000
 
     # Stripe (Matcha Work billing)
@@ -169,7 +169,7 @@ def load_settings() -> Settings:
         celery_broker_url=os.getenv("CELERY_BROKER_URL"),
         celery_result_backend=os.getenv("CELERY_RESULT_BACKEND"),
         compliance_emails_enabled=os.getenv("COMPLIANCE_EMAILS_ENABLED", "true").lower() in ("true", "1", "yes"),
-        gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "500")),
+        gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "200")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "5000")),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),
         stripe_webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET"),
