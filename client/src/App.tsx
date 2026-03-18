@@ -9,6 +9,7 @@ import Features from './pages/admin/Features'
 import Settings from './pages/admin/Settings'
 import JurisdictionData from './pages/admin/JurisdictionData'
 import Jurisdictions from './pages/admin/Jurisdictions'
+import IndustryRequirements from './pages/admin/IndustryRequirements'
 import Dashboard from './pages/app/Dashboard'
 import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
@@ -44,6 +45,7 @@ export default function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="jurisdiction-data" element={<JurisdictionData />} />
         <Route path="jurisdictions" element={<Jurisdictions />} />
+        <Route path="industry-requirements" element={<IndustryRequirements />} />
       </Route>
       <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
         <Route index element={<Dashboard />} />

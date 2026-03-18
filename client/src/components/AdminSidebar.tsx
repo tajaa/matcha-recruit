@@ -1,4 +1,4 @@
-import { Building2, ToggleRight, Settings, MapPin, Globe } from 'lucide-react'
+import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 
 const nav = [
@@ -6,6 +6,7 @@ const nav = [
   { to: '/admin/features', icon: ToggleRight, label: 'Business Features' },
   { to: '/admin/jurisdictions', icon: Globe, label: 'Jurisdictions' },
   { to: '/admin/jurisdiction-data', icon: MapPin, label: 'Jurisdiction Data' },
+  { to: '/admin/industry-requirements', icon: ClipboardList, label: 'Industry Reqs' },
   { to: '/admin/settings', icon: Settings, label: 'Settings' },
 ]
 

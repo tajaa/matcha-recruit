@@ -23,6 +23,7 @@ from ..services.credential_crypto import decrypt_credential_fields
 from ..feature_flags import merge_company_features
 from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings
+from ..compliance_registry import TRIGGER_PROFILES
 from ..services.compliance_service import (
     update_auto_check_settings,
     _jurisdiction_row_to_dict,
@@ -5878,6 +5879,157 @@ async def delete_industry_profile(profile_id: UUID):
     if result == "DELETE 0":
         raise HTTPException(status_code=404, detail="Profile not found")
     return {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# Industry requirements matrix
+# ---------------------------------------------------------------------------
+
+@router.get("/industry-requirements-matrix", dependencies=[Depends(require_admin)])
+async def get_industry_requirements_matrix(
+    industry: str = Query("healthcare"),
+    specialties: Optional[str] = Query(None),
+    entity_type: Optional[str] = Query(None),
+    payer_contracts: Optional[str] = Query(None),
+):
+    """Return a matrix of compliance categories applicable to an industry,
+    annotated with jurisdiction data coverage and trigger-profile sourcing."""
+
+    specialty_list = [s.strip() for s in specialties.split(",") if s.strip()] if specialties else []
+    payer_list = [p.strip() for p in payer_contracts.split(",") if p.strip()] if payer_contracts else []
+
+    async with get_connection() as conn:
+        # 1. Load the industry profile
+        profile_row = await conn.fetchrow(
+            "SELECT * FROM industry_compliance_profiles WHERE name ILIKE $1",
+            industry,
+        )
+        # 2. Load all compliance categories
+        cat_rows = await conn.fetch(
+            "SELECT slug, name, description, domain::text, \"group\", industry_tag, sort_order "
+            "FROM compliance_categories ORDER BY sort_order, slug"
+        )
+
+    if not cat_rows:
+        raise HTTPException(status_code=404, detail="No compliance categories found")
+
+    cats_by_slug = {r["slug"]: dict(r) for r in cat_rows}
+    focused_categories = list(profile_row["focused_categories"]) if profile_row else []
+
+    # 3. Determine activated trigger profiles
+    active_triggers = []
+    triggered_cats: dict[str, list[str]] = {}  # slug -> list of trigger keys
+
+    for tp in TRIGGER_PROFILES:
+        activated = False
+        if tp.attribute_key == "entity_type" and entity_type and tp.attribute_match == entity_type:
+            activated = True
+        elif tp.attribute_key == "payer_contracts" and tp.attribute_match in payer_list:
+            activated = True
+
+        if activated:
+            active_triggers.append({
+                "key": tp.key,
+                "label": tp.label,
+                "categories": list(tp.applicable_categories),
+            })
+            for cat_slug in tp.applicable_categories:
+                triggered_cats.setdefault(cat_slug, []).append(tp.key)
+
+    # 4. Classify each category and determine the applicable set
+    applicable_slugs: list[str] = []
+    source_map: dict[str, str] = {}
+    triggered_by_map: dict[str, list[str]] = {}
+
+    for slug, cat in cats_by_slug.items():
+        tag = cat.get("industry_tag") or ""
+        sources: list[str] = []
+
+        # focused: in the industry profile's focused_categories
+        if slug in focused_categories:
+            sources.append("focused")
+
+        # base: industry_tag matches industry exactly
+        if tag.lower() == industry.lower():
+            sources.append("base")
+
+        # specialty: industry_tag starts with "industry:" and suffix matches a selected specialty
+        if ":" in tag:
+            prefix, suffix = tag.split(":", 1)
+            if prefix.lower() == industry.lower() and suffix.lower() in [s.lower() for s in specialty_list]:
+                sources.append("specialty")
+
+        # triggered: appears in an activated trigger profile
+        if slug in triggered_cats:
+            sources.append("triggered")
+            triggered_by_map[slug] = triggered_cats[slug]
+
+        if sources:
+            applicable_slugs.append(slug)
+            # Priority: triggered > specialty > base > focused
+            for priority in ("triggered", "specialty", "base", "focused"):
+                if priority in sources:
+                    source_map[slug] = priority
+                    break
+
+    if not applicable_slugs:
+        return {
+            "summary": {"total": 0, "with_data": 0, "missing_data": 0},
+            "industry_profile": {
+                "name": profile_row["name"] if profile_row else industry,
+                "focused_categories": focused_categories,
+            },
+            "active_triggers": active_triggers,
+            "categories": [],
+        }
+
+    # 5. Query jurisdiction data counts for applicable categories
+    async with get_connection() as conn:
+        data_rows = await conn.fetch(
+            "SELECT category, COUNT(*) AS req_count, COUNT(DISTINCT jurisdiction_id) AS jur_count "
+            "FROM jurisdiction_requirements "
+            "WHERE category = ANY($1::text[]) "
+            "GROUP BY category",
+            applicable_slugs,
+        )
+
+    data_map = {r["category"]: {"req_count": r["req_count"], "jur_count": r["jur_count"]} for r in data_rows}
+
+    # 6. Build response
+    categories_out = []
+    with_data = 0
+    for slug in applicable_slugs:
+        cat = cats_by_slug[slug]
+        counts = data_map.get(slug, {"req_count": 0, "jur_count": 0})
+        has_data = counts["jur_count"] > 0
+        if has_data:
+            with_data += 1
+        categories_out.append({
+            "slug": slug,
+            "name": cat["name"],
+            "domain": cat["domain"],
+            "group": cat["group"],
+            "industry_tag": cat.get("industry_tag"),
+            "source": source_map[slug],
+            "triggered_by": triggered_by_map.get(slug, []),
+            "jurisdiction_count": counts["jur_count"],
+            "requirement_count": counts["req_count"],
+            "has_data": has_data,
+        })
+
+    return {
+        "summary": {
+            "total": len(categories_out),
+            "with_data": with_data,
+            "missing_data": len(categories_out) - with_data,
+        },
+        "industry_profile": {
+            "name": profile_row["name"] if profile_row else industry,
+            "focused_categories": focused_categories,
+        },
+        "active_triggers": active_triggers,
+        "categories": categories_out,
+    }
 
 
 # ---------------------------------------------------------------------------
