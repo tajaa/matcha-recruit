@@ -86,8 +86,8 @@ export default function ExplorerTab({
       const q = search.toLowerCase()
       rows = rows.filter(
         (r) =>
-          r.city.toLowerCase().includes(q) ||
-          r.stateName.toLowerCase().includes(q)
+          (r.city || '').toLowerCase().includes(q) ||
+          (r.stateName || '').toLowerCase().includes(q)
       )
     }
     if (filterState) rows = rows.filter((r) => r.stateName === filterState)
@@ -235,9 +235,9 @@ export default function ExplorerTab({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-800">
-                  {paged.map((city) => (
+                  {paged.map((city, idx) => (
                     <tr
-                      key={city.id}
+                      key={`${city.id}-${idx}`}
                       className={`cursor-pointer transition-colors ${
                         selectedCityId === city.id
                           ? 'bg-zinc-800/60'
