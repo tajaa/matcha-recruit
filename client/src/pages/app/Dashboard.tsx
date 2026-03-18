@@ -291,7 +291,7 @@ export default function Dashboard() {
 
           {hasFeature('compliance') && (
             <div className="mb-6">
-              <ComplianceImpact />
+              <ComplianceImpact initialData={complianceDash} />
             </div>
           )}
         </>

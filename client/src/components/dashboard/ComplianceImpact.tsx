@@ -35,11 +35,15 @@ function addDays(days: number): string {
   return d.toISOString().split('T')[0]
 }
 
-export function ComplianceImpact() {
+interface ComplianceImpactProps {
+  initialData?: ComplianceDashboard | null
+}
+
+export function ComplianceImpact({ initialData }: ComplianceImpactProps = {}) {
   const navigate = useNavigate()
   const [horizon, setHorizon] = useState(90)
-  const [data, setData] = useState<ComplianceDashboard | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [data, setData] = useState<ComplianceDashboard | null>(initialData ?? null)
+  const [loading, setLoading] = useState(!initialData)
 
   // Action modal state
   const [selected, setSelected] = useState<ComplianceDashboardItem | null>(null)
@@ -57,7 +61,11 @@ export function ComplianceImpact() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => { load(horizon) }, [horizon, load])
+  // Only fetch on mount if no initialData was provided; always fetch on horizon change
+  useEffect(() => {
+    if (horizon === 90 && initialData !== undefined) return
+    load(horizon)
+  }, [horizon, load, initialData])
 
   const openModal = (item: ComplianceDashboardItem) => {
     setSelected(item)
