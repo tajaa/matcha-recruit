@@ -53,6 +53,7 @@ from ..services.compliance_service import (
     get_hierarchical_requirements,
     update_facility_attributes,
     get_facility_attributes,
+    search_company_requirements,
 )
 
 router = APIRouter()
@@ -910,6 +911,34 @@ async def get_pinned_requirements_endpoint(
         raise HTTPException(status_code=403, detail="Access denied")
 
     return await get_pinned_requirements(company_id)
+
+
+@router.get("/search")
+async def search_requirements_endpoint(
+    q: str = Query(..., min_length=1, description="Search query"),
+    location_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Search across all compliance requirements for a company."""
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    loc_uuid = None
+    if location_id:
+        try:
+            loc_uuid = UUID(location_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid location_id")
+
+    async with get_connection() as conn:
+        results = await search_company_requirements(
+            conn, company_id, q, location_id=loc_uuid, limit=limit
+        )
+
+    return results
 
 
 @router.patch("/locations/{location_id}/facility-attributes")

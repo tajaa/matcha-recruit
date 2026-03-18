@@ -27,7 +27,21 @@ type Props = {
 export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
-  const { sectionedCategories } = useComplianceRequirements(requirements)
+  const [searchQuery, setSearchQuery] = useState('')
+
+  const filteredRequirements = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return requirements
+    return requirements.filter((r) =>
+      (r.title?.toLowerCase().includes(q)) ||
+      (r.description?.toLowerCase().includes(q)) ||
+      (r.current_value?.toLowerCase().includes(q)) ||
+      (r.jurisdiction_name?.toLowerCase().includes(q)) ||
+      (r.category?.toLowerCase().includes(q))
+    )
+  }, [requirements, searchQuery])
+
+  const { sectionedCategories } = useComplianceRequirements(filteredRequirements)
 
   const filteredSections = useMemo(() => {
     if (groupFilter === 'all') return sectionedCategories
@@ -54,11 +68,20 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <div className="w-48">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search requirements..."
+          className="flex-1 bg-zinc-800 border border-zinc-600 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-400 transition-colors"
+        />
+        <div className="w-48 shrink-0">
           <Select label="" options={GROUP_OPTIONS} value={groupFilter}
             onChange={(e) => setGroupFilter(e.target.value as 'all' | CategoryGroup)} />
         </div>
-        <span className="text-xs text-zinc-500">{requirements.length} requirements</span>
+        <span className="text-xs text-zinc-500 shrink-0">
+          {searchQuery ? `${filteredRequirements.length} of ${requirements.length}` : requirements.length} requirements
+        </span>
       </div>
 
       {filteredSections.length === 0 ? (

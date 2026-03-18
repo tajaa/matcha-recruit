@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse } from '../../types/matcha-work'
-import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode } from '../../api/matchaWork'
+import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode } from '../../api/matchaWork'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -29,6 +29,10 @@ export default function MatchaWorkThread() {
   const [nodeMode, setNodeModeState] = useState(false)
   const [togglingNode, setTogglingNode] = useState(false)
 
+  // Compliance mode
+  const [complianceMode, setComplianceModeState] = useState(false)
+  const [togglingCompliance, setTogglingCompliance] = useState(false)
+
   // Title editing
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState('')
@@ -46,6 +50,7 @@ export default function MatchaWorkThread() {
         setThread(data)
         setMessages(data.messages)
         setNodeModeState(data.node_mode)
+        setComplianceModeState(data.compliance_mode)
         // Check if there's already a PDF-worthy task type
         if (data.task_type === 'offer_letter' || data.task_type === 'presentation') {
           setPdfUrl(getPdfProxyUrl(threadId, data.version))
@@ -143,6 +148,17 @@ export default function MatchaWorkThread() {
     setTogglingNode(false)
   }
 
+  async function handleComplianceToggle() {
+    if (!threadId || togglingCompliance) return
+    const newVal = !complianceMode
+    setTogglingCompliance(true)
+    try {
+      await setComplianceMode(threadId, newVal)
+      setComplianceModeState(newVal)
+    } catch {}
+    setTogglingCompliance(false)
+  }
+
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -225,6 +241,20 @@ export default function MatchaWorkThread() {
           >
             <Database size={12} />
             Node
+          </button>
+
+          <button
+            onClick={handleComplianceToggle}
+            disabled={togglingCompliance}
+            title={complianceMode ? 'Compliance mode ON — AI uses jurisdiction requirements' : 'Compliance mode OFF — click to enable compliance context'}
+            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
+              complianceMode
+                ? 'bg-cyan-600 text-white hover:bg-cyan-500'
+                : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200'
+            }`}
+          >
+            <Shield size={12} />
+            Compliance
           </button>
         </div>
 

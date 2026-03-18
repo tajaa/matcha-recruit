@@ -146,6 +146,11 @@ export default function MatchaWorkList() {
                       Node
                     </span>
                   )}
+                  {t.compliance_mode && (
+                    <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-cyan-700 text-cyan-200">
+                      Compliance
+                    </span>
+                  )}
                 </div>
                 <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
                   <span>v{t.version}</span>

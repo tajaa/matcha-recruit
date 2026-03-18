@@ -7987,3 +7987,41 @@ async def get_hierarchical_requirements(
             "total_categories": len(categories_out),
             "total_requirements": total_requirements,
         }
+
+
+async def search_company_requirements(
+    conn,
+    company_id: UUID,
+    query: str,
+    location_id: UUID | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    """Full-text search across a company's compliance requirements."""
+    pattern = f"%{query}%"
+    rows = await conn.fetch(
+        """
+        SELECT cr.*, bl.city, bl.state, bl.name AS location_name
+        FROM compliance_requirements cr
+        JOIN business_locations bl ON cr.location_id = bl.id
+        WHERE bl.company_id = $1
+          AND ($2::uuid IS NULL OR bl.id = $2)
+          AND (
+            cr.title ILIKE $3 OR cr.description ILIKE $3
+            OR cr.current_value ILIKE $3 OR cr.jurisdiction_name ILIKE $3
+            OR cr.category ILIKE $3
+          )
+        ORDER BY
+          CASE WHEN cr.title ILIKE $3 THEN 0
+               WHEN cr.current_value ILIKE $3 THEN 1
+               WHEN cr.category ILIKE $3 THEN 2
+               ELSE 3
+          END,
+          cr.category, cr.jurisdiction_level
+        LIMIT $4
+        """,
+        company_id,
+        location_id,
+        pattern,
+        limit,
+    )
+    return [dict(row) for row in rows]

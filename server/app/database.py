@@ -4202,6 +4202,17 @@ async def init_db():
         """)
         await conn.execute("""
             DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'mw_threads' AND column_name = 'compliance_mode'
+                ) THEN
+                    ALTER TABLE mw_threads ADD COLUMN compliance_mode BOOLEAN NOT NULL DEFAULT false;
+                END IF;
+            END $$;
+        """)
+        await conn.execute("""
+            DO $$
             DECLARE
                 c RECORD;
             BEGIN

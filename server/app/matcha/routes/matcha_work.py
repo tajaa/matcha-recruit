@@ -37,6 +37,7 @@ from ..models.matcha_work import (
     SendMessageResponse,
     PinThreadRequest,
     NodeModeRequest,
+    ComplianceModeRequest,
     ThreadDetailResponse,
     ThreadListItem,
     OfferLetterDocument,
@@ -69,7 +70,7 @@ from ..services.matcha_work_handbook_upload import (
     parse_handbook_sections,
 )
 from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation
-from ..services.matcha_work_node import build_node_context
+from ..services.matcha_work_node import build_node_context, build_compliance_context
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -256,6 +257,7 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: UUID) -> Th
         task_type=_infer_skill_from_state(thread["current_state"]),
         is_pinned=thread.get("is_pinned", False),
         node_mode=thread.get("node_mode", False),
+        compliance_mode=thread.get("compliance_mode", False),
         linked_offer_letter_id=thread.get("linked_offer_letter_id"),
         created_at=thread["created_at"],
         updated_at=thread["updated_at"],
@@ -1106,6 +1108,7 @@ async def create_thread(
         task_type=_infer_skill_from_state(thread["current_state"]),
         is_pinned=thread.get("is_pinned", False),
         node_mode=thread.get("node_mode", False),
+        compliance_mode=thread.get("compliance_mode", False),
         created_at=thread["created_at"],
         assistant_reply=assistant_reply,
         pdf_url=pdf_url,
@@ -1681,6 +1684,9 @@ async def send_message(
     if thread.get("node_mode"):
         node_ctx = await build_node_context(company_id)
         ctx += "\n\n" + node_ctx
+    if thread.get("compliance_mode"):
+        compliance_ctx = await build_compliance_context(company_id)
+        ctx += "\n\n" + compliance_ctx
     ai_resp = await ai_provider.generate(
         msg_dicts, thread["current_state"], company_context=ctx,
         slide_index=body.slide_index, context_summary=context_summary,
@@ -1841,6 +1847,9 @@ async def send_message_stream(
     if thread.get("node_mode"):
         node_ctx = await build_node_context(company_id)
         ctx += "\n\n" + node_ctx
+    if thread.get("compliance_mode"):
+        compliance_ctx = await build_compliance_context(company_id)
+        ctx += "\n\n" + compliance_ctx
     estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
 
     async def event_stream():
@@ -2435,7 +2444,7 @@ async def update_thread_title(
             UPDATE mw_threads
             SET title=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at, current_state
             """,
             body.title,
             thread_id,
@@ -2485,6 +2494,31 @@ async def set_thread_node_mode(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     row = await doc_svc.set_thread_node_mode(thread_id, company_id, body.node_mode)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row_dict = dict(row)
+    current_state = _json_object(row_dict.pop("current_state", {}))
+    return ThreadListItem(
+        **{
+            **row_dict,
+            "task_type": _infer_skill_from_state(current_state),
+        }
+    )
+
+
+@router.post("/threads/{thread_id}/compliance-mode", response_model=ThreadListItem)
+async def set_thread_compliance_mode(
+    thread_id: UUID,
+    body: ComplianceModeRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Enable or disable Compliance mode (jurisdiction requirements context) for a thread."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row = await doc_svc.set_thread_compliance_mode(thread_id, company_id, body.compliance_mode)
     if row is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 

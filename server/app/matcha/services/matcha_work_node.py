@@ -1,7 +1,8 @@
-"""Node mode — builds rich internal-data context for Matcha Work threads."""
+"""Node mode & compliance mode — builds rich internal-data context for Matcha Work threads."""
 
 import logging
 import time
+from collections import defaultdict
 from uuid import UUID
 
 from ...database import get_connection
@@ -11,6 +12,9 @@ logger = logging.getLogger(__name__)
 # TTL cache keyed by company_id — same pattern as _company_profile_cache
 _node_context_cache: dict[str, tuple[float, str]] = {}
 _NODE_CACHE_TTL = 120  # 2 minutes
+
+_compliance_context_cache: dict[str, tuple[float, str]] = {}
+_COMPLIANCE_CACHE_TTL = 120  # 2 minutes
 
 
 async def build_node_context(company_id: UUID) -> str:
@@ -160,4 +164,77 @@ async def build_node_context(company_id: UUID) -> str:
 
     result = "\n".join(sections)
     _node_context_cache[cache_key] = (now, result)
+    return result
+
+
+async def build_compliance_context(company_id: UUID) -> str:
+    """Fetch compliance requirements by location and format as AI context string."""
+    cache_key = str(company_id)
+    now = time.time()
+    cached = _compliance_context_cache.get(cache_key)
+    if cached and (now - cached[0]) < _COMPLIANCE_CACHE_TTL:
+        return cached[1]
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT cr.category, cr.title, cr.current_value,
+                   cr.jurisdiction_name, cr.jurisdiction_level,
+                   cr.effective_date, cr.source_url,
+                   bl.city, bl.state, bl.name AS location_name
+            FROM compliance_requirements cr
+            JOIN business_locations bl ON cr.location_id = bl.id
+            WHERE bl.company_id = $1 AND bl.is_active = true
+            ORDER BY bl.city, cr.category, cr.jurisdiction_level
+            """,
+            company_id,
+        )
+
+    sections: list[str] = []
+
+    # Instruction block
+    sections.append(
+        "=== COMPLIANCE MODE: JURISDICTION REQUIREMENTS ===\n"
+        "You have access to the company's compliance requirements by location below. "
+        "Cite this data first when answering compliance questions. "
+        "If the data below does not cover what the user asks about, suggest they run "
+        "a compliance check to pull in the latest requirements."
+    )
+
+    if not rows:
+        sections.append(
+            "\nNo compliance requirements found for active locations. "
+            "Suggest the user add business locations and run a compliance check."
+        )
+    else:
+        # Group by location
+        by_location: dict[str, list] = defaultdict(list)
+        for r in rows:
+            loc_key = f"{r['location_name'] or 'Unknown'} ({r['city'] or 'N/A'}, {r['state'] or 'N/A'})"
+            by_location[loc_key].append(r)
+
+        for loc_name, reqs in by_location.items():
+            lines = [f"\n--- {loc_name} ---"]
+            # Group by category within location
+            by_cat: dict[str, list] = defaultdict(list)
+            for r in reqs:
+                by_cat[r["category"] or "uncategorized"].append(r)
+
+            for cat, cat_reqs in by_cat.items():
+                lines.append(f"\n  [{cat}]")
+                for r in cat_reqs:
+                    title = r["title"] or "Untitled"
+                    value = r["current_value"] or "N/A"
+                    level = r["jurisdiction_level"] or "N/A"
+                    eff = str(r["effective_date"]) if r["effective_date"] else "N/A"
+                    source = r["source_url"] or ""
+                    entry = f"  - {title}: {value} (level: {level}, effective: {eff})"
+                    if source:
+                        entry += f" [source: {source}]"
+                    lines.append(entry)
+
+            sections.append("\n".join(lines))
+
+    result = "\n".join(sections)
+    _compliance_context_cache[cache_key] = (now, result)
     return result

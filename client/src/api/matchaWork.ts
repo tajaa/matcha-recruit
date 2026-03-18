@@ -37,6 +37,10 @@ export function setNodeMode(id: string, node_mode: boolean) {
   return api.post<MWThread>(`/matcha-work/threads/${id}/node-mode`, { node_mode })
 }
 
+export function setComplianceMode(id: string, compliance_mode: boolean) {
+  return api.post<MWThread>(`/matcha-work/threads/${id}/compliance-mode`, { compliance_mode })
+}
+
 export function archiveThread(id: string) {
   return api.delete(`/matcha-work/threads/${id}`)
 }

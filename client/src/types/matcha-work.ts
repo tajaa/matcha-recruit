@@ -15,6 +15,7 @@ export interface MWThread {
   task_type: MWTaskType | null
   is_pinned: boolean
   node_mode: boolean
+  compliance_mode: boolean
   version: number
   created_at: string
   updated_at: string
@@ -63,6 +64,7 @@ export interface MWCreateResponse {
   task_type: MWTaskType | null
   is_pinned: boolean
   node_mode: boolean
+  compliance_mode: boolean
   created_at: string
   assistant_reply: string | null
   pdf_url: string | null

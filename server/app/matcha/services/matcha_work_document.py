@@ -822,7 +822,7 @@ async def create_thread(
                 INSERT INTO mw_threads(company_id, created_by, title, current_state)
                 VALUES($1, $2, $3, $4::jsonb)
                 RETURNING id, company_id, created_by, title, status,
-                          current_state, version, is_pinned, node_mode, linked_offer_letter_id,
+                          current_state, version, is_pinned, node_mode, compliance_mode, linked_offer_letter_id,
                           created_at, updated_at
                 """,
                 company_id,
@@ -841,7 +841,7 @@ async def get_thread(thread_id: UUID, company_id: UUID) -> Optional[dict]:
         row = await conn.fetchrow(
             """
             SELECT id, company_id, created_by, title, status,
-                   current_state, version, is_pinned, node_mode, linked_offer_letter_id,
+                   current_state, version, is_pinned, node_mode, compliance_mode, linked_offer_letter_id,
                    created_at, updated_at
             FROM mw_threads
             WHERE id=$1 AND company_id=$2
@@ -882,7 +882,7 @@ async def list_threads(
         if status:
             rows = await conn.fetch(
                 f"""
-                SELECT id, title, status, version, is_pinned, node_mode, created_at, updated_at,
+                SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
                        {task_type_sql}
                 FROM mw_threads
                 WHERE company_id=$1 AND status=$2
@@ -897,7 +897,7 @@ async def list_threads(
         else:
             rows = await conn.fetch(
                 f"""
-                SELECT id, title, status, version, is_pinned, node_mode, created_at, updated_at,
+                SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
                        {task_type_sql}
                 FROM mw_threads
                 WHERE company_id=$1
@@ -1054,7 +1054,7 @@ async def set_thread_pinned(
             UPDATE mw_threads
             SET is_pinned=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at, current_state
             """,
             is_pinned,
             thread_id,
@@ -1077,9 +1077,31 @@ async def set_thread_node_mode(
             UPDATE mw_threads
             SET node_mode=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at, current_state
             """,
             node_mode,
+            thread_id,
+            company_id,
+        )
+        if row is None:
+            return None
+        return _thread_list_item_from_row(dict(row))
+
+
+async def set_thread_compliance_mode(
+    thread_id: UUID,
+    company_id: UUID,
+    compliance_mode: bool,
+) -> Optional[dict]:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE mw_threads
+            SET compliance_mode=$1, updated_at=NOW()
+            WHERE id=$2 AND company_id=$3
+            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at, current_state
+            """,
+            compliance_mode,
             thread_id,
             company_id,
         )
