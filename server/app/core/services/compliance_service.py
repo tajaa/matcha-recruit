@@ -986,8 +986,27 @@ async def _get_or_create_jurisdiction(
     Auto-resolves county from jurisdiction_reference when not provided,
     then links city -> county -> state via parent_id.
     """
-    norm_city, ref_county = await _resolve_reference_city(conn, city, state)
     norm_state = state.upper().strip()
+
+    # 1b. State-only shortcut — no city means we just need the state jurisdiction
+    if not city or not city.strip():
+        state_j = await conn.fetchrow(
+            "SELECT id FROM jurisdictions WHERE COALESCE(city, '') = '' AND state = $1",
+            norm_state,
+        )
+        if not state_j:
+            await conn.execute(
+                "INSERT INTO jurisdictions (city, state, display_name, level) VALUES ('', $1, $2, 'state') ON CONFLICT (COALESCE(city, ''), state) DO NOTHING",
+                norm_state,
+                norm_state,
+            )
+            state_j = await conn.fetchrow(
+                "SELECT id FROM jurisdictions WHERE COALESCE(city, '') = '' AND state = $1",
+                norm_state,
+            )
+        return state_j["id"]
+
+    norm_city, ref_county = await _resolve_reference_city(conn, city, state)
     if not county and ref_county:
         county = ref_county
 

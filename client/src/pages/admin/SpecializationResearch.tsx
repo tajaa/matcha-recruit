@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { Microscope, Loader2, Check, ChevronRight, ArrowLeft } from 'lucide-react'
+import { HEALTHCARE_SPECIALTIES } from '../../data/industryConstants'
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -182,7 +183,10 @@ export default function SpecializationResearch() {
 
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue
-          const event = JSON.parse(line.slice(6))
+          const payload = line.slice(6).trim()
+          if (!payload || payload === 'DONE' || payload === '[DONE]') continue
+          let event: any
+          try { event = JSON.parse(payload) } catch { continue }
 
           if (event.type === 'status') {
             setStatusMessage(event.message)
@@ -276,15 +280,18 @@ export default function SpecializationResearch() {
         <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-6 space-y-5">
           <div>
             <label className="block text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-1.5">
-              Specialization Name
+              Medical Specialization
             </label>
-            <input
-              type="text"
+            <select
               value={specialization}
               onChange={(e) => setSpecialization(e.target.value)}
-              placeholder="e.g., Cardiology, Orthopedics, Psychiatry..."
-              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm px-3 py-2 placeholder:text-zinc-600 focus:outline-none focus:border-emerald-600"
-            />
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm px-3 py-2 focus:outline-none focus:border-emerald-600"
+            >
+              <option value="">Select a specialization…</option>
+              {HEALTHCARE_SPECIALTIES.map((s) => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
           </div>
 
           <div>

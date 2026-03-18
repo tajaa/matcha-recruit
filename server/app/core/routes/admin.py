@@ -5092,37 +5092,54 @@ async def run_specialization_research(req: SpecializationResearchRequest):
     async def event_stream():
         try:
             async with get_connection() as conn:
-                # Phase 1: Resolve jurisdictions
+                # Phase 1: Resolve jurisdictions — deduplicate states so shared
+                # state-level requirements are researched once, not per city.
                 yield _to_sse({"type": "status", "message": "Resolving jurisdictions..."})
-                jurisdictions = []
+
+                # Collect all unique states (explicit + implied by cities)
+                state_jurisdictions: dict[str, dict] = {}  # state_norm -> jurisdiction dict
+                city_jurisdictions: list[dict] = []
 
                 for state in req.states:
                     state_norm = state.strip().upper()
-                    jid = await _get_or_create_jurisdiction(conn, "", state_norm)
-                    jurisdictions.append({"id": jid, "label": state_norm, "city": "", "state": state_norm})
+                    if state_norm not in state_jurisdictions:
+                        jid = await _get_or_create_jurisdiction(conn, "", state_norm)
+                        state_jurisdictions[state_norm] = {"id": jid, "label": state_norm, "city": "", "state": state_norm}
 
                 for city_entry in req.cities:
                     city = city_entry.get("city", "").strip()
                     state = city_entry.get("state", "").strip().upper()
-                    if city and state:
-                        jid = await _get_or_create_jurisdiction(conn, city, state)
-                        jurisdictions.append({"id": jid, "label": f"{city}, {state}", "city": city, "state": state})
+                    if not city or not state:
+                        continue
+                    # Ensure parent state is researched first
+                    if state not in state_jurisdictions:
+                        sid = await _get_or_create_jurisdiction(conn, "", state)
+                        state_jurisdictions[state] = {"id": sid, "label": state, "city": "", "state": state}
+                    jid = await _get_or_create_jurisdiction(conn, city, state)
+                    city_jurisdictions.append({"id": jid, "label": f"{city}, {state}", "city": city, "state": state})
+
+                # Order: states first, then cities — so state-level requirements
+                # are in the DB before city research runs. City research will then
+                # only add local ordinances (existing_cats check skips duplicates).
+                all_jurisdictions = list(state_jurisdictions.values()) + city_jurisdictions
+                total_count = len(all_jurisdictions)
 
                 yield _to_sse({
                     "type": "status",
-                    "message": f"Resolved {len(jurisdictions)} jurisdictions. Starting research...",
+                    "message": f"Resolved {len(state_jurisdictions)} state(s) + {len(city_jurisdictions)} city/cities. Starting research...",
                 })
 
-                # Phase 2: Research each jurisdiction
+                # Phase 2: Research each jurisdiction (states first, then cities)
                 grand_total = 0
                 grand_failed = []
 
-                for j_idx, j in enumerate(jurisdictions, 1):
+                for j_idx, j in enumerate(all_jurisdictions, 1):
+                    is_city = bool(j["city"])
                     yield _to_sse({
                         "type": "researching",
                         "jurisdiction": j["label"],
                         "progress": j_idx,
-                        "total": len(jurisdictions),
+                        "total": total_count,
                     })
 
                     def progress_cb(cat_idx, cat_total, message):
