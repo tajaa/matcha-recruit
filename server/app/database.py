@@ -3307,9 +3307,10 @@ async def init_db():
         """)
 
         # Add source_tier column to jurisdiction_requirements
+        # Column was migrated from INTEGER to source_tier_enum via alembic migration 04
         await conn.execute("""
             ALTER TABLE jurisdiction_requirements
-            ADD COLUMN IF NOT EXISTS source_tier INTEGER DEFAULT 3
+            ADD COLUMN IF NOT EXISTS source_tier source_tier_enum DEFAULT 'tier_3_aggregator'
         """)
         await conn.execute("""
             ALTER TABLE jurisdiction_requirements

@@ -2,15 +2,13 @@
 ## Hierarchical Jurisdiction Precedence with Full Policy Granularity
 
 **Date:** 2026-03-17
-**Status:** Spec finalized, pending implementation
+**Status:** Implementation Plan — ready for execution
 
 ---
 
 ## Context
 
-We're building a healthcare compliance intelligence platform where the database is the single source of truth for every regulation a facility is subject to. A medical clinic, hospital, or SNF onboards and immediately sees every regulation they're subject to — federal, state, and local — organized by domain, with clear visual hierarchy showing which policy governs and why, backed by legal citations and plain-English reasoning.
-
-The current schema has flat category abstractions, duplicated federal data, no explainability, and no ORM. This redesign introduces:
+We're building a healthcare compliance intelligence platform where the database is the single source of truth for every regulation a facility is subject to. The current schema has flat category abstractions, duplicated federal data, no explainability, and no ORM. This redesign introduces:
 
 - Hierarchical jurisdiction precedence (federal → state → county → city → special_district)
 - Granular per-policy rows with canonical keys, fetch hashes, and change tracking
@@ -19,24 +17,7 @@ The current schema has flat category abstractions, duplicated federal data, no e
 - SQLAlchemy ORM models as schema source of truth
 - A resolution query (recursive CTE) that returns the full jurisdiction stack with governing logic
 
-**10 changes. 7 ORM models. 5 migrations. 13 new files. 7 modified files.**
-
----
-
-## Current State
-
-| Component | Status |
-|-----------|--------|
-| ORM | None — raw SQL via asyncpg |
-| SQLAlchemy | NOT a dependency (alembic imports it internally but it's not in requirements.txt) |
-| Alembic | 118 migrations, all raw SQL via `op.execute()`. `target_metadata = None` |
-| Tables | 125 total, created in `database.py init_db()` + migrations |
-| Categories | 45 hardcoded in `server/app/core/compliance_registry.py` as Python dataclasses |
-| Hierarchy | city → county → state via `parent_id`. No federal row. |
-| Preemption | `state_preemption_rules` table: flat `allows_local_override` boolean |
-| Employee location | `work_state VARCHAR(2)` — single value, no multi-jurisdiction |
-| Policy granularity | Category-level abstractions, not per-policy rows |
-| Explainability | None — filters applied silently in code |
+**10 changes total.** SQLAlchemy is NOT currently a dependency. All 125 existing tables use raw SQL via asyncpg. Alembic has `target_metadata = None`.
 
 ---
 
@@ -88,7 +69,7 @@ class TimestampMixin:
 
 ### 1d. `server/app/orm/enums.py`
 
-8 PostgreSQL ENUM types:
+9 PostgreSQL ENUM types:
 
 | Enum | Values |
 |------|--------|
@@ -100,6 +81,7 @@ class TimestampMixin:
 | `ChangeSource` | ai_fetch, manual_review, legislative_update, system_migration |
 | `EmployeeJurisdictionRelType` | licensed_in, works_at, telehealth_coverage, historical |
 | `CategoryDomain` | labor, privacy, clinical, billing, licensing, safety, reporting, emergency, corporate_integrity |
+| `GovernanceSource` | precedence_rule, default_local, not_evaluated |
 
 ### 1e. Modify `server/alembic/env.py`
 
@@ -127,11 +109,11 @@ def do_run_migrations(connection):
         context.run_migrations()
 ```
 
-**Critical:** The `include_name` filter means autogenerate only manages tables with ORM models. All 125 legacy tables are invisible to Alembic autogenerate.
+**Critical:** The `include_name` filter means autogenerate only manages tables with ORM models. All 125 legacy tables are invisible.
 
 ### 1f. Dual engine strategy
 
-SQLAlchemy is used ONLY for schema definition + migration generation. All runtime queries stay on the existing asyncpg pool in `database.py`. No SQLAlchemy Session at runtime. No ORM query layer.
+SQLAlchemy is used ONLY for schema definition + migration generation. All runtime queries stay on the existing asyncpg pool in `database.py`. No SQLAlchemy Session at runtime.
 
 ---
 
@@ -144,9 +126,10 @@ Existing columns mirrored exactly + new `level` column:
 | Column | Type | Notes |
 |--------|------|-------|
 | id | UUID PK | gen_random_uuid() |
-| city | VARCHAR(100) NOT NULL | |
-| state | VARCHAR(2) NOT NULL | |
+| city | VARCHAR(100) | **nullable** — NULL for federal and state rows. Only populated for city/county/special_district. Eliminates empty-string convention. |
+| state | VARCHAR(2) NOT NULL | 'US' for federal row |
 | county | VARCHAR(100) | nullable |
+| display_name | VARCHAR(200) NOT NULL | **NEW.** Human-readable: "Federal", "California", "San Francisco, CA", "Miami-Dade County, FL". Computed on insert/update. Every query that needs a label reads this instead of concatenating city/state. |
 | **level** | **JurisdictionLevel enum** | **NEW. NOT NULL DEFAULT 'city'** |
 | parent_id | UUID FK self | ON DELETE SET NULL |
 | last_verified_at | TIMESTAMP | nullable |
@@ -154,7 +137,8 @@ Existing columns mirrored exactly + new `level` column:
 | legislation_count | INTEGER DEFAULT 0 | |
 | created_at, updated_at | TIMESTAMP | |
 
-Constraints: UNIQUE(city, state). Indexes: level, parent_id, state.
+Constraints: UNIQUE(city, state) — PostgreSQL treats NULLs as distinct in unique constraints, so federal (NULL, 'US') and each state (NULL, 'CA') are unique. Partial unique index `CREATE UNIQUE INDEX uq_jurisdictions_state_level ON jurisdictions (state) WHERE city IS NULL AND level IN ('federal', 'state')` prevents duplicate state-level rows.
+Indexes: level, parent_id, state.
 Relationships: parent (self), children (self), requirements.
 
 ### 2b. `ComplianceCategory` (new) — `server/app/orm/jurisdiction.py`
@@ -189,47 +173,42 @@ Indexes: domain, group.
 | id | UUID PK | |
 | category_id | UUID FK compliance_categories NOT NULL | |
 | higher_jurisdiction_id | UUID FK jurisdictions NOT NULL | the jurisdiction that sets the baseline |
-| lower_jurisdiction_id | UUID FK jurisdictions NOT NULL | the jurisdiction that may override |
+| lower_jurisdiction_id | UUID FK jurisdictions | **nullable** — specific child jurisdiction, or NULL when `applies_to_all_children = true` |
+| applies_to_all_children | BOOLEAN NOT NULL DEFAULT false | when true, rule applies to every descendant of higher_jurisdiction_id; lower_jurisdiction_id must be NULL |
 | precedence_type | PrecedenceType enum NOT NULL | floor/ceiling/supersede/additive |
-| trigger_condition | JSONB | nullable — structured boolean expression evaluated against facility attributes |
-| reasoning_text | TEXT | human-readable: "California CMIA provides broader protections than HIPAA..." |
-| legal_citation | VARCHAR(500) | statute reference: "Cal. Civ. Code §56.10" |
+| trigger_condition | JSONB | nullable — structured boolean expression |
+| reasoning_text | TEXT | human-readable explanation |
+| legal_citation | VARCHAR(500) | e.g. "Cal. Civ. Code §56.10" |
 | effective_date | DATE | nullable |
-| sunset_date | DATE | nullable — for expiring rules |
+| sunset_date | DATE | nullable |
 | last_verified_at | TIMESTAMP | nullable |
 | status | PrecedenceRuleStatus enum DEFAULT 'active' | |
 | created_at, updated_at | TIMESTAMP | |
 
-Constraints: UNIQUE(category_id, higher_jurisdiction_id, lower_jurisdiction_id).
-Indexes: category_id, status, lower_jurisdiction_id.
+Constraints: UNIQUE(category_id, higher_jurisdiction_id, lower_jurisdiction_id) where lower_jurisdiction_id IS NOT NULL. CHECK: `(applies_to_all_children = true AND lower_jurisdiction_id IS NULL) OR (applies_to_all_children = false AND lower_jurisdiction_id IS NOT NULL)`.
+Indexes: category_id, status, lower_jurisdiction_id, **higher_jurisdiction_id**.
 
-**Precedence types explained:**
-- `floor` — higher sets minimum, lower can be stricter (e.g., CA min wage > federal)
-- `ceiling` — higher sets maximum, lower cannot exceed (e.g., TX preempts local min wage)
-- `supersede` — lower completely replaces higher in this context
-- `additive` — both apply simultaneously, no conflict
-
-**Wildcard convention:** When `lower_jurisdiction_id = higher_jurisdiction_id`, the rule applies to ALL children of that jurisdiction.
+**No wildcard convention.** Instead, `applies_to_all_children = true` with `lower_jurisdiction_id = NULL` explicitly means "this rule governs between higher_jurisdiction and every jurisdiction beneath it in the tree." Specific pair rules (both IDs set, `applies_to_all_children = false`) take priority over blanket rules during resolution.
 
 ### 2d. `JurisdictionRequirement` (modified) — `server/app/orm/requirement.py`
 
-All existing columns mirrored exactly + new columns:
+All existing columns mirrored + new columns:
 
 | New Column | Type | Notes |
 |------------|------|-------|
 | **canonical_key** | VARCHAR(255) UNIQUE | idempotency key: `ca_san_diego_minimum_wage_iwo_2024` |
-| **category_id** | UUID FK compliance_categories | nullable during migration |
-| **summary** | TEXT | plain-English description of what the policy requires |
-| **full_text_reference** | TEXT | URL or document path to authoritative source text |
-| **statute_citation** | VARCHAR(500) | formal legal citation: "San Diego Municipal Code §39.0101" |
-| **fetch_hash** | VARCHAR(64) | SHA-256 of fetched content — skip update if hash matches |
+| **category_id** | UUID FK compliance_categories | nullable initially, **ALTER to NOT NULL after backfill in Migration 4** |
+| **summary** | TEXT | plain-English description |
+| **full_text_reference** | TEXT | URL/path to authoritative source |
+| **statute_citation** | VARCHAR(500) | formal legal citation |
+| **fetch_hash** | VARCHAR(64) | SHA-256 of **normalized** fetched content. Normalization: strip leading/trailing whitespace, collapse internal whitespace runs to single space, normalize Unicode to NFC, strip HTML tags if HTML source, lowercase. This prevents phantom changes from whitespace/encoding drift between fetches flooding policy_change_log. Hash is computed by a shared `normalize_and_hash(raw_content: str) -> str` utility. |
 | **status** | RequirementStatus enum DEFAULT 'active' | active/pending/repealed/superseded/under_review |
-| **superseded_by_id** | UUID FK self | nullable — when a policy is replaced, point to new row |
-| **applicable_entity_types** | JSONB | clinic, hospital, SNF, ambulatory_surgery_center, etc. |
-| **trigger_conditions** | JSONB | structured conditions for when this policy applies to a specific facility |
-| **metadata** | JSONB | overflow for policy-specific attributes |
+| **superseded_by_id** | UUID FK self | nullable |
+| **applicable_entity_types** | JSONB | clinic, hospital, SNF, etc. |
+| **trigger_conditions** | JSONB | when this policy applies to a facility |
+| **metadata** | JSONB | overflow |
 
-**source_tier migration:** Existing INTEGER column (1/2/3) → SourceTier enum (tier_1_government/tier_2_official_secondary/tier_3_aggregator). Requires column rename + type swap.
+**source_tier migration:** INTEGER (1/2/3) → SourceTier enum (tier_1_government/tier_2_official_secondary/tier_3_aggregator). Requires column swap.
 
 Indexes: canonical_key, category_id, status, source_tier (added to existing jurisdiction_id, rate_type indexes).
 
@@ -239,16 +218,14 @@ Indexes: canonical_key, category_id, status, source_tier (added to existing juri
 |--------|------|-------|
 | id | UUID PK | |
 | requirement_id | UUID FK jurisdiction_requirements NOT NULL | ON DELETE CASCADE |
-| field_changed | VARCHAR(100) NOT NULL | which field changed |
+| field_changed | VARCHAR(100) NOT NULL | |
 | old_value | TEXT | nullable |
 | new_value | TEXT | nullable |
 | changed_at | TIMESTAMP DEFAULT NOW() | |
 | change_source | ChangeSource enum NOT NULL | ai_fetch/manual_review/legislative_update/system_migration |
-| change_reason | TEXT | nullable — why this changed |
+| change_reason | TEXT | nullable |
 
 Indexes: requirement_id, changed_at.
-
-Every mutation to jurisdiction_requirements writes a change log entry. Nothing changes silently.
 
 ### 2f. `ComplianceRequirement` (modified) — `server/app/orm/compliance.py`
 
@@ -258,8 +235,7 @@ All existing columns mirrored + 2 new explainability columns:
 |------------|------|-------|
 | **governing_jurisdiction_level** | VARCHAR(20) | nullable — which level's policy governs for this category |
 | **governing_precedence_rule_id** | UUID FK precedence_rules | nullable — which rule determined governance |
-
-When sync logic copies from jurisdiction_requirements into compliance_requirements for a location, it evaluates precedence_rules and writes which rule determined governance. The frontend reads this to render the hierarchy with reasoning.
+| **governance_source** | VARCHAR(20) NOT NULL DEFAULT 'not_evaluated' | enum: `precedence_rule` (rule matched), `default_local` (no rule, most-local wins), `not_evaluated` (sync hasn't run yet). Disambiguates NULL rule_id: `default_local` + NULL rule_id means "we checked, no rule applies, local governs." `not_evaluated` + NULL means "sync hasn't populated this yet." |
 
 ### 2g. `EmployeeJurisdiction` (new) — `server/app/orm/employee.py`
 
@@ -275,11 +251,25 @@ When sync logic copies from jurisdiction_requirements into compliance_requiremen
 
 Constraints: UNIQUE(employee_id, jurisdiction_id, relationship_type).
 Indexes: employee_id, jurisdiction_id, relationship_type.
-**RLS required** — policy via join to employees.org_id.
+
+**RLS policy** (exact SQL):
+```sql
+ALTER TABLE employee_jurisdictions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employee_jurisdictions FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation ON employee_jurisdictions
+    USING (
+        employee_id IN (
+            SELECT id FROM employees
+            WHERE org_id::text = current_setting('app.current_tenant_id', true)
+        )
+        OR current_setting('app.is_admin', true) = 'true'
+    );
+```
+This matches the existing RLS pattern in `e72bfad5eca9_add_row_level_security.py`. The subquery is acceptable here because `employee_id` is indexed and the employees table has an index on `org_id`. The admin bypass clause mirrors other tenant isolation policies.
 
 ### 2h. `BusinessLocation` (schema-only mirror) — `server/app/orm/location.py`
 
-Read-only ORM model mirroring the existing `business_locations` table so other models can declare FK relationships to it. No new columns added.
+Read-only ORM model mirroring the existing `business_locations` table so other models can declare FK relationships to it. No new columns.
 
 ---
 
@@ -296,11 +286,21 @@ All migrations use `op.execute()` with raw SQL (consistent with existing pattern
 ### Migration 2: Modify jurisdictions
 
 1. ADD COLUMN `level jurisdiction_level_enum NOT NULL DEFAULT 'city'`
-2. UPDATE existing state rows: `SET level = 'state' WHERE city = '' AND state != 'US'`
-3. UPDATE county rows: `SET level = 'county' WHERE city LIKE '_county_%'`
-4. INSERT federal row: `city='', state='US', level='federal'`
-5. Link state rows → federal: `UPDATE jurisdictions SET parent_id = <federal_id> WHERE level = 'state' AND parent_id IS NULL`
-6. Add index on `level`
+2. ADD COLUMN `display_name VARCHAR(200)`
+3. ALTER COLUMN `city` DROP NOT NULL — make nullable
+4. UPDATE existing state rows: `SET level = 'state', city = NULL WHERE city = '' AND state != 'US'`
+5. UPDATE county rows: `SET level = 'county' WHERE city LIKE '_county_%'`
+6. INSERT federal row: `city=NULL, state='US', level='federal', display_name='Federal'`
+7. Link state rows → federal: `UPDATE jurisdictions SET parent_id = <federal_id> WHERE level = 'state' AND parent_id IS NULL`
+8. Backfill display_name for all rows:
+   - federal: `'Federal'`
+   - state: state full name from lookup (e.g., `'California'`)
+   - county: `'{county}, {state}'` (e.g., `'Miami-Dade County, FL'`)
+   - city: `'{city}, {state}'` (e.g., `'San Francisco, CA'`)
+9. ALTER `display_name` SET NOT NULL after backfill
+10. Add index on `level`
+11. Add partial unique index: `CREATE UNIQUE INDEX uq_jurisdictions_state_level ON jurisdictions (state) WHERE city IS NULL AND level IN ('federal', 'state')`
+12. Drop old UNIQUE(city, state) constraint, add new one that handles NULLs: `CREATE UNIQUE INDEX uq_jurisdictions_city_state ON jurisdictions (COALESCE(city, ''), state)`
 
 ### Migration 3: Create precedence_rules + migrate preemption data
 
@@ -308,23 +308,25 @@ All migrations use `op.execute()` with raw SQL (consistent with existing pattern
 2. Migrate from `state_preemption_rules`:
    - `allows_local_override = true` → `precedence_type = 'floor'`
    - `allows_local_override = false` → `precedence_type = 'ceiling'`
-   - `higher_jurisdiction_id` = state jurisdiction
-   - `lower_jurisdiction_id` = same as higher (wildcard: applies to all children)
+   - `higher_jurisdiction_id` = state jurisdiction for that state
+   - `lower_jurisdiction_id` = **NULL** (blanket rule)
+   - `applies_to_all_children` = **true** (applies to every city/county under the state)
    - `category_id` = lookup from compliance_categories by slug
-3. Do NOT drop `state_preemption_rules` — keep for backward compat during transition
+3. Do NOT drop `state_preemption_rules` yet — keep for backward compat
 
 ### Migration 4: Modify jurisdiction_requirements + create policy_change_log
 
 1. Add new columns: canonical_key, category_id, summary, full_text_reference, statute_citation, fetch_hash, status, superseded_by_id, applicable_entity_types, trigger_conditions, metadata
 2. Migrate source_tier: INTEGER → source_tier_enum (add new column, backfill, drop old, rename)
 3. Backfill category_id from compliance_categories via slug match on category column
-4. Backfill canonical_key from existing requirement_key + jurisdiction context
-5. CREATE TABLE `policy_change_log`
-6. Add indexes: canonical_key, category_id, status
+4. **ALTER category_id to NOT NULL** — after backfill, no row should be orphaned. Any rows with unknown category get a fallback "uncategorized" category or are flagged for review. The string `category` column remains for backward compat but `category_id` is the canonical FK going forward.
+5. Backfill canonical_key from existing requirement_key + jurisdiction context
+6. CREATE TABLE `policy_change_log`
+7. Add indexes: canonical_key, category_id, status
 
 ### Migration 5: Modify compliance_requirements + create employee_jurisdictions
 
-1. Add governing_jurisdiction_level, governing_precedence_rule_id to compliance_requirements
+1. Add governing_jurisdiction_level, governing_precedence_rule_id, governance_source (enum, NOT NULL DEFAULT 'not_evaluated') to compliance_requirements
 2. CREATE TABLE `employee_jurisdictions`
 3. Migrate work_state data: INSERT into employee_jurisdictions with relationship_type='works_at'
 4. Migrate work_location_id data: INSERT city-level jurisdiction links
@@ -347,6 +349,7 @@ Recursive CTE that, given a `jurisdiction_id`:
 
 ```sql
 WITH RECURSIVE jurisdiction_chain AS (
+    -- Walk parent_id from leaf up to federal
     SELECT id, city, state, level, parent_id, 0 AS depth
     FROM jurisdictions WHERE id = $1
     UNION ALL
@@ -354,36 +357,51 @@ WITH RECURSIVE jurisdiction_chain AS (
     FROM jurisdictions j JOIN jurisdiction_chain jc ON j.id = jc.parent_id
 ),
 chain_requirements AS (
-    SELECT jr.*, jc.level AS jur_level, jc.depth
+    SELECT jr.*, jr.category_id AS req_category_id, jc.level AS jur_level, jc.depth
     FROM jurisdiction_requirements jr
     JOIN jurisdiction_chain jc ON jr.jurisdiction_id = jc.id
     WHERE jr.status = 'active'
 ),
 chain_precedence AS (
-    SELECT pr.*, cc.slug AS category_slug
+    -- Match precedence rules: either specific pair or blanket (applies_to_all_children)
+    SELECT pr.id AS rule_id, pr.category_id AS rule_category_id,
+           pr.precedence_type, pr.reasoning_text, pr.legal_citation,
+           pr.trigger_condition, pr.applies_to_all_children,
+           pr.higher_jurisdiction_id, pr.lower_jurisdiction_id
     FROM precedence_rules pr
-    JOIN compliance_categories cc ON pr.category_id = cc.id
     WHERE pr.status = 'active'
       AND pr.higher_jurisdiction_id IN (SELECT id FROM jurisdiction_chain)
-      AND (pr.lower_jurisdiction_id IN (SELECT id FROM jurisdiction_chain)
-           OR pr.lower_jurisdiction_id = pr.higher_jurisdiction_id)
+      AND (
+          -- Specific pair: both higher and lower are in our chain
+          (pr.applies_to_all_children = false
+           AND pr.lower_jurisdiction_id IN (SELECT id FROM jurisdiction_chain))
+          OR
+          -- Blanket rule: applies to all descendants of higher
+          (pr.applies_to_all_children = true)
+      )
 )
-SELECT cr.*, cp.id AS rule_id, cp.precedence_type,
+SELECT cr.*,
+       cp.rule_id, cp.precedence_type,
        cp.reasoning_text, cp.legal_citation, cp.trigger_condition
 FROM chain_requirements cr
-LEFT JOIN chain_precedence cp ON cp.category_slug = cr.category
+LEFT JOIN chain_precedence cp
+    ON cp.rule_category_id = cr.req_category_id  -- join on FK, not string
 ORDER BY cr.category, cr.depth ASC
 ```
 
-This is a single composed query. Not ORM traversal.
+**Key fixes vs. original CTE:**
+- Joins precedence on `category_id` FK (not string slug match)
+- Blanket rules (`applies_to_all_children = true`) match via `higher_jurisdiction_id IN chain` — no self-referential lower_jurisdiction_id trick
+- Specific pair rules require both higher and lower in the chain
+- When both a blanket and specific rule match the same category, `determine_governing_requirement()` gives priority to the specific rule
 
 ### 4b. New function: `determine_governing_requirement()`
 
-Python post-processing of CTE results, grouped by category:
-- **floor**: take highest value (most beneficial to employee)
-- **ceiling**: take higher jurisdiction's value
-- **supersede**: lower jurisdiction completely replaces higher
-- **additive**: all levels apply simultaneously, no conflict
+Python post-processing of CTE results per category:
+- **floor**: highest value (most beneficial to employee)
+- **ceiling**: higher jurisdiction's value
+- **supersede**: lower jurisdiction completely replaces
+- **additive**: all levels apply simultaneously
 - **no rule**: default to most-local (lowest depth)
 
 ### 4c. Gradual migration
@@ -403,7 +421,7 @@ Python post-processing of CTE results, grouped by category:
 ```python
 class JurisdictionLevelRequirement(BaseModel):
     id: str
-    jurisdiction_level: str  # federal/state/county/city/special_district
+    jurisdiction_level: str
     jurisdiction_name: str
     title: str
     description: Optional[str] = None
@@ -446,7 +464,7 @@ class HierarchicalComplianceResponse(BaseModel):
 
 - `GET /locations/{id}/requirements` — add `?view=hierarchical` param. Default `flat` (backward compat). When `hierarchical`, returns `HierarchicalComplianceResponse`.
 - **New:** `GET /compliance/categories` — returns all categories from DB table
-- **New:** `GET /compliance/precedence-rules?state={state}` — returns precedence rules for a state
+- **New:** `GET /compliance/precedence-rules?state={state}` — returns precedence rules
 - **New:** `GET /compliance/locations/{id}/jurisdiction-stack` — raw resolution for admin/debug
 
 ### 5c. Frontend types
@@ -469,11 +487,11 @@ class HierarchicalComplianceResponse(BaseModel):
 | `server/app/orm/compliance.py` | ComplianceRequirement model |
 | `server/app/orm/employee.py` | EmployeeJurisdiction model |
 | `server/app/orm/location.py` | BusinessLocation model (schema-only FK reference) |
-| `server/alembic/versions/XXXX_01_enums_and_categories.py` | Migration 1: ENUMs + compliance_categories |
-| `server/alembic/versions/XXXX_02_jurisdictions_hierarchy.py` | Migration 2: federal jurisdiction + level column |
-| `server/alembic/versions/XXXX_03_precedence_rules.py` | Migration 3: precedence_rules + preemption data migration |
-| `server/alembic/versions/XXXX_04_jurisdiction_requirements_granular.py` | Migration 4: granular policy columns + policy_change_log |
-| `server/alembic/versions/XXXX_05_explainability_and_employee_junctions.py` | Migration 5: explainability + employee_jurisdictions |
+| `server/alembic/versions/XXXX_01_enums_and_categories.py` | Migration 1 |
+| `server/alembic/versions/XXXX_02_jurisdictions_hierarchy.py` | Migration 2 |
+| `server/alembic/versions/XXXX_03_precedence_rules.py` | Migration 3 |
+| `server/alembic/versions/XXXX_04_jurisdiction_requirements_granular.py` | Migration 4 |
+| `server/alembic/versions/XXXX_05_explainability_and_employee_junctions.py` | Migration 5 |
 
 ### Modified files (7)
 
@@ -483,11 +501,11 @@ class HierarchicalComplianceResponse(BaseModel):
 | `server/alembic/env.py` | Import Base.metadata, add include_name filter, enable compare_type |
 | `server/app/core/models/compliance.py` | Add 4 new Pydantic response schemas, add `special_district` to JurisdictionLevel enum |
 | `server/app/core/services/compliance_service.py` | Add `resolve_jurisdiction_stack()`, `determine_governing_requirement()`; modify `get_location_requirements()` for hierarchical view |
-| `server/app/core/routes/compliance.py` | Add `view` param to requirements endpoint, add 3 new endpoints |
+| `server/app/core/routes/compliance.py` | Add `view` param, 3 new endpoints |
 | `server/app/core/compliance_registry.py` | Add `CATEGORY_DOMAIN_MAP` dict for seeding; keep existing CATEGORIES list |
-| `client/src/types/compliance.ts` | Add hierarchical response TypeScript interfaces |
+| `client/src/types/compliance.ts` | Add hierarchical response interfaces |
 
-### Not modified (backward compat, migrate later)
+### Not modified yet (backward compat, migrate later)
 
 | File | Reason |
 |------|--------|
@@ -501,25 +519,53 @@ class HierarchicalComplianceResponse(BaseModel):
 ## Verification
 
 1. **ORM models compile:** `cd server && python3 -c "from app.orm import Base; print(sorted(Base.metadata.tables.keys()))"`
-2. **Autogenerate preview:** `cd server && alembic revision --autogenerate --sql -m "test"` — verify only managed tables appear, no DROP TABLE for legacy tables
+2. **Autogenerate preview:** `cd server && alembic revision --autogenerate --sql -m "test" | head -100` — verify only managed tables appear, no DROP TABLE for legacy tables
 3. **Migration dry-run:** Run migrations 1-5 against a test DB (NOT production). Verify:
    - `SELECT COUNT(*) FROM compliance_categories` → 45
    - `SELECT * FROM jurisdictions WHERE level = 'federal'` → 1 row
    - `SELECT COUNT(*) FROM precedence_rules` → matches `state_preemption_rules` count
    - `SELECT COUNT(*) FROM jurisdiction_requirements WHERE canonical_key IS NOT NULL` → > 0
    - `SELECT COUNT(*) FROM employee_jurisdictions` → matches employees with work_state
-4. **Resolution query:** Call `resolve_jurisdiction_stack(conn, <sf_jurisdiction_id>)` — returns federal + CA state + SF city requirements with precedence rules
-5. **API endpoint:** `GET /api/compliance/locations/{id}/requirements?view=hierarchical` returns nested `HierarchicalComplianceResponse`
+4. **Resolution query:** Call `resolve_jurisdiction_stack(conn, <sf_jurisdiction_id>)` and verify it returns federal + CA state + SF city requirements with precedence rules
+5. **API:** `GET /api/compliance/locations/{id}/requirements?view=hierarchical` returns `HierarchicalComplianceResponse`
 6. **Backward compat:** `GET /api/compliance/locations/{id}/requirements` (no view param) returns existing flat `List[RequirementResponse]`
 
 ---
 
 ## Implementation Order
 
-Execute phases sequentially. Each is independently testable:
+Execute phases sequentially:
+1. **Phase 1** (infra) — requirements.txt, orm package, env.py
+2. **Phase 2** (models) — all 7 ORM model files
+3. **Phase 3** (migrations) — 5 migration files with data migration SQL
+4. **Phase 4** (service) — resolution query + governing logic
+5. **Phase 5** (API) — Pydantic schemas + endpoint changes
 
-1. **Phase 1** — SQLAlchemy infrastructure: requirements.txt, orm package, env.py
-2. **Phase 2** — ORM model definitions: all 7 model files
-3. **Phase 3** — Alembic migrations: 5 migration files with data migration SQL
-4. **Phase 4** — Service layer: resolution query + governing logic
-5. **Phase 5** — API layer: Pydantic schemas + endpoint changes
+Each phase is independently testable. No phase depends on later phases being complete.
+
+---
+
+## Industry Extensibility (Future Verticals)
+
+The schema is designed to expand beyond healthcare to dental, biotech, law firms, unions, and any regulated industry.
+
+### What requires zero schema changes
+- New categories = `INSERT` rows into `compliance_categories` (DB table, not hardcoded)
+- `industry_tag` on categories routes by vertical (`biotech:gmp`, `dental:infection_control`, `legal:malpractice`)
+- `applicable_entity_types` JSONB on requirements handles entity-level filtering (law firm vs clinic vs lab)
+- `trigger_conditions` JSONB encodes any boolean expression against facility attributes
+- The resolution CTE is industry-agnostic — runs against whatever categories exist for a jurisdiction
+
+### What requires one migration per new domain
+- Add new value to `CategoryDomain` enum (e.g., `financial`, `biotech`, `dental`, `legal`)
+- Insert new `compliance_categories` rows with appropriate domain + group + industry_tag
+
+### One structural generalization needed before going multi-industry
+- `companies.healthcare_specialties` is too healthcare-specific — rename/replace with `industry_attributes JSONB` or a `company_industries` junction table
+- This is the **only** structural change required; everything else is data
+
+### Adding a new vertical in practice (e.g. dental)
+1. Write ~8–15 new `ComplianceCategoryDef` entries in `compliance_registry.py`
+2. Run migration to seed them into `compliance_categories` with `domain='dental'` + appropriate `industry_tag`
+3. Write fetch/research logic for those categories
+4. Jurisdiction hierarchy, precedence rules, and resolution query all work unchanged

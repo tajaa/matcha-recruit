@@ -236,6 +236,42 @@ CATEGORIES: List[ComplianceCategoryDef] = [
 
 
 # ---------------------------------------------------------------------------
+# CATEGORY_DOMAIN_MAP — maps category key → CategoryDomain enum value
+# Used for seeding the compliance_categories table in migrations.
+# ---------------------------------------------------------------------------
+
+CATEGORY_DOMAIN_MAP: Dict[str, str] = {
+    # Labor + supplementary → labor
+    "minimum_wage": "labor", "overtime": "labor", "sick_leave": "labor",
+    "meal_breaks": "labor", "pay_frequency": "labor", "final_pay": "labor",
+    "minor_work_permit": "labor", "scheduling_reporting": "labor",
+    "leave": "labor", "workplace_safety": "labor", "workers_comp": "labor",
+    "anti_discrimination": "labor", "business_license": "labor",
+    "tax_rate": "labor", "posting_requirements": "labor",
+    # Healthcare → per-category domains
+    "hipaa_privacy": "privacy", "billing_integrity": "billing",
+    "clinical_safety": "clinical", "healthcare_workforce": "clinical",
+    "corporate_integrity": "corporate_integrity",
+    "research_consent": "clinical", "state_licensing": "licensing",
+    "emergency_preparedness": "emergency",
+    # Oncology
+    "radiation_safety": "safety", "chemotherapy_handling": "safety",
+    "tumor_registry": "reporting", "oncology_clinical_trials": "clinical",
+    "oncology_patient_rights": "clinical",
+    # Medical compliance
+    "health_it": "clinical", "quality_reporting": "reporting",
+    "cybersecurity": "safety", "environmental_safety": "safety",
+    "pharmacy_drugs": "clinical", "payer_relations": "billing",
+    "reproductive_behavioral": "clinical", "pediatric_vulnerable": "clinical",
+    "telehealth": "clinical", "medical_devices": "safety",
+    "transplant_organ": "clinical", "antitrust": "corporate_integrity",
+    "tax_exempt": "billing", "language_access": "clinical",
+    "records_retention": "clinical", "marketing_comms": "corporate_integrity",
+    "emerging_regulatory": "safety",
+}
+
+
+# ---------------------------------------------------------------------------
 # REGULATIONS  (229 entries)
 # ---------------------------------------------------------------------------
 

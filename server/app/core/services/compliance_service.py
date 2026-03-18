@@ -6872,3 +6872,428 @@ async def get_pinned_requirements(company_id: UUID) -> list[dict]:
         }
         for row in rows
     ]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Phase 4: Hierarchical Resolution — ALL compliance intelligence lives here
+# ═══════════════════════════════════════════════════════════════════════════
+
+import hashlib
+import unicodedata
+
+
+def normalize_and_hash(raw_content: str) -> str:
+    """Normalize content and return SHA-256 hash.
+
+    Normalization pipeline:
+    1. Strip leading/trailing whitespace
+    2. Collapse internal whitespace runs to single space
+    3. Normalize Unicode to NFC
+    4. Strip HTML tags (simple regex)
+    5. Lowercase
+    """
+    if not raw_content:
+        return hashlib.sha256(b"").hexdigest()
+    text = raw_content.strip()
+    text = re.sub(r"<[^>]+>", "", text)  # strip HTML
+    text = re.sub(r"\s+", " ", text)  # collapse whitespace
+    text = unicodedata.normalize("NFC", text)
+    text = text.lower()
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def evaluate_trigger_conditions(
+    trigger_json: Optional[Dict[str, Any]],
+    facility_attributes: Optional[Dict[str, Any]],
+) -> bool:
+    """Evaluate a trigger_conditions JSONB document against facility_attributes.
+
+    Returns True if the trigger conditions are met, False otherwise.
+    If trigger_json is None, the requirement has no trigger → always applies.
+    If facility_attributes is None, treat all attribute checks as False.
+
+    Supports: attribute, entity_type, and/or/not compounds.
+    requirement_active / category_active are v2 — passthrough (return True).
+    """
+    if trigger_json is None:
+        return True
+    if facility_attributes is None:
+        facility_attributes = {}
+
+    return _eval_condition(trigger_json, facility_attributes)
+
+
+def _eval_condition(cond: Dict[str, Any], attrs: Dict[str, Any]) -> bool:
+    """Recursively evaluate a single trigger condition node."""
+    # Compound conditions
+    if "op" in cond:
+        op = cond["op"]
+        children = cond.get("conditions", [])
+        if op == "and":
+            return all(_eval_condition(c, attrs) for c in children)
+        elif op == "or":
+            return any(_eval_condition(c, attrs) for c in children)
+        elif op == "not":
+            if children:
+                return not _eval_condition(children[0], attrs)
+            return True
+        return True
+
+    # Leaf conditions
+    ctype = cond.get("type")
+
+    if ctype == "attribute":
+        key = cond.get("key", "")
+        operator = cond.get("operator", "eq")
+        expected = cond.get("value")
+        actual = attrs.get(key)
+
+        if operator == "exists":
+            return key in attrs
+        if actual is None:
+            return False
+        if operator == "eq":
+            return actual == expected
+        if operator == "neq":
+            return actual != expected
+        if operator == "gt":
+            return actual > expected
+        if operator == "gte":
+            return actual >= expected
+        if operator == "lt":
+            return actual < expected
+        if operator == "lte":
+            return actual <= expected
+        if operator == "in":
+            return actual in (expected or [])
+        if operator == "contains":
+            if isinstance(actual, (list, set)):
+                return expected in actual
+            return False
+        return False
+
+    if ctype == "entity_type":
+        value = cond.get("value")
+        operator = cond.get("operator", "eq")
+        entity = attrs.get("entity_type")
+        if operator == "eq":
+            return entity == value
+        if operator == "in":
+            return entity in (value if isinstance(value, list) else [value])
+        return False
+
+    # v2 chaining predicates — passthrough for now
+    if ctype in ("requirement_active", "category_active"):
+        return True
+
+    return True
+
+
+async def resolve_jurisdiction_stack(
+    conn: asyncpg.Connection, jurisdiction_id: UUID
+) -> List[Dict[str, Any]]:
+    """Walk the jurisdiction hierarchy from leaf to federal via recursive CTE.
+
+    Returns all active requirements at each level in the chain, joined with
+    matching precedence rules. Results ordered by category + depth (leaf first).
+    """
+    query = """
+        WITH RECURSIVE jurisdiction_chain AS (
+            SELECT id, city, state, level::text AS level, display_name,
+                   parent_id, authority_type, 0 AS depth
+            FROM jurisdictions WHERE id = $1
+            UNION ALL
+            SELECT j.id, j.city, j.state, j.level::text, j.display_name,
+                   j.parent_id, j.authority_type, jc.depth + 1
+            FROM jurisdictions j JOIN jurisdiction_chain jc ON j.id = jc.parent_id
+        ),
+        chain_requirements AS (
+            SELECT jr.id, jr.jurisdiction_id, jr.requirement_key, jr.category,
+                   jr.jurisdiction_level, jr.jurisdiction_name, jr.title,
+                   jr.description, jr.current_value, jr.numeric_value,
+                   jr.source_url, jr.source_name, jr.effective_date,
+                   jr.rate_type, jr.canonical_key, jr.statute_citation,
+                   jr.status::text AS req_status, jr.category_id,
+                   jr.trigger_conditions, jr.applicable_entity_types,
+                   jc.level AS jur_level, jc.display_name AS jur_display_name,
+                   jc.depth
+            FROM jurisdiction_requirements jr
+            JOIN jurisdiction_chain jc ON jr.jurisdiction_id = jc.id
+            WHERE jr.status = 'active'
+        ),
+        chain_precedence AS (
+            SELECT pr.id AS rule_id, pr.category_id AS rule_category_id,
+                   pr.precedence_type::text AS precedence_type,
+                   pr.reasoning_text, pr.legal_citation,
+                   pr.trigger_condition, pr.applies_to_all_children,
+                   pr.higher_jurisdiction_id, pr.lower_jurisdiction_id
+            FROM precedence_rules pr
+            WHERE pr.status = 'active'
+              AND pr.higher_jurisdiction_id IN (SELECT id FROM jurisdiction_chain)
+              AND (
+                  (pr.applies_to_all_children = false
+                   AND pr.lower_jurisdiction_id IN (SELECT id FROM jurisdiction_chain))
+                  OR (pr.applies_to_all_children = true)
+              )
+        )
+        SELECT cr.*,
+               cp.rule_id, cp.precedence_type,
+               cp.reasoning_text AS rule_reasoning_text,
+               cp.legal_citation AS rule_legal_citation,
+               cp.trigger_condition AS rule_trigger_condition,
+               cp.applies_to_all_children
+        FROM chain_requirements cr
+        LEFT JOIN chain_precedence cp
+            ON cp.rule_category_id = cr.category_id
+        ORDER BY cr.category, cr.depth ASC
+    """
+    rows = await conn.fetch(query, jurisdiction_id)
+    return [dict(row) for row in rows]
+
+
+def determine_governing_requirement(
+    rows_by_category: Dict[str, List[Dict[str, Any]]],
+    facility_attributes: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """For each category, determine the governing requirement based on precedence.
+
+    Returns a list of dicts, one per category, each containing:
+    - governing_requirement: the winning row
+    - all_levels: all rows for this category
+    - precedence_type: floor/ceiling/supersede/additive or None
+    - governance_source: precedence_rule / default_local
+    - reasoning_text, legal_citation from the matched rule
+
+    ALL compliance intelligence is computed here. Frontend just renders results.
+    """
+    results = []
+
+    for category, rows in rows_by_category.items():
+        if not rows:
+            continue
+
+        # Filter by trigger conditions (evaluate against facility attributes)
+        active_rows = []
+        for row in rows:
+            trigger = row.get("trigger_conditions")
+            if evaluate_trigger_conditions(trigger, facility_attributes):
+                active_rows.append(row)
+
+        if not active_rows:
+            continue
+
+        # Find precedence rules — prefer specific pair over blanket
+        rule_row = None
+        precedence_type = None
+        for row in active_rows:
+            if row.get("rule_id") is not None:
+                # Check trigger condition on the precedence rule itself
+                rule_trigger = row.get("rule_trigger_condition")
+                if not evaluate_trigger_conditions(rule_trigger, facility_attributes):
+                    continue
+                # Prefer specific (non-blanket) over blanket
+                if rule_row is None or not row.get("applies_to_all_children"):
+                    rule_row = row
+                    precedence_type = row.get("precedence_type")
+
+        # Sort by depth (0 = leaf/local, higher = more general)
+        sorted_rows = sorted(active_rows, key=lambda r: r.get("depth", 0))
+
+        if precedence_type == "floor":
+            # Highest value wins (most beneficial — typically min wage)
+            rows_with_num = [
+                (r, float(r["numeric_value"]))
+                for r in sorted_rows
+                if r.get("numeric_value") is not None
+            ]
+            if rows_with_num:
+                governing = max(rows_with_num, key=lambda x: x[1])[0]
+            else:
+                governing = sorted_rows[0]  # most local
+            governance_source = "precedence_rule"
+
+        elif precedence_type == "ceiling":
+            # Higher jurisdiction's value (find the row at highest depth)
+            governing = sorted_rows[-1] if sorted_rows else sorted_rows[0]
+            governance_source = "precedence_rule"
+
+        elif precedence_type == "supersede":
+            # Lower jurisdiction completely replaces (most local)
+            governing = sorted_rows[0]
+            governance_source = "precedence_rule"
+
+        elif precedence_type == "additive":
+            # All levels apply — use most local as "governing" for display
+            # but mark all as active
+            governing = sorted_rows[0]
+            governance_source = "precedence_rule"
+
+        else:
+            # No precedence rule — default to most local
+            governing = sorted_rows[0]
+            governance_source = "default_local"
+
+        results.append({
+            "category": category,
+            "category_id": governing.get("category_id"),
+            "governing_requirement": governing,
+            "governing_level": governing.get("jur_level") or governing.get("jurisdiction_level"),
+            "all_levels": sorted_rows,
+            "precedence_type": precedence_type,
+            "governance_source": governance_source,
+            "reasoning_text": rule_row.get("rule_reasoning_text") if rule_row else None,
+            "legal_citation": rule_row.get("rule_legal_citation") if rule_row else None,
+            "rule_trigger_condition": rule_row.get("rule_trigger_condition") if rule_row else None,
+            "rule_id": rule_row.get("rule_id") if rule_row else None,
+        })
+
+    return results
+
+
+async def get_hierarchical_requirements(
+    location_id: UUID, company_id: UUID, category: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Fully resolve compliance requirements for a location using hierarchical precedence.
+
+    This is the main entry point for the hierarchical view. It:
+    1. Loads the location and its facility_attributes
+    2. Resolves the jurisdiction stack via recursive CTE
+    3. Groups by category
+    4. Evaluates trigger conditions against facility attributes
+    5. Determines governing requirement per category via precedence rules
+    6. Returns a fully-resolved response dict — frontend just renders it
+
+    Returns None if location not found.
+    """
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        # 1. Load location
+        loc = await conn.fetchrow(
+            """SELECT bl.id, bl.city, bl.state, bl.name,
+                      bl.jurisdiction_id, bl.facility_attributes
+               FROM business_locations bl
+               WHERE bl.id = $1 AND bl.company_id = $2""",
+            location_id,
+            company_id,
+        )
+        if not loc:
+            return None
+        if not loc["jurisdiction_id"]:
+            return None
+
+        facility_attrs = loc["facility_attributes"]
+        if isinstance(facility_attrs, str):
+            try:
+                facility_attrs = json.loads(facility_attrs)
+            except (json.JSONDecodeError, TypeError):
+                facility_attrs = None
+
+        # 2. Resolve jurisdiction stack
+        stack_rows = await resolve_jurisdiction_stack(conn, loc["jurisdiction_id"])
+
+        # 3. Group by category
+        by_category: Dict[str, List[Dict[str, Any]]] = {}
+        for row in stack_rows:
+            cat = row["category"]
+            if category and cat != category:
+                continue
+            by_category.setdefault(cat, []).append(row)
+
+        # 4-5. Determine governing requirement per category
+        resolved = determine_governing_requirement(by_category, facility_attrs)
+
+        # 6. Look up category labels
+        cat_labels = {}
+        if resolved:
+            cat_ids = [r["category_id"] for r in resolved if r.get("category_id")]
+            if cat_ids:
+                label_rows = await conn.fetch(
+                    "SELECT id, slug, name, domain::text, \"group\" FROM compliance_categories WHERE id = ANY($1)",
+                    cat_ids,
+                )
+                for lr in label_rows:
+                    cat_labels[str(lr["id"])] = {
+                        "name": lr["name"],
+                        "domain": lr["domain"],
+                        "group": lr["group"],
+                        "slug": lr["slug"],
+                    }
+
+        # 7. Get employee impact
+        try:
+            impact = await get_employee_impact_for_location(location_id, company_id)
+            total_affected = impact["total_affected"]
+        except Exception:
+            total_affected = None
+
+        # 8. Build response
+        categories_out = []
+        total_requirements = 0
+        for item in resolved:
+            gov = item["governing_requirement"]
+            cat_id_str = str(item.get("category_id", ""))
+            cat_info = cat_labels.get(cat_id_str, {})
+
+            all_levels = []
+            for row in item["all_levels"]:
+                all_levels.append({
+                    "id": str(row["id"]),
+                    "jurisdiction_level": row.get("jur_level") or row.get("jurisdiction_level", ""),
+                    "jurisdiction_name": row.get("jur_display_name") or row.get("jurisdiction_name", ""),
+                    "title": row.get("title", ""),
+                    "description": row.get("description"),
+                    "current_value": row.get("current_value"),
+                    "numeric_value": float(row["numeric_value"]) if row.get("numeric_value") is not None else None,
+                    "source_url": row.get("source_url"),
+                    "statute_citation": row.get("statute_citation"),
+                    "status": row.get("req_status", "active"),
+                    "canonical_key": row.get("canonical_key"),
+                    "triggered_by": None,  # v2: populated by trigger evaluator
+                })
+                total_requirements += 1
+
+            precedence = None
+            if item.get("precedence_type"):
+                precedence = {
+                    "precedence_type": item["precedence_type"],
+                    "reasoning_text": item.get("reasoning_text"),
+                    "legal_citation": item.get("legal_citation"),
+                    "trigger_condition": item.get("rule_trigger_condition"),
+                }
+
+            categories_out.append({
+                "category": item["category"],
+                "category_label": cat_info.get("name", item["category"]),
+                "domain": cat_info.get("domain"),
+                "authority_type": "geographic",  # v2: from jurisdiction row
+                "governing_level": item.get("governing_level", ""),
+                "governing_requirement": {
+                    "id": str(gov["id"]),
+                    "jurisdiction_level": gov.get("jur_level") or gov.get("jurisdiction_level", ""),
+                    "jurisdiction_name": gov.get("jur_display_name") or gov.get("jurisdiction_name", ""),
+                    "title": gov.get("title", ""),
+                    "description": gov.get("description"),
+                    "current_value": gov.get("current_value"),
+                    "numeric_value": float(gov["numeric_value"]) if gov.get("numeric_value") is not None else None,
+                    "source_url": gov.get("source_url"),
+                    "statute_citation": gov.get("statute_citation"),
+                    "status": gov.get("req_status", "active"),
+                    "canonical_key": gov.get("canonical_key"),
+                    "triggered_by": None,
+                },
+                "precedence": precedence,
+                "all_levels": all_levels,
+                "affected_employee_count": total_affected,
+            })
+
+        return {
+            "location_id": str(loc["id"]),
+            "location_name": loc["name"] or "",
+            "city": loc["city"],
+            "state": loc["state"],
+            "facility_attributes": facility_attrs,
+            "categories": categories_out,
+            "total_categories": len(categories_out),
+            "total_requirements": total_requirements,
+        }

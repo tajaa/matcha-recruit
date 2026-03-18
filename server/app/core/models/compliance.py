@@ -62,6 +62,8 @@ class JurisdictionLevel(str, Enum):
     state = "state"
     county = "county"
     city = "city"
+    special_district = "special_district"
+    regulatory_body = "regulatory_body"
 
 
 class AlertSeverity(str, Enum):
@@ -279,3 +281,66 @@ class ComplianceSummary(BaseModel):
     recent_changes: list
     auto_check_locations: int = 0
     upcoming_deadlines: list = []
+
+
+# ── Hierarchical Compliance Response Schemas ──────────────────────────────
+# ALL intelligence is computed server-side. Frontend just renders these.
+
+
+class TriggerActivation(BaseModel):
+    """Server-evaluated trigger result — frontend just displays this."""
+    trigger_type: str
+    trigger_key: Optional[str] = None
+    trigger_value: Optional[Any] = None
+    matched: bool = True
+
+
+class JurisdictionLevelRequirement(BaseModel):
+    """A single requirement at one jurisdiction level. Server has already
+    determined status, evaluated triggers, and resolved citations."""
+    id: str
+    jurisdiction_level: str
+    jurisdiction_name: str
+    title: str
+    description: Optional[str] = None
+    current_value: Optional[str] = None
+    numeric_value: Optional[float] = None
+    source_url: Optional[str] = None
+    statute_citation: Optional[str] = None
+    status: str = "active"
+    canonical_key: Optional[str] = None
+    triggered_by: Optional[List[TriggerActivation]] = None
+
+
+class PrecedenceInfo(BaseModel):
+    """Server-resolved precedence determination."""
+    precedence_type: str
+    reasoning_text: Optional[str] = None
+    legal_citation: Optional[str] = None
+    trigger_condition: Optional[dict] = None
+
+
+class CategoryComplianceStack(BaseModel):
+    """Fully resolved compliance stack for one category."""
+    category: str
+    category_label: str
+    domain: Optional[str] = None
+    authority_type: Optional[str] = None
+    governing_level: str
+    governing_requirement: JurisdictionLevelRequirement
+    precedence: Optional[PrecedenceInfo] = None
+    all_levels: List[JurisdictionLevelRequirement]
+    affected_employee_count: Optional[int] = None
+
+
+class HierarchicalComplianceResponse(BaseModel):
+    """Complete server-resolved compliance view for a location.
+    Every field is final — no client-side post-processing needed."""
+    location_id: str
+    location_name: str
+    city: str
+    state: str
+    facility_attributes: Optional[dict] = None
+    categories: List[CategoryComplianceStack]
+    total_categories: int
+    total_requirements: int

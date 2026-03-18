@@ -28,10 +28,18 @@ if database_url:
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# Since we're not using SQLAlchemy ORM, we'll manage migrations manually
-target_metadata = None
+# ORM models provide schema source of truth for autogenerate.
+# Only tables with ORM models are managed — all 125 legacy tables are invisible.
+from app.orm import Base
+target_metadata = Base.metadata
+
+
+def include_name(name, type_, parent_names):
+    """Only manage tables that have ORM models. Prevents autogenerate from
+    dropping or modifying unmodeled legacy tables."""
+    if type_ == "table":
+        return name in target_metadata.tables
+    return True
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -66,7 +74,10 @@ def run_migrations_offline() -> None:
 def do_run_migrations(connection):
     context.configure(
         connection=connection,
-        target_metadata=target_metadata
+        target_metadata=target_metadata,
+        compare_type=True,
+        compare_server_default=True,
+        include_name=include_name,
     )
 
     with context.begin_transaction():

@@ -25,6 +25,7 @@ from ..models.compliance import (
     UpcomingLegislationResponse,
     ComplianceSummary,
     PinRequirementRequest,
+    HierarchicalComplianceResponse,
 )
 from ..services.compliance_service import (
     create_location,
@@ -48,6 +49,7 @@ from ..services.compliance_service import (
     _missing_required_categories,
     set_requirement_pinned,
     get_pinned_requirements,
+    get_hierarchical_requirements,
 )
 
 router = APIRouter()
@@ -361,12 +363,11 @@ async def delete_location_endpoint(
     return {"message": "Location deleted successfully"}
 
 
-@router.get(
-    "/locations/{location_id}/requirements", response_model=List[RequirementResponse]
-)
+@router.get("/locations/{location_id}/requirements")
 async def get_location_requirements_endpoint(
     location_id: str,
     category: Optional[str] = None,
+    view: Optional[str] = Query(None, description="'flat' (default) or 'hierarchical'"),
     company_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -379,7 +380,89 @@ async def get_location_requirements_endpoint(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid location ID")
 
+    if view == "hierarchical":
+        result = await get_hierarchical_requirements(loc_uuid, company_id, category)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Location not found")
+        return result
+
     return await get_location_requirements(loc_uuid, company_id, category)
+
+
+@router.get("/categories")
+async def get_compliance_categories(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Returns all compliance categories from the DB table."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            'SELECT id, slug, name, description, domain::text, "group", '
+            "industry_tag, sort_order FROM compliance_categories ORDER BY sort_order"
+        )
+    return [dict(row) for row in rows]
+
+
+@router.get("/precedence-rules")
+async def get_precedence_rules(
+    state: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Returns precedence rules, optionally filtered by state."""
+    async with get_connection() as conn:
+        if state:
+            rows = await conn.fetch(
+                """SELECT pr.id, pr.precedence_type::text, pr.reasoning_text,
+                          pr.legal_citation, pr.applies_to_all_children,
+                          pr.status::text, pr.effective_date, pr.sunset_date,
+                          cc.slug AS category_slug, cc.name AS category_name,
+                          j_hi.display_name AS higher_jurisdiction_name,
+                          j_lo.display_name AS lower_jurisdiction_name
+                   FROM precedence_rules pr
+                   JOIN compliance_categories cc ON cc.id = pr.category_id
+                   JOIN jurisdictions j_hi ON j_hi.id = pr.higher_jurisdiction_id
+                   LEFT JOIN jurisdictions j_lo ON j_lo.id = pr.lower_jurisdiction_id
+                   WHERE j_hi.state = $1 AND pr.status = 'active'
+                   ORDER BY cc.slug""",
+                state.upper(),
+            )
+        else:
+            rows = await conn.fetch(
+                """SELECT pr.id, pr.precedence_type::text, pr.reasoning_text,
+                          pr.legal_citation, pr.applies_to_all_children,
+                          pr.status::text, pr.effective_date, pr.sunset_date,
+                          cc.slug AS category_slug, cc.name AS category_name,
+                          j_hi.display_name AS higher_jurisdiction_name,
+                          j_lo.display_name AS lower_jurisdiction_name
+                   FROM precedence_rules pr
+                   JOIN compliance_categories cc ON cc.id = pr.category_id
+                   JOIN jurisdictions j_hi ON j_hi.id = pr.higher_jurisdiction_id
+                   LEFT JOIN jurisdictions j_lo ON j_lo.id = pr.lower_jurisdiction_id
+                   WHERE pr.status = 'active'
+                   ORDER BY cc.slug"""
+            )
+    return [dict(row) for row in rows]
+
+
+@router.get("/locations/{location_id}/jurisdiction-stack")
+async def get_jurisdiction_stack_endpoint(
+    location_id: str,
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Raw jurisdiction stack resolution for admin/debug."""
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        loc_uuid = UUID(location_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid location ID")
+
+    result = await get_hierarchical_requirements(loc_uuid, company_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+    return result
 
 
 @router.get("/locations/{location_id}/check-log", response_model=List[CheckLogEntry])

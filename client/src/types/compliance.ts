@@ -61,7 +61,7 @@ export interface ComplianceRequirement {
   category: string
   rate_type: string | null
   applicable_industries: string[]
-  jurisdiction_level: 'federal' | 'state' | 'county' | 'city'
+  jurisdiction_level: 'federal' | 'state' | 'county' | 'city' | 'special_district' | 'regulatory_body'
   jurisdiction_name: string
   title: string
   description: string | null
@@ -286,6 +286,61 @@ export const REQUIREMENT_CATEGORIES = [
 ] as const
 
 export type RequirementCategory = (typeof REQUIREMENT_CATEGORIES)[number]
+
+// ── Hierarchical Compliance Response Types ───────────────────────────────
+// ALL intelligence is computed server-side. These are display-only types.
+
+export interface TriggerActivation {
+  trigger_type: 'attribute' | 'entity_type' | 'requirement_active' | 'category_active' | 'none'
+  trigger_key: string | null
+  trigger_value: unknown | null
+  matched: boolean
+}
+
+export interface JurisdictionLevelRequirement {
+  id: string
+  jurisdiction_level: string
+  jurisdiction_name: string
+  title: string
+  description: string | null
+  current_value: string | null
+  numeric_value: number | null
+  source_url: string | null
+  statute_citation: string | null
+  status: string
+  canonical_key: string | null
+  triggered_by: TriggerActivation[] | null
+}
+
+export interface PrecedenceInfo {
+  precedence_type: 'floor' | 'ceiling' | 'supersede' | 'additive'
+  reasoning_text: string | null
+  legal_citation: string | null
+  trigger_condition: Record<string, unknown> | null
+}
+
+export interface CategoryComplianceStack {
+  category: string
+  category_label: string
+  domain: string | null
+  authority_type: string | null
+  governing_level: string
+  governing_requirement: JurisdictionLevelRequirement
+  precedence: PrecedenceInfo | null
+  all_levels: JurisdictionLevelRequirement[]
+  affected_employee_count: number | null
+}
+
+export interface HierarchicalComplianceResponse {
+  location_id: string
+  location_name: string
+  city: string
+  state: string
+  facility_attributes: Record<string, unknown> | null
+  categories: CategoryComplianceStack[]
+  total_categories: number
+  total_requirements: number
+}
 
 export const categoryLabel: Record<RequirementCategory, string> = {
   minimum_wage: 'Minimum Wage',

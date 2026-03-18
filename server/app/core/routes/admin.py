@@ -2838,7 +2838,7 @@ async def jurisdiction_data_overview(bust: bool = False):
                 ) AS categories,
                 COALESCE(
                     json_agg(json_build_object(
-                        'tier', COALESCE(jr.source_tier, 3),
+                        'tier', COALESCE(jr.source_tier::text, 'tier_3_aggregator'),
                         'category', jr.category,
                         'last_verified', jr.last_verified_at
                     )) FILTER (WHERE jr.id IS NOT NULL),
@@ -2846,7 +2846,8 @@ async def jurisdiction_data_overview(bust: bool = False):
                 ) AS req_details
             FROM jurisdictions j
             LEFT JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
-            WHERE j.city NOT LIKE '_county_%' AND j.city <> ''
+            WHERE (j.city IS NULL OR (j.city NOT LIKE '_county_%' AND j.city <> ''))
+              AND j.level != 'federal'
             GROUP BY j.id, j.city, j.state, j.last_verified_at
             ORDER BY j.state, j.city
         """)
@@ -3009,14 +3010,9 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
         j = await conn.fetchrow("SELECT * FROM jurisdictions WHERE id = $1", jurisdiction_id)
         if not j:
             raise HTTPException(status_code=404, detail="Jurisdiction not found")
-        if not await _is_supported_city(conn, j["city"], j["state"]):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"Unsupported city '{_city_display(_normalize_city_input(j['city']))}, {j['state']}' "
-                    "for research. Use a supported canonical city (for example: 'Salt Lake City')."
-                ),
-            )
+        # Only validate city for city-level jurisdictions used in research
+        # State/federal/county rows and detail lookups should always be viewable
+        j_level = j["level"] if "level" in j.keys() else "city"
 
         # Fetch children
         children = await conn.fetch(
