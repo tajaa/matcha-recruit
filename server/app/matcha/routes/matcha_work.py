@@ -1861,10 +1861,16 @@ async def send_message_stream(
             if thread.get("compliance_mode"):
                 yield _sse_data({"type": "status", "message": "Loading compliance data for your locations..."})
                 compliance_ctx = await build_compliance_context(company_id)
-                req_count = compliance_ctx.count("\n  - ")
-                loc_count = compliance_ctx.count("\n--- ")
-                if req_count > 0:
-                    yield _sse_data({"type": "status", "message": f"Found {req_count} requirements across {loc_count} locations — cross-referencing..."})
+                cat_count = compliance_ctx.count("Decision path:")
+                trigger_count = compliance_ctx.count("[trigger:")
+                loc_count = compliance_ctx.count("FACILITY PROFILE")
+                if cat_count > 0:
+                    parts = [f"{cat_count} regulatory categories across {loc_count} location{'s' if loc_count != 1 else ''}"]
+                    if trigger_count > 0:
+                        parts.append(f"{trigger_count} triggered requirement{'s' if trigger_count != 1 else ''}")
+                    yield _sse_data({"type": "status", "message": f"Found {' with '.join(parts)} — building reasoning chains..."})
+                elif compliance_ctx.count("legacy format") > 0:
+                    yield _sse_data({"type": "status", "message": "Loaded compliance data (legacy format) — cross-referencing..."})
                 else:
                     yield _sse_data({"type": "status", "message": "No compliance data found — will suggest running a check..."})
                 ctx += "\n\n" + compliance_ctx
