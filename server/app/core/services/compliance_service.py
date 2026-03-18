@@ -2673,6 +2673,19 @@ def _compute_requirement_key(req) -> str:
         else getattr(req, "rate_type", None)
     )
     cat_key = _normalize_category(cat) or ""
+
+    # Prefer Gemini-provided regulation_key when present — gives stable dedup
+    # across runs regardless of how the title is phrased.
+    reg_key = req.get("regulation_key") if isinstance(req, dict) else getattr(req, "regulation_key", None)
+    if reg_key and isinstance(reg_key, str):
+        reg_key_norm = _normalize_title_key(reg_key).strip().replace(" ", "_")
+        if reg_key_norm:
+            aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
+            if aet and isinstance(aet, list) and len(aet) > 0:
+                return f"{aet[0]}:{cat_key}:{reg_key_norm}"
+            return f"{cat_key}:{reg_key_norm}"
+
+    # Fallback: title-based key computation
     base_title = _base_title(title or "", jname)
     base_key = _normalize_title_key(base_title)
 

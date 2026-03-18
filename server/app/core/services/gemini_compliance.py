@@ -350,6 +350,27 @@ def _validate_verification(data: dict) -> Optional[str]:
     return None
 
 
+def _build_regulation_key_instruction(category: str) -> str:
+    """Build prompt fragment telling Gemini to use stable regulation keys."""
+    from ..compliance_registry import EXPECTED_REGULATION_KEYS
+    expected_keys = EXPECTED_REGULATION_KEYS.get(category, frozenset())
+    if not expected_keys:
+        return (
+            '\nFor each requirement, include a "regulation_key" field with a short, stable snake_case '
+            "identifier derived from the statute or regulation name "
+            '(e.g., "state_minimum_wage", "fmla", "osha_general_duty"). '
+            "The same regulation must always get the same key regardless of how you phrase the title.\n"
+        )
+    keys_list = ", ".join(sorted(expected_keys))
+    return (
+        f'\nIMPORTANT: For each requirement, include a "regulation_key" field. '
+        f"Use one of these known keys when applicable: {keys_list}\n"
+        "If a requirement doesn't match any known key, create a short snake_case key from the "
+        'statute name (e.g., "ca_paid_sick_leave", "sf_minimum_wage_ordinance"). '
+        "The same regulation must always get the same key regardless of how you phrase the title.\n"
+    )
+
+
 def _build_category_prompt(
     location_str: str,
     category: str,
@@ -358,6 +379,8 @@ def _build_category_prompt(
     industry_context: str = "",
 ) -> str:
     """Build a focused prompt for a single compliance category."""
+
+    regulation_key_instruction = _build_regulation_key_instruction(category)
 
     return f"""You are a compliance research expert. Research current {category.replace('_', ' ')} laws for a business operating in {location_str}.
 {context_section}
@@ -368,7 +391,7 @@ If there is no distinct rule beyond federal/state baseline, still return one sta
 Do NOT return an empty requirements list.
 
 For each requirement, determine whether the statute explicitly requires the employer to include this policy in a written employee handbook or written notice. Set "requires_written_policy" to true only if written disclosure is legally mandated. If the obligation is satisfied by a workplace poster, verbal notice, or operational compliance alone, set it to false.
-
+{regulation_key_instruction}
 Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
 
 Respond with JSON:
@@ -376,6 +399,7 @@ Respond with JSON:
   "requirements": [
     {{
       "category": "{category}",
+      "regulation_key": "stable_snake_case_key",
       "rate_type": <for minimum_wage only: "general" | "tipped" | "exempt_salary" | "hotel" | "fast_food" | "healthcare" | "large_employer" | "small_employer"; else null>,
       "jurisdiction_level": "state" | "county" | "city",
       "jurisdiction_name": "Name",
@@ -409,6 +433,8 @@ def _build_triggered_category_prompt(
     preemption_context: str = "",
 ) -> str:
     """Build a prompt for trigger-specific requirements (e.g. FQHC, Medi-Cal)."""
+    regulation_key_instruction = _build_regulation_key_instruction(category)
+
     return f"""You are a compliance research expert specializing in healthcare regulatory requirements.
 
 {trigger_instruction}
@@ -419,7 +445,7 @@ Category: {category.replace('_', ' ')}
 {preemption_context}
 
 IMPORTANT: These requirements are ADDITIONAL to baseline rules. Only return requirements SPECIFIC to {trigger_label} facilities/providers. Do NOT repeat general healthcare or labor requirements.
-
+{regulation_key_instruction}
 Today's date is {date.today().isoformat()}. Return ONLY requirements currently in effect.
 
 Respond with JSON:
@@ -427,6 +453,7 @@ Respond with JSON:
   "requirements": [
     {{
       "category": "{category}",
+      "regulation_key": "stable_snake_case_key",
       "jurisdiction_level": "federal" | "state" | "county" | "city",
       "jurisdiction_name": "Name",
       "title": "Short title",

@@ -3582,6 +3582,81 @@ EXPECTED_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     for cat, regs in REGULATIONS_BY_CATEGORY.items()
 }
 
+# Labor + supplementary categories don't have full RegulationDef objects but need
+# stable keys for Gemini dedup. Add them directly.
+_LABOR_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
+    "minimum_wage": frozenset([
+        "state_minimum_wage", "tipped_minimum_wage", "exempt_salary_threshold",
+        "fast_food_minimum_wage", "healthcare_minimum_wage", "large_employer_minimum_wage",
+        "small_employer_minimum_wage", "youth_minimum_wage", "tip_credit_prohibition",
+        "local_minimum_wage",
+    ]),
+    "overtime": frozenset([
+        "daily_weekly_overtime", "double_time", "seventh_day_overtime",
+        "exempt_salary_threshold", "alternative_workweek", "healthcare_overtime",
+        "mandatory_overtime_restrictions", "comp_time",
+    ]),
+    "leave": frozenset([
+        "fmla", "state_family_leave", "state_paid_family_leave",
+        "state_disability_insurance", "pregnancy_disability_leave",
+        "paid_sick_leave", "bereavement_leave", "organ_donor_leave",
+        "domestic_violence_leave", "jury_duty_leave", "military_leave",
+        "voting_leave", "school_activity_leave", "reproductive_loss_leave",
+        "bone_marrow_donor_leave",
+    ]),
+    "sick_leave": frozenset([
+        "state_paid_sick_leave", "accrual_and_usage_caps", "local_sick_leave",
+    ]),
+    "meal_breaks": frozenset([
+        "meal_break", "rest_break", "lactation_break",
+        "on_duty_meal_agreement", "healthcare_meal_waiver", "missed_break_penalty",
+    ]),
+    "pay_frequency": frozenset([
+        "standard_pay_frequency", "final_pay_termination", "final_pay_resignation",
+        "exempt_monthly_pay", "payday_posting", "wage_notice",
+    ]),
+    "final_pay": frozenset([
+        "final_pay_termination", "final_pay_resignation", "final_pay_layoff",
+        "waiting_time_penalty",
+    ]),
+    "minor_work_permit": frozenset([
+        "work_permit", "hour_limits_14_15", "hour_limits_16_17",
+        "prohibited_occupations", "entertainment_permits", "recordkeeping",
+    ]),
+    "scheduling_reporting": frozenset([
+        "reporting_time_pay", "predictive_scheduling", "split_shift_premium",
+        "on_call_pay", "spread_of_hours",
+    ]),
+    "workplace_safety": frozenset([
+        "osha_general_duty", "injury_illness_recordkeeping", "heat_illness_prevention",
+        "workplace_violence_prevention", "hazard_communication",
+    ]),
+    "workers_comp": frozenset([
+        "mandatory_coverage", "claim_filing", "return_to_work",
+        "anti_retaliation", "posting_requirements",
+    ]),
+    "anti_discrimination": frozenset([
+        "protected_classes", "pay_transparency", "salary_history_ban",
+        "harassment_prevention_training", "reasonable_accommodation",
+        "whistleblower_protection",
+    ]),
+    "business_license": frozenset([
+        "state_business_registration", "local_business_license",
+        "professional_licensing", "dba_registration",
+    ]),
+    "tax_rate": frozenset([
+        "corporate_income_tax", "franchise_tax", "unemployment_insurance_tax",
+        "disability_insurance_tax", "employment_training_tax",
+        "sales_use_tax", "local_tax",
+    ]),
+    "posting_requirements": frozenset([
+        "minimum_wage_poster", "discrimination_poster", "osha_poster",
+        "workers_comp_poster", "paid_sick_leave_poster", "family_leave_poster",
+        "whistleblower_poster", "wage_order_poster", "workplace_violence_poster",
+    ]),
+}
+EXPECTED_REGULATION_KEYS.update(_LABOR_REGULATION_KEYS)
+
 
 # ---------------------------------------------------------------------------
 # Trigger profiles — drive targeted Gemini research passes
