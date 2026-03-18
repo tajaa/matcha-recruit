@@ -49,7 +49,7 @@ class Settings:
 
     # Email (Gmail API via OAuth2)
     gmail_token_path: str = "agent/workspace/token.json"
-    gmail_from_email: str = "aaron@itsmatcha.net"
+    gmail_from_email: str = ""
     gmail_from_name: str = "Matcha Recruit"
     app_base_url: str = "http://localhost:5173"
     contact_email: str = "aaron@hey-matcha.com"
@@ -153,7 +153,7 @@ def load_settings() -> Settings:
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
         cloudfront_domain=os.getenv("CLOUDFRONT_DOMAIN"),
         gmail_token_path=os.getenv("GMAIL_TOKEN_PATH", "agent/workspace/token.json"),
-        gmail_from_email=os.getenv("GMAIL_FROM_EMAIL", "aaron@itsmatcha.net"),
+        gmail_from_email=os.getenv("GMAIL_FROM_EMAIL", ""),
         gmail_from_name=os.getenv("GMAIL_FROM_NAME", "Matcha Recruit"),
         app_base_url=os.getenv("APP_BASE_URL", "http://localhost:5173"),
         contact_email=os.getenv("CONTACT_EMAIL", "aaron@hey-matcha.com"),
