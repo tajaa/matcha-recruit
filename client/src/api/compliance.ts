@@ -107,6 +107,12 @@ export function fetchSummary() {
   return api.get<ComplianceSummary>('/compliance/summary')
 }
 
+export function fetchComplianceDashboard(horizonDays = 90) {
+  return api.get<import('../types/dashboard').ComplianceDashboard>(
+    `/compliance/dashboard?horizon_days=${horizonDays}`
+  )
+}
+
 // ── Compliance Checks ──
 
 export function getComplianceCheckUrl(locationId: string): string {
