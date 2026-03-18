@@ -1,28 +1,68 @@
-"""Email service using MailerSend."""
+"""Email service using Gmail API via OAuth2."""
+import base64
 import html
 import httpx
+import json
 import logging
 from datetime import date, datetime
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+from pathlib import Path
 from typing import Optional
 
 from ...config import get_settings
 
 logger = logging.getLogger(__name__)
 
+GMAIL_TOKEN_URI = "https://oauth2.googleapis.com/token"
+GMAIL_SEND_URI = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+
 
 class EmailService:
-    """Service for sending emails via MailerSend API."""
+    """Service for sending emails via Gmail API."""
 
     def __init__(self):
         self.settings = get_settings()
-        self.api_key = self.settings.mailersend_api_key
-        self.from_email = self.settings.mailersend_from_email
-        self.from_name = self.settings.mailersend_from_name
-        self.base_url = "https://api.mailersend.com/v1"
+        self.from_email = self.settings.gmail_from_email
+        self.from_name = self.settings.gmail_from_name
+        self._token_data: Optional[dict] = None
+
+    def _load_token(self) -> Optional[dict]:
+        token_path = Path(self.settings.gmail_token_path)
+        if not token_path.is_absolute():
+            # Resolve relative to server/ directory
+            token_path = Path(__file__).parent.parent.parent.parent / self.settings.gmail_token_path
+        if not token_path.exists():
+            return None
+        with open(token_path) as f:
+            return json.load(f)
 
     def is_configured(self) -> bool:
-        """Check if email service is properly configured."""
-        return bool(self.api_key)
+        """Check if Gmail token file is present and has required fields."""
+        data = self._load_token()
+        return bool(data and data.get("refresh_token") and data.get("client_id") and data.get("client_secret"))
+
+    async def _get_access_token(self) -> str:
+        """Return a valid access token, refreshing if necessary."""
+        data = self._load_token()
+        if not data:
+            raise RuntimeError("Gmail token.json not found")
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                GMAIL_TOKEN_URI,
+                data={
+                    "client_id": data["client_id"],
+                    "client_secret": data["client_secret"],
+                    "refresh_token": data["refresh_token"],
+                    "grant_type": "refresh_token",
+                },
+                timeout=10.0,
+            )
+            resp.raise_for_status()
+            return resp.json()["access_token"]
 
     async def send_email(
         self,
@@ -33,57 +73,59 @@ class EmailService:
         text_content: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
     ) -> bool:
-        """Send a generic email via MailerSend.
+        """Send an email via Gmail API.
 
-        Attachments should match MailerSend format:
-        {"filename": "...", "content": "<base64>", "disposition": "attachment"}
+        Attachments format: {"filename": "...", "content": "<base64>", "disposition": "attachment"}
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured — token.json missing or incomplete")
             return False
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name or to_email,
-                }
-            ],
-            "subject": subject,
-            "html": html_content,
-        }
-        if text_content:
-            payload["text"] = text_content
-        if attachments:
-            payload["attachments"] = attachments
-
         try:
+            msg = MIMEMultipart("alternative") if not attachments else MIMEMultipart("mixed")
+            msg["Subject"] = subject
+            msg["From"] = f"{self.from_name} <{self.from_email}>"
+            msg["To"] = f"{to_name} <{to_email}>" if to_name else to_email
+
+            if attachments:
+                alt = MIMEMultipart("alternative")
+                if text_content:
+                    alt.attach(MIMEText(text_content, "plain"))
+                alt.attach(MIMEText(html_content, "html"))
+                msg.attach(alt)
+                for att in attachments:
+                    part = MIMEBase("application", "octet-stream")
+                    part.set_payload(base64.b64decode(att["content"]))
+                    encoders.encode_base64(part)
+                    part.add_header("Content-Disposition", att.get("disposition", "attachment"), filename=att["filename"])
+                    msg.attach(part)
+            else:
+                if text_content:
+                    msg.attach(MIMEText(text_content, "plain"))
+                msg.attach(MIMEText(html_content, "html"))
+
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            token = await self._get_access_token()
+
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
+                    GMAIL_SEND_URI,
+                    json={"raw": raw},
+                    headers={"Authorization": f"Bearer {token}"},
                     timeout=30.0,
                 )
 
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent email to %s", to_email)
-                    return True
-                else:
-                    logger.warning(
-                        "Failed to send email to %s: %s - %s",
-                        to_email, response.status_code, response.text[:200],
-                    )
-                    return False
+            if response.status_code == 200:
+                logger.info("Sent email to %s", to_email)
+                return True
+            else:
+                logger.warning(
+                    "Failed to send email to %s: %s - %s",
+                    to_email, response.status_code, response.text[:200],
+                )
+                return False
 
-        except Exception as e:
+        except Exception:
             logger.exception("Error sending email to %s", to_email)
             return False
 
