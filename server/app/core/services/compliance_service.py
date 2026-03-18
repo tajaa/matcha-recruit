@@ -1451,6 +1451,14 @@ async def _upsert_jurisdiction_requirements_routed(
 
 async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[Dict]):
     """Upsert requirements to a jurisdiction without deleting existing rows."""
+    # ── Data integrity pipeline ──
+    for req in reqs:
+        _clamp_varchar_fields(req)
+        cat = _normalize_category(req.get("category"))
+        if cat:
+            req["category"] = cat
+    await _validate_source_urls(reqs)
+
     for req in reqs:
         requirement_key = _compute_requirement_key(req)
         tc = req.get("trigger_conditions")
@@ -2148,11 +2156,6 @@ async def _refresh_repository_missing_categories(
     merged_requirements = await _filter_with_preemption(
         conn, merged_requirements, state
     )
-    for req in merged_requirements:
-        _clamp_varchar_fields(req)
-
-    await _validate_source_urls(merged_requirements)
-
     await _upsert_jurisdiction_requirements_routed(conn, jurisdiction_id, merged_requirements)
 
     for req in refreshed_requirements:
@@ -2175,6 +2178,14 @@ async def _upsert_jurisdiction_requirements(
     conn, jurisdiction_id: UUID, reqs: List[Dict]
 ):
     """Write Gemini results into the jurisdiction repository. Remove stale rows."""
+    # ── Data integrity pipeline ──
+    for req in reqs:
+        _clamp_varchar_fields(req)
+        cat = _normalize_category(req.get("category"))
+        if cat:
+            req["category"] = cat
+    await _validate_source_urls(reqs)
+
     new_keys = set()
     for req in reqs:
         requirement_key = _compute_requirement_key(req)
@@ -2362,6 +2373,14 @@ async def _sync_requirements_to_location(
     Runs the existing change-detection logic (upsert, history snapshot, alerts).
     Returns {"new": N, "updated": N, "alerts": N, "changes_to_verify": [...]}.
     """
+    # ── Data integrity pipeline ──
+    for req in reqs:
+        _clamp_varchar_fields(req)
+        cat = _normalize_category(req.get("category"))
+        if cat:
+            req["category"] = cat
+    await _validate_source_urls(reqs)
+
     new_count = 0
     updated_count = 0
     alert_count = 0
@@ -4431,8 +4450,6 @@ async def run_compliance_check_stream(
                             source_context=source_context,
                         )
                         if triggered_reqs:
-                            for req in triggered_reqs:
-                                _clamp_varchar_fields(req)
                             await _upsert_requirements_additive(
                                 conn, jurisdiction_id, triggered_reqs
                             )
@@ -4527,10 +4544,6 @@ async def run_compliance_check_stream(
             requirements = await _filter_with_preemption(
                 conn, requirements, location.state
             )
-            for req in requirements:
-                _clamp_varchar_fields(req)
-
-            await _validate_source_urls(requirements)
 
             yield {
                 "type": "processing",
@@ -6942,8 +6955,6 @@ async def run_compliance_check_background(
                             source_context=source_context,
                         )
                         if triggered_reqs:
-                            for req in triggered_reqs:
-                                _clamp_varchar_fields(req)
                             await _upsert_requirements_additive(
                                 conn, jurisdiction_id, triggered_reqs
                             )
@@ -7027,10 +7038,6 @@ async def run_compliance_check_background(
             requirements = await _filter_with_preemption(
                 conn, requirements, location.state
             )
-            for req in requirements:
-                _clamp_varchar_fields(req)
-
-            await _validate_source_urls(requirements)
 
             # Contribute to repository after Gemini call.
             if not used_repository:
