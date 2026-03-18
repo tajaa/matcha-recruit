@@ -1847,16 +1847,29 @@ async def send_message_stream(
 
     ai_provider = get_ai_provider()
     ctx = _build_company_context(profile)
-    if thread.get("node_mode"):
-        node_ctx = await build_node_context(company_id)
-        ctx += "\n\n" + node_ctx
-    if thread.get("compliance_mode"):
-        compliance_ctx = await build_compliance_context(company_id)
-        ctx += "\n\n" + compliance_ctx
-    estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
+    # Node/compliance context is built inside event_stream() so we can yield status events
 
     async def event_stream():
+        nonlocal ctx
         try:
+            # Build mode-specific context with status updates
+            if thread.get("node_mode"):
+                yield _sse_data({"type": "status", "message": "Loading internal company data..."})
+                node_ctx = await build_node_context(company_id)
+                ctx += "\n\n" + node_ctx
+
+            if thread.get("compliance_mode"):
+                yield _sse_data({"type": "status", "message": "Loading compliance data for your locations..."})
+                compliance_ctx = await build_compliance_context(company_id)
+                req_count = compliance_ctx.count("\n  - ")
+                loc_count = compliance_ctx.count("\n--- ")
+                if req_count > 0:
+                    yield _sse_data({"type": "status", "message": f"Found {req_count} requirements across {loc_count} locations — cross-referencing..."})
+                else:
+                    yield _sse_data({"type": "status", "message": "No compliance data found — will suggest running a check..."})
+                ctx += "\n\n" + compliance_ctx
+
+            estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
             yield _sse_data(
                 {
                     "type": "usage",
@@ -1867,6 +1880,7 @@ async def send_message_stream(
                 }
             )
 
+            yield _sse_data({"type": "status", "message": "Generating response..."})
             ai_resp = await ai_provider.generate(
                 msg_dicts, thread["current_state"], company_context=ctx,
                 slide_index=body.slide_index, context_summary=context_summary,

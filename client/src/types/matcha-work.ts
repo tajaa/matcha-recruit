@@ -73,5 +73,6 @@ export interface MWCreateResponse {
 // SSE event types from the stream endpoint
 export type MWStreamEvent =
   | { type: 'usage'; data: MWTokenUsage & { stage: 'estimate' | 'final' } }
+  | { type: 'status'; message: string }
   | { type: 'complete'; data: MWSendResponse }
   | { type: 'error'; message: string }

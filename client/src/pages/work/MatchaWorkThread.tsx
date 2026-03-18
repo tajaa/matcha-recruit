@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
+import Markdown from 'react-markdown'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield } from 'lucide-react'
-import type { MWMessage, MWThreadDetail, MWSendResponse } from '../../types/matcha-work'
+import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode } from '../../api/matchaWork'
 
 const TASK_LABELS: Record<string, string> = {
@@ -32,6 +33,9 @@ export default function MatchaWorkThread() {
   // Compliance mode
   const [complianceMode, setComplianceModeState] = useState(false)
   const [togglingCompliance, setTogglingCompliance] = useState(false)
+
+  // Stream status
+  const [statusMessage, setStatusMessage] = useState('')
 
   // Title editing
   const [editingTitle, setEditingTitle] = useState(false)
@@ -86,10 +90,11 @@ export default function MatchaWorkThread() {
     setMessages((prev) => [...prev, tempUserMsg])
 
     abortRef.current = sendMessageStream(threadId, content, {
-      onEvent: () => {
-        // Usage events — ignored for now
+      onEvent: (event: MWStreamEvent) => {
+        if (event.type === 'status') setStatusMessage(event.message)
       },
       onComplete: (data: MWSendResponse) => {
+        setStatusMessage('')
         // Replace temp user message + add assistant message
         setMessages((prev) => {
           const withoutTemp = prev.filter((m) => m.id !== tempUserMsg.id)
@@ -115,6 +120,7 @@ export default function MatchaWorkThread() {
         setStreaming(false)
       },
       onError: (err) => {
+        setStatusMessage('')
         setError(err)
         setStreaming(false)
       },
@@ -271,21 +277,26 @@ export default function MatchaWorkThread() {
               className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm whitespace-pre-wrap ${
+                className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
                   m.role === 'user'
-                    ? 'bg-zinc-700 text-white'
-                    : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50'
+                    ? 'bg-zinc-700 text-white whitespace-pre-wrap'
+                    : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none'
                 }`}
               >
-                {m.content}
+                {m.role === 'assistant' ? (
+                  <Markdown>{m.content}</Markdown>
+                ) : (
+                  m.content
+                )}
               </div>
             </div>
           ))}
 
           {streaming && (
             <div className="flex justify-start">
-              <div className="bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-4 py-2.5">
-                <Loader2 size={16} className="animate-spin text-zinc-400" />
+              <div className="bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-4 py-2.5 flex items-center gap-2">
+                <Loader2 size={14} className="animate-spin text-zinc-500" />
+                <span className="text-sm text-zinc-400">{statusMessage || 'Thinking...'}</span>
               </div>
             </div>
           )}
