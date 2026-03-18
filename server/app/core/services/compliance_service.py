@@ -6,6 +6,7 @@ import json
 import re
 
 import asyncpg
+import httpx
 from fastapi import HTTPException
 
 from .jurisdiction_context import (
@@ -615,6 +616,43 @@ def _clamp_varchar_fields(req: dict) -> dict:
         if val and len(val) > 100:
             req[field] = val[:100]
     return req
+
+
+async def _validate_source_urls(reqs: List[Dict]) -> List[Dict]:
+    """Validate source_url fields via HEAD requests; clear any that 404/fail."""
+    url_map: Dict[str, List[Dict]] = {}
+    for req in reqs:
+        url = req.get("source_url")
+        if url:
+            url_map.setdefault(url, []).append(req)
+
+    if not url_map:
+        return reqs
+
+    sem = asyncio.Semaphore(10)
+
+    async def _check(url: str) -> tuple:
+        try:
+            async with sem:
+                async with httpx.AsyncClient(
+                    follow_redirects=True, timeout=5.0
+                ) as client:
+                    resp = await client.head(url)
+                    return (url, resp.status_code)
+        except Exception:
+            return (url, None)
+
+    results = await asyncio.gather(*[_check(u) for u in url_map])
+
+    for url, status in results:
+        if status is None or status >= 400:
+            label = f"status {status}" if status else "connection error"
+            print(f"[Compliance] Dropped invalid source URL: {url} ({label})")
+            for req in url_map[url]:
+                req["source_url"] = ""
+                req["source_name"] = ""
+
+    return reqs
 
 
 def _normalize_category(category: Optional[str]) -> Optional[str]:
@@ -2017,6 +2055,8 @@ async def _refresh_repository_missing_categories(
     )
     for req in merged_requirements:
         _clamp_varchar_fields(req)
+
+    await _validate_source_urls(merged_requirements)
 
     await _upsert_jurisdiction_requirements_routed(conn, jurisdiction_id, merged_requirements)
 
@@ -4200,6 +4240,8 @@ async def run_compliance_check_stream(
             )
             for req in requirements:
                 _clamp_varchar_fields(req)
+
+            await _validate_source_urls(requirements)
 
             yield {
                 "type": "processing",
@@ -6481,6 +6523,8 @@ async def run_compliance_check_background(
             )
             for req in requirements:
                 _clamp_varchar_fields(req)
+
+            await _validate_source_urls(requirements)
 
             # Contribute to repository after Gemini call.
             if not used_repository:
