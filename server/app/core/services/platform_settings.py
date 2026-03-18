@@ -191,7 +191,7 @@ async def get_jurisdiction_research_model_mode(*, conn=None) -> str:
     else:
         mode = str(raw)
 
-    if mode not in ["light", "heavy"]:
+    if mode not in ["lite", "light", "heavy"]:
         mode = DEFAULT_JURISDICTION_RESEARCH_MODEL_MODE
 
     _jurisdiction_research_model_mode_cache = mode

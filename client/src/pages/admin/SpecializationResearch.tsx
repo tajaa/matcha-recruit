@@ -1,6 +1,12 @@
-import { useState, useRef } from 'react'
-import { Microscope, Loader2, Check, ChevronRight, ArrowLeft } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Microscope, Loader2, Check, ChevronRight, ChevronDown, ArrowLeft } from 'lucide-react'
 import { HEALTHCARE_SPECIALTIES } from '../../data/industryConstants'
+
+const MODEL_LABELS: Record<string, { label: string; model: string; color: string }> = {
+  lite:  { label: 'Lite',  model: 'Gemini 3.1 Flash Lite', color: 'bg-zinc-700 text-zinc-300' },
+  light: { label: 'Light', model: 'Gemini 3 Flash',        color: 'bg-blue-900/50 text-blue-300' },
+  heavy: { label: 'Pro',   model: 'Gemini 3.1 Pro',        color: 'bg-purple-900/50 text-purple-300' },
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -24,9 +30,16 @@ type JurisdictionProgress = {
   done: boolean
 }
 
+type RequirementSummary = {
+  category: string
+  title: string
+  jurisdiction_level: string
+}
+
 type CompletedJurisdiction = {
   jurisdiction: string
   requirement_count: number
+  requirements: RequirementSummary[]
 }
 
 // ── Constants ──────────────────────────────────────────────────────────────────
@@ -45,6 +58,17 @@ const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 export default function SpecializationResearch() {
   const [step, setStep] = useState(1)
+  const [modelMode, setModelMode] = useState<string>('light')
+
+  useEffect(() => {
+    const token = localStorage.getItem('matcha_access_token')
+    fetch(`${BASE}/admin/platform-settings`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => r.json())
+      .then((data) => setModelMode(data.jurisdiction_research_model_mode || 'light'))
+      .catch(() => {})
+  }, [])
 
   // Step 1 state
   const [specialization, setSpecialization] = useState('')
@@ -62,6 +86,7 @@ export default function SpecializationResearch() {
   const [statusMessage, setStatusMessage] = useState('')
   const [jurisdictionProgress, setJurisdictionProgress] = useState<Map<string, JurisdictionProgress>>(new Map())
   const [completedJurisdictions, setCompletedJurisdictions] = useState<CompletedJurisdiction[]>([])
+  const [expandedJurisdictions, setExpandedJurisdictions] = useState<Set<string>>(new Set())
   const [finalSummary, setFinalSummary] = useState<{
     total_requirements: number
     jurisdictions_researched: number
@@ -210,7 +235,11 @@ export default function SpecializationResearch() {
             })
             setCompletedJurisdictions((prev) => [
               ...prev,
-              { jurisdiction: event.jurisdiction, requirement_count: event.requirements_found ?? 0 },
+              {
+                jurisdiction: event.jurisdiction,
+                requirement_count: event.requirements_found ?? 0,
+                requirements: event.requirements ?? [],
+              },
             ])
           } else if (event.type === 'completed') {
             const s = event.summary ?? {}
@@ -245,10 +274,19 @@ export default function SpecializationResearch() {
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center gap-3 mb-6">
         <Microscope className="w-6 h-6 text-emerald-400" />
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Specialization Research</h1>
           <p className="text-sm text-zinc-500">Discover and research compliance categories for industry specializations</p>
         </div>
+        {(() => {
+          const info = MODEL_LABELS[modelMode] || MODEL_LABELS.light
+          return (
+            <div className={`shrink-0 px-2.5 py-1 rounded-md text-xs font-medium ${info.color}`} title={`Research model: ${info.model}`}>
+              {info.label}
+              <span className="ml-1.5 opacity-60 hidden sm:inline">{info.model}</span>
+            </div>
+          )
+        })()}
       </div>
 
       {/* Step indicator */}
@@ -470,16 +508,74 @@ export default function SpecializationResearch() {
               <h3 className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-3">
                 Completed ({completedJurisdictions.length})
               </h3>
-              <div className="space-y-1.5">
-                {completedJurisdictions.map((cj) => (
-                  <div key={cj.jurisdiction} className="flex items-center gap-3">
-                    <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                    <span className="text-sm text-zinc-300">{cj.jurisdiction}</span>
-                    <span className="text-xs text-zinc-500 ml-auto">
-                      {cj.requirement_count} requirement{cj.requirement_count !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                ))}
+              <div className="space-y-1">
+                {completedJurisdictions.map((cj) => {
+                  const isExpanded = expandedJurisdictions.has(cj.jurisdiction)
+                  const hasReqs = cj.requirements.length > 0
+                  const grouped = hasReqs
+                    ? cj.requirements.reduce<Record<string, RequirementSummary[]>>((acc, r) => {
+                        const cat = r.category || 'uncategorized'
+                        ;(acc[cat] ??= []).push(r)
+                        return acc
+                      }, {})
+                    : {}
+
+                  return (
+                    <div key={cj.jurisdiction}>
+                      <button
+                        onClick={() => {
+                          if (!hasReqs) return
+                          setExpandedJurisdictions((prev) => {
+                            const next = new Set(prev)
+                            if (next.has(cj.jurisdiction)) next.delete(cj.jurisdiction)
+                            else next.add(cj.jurisdiction)
+                            return next
+                          })
+                        }}
+                        className={`w-full flex items-center gap-3 py-1.5 text-left ${hasReqs ? 'cursor-pointer hover:bg-zinc-800/50' : 'cursor-default'} rounded px-1 -mx-1 transition-colors`}
+                      >
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        <span className="text-sm text-zinc-300 font-medium">{cj.jurisdiction}</span>
+                        <span className="text-xs text-zinc-500 ml-auto">
+                          {cj.requirement_count} requirement{cj.requirement_count !== 1 ? 's' : ''}
+                        </span>
+                        {hasReqs && (
+                          isExpanded
+                            ? <ChevronDown className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                            : <ChevronRight className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                        )}
+                      </button>
+
+                      {isExpanded && hasReqs && (
+                        <div className="ml-7 mt-1 mb-2 space-y-2">
+                          {Object.entries(grouped).map(([cat, reqs]) => (
+                            <div key={cat}>
+                              <div className="text-[10px] uppercase tracking-wide text-zinc-500 font-medium mb-1">
+                                {cat.replace(/_/g, ' ')} ({reqs.length})
+                              </div>
+                              <div className="space-y-0.5">
+                                {reqs.map((r, i) => (
+                                  <div key={i} className="flex items-center gap-2 text-xs">
+                                    <span className="text-zinc-400">•</span>
+                                    <span className="text-zinc-300 truncate">{r.title || 'Untitled'}</span>
+                                    <span className={`shrink-0 px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                                      r.jurisdiction_level === 'city' ? 'bg-emerald-900/40 text-emerald-400' :
+                                      r.jurisdiction_level === 'state' ? 'bg-blue-900/40 text-blue-400' :
+                                      r.jurisdiction_level === 'county' ? 'bg-purple-900/40 text-purple-400' :
+                                      'bg-zinc-800 text-zinc-400'
+                                    }`}>
+                                      {r.jurisdiction_level || 'unknown'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -524,6 +620,7 @@ export default function SpecializationResearch() {
                   setStatusMessage('')
                   setJurisdictionProgress(new Map())
                   setCompletedJurisdictions([])
+                  setExpandedJurisdictions(new Set())
                   setFinalSummary(null)
                 }}
                 className="mt-4 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm font-medium px-4 py-2 rounded-lg transition-colors"

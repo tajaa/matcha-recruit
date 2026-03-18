@@ -5164,6 +5164,14 @@ async def run_specialization_research(req: SpecializationResearchRequest):
                         "categories_researched": len(result.get("categories", [])),
                         "failed": result.get("failed", []),
                         "skipped": result.get("skipped", False),
+                        "requirements": [
+                            {
+                                "category": r.get("category", ""),
+                                "title": (r.get("title") or "")[:120],
+                                "jurisdiction_level": r.get("jurisdiction_level", ""),
+                            }
+                            for r in (result.get("requirements") or [])[:40]
+                        ],
                     })
 
                 # Phase 3: Completeness summary
@@ -5177,7 +5185,7 @@ async def run_specialization_research(req: SpecializationResearchRequest):
                         "specialization": req.specialization,
                         "industry_tag": req.industry_tag,
                         "total_requirements": grand_total,
-                        "jurisdictions_researched": len(jurisdictions),
+                        "jurisdictions_researched": len(all_jurisdictions),
                         "categories_requested": len(req.categories),
                         "failed_categories": list(set(grand_failed)),
                         "completeness": completeness,

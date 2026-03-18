@@ -1,23 +1,62 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card } from '../../components/ui'
 import { Button } from '../../components/ui'
+import { Loader2 } from 'lucide-react'
 
-const models = [
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', description: 'Fast, cost-effective' },
-  { id: 'gemini-2.0-flash-lite', label: 'Gemini 2.0 Flash Lite', description: 'Lightest, lowest cost' },
-  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', description: 'Balanced speed and quality' },
-  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', description: 'Highest quality, slower' },
+const BASE = import.meta.env.VITE_API_URL ?? '/api'
+
+const RESEARCH_MODELS = [
+  { id: 'lite', label: 'Lite', model: 'Gemini 3.1 Flash Lite', description: 'Fastest, lowest cost — good for bulk research' },
+  { id: 'light', label: 'Light', model: 'Gemini 3 Flash', description: 'Balanced speed and quality (default)' },
+  { id: 'heavy', label: 'Pro', model: 'Gemini 3.1 Pro', description: 'Highest quality, slower — best for targeted research' },
 ]
 
 export default function Settings() {
-  const [activeModel, setActiveModel] = useState('gemini-2.5-flash')
-  const [saved, setSaved] = useState(false)
+  const [researchMode, setResearchMode] = useState<string | null>(null)
+  const [pendingMode, setPendingMode] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
 
-  function handleSave() {
-    // TODO: wire to /api/admin/settings
-    setSaved(true)
-    setTimeout(() => setSaved(false), 2000)
+  useEffect(() => {
+    const token = localStorage.getItem('matcha_access_token')
+    fetch(`${BASE}/admin/platform-settings`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        const mode = data.jurisdiction_research_model_mode || 'light'
+        setResearchMode(mode)
+        setPendingMode(mode)
+      })
+      .catch(() => {
+        setResearchMode('light')
+        setPendingMode('light')
+      })
+      .finally(() => setLoading(false))
+  }, [])
+
+  async function handleSave() {
+    if (!pendingMode || pendingMode === researchMode) return
+    setSaving(true)
+    const token = localStorage.getItem('matcha_access_token')
+    try {
+      const res = await fetch(`${BASE}/admin/platform-settings/jurisdiction-research-model-mode`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ mode: pendingMode }),
+      })
+      if (res.ok) {
+        setResearchMode(pendingMode)
+      }
+    } finally {
+      setSaving(false)
+    }
   }
+
+  const hasChanges = pendingMode !== researchMode
 
   return (
     <div>
@@ -27,36 +66,49 @@ export default function Settings() {
       <p className="mt-2 text-sm text-zinc-500">Platform-wide configuration.</p>
 
       <div className="mt-8 max-w-xl">
-        <h2 className="text-sm font-medium text-zinc-300 mb-3">AI Model</h2>
-        <div className="space-y-2">
-          {models.map((m) => (
-            <Card
-              key={m.id}
-              className={`flex items-center gap-4 p-4 cursor-pointer transition-colors ${
-                activeModel === m.id
-                  ? 'border-emerald-500 bg-emerald-950/20'
-                  : 'hover:border-zinc-700'
-              }`}
-              onClick={() => { setActiveModel(m.id); setSaved(false) }}
-            >
-              <div
-                className={`h-3 w-3 rounded-full border-2 ${
-                  activeModel === m.id
-                    ? 'border-emerald-500 bg-emerald-500'
-                    : 'border-zinc-600'
+        <h2 className="text-sm font-medium text-zinc-300 mb-1">Compliance Research Model</h2>
+        <p className="text-xs text-zinc-500 mb-3">
+          Controls which Gemini model is used for jurisdiction &amp; specialization research.
+        </p>
+
+        {loading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading settings...
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {RESEARCH_MODELS.map((m) => (
+              <Card
+                key={m.id}
+                className={`flex items-center gap-4 p-4 cursor-pointer transition-colors ${
+                  pendingMode === m.id
+                    ? 'border-emerald-500 bg-emerald-950/20'
+                    : 'hover:border-zinc-700'
                 }`}
-              />
-              <div>
-                <p className="text-sm font-medium text-zinc-100">{m.label}</p>
-                <p className="text-xs text-zinc-500">{m.description}</p>
-              </div>
-            </Card>
-          ))}
-        </div>
+                onClick={() => setPendingMode(m.id)}
+              >
+                <div
+                  className={`h-3 w-3 rounded-full border-2 shrink-0 ${
+                    pendingMode === m.id
+                      ? 'border-emerald-500 bg-emerald-500'
+                      : 'border-zinc-600'
+                  }`}
+                />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-zinc-100">
+                    {m.label}
+                    <span className="ml-2 text-xs font-normal text-zinc-500">{m.model}</span>
+                  </p>
+                  <p className="text-xs text-zinc-500">{m.description}</p>
+                </div>
+              </Card>
+            ))}
+          </div>
+        )}
 
         <div className="mt-6">
-          <Button onClick={handleSave}>
-            {saved ? 'Saved' : 'Save changes'}
+          <Button onClick={handleSave} disabled={!hasChanges || saving}>
+            {saving ? 'Saving...' : hasChanges ? 'Save changes' : 'Saved'}
           </Button>
         </div>
       </div>
