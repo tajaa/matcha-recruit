@@ -1510,7 +1510,12 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
                 source_url = EXCLUDED.source_url,
                 source_name = EXCLUDED.source_name,
                 requires_written_policy = EXCLUDED.requires_written_policy,
-                applicable_industries = EXCLUDED.applicable_industries,
+                applicable_industries = (
+                    SELECT array_agg(DISTINCT val) FROM unnest(
+                        COALESCE(jurisdiction_requirements.applicable_industries, '{}')
+                        || COALESCE(EXCLUDED.applicable_industries, '{}')
+                    ) AS val
+                ),
                 trigger_conditions = EXCLUDED.trigger_conditions,
                 applicable_entity_types = EXCLUDED.applicable_entity_types,
                 effective_date = EXCLUDED.effective_date,
@@ -2239,7 +2244,12 @@ async def _upsert_jurisdiction_requirements(
                 source_url = EXCLUDED.source_url,
                 source_name = EXCLUDED.source_name,
                 requires_written_policy = EXCLUDED.requires_written_policy,
-                applicable_industries = EXCLUDED.applicable_industries,
+                applicable_industries = (
+                    SELECT array_agg(DISTINCT val) FROM unnest(
+                        COALESCE(jurisdiction_requirements.applicable_industries, '{}')
+                        || COALESCE(EXCLUDED.applicable_industries, '{}')
+                    ) AS val
+                ),
                 trigger_conditions = EXCLUDED.trigger_conditions,
                 applicable_entity_types = EXCLUDED.applicable_entity_types,
                 effective_date = EXCLUDED.effective_date,
@@ -8211,10 +8221,23 @@ async def research_specialization_for_jurisdiction(
     except Exception:
         preemption_rules = {}
 
-    existing = await conn.fetch(
-        "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
-        jurisdiction_id,
-    )
+    # Check which categories this specialization has already researched.
+    # If an industry_tag is provided, only skip categories where requirements
+    # tagged with this specific specialization already exist — so cardiology
+    # and neurology can both research billing_integrity independently.
+    if industry_tag:
+        existing = await conn.fetch(
+            """SELECT DISTINCT category FROM jurisdiction_requirements
+               WHERE jurisdiction_id = $1
+                 AND applicable_industries @> ARRAY[$2::text]""",
+            jurisdiction_id,
+            industry_tag,
+        )
+    else:
+        existing = await conn.fetch(
+            "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+            jurisdiction_id,
+        )
     existing_cats = {r["category"] for r in existing}
     missing = sorted(cat for cat in categories if cat not in existing_cats)
 
