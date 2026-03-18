@@ -122,6 +122,7 @@ async def add_security_headers(request: Request, call_next):
         "img-src 'self' data: https:; "
         "connect-src 'self' wss: https:; "
         "font-src 'self' https:; "
+        "frame-src 'self' https://*.cloudfront.net blob:; "
         "frame-ancestors 'none'"
     )
     response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
