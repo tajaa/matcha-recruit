@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { MeResponse } from '../types/dashboard'
 
@@ -30,8 +30,10 @@ export function useMe() {
       .finally(() => setLoading(false))
   }, [])
 
-  const hasFeature = (f: string): boolean =>
-    !!me?.profile?.enabled_features?.[f]
+  const hasFeature = useCallback(
+    (f: string): boolean => !!me?.profile?.enabled_features?.[f],
+    [me],
+  )
 
   const isHealthcare =
     me?.profile?.industry?.toLowerCase() === 'healthcare'
