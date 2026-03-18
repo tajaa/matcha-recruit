@@ -12,6 +12,13 @@ export interface JurisdictionOption {
 /** @deprecated Use JurisdictionOption */
 export type Jurisdiction = JurisdictionOption
 
+export interface FacilityAttributes {
+  entity_type?: string | null
+  payer_contracts?: string[] | null
+  bed_count?: number | null
+  teaching_hospital?: boolean | null
+}
+
 export interface LocationCreate {
   name?: string
   address?: string
@@ -19,6 +26,7 @@ export interface LocationCreate {
   state: string
   county?: string
   zipcode?: string
+  facility_attributes?: FacilityAttributes
 }
 
 export interface LocationUpdate {
@@ -52,6 +60,7 @@ export interface BusinessLocation {
   data_status: string
   coverage_status: string
   has_local_ordinance: boolean
+  facility_attributes?: FacilityAttributes | null
   source?: 'manual' | 'employee_derived'
   created_at: string
 }

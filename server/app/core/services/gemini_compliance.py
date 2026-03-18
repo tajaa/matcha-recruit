@@ -226,6 +226,21 @@ def _coerce_requirement_shape(req: dict, requested_category: Optional[str]) -> d
         rwp = rwp.strip().lower() not in ("false", "0", "no", "")
     normalized["requires_written_policy"] = bool(rwp) if rwp is not None else None
 
+    # Validate trigger_conditions — must be dict or None
+    tc = normalized.get("trigger_conditions")
+    if tc is not None and not isinstance(tc, dict):
+        normalized["trigger_conditions"] = None
+
+    # Normalize applicable_entity_types to lowercase string array
+    aet = normalized.get("applicable_entity_types")
+    if aet is not None:
+        if isinstance(aet, list):
+            normalized["applicable_entity_types"] = [
+                str(v).lower().strip() for v in aet if v
+            ]
+        else:
+            normalized["applicable_entity_types"] = None
+
     return normalized
 
 
@@ -379,6 +394,51 @@ Respond with JSON:
       "employer_size_threshold": <for leave only: integer or null; else omit>,
       "employee_tenure_months": <for leave only: integer or null; else omit>,
       "employee_hours_threshold": <for leave only: integer or null; else omit>
+    }}
+  ]
+}}
+"""
+
+
+def _build_triggered_category_prompt(
+    location_str: str,
+    category: str,
+    trigger_instruction: str,
+    trigger_label: str,
+    context_section: str = "",
+    preemption_context: str = "",
+) -> str:
+    """Build a prompt for trigger-specific requirements (e.g. FQHC, Medi-Cal)."""
+    return f"""You are a compliance research expert specializing in healthcare regulatory requirements.
+
+{trigger_instruction}
+
+Location: {location_str}
+Category: {category.replace('_', ' ')}
+{context_section}
+{preemption_context}
+
+IMPORTANT: These requirements are ADDITIONAL to baseline rules. Only return requirements SPECIFIC to {trigger_label} facilities/providers. Do NOT repeat general healthcare or labor requirements.
+
+Today's date is {date.today().isoformat()}. Return ONLY requirements currently in effect.
+
+Respond with JSON:
+{{
+  "requirements": [
+    {{
+      "category": "{category}",
+      "jurisdiction_level": "federal" | "state" | "county" | "city",
+      "jurisdiction_name": "Name",
+      "title": "Short title",
+      "description": "Detailed explanation of this {trigger_label}-specific requirement",
+      "current_value": "Requirement summary",
+      "numeric_value": <float or null>,
+      "effective_date": "YYYY-MM-DD" or null,
+      "source_url": "https://...",
+      "source_name": "Source Name",
+      "requires_written_policy": true | false,
+      "trigger_conditions": {{"type": "entity_type or attribute", "value": "trigger value"}},
+      "applicable_entity_types": ["{trigger_label.lower().replace(' ', '_')}"]
     }}
   ]
 }}
@@ -792,6 +852,131 @@ class GeminiComplianceService:
             on_retry=on_retry,
             industry_context=industry_context,
         )
+
+    async def research_triggered_requirements(
+        self,
+        city: str,
+        state: str,
+        county: Optional[str],
+        profile_key: str,
+        profile_label: str,
+        trigger_condition: dict,
+        research_instruction: str,
+        categories: List[str],
+        source_context: str = "",
+    ) -> List[Dict]:
+        """Research requirements specific to a trigger profile (e.g. FQHC, Medi-Cal).
+
+        Returns requirements tagged with the profile's trigger_condition.
+        """
+        if not self._has_api_key():
+            return []
+
+        location_str = f"{city}, {state}"
+        if county:
+            location_str = f"{city}, {county} County, {state}"
+
+        all_requirements = []
+        for category in categories:
+            prompt = _build_triggered_category_prompt(
+                location_str=location_str,
+                category=category,
+                trigger_instruction=research_instruction,
+                trigger_label=profile_label,
+                context_section=source_context,
+            )
+            try:
+                reqs = await self._call_with_retry(
+                    prompt, "requirements", max_retries=2,
+                    label=f"Triggered research {profile_key}/{category}",
+                )
+                if not isinstance(reqs, list) or not reqs:
+                    continue
+                for req in reqs:
+                    req = _coerce_requirement_shape(req, category)
+                    error = _validate_requirement(req)
+                    if error:
+                        print(f"[Triggered Research] Dropping invalid ({profile_key}/{category}): {error}")
+                        continue
+                    # Tag with trigger condition and entity types
+                    req["trigger_conditions"] = trigger_condition
+                    req["applicable_entity_types"] = [profile_key]
+                    # Prefix requirement key to avoid collision with baseline
+                    if req.get("title"):
+                        req["title"] = req["title"][:200]
+                    all_requirements.append(req)
+            except Exception as e:
+                print(f"[Triggered Research] Error researching {profile_key}/{category}: {e}")
+
+        print(
+            f"[Triggered Research] {profile_key}: {len(all_requirements)} requirements "
+            f"for {location_str}"
+        )
+        return all_requirements
+
+    async def infer_facility_profile(
+        self,
+        company_name: str,
+        industry: str,
+        healthcare_specialties: Optional[List[str]],
+        city: str,
+        state: str,
+    ) -> Optional[Dict]:
+        """Use Gemini to classify a healthcare facility from its company name and context.
+
+        Returns a dict with entity_type, inferred_specialties, likely_payer_contracts,
+        confidence, and reasoning — or None if inference fails.
+        """
+        if not self._has_api_key():
+            return None
+
+        specialties_str = ", ".join(healthcare_specialties) if healthcare_specialties else "not specified"
+        prompt = f"""You are a healthcare facility classification expert.
+
+Given the following company information, classify the facility type and infer likely attributes.
+
+Company Name: {company_name}
+Industry: {industry}
+Healthcare Specialties: {specialties_str}
+Location: {city}, {state}
+
+Classify the facility and respond with JSON:
+{{
+  "entity_type": one of "fqhc" | "hospital" | "critical_access_hospital" | "clinic" | "nursing_facility" | "pharmacy" | "behavioral_health" | "ambulatory_surgery_center" | "home_health" | "hospice" | "dialysis_center" | "lab" | "dental" | "other",
+  "inferred_specialties": ["list", "of", "detected", "specialties"],
+  "likely_payer_contracts": subset of ["medicare", "medi_cal", "medicaid_other", "commercial", "tricare"],
+  "confidence": 0.0 to 1.0,
+  "reasoning": "one-line explanation of classification"
+}}
+
+Use the company name and specialties to determine the most likely facility type.
+For California locations, include "medi_cal" in payer contracts if the facility likely accepts Medicaid.
+For non-California locations, use "medicaid_other" instead.
+Most healthcare facilities accept Medicare — include it unless the facility type typically does not (e.g. some dental or cosmetic clinics).
+Return ONLY valid JSON, no markdown fences or explanation text.
+"""
+
+        try:
+            result = await self._call_with_retry(
+                prompt,
+                None,
+                max_retries=1,
+                label=f"Facility inference for {company_name}",
+            )
+            if not isinstance(result, dict):
+                return None
+            # Validate required fields
+            if not result.get("entity_type"):
+                return None
+            # Ensure confidence is a number
+            try:
+                result["confidence"] = float(result.get("confidence", 0))
+            except (ValueError, TypeError):
+                result["confidence"] = 0.0
+            return result
+        except Exception as e:
+            print(f"[Facility Inference] Error inferring profile for {company_name}: {e}")
+            return None
 
     async def discover_jurisdiction_sources(
         self,

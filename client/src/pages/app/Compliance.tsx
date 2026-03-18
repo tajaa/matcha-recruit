@@ -13,6 +13,7 @@ import { ComplianceUpcomingTab } from '../../components/compliance/ComplianceUpc
 import { ComplianceHistoryTab } from '../../components/compliance/ComplianceHistoryTab'
 import { CompliancePostersTab } from '../../components/compliance/CompliancePostersTab'
 import { ComplianceScanProgress } from '../../components/compliance/ComplianceScanProgress'
+import { FacilityProfileBanner } from '../../components/compliance/FacilityProfileBanner'
 import { updateAlertActionPlan } from '../../api/compliance'
 import type { BusinessLocation, LocationCreate, ComplianceActionPlanUpdate } from '../../types/compliance'
 
@@ -184,6 +185,12 @@ export default function Compliance() {
                     {check.scanning ? 'Scanning...' : 'Run Compliance Check'}
                   </Button>
                 </div>
+
+                <FacilityProfileBanner
+                  locationId={selectedId!}
+                  facilityAttributes={selectedLoc?.facility_attributes}
+                  onUpdated={() => data.loadLocations()}
+                />
 
                 <ComplianceScanProgress scanning={check.scanning} messages={check.messages} />
 

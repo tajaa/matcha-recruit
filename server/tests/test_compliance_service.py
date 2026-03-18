@@ -407,3 +407,103 @@ def test_filter_with_preemption_non_wage_prefers_local_when_allowed():
     assert len(filtered) == 1
     assert filtered[0]["jurisdiction_level"] == "city"
     assert filtered[0]["title"] == "San Francisco Overtime"
+
+
+# ── Trigger-aware key computation ──
+
+
+def test_compute_requirement_key_baseline_no_prefix():
+    """Baseline requirements (no applicable_entity_types) should not be prefixed."""
+    req = {"category": "billing_integrity", "title": "False Claims Act"}
+    key = cs._compute_requirement_key(req)
+    assert key.startswith("billing_integrity:")
+    assert not key.startswith("fqhc:")
+
+
+def test_compute_requirement_key_triggered_has_prefix():
+    """Triggered requirements should include entity type prefix."""
+    req = {
+        "category": "billing_integrity",
+        "title": "FQHC Sliding Fee Discount",
+        "applicable_entity_types": ["fqhc"],
+    }
+    key = cs._compute_requirement_key(req)
+    assert key.startswith("fqhc:billing_integrity:")
+
+
+def test_compute_requirement_key_different_triggers_no_collision():
+    """Same title under different triggers should produce different keys."""
+    base = {"category": "billing_integrity", "title": "Provider Enrollment"}
+    fqhc = {**base, "applicable_entity_types": ["fqhc"]}
+    medi_cal = {**base, "applicable_entity_types": ["medi_cal"]}
+
+    key_base = cs._compute_requirement_key(base)
+    key_fqhc = cs._compute_requirement_key(fqhc)
+    key_medi_cal = cs._compute_requirement_key(medi_cal)
+
+    assert key_base != key_fqhc
+    assert key_base != key_medi_cal
+    assert key_fqhc != key_medi_cal
+
+
+def test_compute_requirement_key_empty_entity_types_no_prefix():
+    """Empty applicable_entity_types list should not produce a prefix."""
+    req = {
+        "category": "billing_integrity",
+        "title": "General Billing Rule",
+        "applicable_entity_types": [],
+    }
+    key = cs._compute_requirement_key(req)
+    assert key.startswith("billing_integrity:")
+    assert not key.startswith(":billing_integrity:")
+
+
+# ── _jurisdiction_row_to_dict trigger fields ──
+
+
+def test_jurisdiction_row_to_dict_includes_trigger_fields():
+    """Trigger metadata should be preserved when converting row to dict."""
+    row = {
+        "category": "billing_integrity",
+        "rate_type": None,
+        "jurisdiction_level": "federal",
+        "jurisdiction_name": "United States",
+        "title": "FQHC Sliding Fee",
+        "description": "desc",
+        "current_value": "Required",
+        "numeric_value": None,
+        "source_url": "https://example.gov",
+        "source_name": "HRSA",
+        "effective_date": None,
+        "expiration_date": None,
+        "applicable_industries": None,
+        "trigger_conditions": {"type": "entity_type", "value": "fqhc"},
+        "applicable_entity_types": ["fqhc"],
+    }
+    result = cs._jurisdiction_row_to_dict(row)
+    assert result["trigger_conditions"] == {"type": "entity_type", "value": "fqhc"}
+    assert result["applicable_entity_types"] == ["fqhc"]
+
+
+def test_jurisdiction_row_to_dict_null_trigger_fields():
+    """Baseline rows should have None for trigger fields."""
+    row = {
+        "category": "minimum_wage",
+        "rate_type": "general",
+        "jurisdiction_level": "state",
+        "jurisdiction_name": "California",
+        "title": "CA Minimum Wage",
+        "description": "desc",
+        "current_value": "$16.50",
+        "numeric_value": 16.50,
+        "source_url": "https://dir.ca.gov",
+        "source_name": "DIR",
+        "effective_date": None,
+        "expiration_date": None,
+        "applicable_industries": None,
+        "trigger_conditions": None,
+        "applicable_entity_types": None,
+    }
+    result = cs._jurisdiction_row_to_dict(row)
+    assert result["trigger_conditions"] is None
+    assert result["applicable_entity_types"] is None

@@ -19,6 +19,7 @@ from ..models.auth import CurrentUser
 from ..models.compliance import (
     LocationCreate,
     LocationUpdate,
+    FacilityAttributesUpdate,
     RequirementResponse,
     AlertResponse,
     CheckLogEntry,
@@ -50,6 +51,8 @@ from ..services.compliance_service import (
     set_requirement_pinned,
     get_pinned_requirements,
     get_hierarchical_requirements,
+    update_facility_attributes,
+    get_facility_attributes,
 )
 
 router = APIRouter()
@@ -144,6 +147,7 @@ async def create_location_endpoint(
         "county": location.county,
         "zipcode": location.zipcode,
         "is_active": location.is_active,
+        "facility_attributes": location.facility_attributes,
         "created_at": location.created_at.isoformat(),
     }
 
@@ -251,6 +255,7 @@ async def get_locations_endpoint(
                 "requirements_count": loc.get("requirements_count", 0),
                 "unread_alerts_count": loc.get("unread_alerts_count", 0),
                 "data_status": loc.get("data_status", "needs_research"),
+                "facility_attributes": loc.get("facility_attributes"),
             }
         )
     return result
@@ -299,6 +304,7 @@ async def get_location_endpoint(
         else None,
         "created_at": location.created_at.isoformat(),
         "has_local_ordinance": location.has_local_ordinance,
+        "facility_attributes": location.facility_attributes,
         "requirements_count": counts["requirements_count"],
         "unread_alerts_count": counts["unread_alerts_count"],
     }
@@ -904,3 +910,52 @@ async def get_pinned_requirements_endpoint(
         raise HTTPException(status_code=403, detail="Access denied")
 
     return await get_pinned_requirements(company_id)
+
+
+@router.patch("/locations/{location_id}/facility-attributes")
+async def update_facility_attributes_endpoint(
+    location_id: str,
+    data: FacilityAttributesUpdate,
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        loc_uuid = UUID(location_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid location ID")
+
+    attrs = data.model_dump(exclude_none=False)
+    # Only send fields that were explicitly provided
+    attrs = {k: v for k, v in attrs.items() if v is not None or k in data.model_fields_set}
+
+    result = await update_facility_attributes(loc_uuid, company_id, attrs)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    return {"facility_attributes": result}
+
+
+@router.get("/locations/{location_id}/facility-attributes")
+async def get_facility_attributes_endpoint(
+    location_id: str,
+    company_id: Optional[str] = Query(None),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await resolve_company_id(current_user, company_id)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    try:
+        loc_uuid = UUID(location_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid location ID")
+
+    result = await get_facility_attributes(loc_uuid, company_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Location not found")
+
+    return {"facility_attributes": result}

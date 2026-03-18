@@ -4,6 +4,7 @@ import type {
   BusinessLocation,
   LocationCreate,
   LocationUpdate,
+  FacilityAttributes,
   ComplianceRequirement,
   ComplianceAlert,
   ComplianceSummary,
@@ -42,6 +43,21 @@ export function updateLocation(locationId: string, data: LocationUpdate) {
 
 export function deleteLocation(id: string) {
   return api.delete(`/compliance/locations/${id}`)
+}
+
+// ── Facility Attributes ──
+
+export function fetchFacilityAttributes(locationId: string) {
+  return api.get<{ facility_attributes: FacilityAttributes }>(
+    `/compliance/locations/${locationId}/facility-attributes`
+  )
+}
+
+export function updateFacilityAttributes(locationId: string, data: Partial<FacilityAttributes>) {
+  return api.patch<{ facility_attributes: FacilityAttributes }>(
+    `/compliance/locations/${locationId}/facility-attributes`,
+    data
+  )
 }
 
 // ── Requirements ──

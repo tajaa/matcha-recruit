@@ -1176,6 +1176,8 @@ def _jurisdiction_row_to_dict(jr: dict) -> dict:
         if jr.get("expiration_date")
         else None,
         "applicable_industries": jr.get("applicable_industries"),
+        "trigger_conditions": jr.get("trigger_conditions"),
+        "applicable_entity_types": jr.get("applicable_entity_types"),
     }
 
 
@@ -1447,14 +1449,17 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
     """Upsert requirements to a jurisdiction without deleting existing rows."""
     for req in reqs:
         requirement_key = _compute_requirement_key(req)
+        tc = req.get("trigger_conditions")
+        tc_json = json.dumps(tc) if tc else None
+        aet = req.get("applicable_entity_types")
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
-                 applicable_industries)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16)
+                 applicable_industries, trigger_conditions, applicable_entity_types)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1469,6 +1474,8 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
                 source_name = EXCLUDED.source_name,
                 requires_written_policy = EXCLUDED.requires_written_policy,
                 applicable_industries = EXCLUDED.applicable_industries,
+                trigger_conditions = EXCLUDED.trigger_conditions,
+                applicable_entity_types = EXCLUDED.applicable_entity_types,
                 effective_date = EXCLUDED.effective_date,
                 expiration_date = EXCLUDED.expiration_date,
                 last_verified_at = NOW(),
@@ -1493,6 +1500,8 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
             parse_date(req.get("expiration_date")),
             req.get("requires_written_policy"),
             req.get("applicable_industries"),
+            tc_json,
+            aet,
         )
 
 
@@ -1617,6 +1626,81 @@ async def _research_healthcare_requirements_for_jurisdiction(
             f"All healthcare categories failed for {location_name}: "
             f"{', '.join(failed_categories)}"
         )
+
+    # ── Phase 2: Triggered research based on facility attributes ──
+    from ..compliance_registry import get_activated_profiles
+
+    try:
+        loc_rows = await conn.fetch(
+            "SELECT facility_attributes FROM business_locations WHERE jurisdiction_id = $1",
+            jurisdiction_id,
+        )
+        all_facility_attrs = set()
+        for lr in loc_rows:
+            fa = lr["facility_attributes"]
+            if isinstance(fa, str):
+                try:
+                    fa = json.loads(fa)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+            if fa:
+                # Collect unique profiles across all linked locations
+                for profile in get_activated_profiles(fa):
+                    all_facility_attrs.add(profile.key)
+    except Exception as e:
+        print(f"[Healthcare Research] Error loading facility attributes: {e}")
+        all_facility_attrs = set()
+
+    if all_facility_attrs:
+        from ..compliance_registry import TRIGGER_PROFILES
+
+        activated_profiles = [p for p in TRIGGER_PROFILES if p.key in all_facility_attrs]
+        for profile in activated_profiles:
+            trigger_cats = [
+                c for c in profile.applicable_categories
+                if c in HEALTHCARE_CATEGORIES or c in MEDICAL_COMPLIANCE_CATEGORIES
+            ]
+            if not trigger_cats:
+                continue
+
+            print(
+                f"[Healthcare Research] Phase 2: Triggered research for "
+                f"{profile.label} ({len(trigger_cats)} categories)"
+            )
+            if progress_callback:
+                progress_callback(
+                    0, 0,
+                    f"Researching {profile.label}-specific requirements...",
+                )
+
+            try:
+                triggered_reqs = await service.research_triggered_requirements(
+                    city=city,
+                    state=state,
+                    county=county,
+                    profile_key=profile.key,
+                    profile_label=profile.label,
+                    trigger_condition=profile.trigger_condition,
+                    research_instruction=profile.research_instruction,
+                    categories=trigger_cats,
+                    source_context=source_context,
+                )
+
+                for req in triggered_reqs:
+                    _clamp_varchar_fields(req)
+                    if not req.get("applicable_industries"):
+                        req["applicable_industries"] = ["healthcare"]
+
+                if triggered_reqs:
+                    await _upsert_requirements_additive(conn, jurisdiction_id, triggered_reqs)
+                    total_new += len(triggered_reqs)
+                    added_requirements.extend(triggered_reqs)
+                    print(
+                        f"[Healthcare Research]   -> {len(triggered_reqs)} "
+                        f"{profile.label}-specific requirements saved"
+                    )
+            except Exception as e:
+                print(f"[Healthcare Research]   -> Error in triggered research for {profile.key}: {e}")
 
     return {
         "new": total_new,
@@ -2084,14 +2168,17 @@ async def _upsert_jurisdiction_requirements(
     for req in reqs:
         requirement_key = _compute_requirement_key(req)
         new_keys.add(requirement_key)
+        tc = req.get("trigger_conditions")
+        tc_json = json.dumps(tc) if tc else None
+        aet = req.get("applicable_entity_types")
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
-                 applicable_industries)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16)
+                 applicable_industries, trigger_conditions, applicable_entity_types)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -2106,6 +2193,8 @@ async def _upsert_jurisdiction_requirements(
                 source_name = EXCLUDED.source_name,
                 requires_written_policy = EXCLUDED.requires_written_policy,
                 applicable_industries = EXCLUDED.applicable_industries,
+                trigger_conditions = EXCLUDED.trigger_conditions,
+                applicable_entity_types = EXCLUDED.applicable_entity_types,
                 effective_date = EXCLUDED.effective_date,
                 expiration_date = EXCLUDED.expiration_date,
                 last_verified_at = NOW(),
@@ -2130,6 +2219,8 @@ async def _upsert_jurisdiction_requirements(
             parse_date(req.get("expiration_date")),
             req.get("requires_written_policy"),
             req.get("applicable_industries"),
+            tc_json,
+            aet,
         )
 
     # Remove jurisdiction rows not in new result set
@@ -2538,6 +2629,12 @@ def _compute_requirement_key(req) -> str:
             else (_normalize_rate_type(rate_type) or "general")
         )
         return f"{cat_key}:{normalized_rate_type}"
+
+    # Prefix triggered requirements to avoid collision with baseline keys
+    aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
+    if aet and isinstance(aet, list) and len(aet) > 0:
+        prefix = aet[0]
+        return f"{prefix}:{cat_key}:{base_key}"
 
     return f"{cat_key}:{base_key}"
 
@@ -3589,10 +3686,11 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
     from ...database import get_connection
 
     async with get_connection() as conn:
+        fa_json = json.dumps(data.facility_attributes) if data.facility_attributes else None
         location_id = await conn.fetchval(
             """
-            INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            INSERT INTO business_locations (company_id, name, address, city, state, county, zipcode, facility_attributes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING id
             """,
             company_id,
@@ -3602,6 +3700,7 @@ async def create_location(company_id: UUID, data: LocationCreate) -> tuple:
             data.state.upper(),
             data.county,
             data.zipcode or "",
+            fa_json,
         )
 
         # Resolve county from zip if not provided
@@ -3764,6 +3863,9 @@ async def run_compliance_check_stream(
     cached_requirements_for_merge: List[Dict[str, Any]] = []
     research_categories: Optional[List[str]] = None
     industry_context: str = ""
+    source_context: str = ""
+    corrections_context: str = ""
+    preemption_rules: Dict[str, bool] = {}
 
     async with get_connection() as conn:
         # Load industry profile for industry-aware research prompts
@@ -3790,6 +3892,58 @@ async def run_compliance_check_stream(
             has_local_ordinance = await _lookup_has_local_ordinance(
                 conn, location.city, location.state
             )
+
+            # ============================================================
+            # FACILITY INFERENCE: Auto-populate facility_attributes for healthcare companies
+            # ============================================================
+            canonical_industry = industry_profile.get("canonical_industry") if industry_profile else None
+            if canonical_industry == "healthcare":
+                fa = location.facility_attributes
+                if isinstance(fa, str):
+                    try:
+                        fa = json.loads(fa)
+                    except (json.JSONDecodeError, TypeError):
+                        fa = None
+                has_entity_type = fa and fa.get("entity_type")
+                if not has_entity_type:
+                    try:
+                        comp_row = await conn.fetchrow(
+                            "SELECT name, industry, healthcare_specialties FROM companies WHERE id = $1",
+                            company_id,
+                        )
+                        if comp_row:
+                            inference = await service.infer_facility_profile(
+                                company_name=comp_row["name"] or "",
+                                industry=comp_row["industry"] or "",
+                                healthcare_specialties=comp_row["healthcare_specialties"],
+                                city=location.city,
+                                state=location.state,
+                            )
+                            if inference and inference.get("confidence", 0) >= 0.5:
+                                inferred_attrs = {
+                                    "entity_type": inference["entity_type"],
+                                    "payer_contracts": inference.get("likely_payer_contracts", []),
+                                }
+                                # Inline update to reuse existing connection
+                                merged = (fa or {})
+                                merged.update(inferred_attrs)
+                                await conn.execute(
+                                    "UPDATE business_locations SET facility_attributes = $1, updated_at = NOW() WHERE id = $2",
+                                    json.dumps(merged), location_id,
+                                )
+                                # Reload location so Tier 4 sees the new attrs
+                                row = await conn.fetchrow(
+                                    "SELECT * FROM business_locations WHERE id = $1 AND company_id = $2",
+                                    location_id, company_id,
+                                )
+                                if row:
+                                    location = BusinessLocation(**dict(row))
+                                yield {
+                                    "type": "facility_inference",
+                                    "message": f"Detected: {inference['entity_type']}",
+                                }
+                    except Exception as e:
+                        print(f"[Facility Inference] Error during auto-inference: {e}")
 
             # ============================================================
             # TIER 1: Check for fresh structured data from authoritative sources
@@ -4196,6 +4350,120 @@ async def run_compliance_check_stream(
                         "type": "fallback",
                         "message": "Using cached data (live research unavailable)",
                     }
+
+            # ============================================================
+            # TIER 4: Triggered research based on facility attributes
+            # ============================================================
+            from ..compliance_registry import get_activated_profiles as _get_activated_profiles
+
+            fa = location.facility_attributes
+            if isinstance(fa, str):
+                try:
+                    fa = json.loads(fa)
+                except (json.JSONDecodeError, TypeError):
+                    fa = None
+            activated_profiles = _get_activated_profiles(fa) if fa else []
+            failed_profile_keys: set = set()
+            if activated_profiles:
+                # Lazy-init Gemini context if Tier 3 didn't run
+                if not source_context:
+                    known_sources = await get_known_sources(conn, jurisdiction_id)
+                    source_context = build_context_prompt(known_sources)
+
+                for profile in activated_profiles:
+                    # Check if jurisdiction already has triggered requirements for this profile
+                    existing_triggered = await conn.fetchval(
+                        """SELECT COUNT(*) FROM jurisdiction_requirements
+                           WHERE jurisdiction_id = $1
+                             AND applicable_entity_types @> $2::jsonb""",
+                        jurisdiction_id,
+                        json.dumps([profile.key]),
+                    )
+                    if existing_triggered and existing_triggered > 0:
+                        # Load existing triggered requirements and add to results
+                        triggered_rows = await conn.fetch(
+                            """SELECT * FROM jurisdiction_requirements
+                               WHERE jurisdiction_id = $1
+                                 AND applicable_entity_types @> $2::jsonb""",
+                            jurisdiction_id,
+                            json.dumps([profile.key]),
+                        )
+                        for tr in triggered_rows:
+                            requirements.append(_jurisdiction_row_to_dict(dict(tr)))
+                        continue
+
+                    yield {
+                        "type": "trigger_research",
+                        "message": f"Researching {profile.label}-specific requirements...",
+                    }
+                    try:
+                        trigger_cats = list(profile.applicable_categories)
+                        triggered_reqs = await service.research_triggered_requirements(
+                            city=location.city,
+                            state=location.state,
+                            county=location.county,
+                            profile_key=profile.key,
+                            profile_label=profile.label,
+                            trigger_condition=profile.trigger_condition,
+                            research_instruction=profile.research_instruction,
+                            categories=trigger_cats,
+                            source_context=source_context,
+                        )
+                        if triggered_reqs:
+                            for req in triggered_reqs:
+                                _clamp_varchar_fields(req)
+                            await _upsert_requirements_additive(
+                                conn, jurisdiction_id, triggered_reqs
+                            )
+                            requirements.extend(triggered_reqs)
+                    except Exception as e:
+                        failed_profile_keys.add(profile.key)
+                        print(f"[Tier 4] Error researching {profile.key}: {e}")
+
+            # ── Gap detection: flag missing specialty policies for admin ──
+            if activated_profiles:
+                req_categories = {
+                    r.get("category") for r in requirements if r.get("category")
+                }
+                for profile in activated_profiles:
+                    if profile.key in failed_profile_keys:
+                        continue
+                    for cat in profile.applicable_categories:
+                        if cat not in req_categories:
+                            # Deduplicate: skip if a missing_specialty alert already exists
+                            existing_alert = await conn.fetchval(
+                                """SELECT id FROM compliance_alerts
+                                   WHERE location_id = $1 AND alert_type = 'missing_specialty'
+                                     AND category = $2 AND metadata->>'trigger_profile' = $3
+                                     AND status != 'dismissed'""",
+                                location_id, cat, profile.key,
+                            )
+                            if existing_alert:
+                                continue
+                            try:
+                                cat_label = cat.replace("_", " ").title()
+                                await _create_alert(
+                                    conn,
+                                    location_id,
+                                    company_id,
+                                    None,
+                                    f"Missing {cat_label} policies for {profile.label}",
+                                    (
+                                        f"Facility profile indicates {profile.label} requirements apply "
+                                        f"but no {cat_label} policies found. Admin review recommended."
+                                    ),
+                                    "info",
+                                    cat,
+                                    alert_type="missing_specialty",
+                                    metadata={
+                                        "inferred_profile": profile.key,
+                                        "missing_category": cat,
+                                        "trigger_profile": profile.key,
+                                        "source": "gemini_inference",
+                                    },
+                                )
+                            except Exception as e:
+                                print(f"[Gap Detection] Error creating alert for {cat}/{profile.key}: {e}")
 
             if not requirements:
                 await conn.execute(
@@ -4717,6 +4985,64 @@ async def get_location(
         if row:
             return BusinessLocation(**dict(row))
         return None
+
+
+async def update_facility_attributes(
+    location_id: UUID, company_id: UUID, attrs: dict
+) -> Optional[dict]:
+    """Merge new facility attributes into existing JSONB and return merged result."""
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id, facility_attributes FROM business_locations WHERE id = $1 AND company_id = $2",
+            location_id, company_id,
+        )
+        if not row:
+            return None
+
+        existing = row["facility_attributes"]
+        if isinstance(existing, str):
+            try:
+                existing = json.loads(existing)
+            except (json.JSONDecodeError, TypeError):
+                existing = {}
+        existing = existing or {}
+
+        # Merge: new values overwrite, None values remove keys
+        for k, v in attrs.items():
+            if v is None:
+                existing.pop(k, None)
+            else:
+                existing[k] = v
+
+        await conn.execute(
+            "UPDATE business_locations SET facility_attributes = $1, updated_at = NOW() WHERE id = $2",
+            json.dumps(existing), location_id,
+        )
+        return existing
+
+
+async def get_facility_attributes(
+    location_id: UUID, company_id: UUID
+) -> Optional[dict]:
+    """Return facility_attributes for a location, or None if not found."""
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT facility_attributes FROM business_locations WHERE id = $1 AND company_id = $2",
+            location_id, company_id,
+        )
+        if not row:
+            return None
+        fa = row["facility_attributes"]
+        if isinstance(fa, str):
+            try:
+                return json.loads(fa)
+            except (json.JSONDecodeError, TypeError):
+                return {}
+        return fa or {}
 
 
 async def update_location(
@@ -6206,6 +6532,9 @@ async def run_compliance_check_background(
     cached_requirements_for_merge: List[Dict[str, Any]] = []
     research_categories: Optional[List[str]] = None
     industry_context: str = ""
+    source_context: str = ""
+    corrections_context: str = ""
+    preemption_rules: Dict[str, bool] = {}
 
     async with get_connection() as conn:
         # Load industry profile for industry-aware research prompts
@@ -6232,6 +6561,54 @@ async def run_compliance_check_background(
             has_local_ordinance = await _lookup_has_local_ordinance(
                 conn, location.city, location.state
             )
+
+            # ── Facility Inference for healthcare companies ──
+            canonical_industry = industry_profile.get("canonical_industry") if industry_profile else None
+            if canonical_industry == "healthcare":
+                fa = location.facility_attributes
+                if isinstance(fa, str):
+                    try:
+                        fa = json.loads(fa)
+                    except (json.JSONDecodeError, TypeError):
+                        fa = None
+                has_entity_type = fa and fa.get("entity_type")
+                if not has_entity_type:
+                    try:
+                        comp_row = await conn.fetchrow(
+                            "SELECT name, industry, healthcare_specialties FROM companies WHERE id = $1",
+                            company_id,
+                        )
+                        if comp_row:
+                            inference = await service.infer_facility_profile(
+                                company_name=comp_row["name"] or "",
+                                industry=comp_row["industry"] or "",
+                                healthcare_specialties=comp_row["healthcare_specialties"],
+                                city=location.city,
+                                state=location.state,
+                            )
+                            if inference and inference.get("confidence", 0) >= 0.5:
+                                inferred_attrs = {
+                                    "entity_type": inference["entity_type"],
+                                    "payer_contracts": inference.get("likely_payer_contracts", []),
+                                }
+                                merged = (fa or {})
+                                merged.update(inferred_attrs)
+                                await conn.execute(
+                                    "UPDATE business_locations SET facility_attributes = $1, updated_at = NOW() WHERE id = $2",
+                                    json.dumps(merged), location_id,
+                                )
+                                row = await conn.fetchrow(
+                                    "SELECT * FROM business_locations WHERE id = $1 AND company_id = $2",
+                                    location_id, company_id,
+                                )
+                                if row:
+                                    location = BusinessLocation(**dict(row))
+                                print(
+                                    f"[Facility Inference] Auto-set {inference['entity_type']} "
+                                    f"for {location.name or location.city}"
+                                )
+                    except Exception as e:
+                        print(f"[Facility Inference] Error during auto-inference: {e}")
 
             # TIER 1: Check for fresh structured data from authoritative sources
             from .structured_data import StructuredDataService
@@ -6489,6 +6866,111 @@ async def run_compliance_check_background(
                     print(
                         f"[Compliance] Background: falling back to stale repository data ({len(requirements)} cached requirements)"
                     )
+
+            # ── TIER 4: Triggered research based on facility attributes ──
+            from ..compliance_registry import get_activated_profiles as _get_activated_profiles_bg
+
+            fa_bg = location.facility_attributes
+            if isinstance(fa_bg, str):
+                try:
+                    fa_bg = json.loads(fa_bg)
+                except (json.JSONDecodeError, TypeError):
+                    fa_bg = None
+            activated_profiles_bg = _get_activated_profiles_bg(fa_bg) if fa_bg else []
+            failed_profile_keys_bg: set = set()
+            if activated_profiles_bg:
+                if not source_context:
+                    known_sources = await get_known_sources(conn, jurisdiction_id)
+                    source_context = build_context_prompt(known_sources)
+
+                for profile in activated_profiles_bg:
+                    existing_triggered = await conn.fetchval(
+                        """SELECT COUNT(*) FROM jurisdiction_requirements
+                           WHERE jurisdiction_id = $1
+                             AND applicable_entity_types @> $2::jsonb""",
+                        jurisdiction_id,
+                        json.dumps([profile.key]),
+                    )
+                    if existing_triggered and existing_triggered > 0:
+                        triggered_rows = await conn.fetch(
+                            """SELECT * FROM jurisdiction_requirements
+                               WHERE jurisdiction_id = $1
+                                 AND applicable_entity_types @> $2::jsonb""",
+                            jurisdiction_id,
+                            json.dumps([profile.key]),
+                        )
+                        for tr in triggered_rows:
+                            requirements.append(_jurisdiction_row_to_dict(dict(tr)))
+                        continue
+
+                    print(f"[Tier 4] Researching {profile.label}-specific requirements...")
+                    try:
+                        trigger_cats = list(profile.applicable_categories)
+                        triggered_reqs = await service.research_triggered_requirements(
+                            city=location.city,
+                            state=location.state,
+                            county=location.county,
+                            profile_key=profile.key,
+                            profile_label=profile.label,
+                            trigger_condition=profile.trigger_condition,
+                            research_instruction=profile.research_instruction,
+                            categories=trigger_cats,
+                            source_context=source_context,
+                        )
+                        if triggered_reqs:
+                            for req in triggered_reqs:
+                                _clamp_varchar_fields(req)
+                            await _upsert_requirements_additive(
+                                conn, jurisdiction_id, triggered_reqs
+                            )
+                            requirements.extend(triggered_reqs)
+                    except Exception as e:
+                        failed_profile_keys_bg.add(profile.key)
+                        print(f"[Tier 4] Error researching {profile.key}: {e}")
+
+            # ── Gap detection: flag missing specialty policies for admin ──
+            if activated_profiles_bg:
+                req_categories = {
+                    r.get("category") for r in requirements if r.get("category")
+                }
+                for profile in activated_profiles_bg:
+                    if profile.key in failed_profile_keys_bg:
+                        continue
+                    for cat in profile.applicable_categories:
+                        if cat not in req_categories:
+                            existing_alert = await conn.fetchval(
+                                """SELECT id FROM compliance_alerts
+                                   WHERE location_id = $1 AND alert_type = 'missing_specialty'
+                                     AND category = $2 AND metadata->>'trigger_profile' = $3
+                                     AND status != 'dismissed'""",
+                                location_id, cat, profile.key,
+                            )
+                            if existing_alert:
+                                continue
+                            try:
+                                cat_label = cat.replace("_", " ").title()
+                                await _create_alert(
+                                    conn,
+                                    location_id,
+                                    company_id,
+                                    None,
+                                    f"Missing {cat_label} policies for {profile.label}",
+                                    (
+                                        f"Facility profile indicates {profile.label} requirements apply "
+                                        f"but no {cat_label} policies found. Admin review recommended."
+                                    ),
+                                    "info",
+                                    cat,
+                                    alert_type="missing_specialty",
+                                    metadata={
+                                        "inferred_profile": profile.key,
+                                        "missing_category": cat,
+                                        "trigger_profile": profile.key,
+                                        "source": "gemini_inference",
+                                    },
+                                )
+                            except Exception as e:
+                                print(f"[Gap Detection] Error creating alert for {cat}/{profile.key}: {e}")
 
             if not requirements:
                 await conn.execute(
@@ -7272,6 +7754,61 @@ def determine_governing_requirement(
     return results
 
 
+def _compute_triggered_by(
+    trigger_conditions: Optional[Dict[str, Any]],
+    facility_attributes: Optional[Dict[str, Any]],
+) -> Optional[List[Dict[str, Any]]]:
+    """Walk trigger condition tree and return activation dicts for the response.
+
+    Returns None for universal requirements (no trigger), or a list of
+    TriggerActivation-shaped dicts showing which conditions matched.
+    """
+    if trigger_conditions is None:
+        return None
+
+    activations: List[Dict[str, Any]] = []
+    _collect_activations(trigger_conditions, facility_attributes or {}, activations)
+    return activations or None
+
+
+def _collect_activations(
+    cond: Dict[str, Any],
+    attrs: Dict[str, Any],
+    out: List[Dict[str, Any]],
+) -> None:
+    """Recursively collect trigger activation results from a condition tree."""
+    # Compound conditions — recurse into children
+    if "op" in cond:
+        for child in cond.get("conditions", []):
+            _collect_activations(child, attrs, out)
+        return
+
+    ctype = cond.get("type")
+
+    if ctype == "entity_type":
+        value = cond.get("value")
+        entity = attrs.get("entity_type")
+        out.append({
+            "trigger_type": "entity_type",
+            "trigger_key": None,
+            "trigger_value": value,
+            "matched": entity == value,
+        })
+
+    elif ctype == "attribute":
+        key = cond.get("key", "")
+        operator = cond.get("operator", "eq")
+        expected = cond.get("value")
+        actual = attrs.get(key)
+        matched = _eval_condition(cond, attrs)
+        out.append({
+            "trigger_type": "attribute",
+            "trigger_key": key,
+            "trigger_value": expected,
+            "matched": matched,
+        })
+
+
 async def get_hierarchical_requirements(
     location_id: UUID, company_id: UUID, category: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
@@ -7371,7 +7908,7 @@ async def get_hierarchical_requirements(
                     "statute_citation": row.get("statute_citation"),
                     "status": row.get("req_status", "active"),
                     "canonical_key": row.get("canonical_key"),
-                    "triggered_by": None,  # v2: populated by trigger evaluator
+                    "triggered_by": _compute_triggered_by(row.get("trigger_conditions"), facility_attrs),
                 })
                 total_requirements += 1
 
@@ -7402,7 +7939,7 @@ async def get_hierarchical_requirements(
                     "statute_citation": gov.get("statute_citation"),
                     "status": gov.get("req_status", "active"),
                     "canonical_key": gov.get("canonical_key"),
-                    "triggered_by": None,
+                    "triggered_by": _compute_triggered_by(gov.get("trigger_conditions"), facility_attrs),
                 },
                 "precedence": precedence,
                 "all_levels": all_levels,

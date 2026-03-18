@@ -114,6 +114,7 @@ class BusinessLocation(BaseModel):
     source: Optional[str] = "manual"
     coverage_status: Optional[str] = "covered"
     employee_count: Optional[int] = 0
+    facility_attributes: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
 
@@ -169,6 +170,7 @@ class LocationCreate(BaseModel):
     state: str
     county: Optional[str] = None
     zipcode: Optional[str] = None
+    facility_attributes: Optional[dict] = None
 
 
 class LocationUpdate(BaseModel):
@@ -179,6 +181,13 @@ class LocationUpdate(BaseModel):
     county: Optional[str] = None
     zipcode: Optional[str] = None
     is_active: Optional[bool] = None
+
+
+class FacilityAttributesUpdate(BaseModel):
+    entity_type: Optional[str] = None
+    payer_contracts: Optional[List[str]] = None
+    bed_count: Optional[int] = None
+    teaching_hospital: Optional[bool] = None
 
 
 class AutoCheckSettings(BaseModel):
