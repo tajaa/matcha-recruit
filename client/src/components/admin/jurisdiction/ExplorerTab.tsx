@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Button, Input } from '../../ui'
+import { api } from '../../../api/client'
 import { CATEGORY_SHORT_LABELS } from '../../../generated/complianceCategories'
-import type { FlatCity, CatCoverage } from './types'
+import type { FlatCity, CatCoverage, PolicyOverview, PolicyDomainSummary } from './types'
 import { fmtDate } from './utils'
 import CategoryCoveragePanel from './CategoryCoveragePanel'
 
@@ -37,6 +38,17 @@ export default function ExplorerTab({
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
+
+  // Policy overview data for sidebar requirement counts
+  const [policySummary, setPolicySummary] = useState<PolicyDomainSummary[] | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    api.get<PolicyOverview>('/admin/jurisdictions/policy-overview')
+      .then((data) => { if (!cancelled) setPolicySummary(data.domains) })
+      .catch(() => { if (!cancelled) setPolicySummary(null) })
+    return () => { cancelled = true }
+  }, [])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -124,20 +136,20 @@ export default function ExplorerTab({
   }
 
   return (
-    <div className={selectedCityId ? 'grid grid-cols-5 gap-4' : ''}>
-      <div className={selectedCityId ? 'col-span-2' : ''}>
-        {/* Category Coverage Panel */}
-        {!selectedCityId && (
-          <CategoryCoveragePanel
-            coverageData={categoryCoverage}
-            selectedCategory={filterCategory}
-            onSelectCategory={(cat) => {
-              setFilterCategory(cat)
-              setPage(0)
-            }}
-          />
-        )}
+    <div className="flex gap-4">
+      {/* Category sidebar — always visible */}
+      <CategoryCoveragePanel
+        coverageData={categoryCoverage}
+        selectedCategory={filterCategory}
+        onSelectCategory={(cat) => {
+          setFilterCategory(cat)
+          setPage(0)
+        }}
+        policySummary={policySummary}
+      />
 
+      {/* Main table area */}
+      <div className="flex-1 min-w-0">
         <div className="border border-zinc-800 rounded-lg">
           {/* Filter bar */}
           <div className="px-3 py-2 border-b border-zinc-800/60 flex flex-wrap items-center gap-2">
