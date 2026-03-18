@@ -7,6 +7,7 @@ import {
 } from '../../generated/complianceCategories'
 import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 import ExplorerTab from '../../components/admin/jurisdiction/ExplorerTab'
+import PolicyBrowserTab from '../../components/admin/jurisdiction/PolicyBrowserTab'
 import ProfileEditorModal from '../../components/admin/jurisdiction/ProfileEditorModal'
 import SpecialtyFilterSelect from '../../components/admin/jurisdiction/SpecialtyFilterSelect'
 import { useIndustryProfiles } from '../../components/admin/jurisdiction/useIndustryProfiles'
@@ -15,7 +16,7 @@ import type { DataOverview, BookmarkedReq, FlatCity, CatCoverage, SpecialtyFilte
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'explorer' | 'quality' | 'preemption' | 'bookmarks'
+type Tab = 'explorer' | 'policies' | 'quality' | 'preemption' | 'bookmarks'
 
 function getCategoryLabel(cat: string) {
   return CATEGORY_LABELS[cat] ?? cat
@@ -251,6 +252,7 @@ export default function JurisdictionData() {
       <div className="flex items-center gap-1 mt-5 mb-5">
         {([
           { id: 'explorer' as Tab, label: 'Explorer' },
+          { id: 'policies' as Tab, label: 'Policies' },
           { id: 'quality' as Tab, label: 'Data Quality' },
           { id: 'preemption' as Tab, label: 'Preemption' },
           { id: 'bookmarks' as Tab, label: 'Bookmarks' },
@@ -260,6 +262,9 @@ export default function JurisdictionData() {
           </Button>
         ))}
       </div>
+
+      {/* ── Policies Tab ── */}
+      {tab === 'policies' && <PolicyBrowserTab />}
 
       {/* ── Explorer Tab ── */}
       {tab === 'explorer' && (

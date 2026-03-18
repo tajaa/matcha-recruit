@@ -98,3 +98,54 @@ export type IndustryProfile = {
   created_at: string | null
   updated_at: string | null
 }
+
+// ── Policy Browser types ────────────────────────────────────────────────────
+
+export type PolicyCategorySummary = {
+  slug: string
+  name: string
+  group: string
+  requirement_count: number
+  jurisdiction_count: number
+  tier_breakdown: { tier_1_government: number; tier_2_official_secondary: number; tier_3_aggregator: number }
+  latest_verified: string | null
+}
+
+export type PolicyDomainSummary = {
+  domain: string
+  label: string
+  category_count: number
+  requirement_count: number
+  categories: PolicyCategorySummary[]
+}
+
+export type PolicyOverview = {
+  summary: {
+    total_requirements: number
+    total_categories_with_data: number
+    total_domains: number
+    total_jurisdictions: number
+  }
+  domains: PolicyDomainSummary[]
+}
+
+export type PolicyRequirementDetail = {
+  id: string
+  jurisdiction_name: string
+  jurisdiction_level: string
+  state: string
+  city: string | null
+  title: string
+  current_value: string | null
+  numeric_value: number | null
+  source_tier: string
+  status: string
+  statute_citation: string | null
+  effective_date: string | null
+  last_verified_at: string | null
+}
+
+export type PolicyCategoryDetail = {
+  category: { slug: string; name: string; domain: string; group: string }
+  requirements: PolicyRequirementDetail[]
+}

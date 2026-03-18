@@ -27,9 +27,7 @@ Thumbs.db
 
 # Screenshots
 Screenshot *.png
-.screenshots/*.png
-.screenshots/*.jpg
-.screenshots/*.gif
+.screenshots/
 
 # Logs
 *.log
@@ -112,3 +110,4 @@ desktop/Matcha/build/
 *.pdf
 DEAL_PROPOSAL_HEALTHCARE.md
 NOTES - Matcha_Healthcare_Proposal.pdf
+scripts/grab-ss.sh
