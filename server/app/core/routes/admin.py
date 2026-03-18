@@ -2852,6 +2852,28 @@ async def jurisdiction_data_overview(bust: bool = False):
             ORDER BY j.state, j.city
         """)
 
+        # ── 1b. Inherited categories from state + federal jurisdictions ──
+        inherited_rows = await conn.fetch("""
+            SELECT j.state, j.level::text AS level,
+                   COALESCE(
+                       array_agg(DISTINCT jr.category) FILTER (WHERE jr.category IS NOT NULL),
+                       '{}'
+                   ) AS categories
+            FROM jurisdictions j
+            LEFT JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
+            WHERE j.level IN ('state', 'federal')
+            GROUP BY j.state, j.level
+        """)
+
+        federal_categories: set = set()
+        state_categories: dict[str, set] = {}
+        for irow in inherited_rows:
+            cats = set(irow["categories"] or [])
+            if irow["level"] == "federal":
+                federal_categories |= cats
+            else:
+                state_categories.setdefault(irow["state"], set()).update(cats)
+
         # ── 2. Preemption rules ──
         try:
             preemption_rows = await conn.fetch("""
@@ -2891,7 +2913,9 @@ async def jurisdiction_data_overview(bust: bool = False):
         if state not in states_map:
             states_map[state] = {"state": state, "cities": []}
 
-        cats_present = [c for c in (row["categories"] or []) if c in req_cats]
+        direct_cats = set(c for c in (row["categories"] or []) if c in req_cats)
+        inherited = (federal_categories | state_categories.get(state, set())) & req_cats
+        cats_present = sorted(direct_cats | inherited)
         cats_missing = sorted(req_cats - set(cats_present))
         req_list = json.loads(row["req_details"]) if isinstance(row["req_details"], str) else row["req_details"]
 
@@ -3001,6 +3025,184 @@ async def jurisdiction_data_overview(bust: bool = False):
     _data_overview_cache = result
     _data_overview_cached_at = now
     return result
+
+
+# ── Category → domain mapping (mirrors CATEGORY_GROUPS in complianceCategories.ts) ──
+_CATEGORY_DOMAIN: dict[str, str] = {}
+for _cat in ["minimum_wage", "overtime", "sick_leave", "meal_breaks", "pay_frequency",
+             "final_pay", "minor_work_permit", "scheduling_reporting", "leave",
+             "workplace_safety", "workers_comp", "anti_discrimination"]:
+    _CATEGORY_DOMAIN[_cat] = "labor"
+for _cat in ["business_license", "tax_rate", "posting_requirements"]:
+    _CATEGORY_DOMAIN[_cat] = "supplementary"
+for _cat in ["hipaa_privacy", "billing_integrity", "clinical_safety", "healthcare_workforce",
+             "corporate_integrity", "research_consent", "state_licensing", "emergency_preparedness"]:
+    _CATEGORY_DOMAIN[_cat] = "healthcare"
+for _cat in ["radiation_safety", "chemotherapy_handling", "tumor_registry",
+             "oncology_clinical_trials", "oncology_patient_rights"]:
+    _CATEGORY_DOMAIN[_cat] = "oncology"
+for _cat in ["health_it", "quality_reporting", "cybersecurity", "environmental_safety",
+             "pharmacy_drugs", "payer_relations", "reproductive_behavioral", "pediatric_vulnerable",
+             "telehealth", "medical_devices", "transplant_organ", "antitrust",
+             "tax_exempt", "language_access", "records_retention", "marketing_comms",
+             "emerging_regulatory"]:
+    _CATEGORY_DOMAIN[_cat] = "medical_compliance"
+
+_DOMAIN_LABELS: dict[str, str] = {
+    "labor": "Labor",
+    "supplementary": "Supplementary",
+    "healthcare": "Healthcare",
+    "oncology": "Oncology",
+    "medical_compliance": "Medical Compliance",
+}
+
+_CATEGORY_LABELS: dict[str, str] = {
+    "minimum_wage": "Minimum Wage", "overtime": "Overtime", "sick_leave": "Sick Leave",
+    "meal_breaks": "Meal & Rest Breaks", "pay_frequency": "Pay Frequency", "final_pay": "Final Pay",
+    "minor_work_permit": "Minor Work Permits", "scheduling_reporting": "Scheduling & Reporting Time",
+    "leave": "Leave", "workplace_safety": "Workplace Safety", "workers_comp": "Workers' Comp",
+    "anti_discrimination": "Anti-Discrimination", "business_license": "Business License",
+    "tax_rate": "Tax Rate", "posting_requirements": "Posting Requirements",
+    "hipaa_privacy": "HIPAA Privacy & Security", "billing_integrity": "Billing & Financial Integrity",
+    "clinical_safety": "Clinical & Patient Safety", "healthcare_workforce": "Healthcare Workforce",
+    "corporate_integrity": "Corporate Integrity & Ethics", "research_consent": "Research & Informed Consent",
+    "state_licensing": "State Licensing & Scope", "emergency_preparedness": "Emergency Preparedness",
+    "radiation_safety": "Radiation Safety", "chemotherapy_handling": "Chemotherapy & Hazardous Drugs",
+    "tumor_registry": "Tumor Registry Reporting", "oncology_clinical_trials": "Oncology Clinical Trials",
+    "oncology_patient_rights": "Oncology Patient Rights", "health_it": "Health IT & Interoperability",
+    "quality_reporting": "Quality Reporting", "cybersecurity": "Cybersecurity",
+    "environmental_safety": "Environmental Safety", "pharmacy_drugs": "Pharmacy & Controlled Substances",
+    "payer_relations": "Payer Relations", "reproductive_behavioral": "Reproductive & Behavioral Health",
+    "pediatric_vulnerable": "Pediatric & Vulnerable Populations", "telehealth": "Telehealth & Digital Health",
+    "medical_devices": "Medical Device Safety", "transplant_organ": "Transplant & Organ Procurement",
+    "antitrust": "Healthcare Antitrust", "tax_exempt": "Tax-Exempt Compliance",
+    "language_access": "Language Access & Civil Rights", "records_retention": "Records Retention",
+    "marketing_comms": "Marketing & Communications", "emerging_regulatory": "Emerging Regulatory",
+}
+
+
+@router.get("/jurisdictions/policy-overview", dependencies=[Depends(require_admin)])
+async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
+    """Policy browser: overview by domain→category, or detail for a single category."""
+    async with get_connection() as conn:
+        if category:
+            # ── Detail mode: all requirements for one category ──
+            rows = await conn.fetch("""
+                SELECT jr.id, j.city, j.state, j.level AS jurisdiction_level,
+                       jr.jurisdiction_name, jr.title, jr.current_value, jr.numeric_value,
+                       jr.source_url, jr.source_name, jr.effective_date,
+                       jr.last_verified_at,
+                       COALESCE(jr.source_tier::text, 'tier_3_aggregator') AS source_tier,
+                       COALESCE(jr.status::text, 'active') AS status,
+                       jr.statute_citation
+                FROM jurisdiction_requirements jr
+                JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+                WHERE jr.category = $1
+                ORDER BY j.state, j.city NULLS FIRST
+            """, category)
+            domain = _CATEGORY_DOMAIN.get(category, "unknown")
+            return {
+                "category": {
+                    "slug": category,
+                    "name": _CATEGORY_LABELS.get(category, category),
+                    "domain": domain,
+                    "group": domain,
+                },
+                "requirements": [
+                    {
+                        "id": str(r["id"]),
+                        "jurisdiction_name": r["jurisdiction_name"],
+                        "jurisdiction_level": r["jurisdiction_level"] or "city",
+                        "state": r["state"],
+                        "city": r["city"],
+                        "title": r["title"],
+                        "current_value": r["current_value"],
+                        "numeric_value": float(r["numeric_value"]) if r["numeric_value"] is not None else None,
+                        "source_tier": r["source_tier"],
+                        "status": r["status"],
+                        "statute_citation": r.get("statute_citation"),
+                        "effective_date": r["effective_date"].isoformat() if r["effective_date"] else None,
+                        "last_verified_at": r["last_verified_at"].isoformat() if r["last_verified_at"] else None,
+                    }
+                    for r in rows
+                ],
+            }
+
+        # ── Overview mode: domain → category tree with counts ──
+        cat_rows = await conn.fetch("""
+            SELECT jr.category,
+                   COUNT(*) AS requirement_count,
+                   COUNT(DISTINCT j.id) AS jurisdiction_count,
+                   COUNT(*) FILTER (WHERE COALESCE(jr.source_tier::text, 'tier_3_aggregator') = 'tier_1_government') AS tier_1,
+                   COUNT(*) FILTER (WHERE COALESCE(jr.source_tier::text, 'tier_3_aggregator') = 'tier_2_official_secondary') AS tier_2,
+                   COUNT(*) FILTER (WHERE COALESCE(jr.source_tier::text, 'tier_3_aggregator') = 'tier_3_aggregator') AS tier_3,
+                   MAX(jr.last_verified_at) AS latest_verified
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            GROUP BY jr.category
+            ORDER BY jr.category
+        """)
+
+        total_jurisdictions_row = await conn.fetchval(
+            "SELECT COUNT(DISTINCT id) FROM jurisdictions"
+        )
+
+        # Build domain → categories structure
+        domains_map: dict[str, dict] = {}
+        total_requirements = 0
+        cats_with_data = 0
+
+        for r in cat_rows:
+            cat = r["category"]
+            domain = _CATEGORY_DOMAIN.get(cat, "unknown")
+            if domain not in domains_map:
+                domains_map[domain] = {
+                    "domain": domain,
+                    "label": _DOMAIN_LABELS.get(domain, domain.replace("_", " ").title()),
+                    "category_count": 0,
+                    "requirement_count": 0,
+                    "categories": [],
+                }
+            d = domains_map[domain]
+            req_count = r["requirement_count"]
+            d["category_count"] += 1
+            d["requirement_count"] += req_count
+            total_requirements += req_count
+            cats_with_data += 1
+            d["categories"].append({
+                "slug": cat,
+                "name": _CATEGORY_LABELS.get(cat, cat),
+                "group": domain,
+                "requirement_count": req_count,
+                "jurisdiction_count": r["jurisdiction_count"],
+                "tier_breakdown": {
+                    "tier_1_government": r["tier_1"],
+                    "tier_2_official_secondary": r["tier_2"],
+                    "tier_3_aggregator": r["tier_3"],
+                },
+                "latest_verified": r["latest_verified"].isoformat() if r["latest_verified"] else None,
+            })
+
+        # Sort domains by the order they appear in REQUIRED_CATEGORIES
+        domain_order = list(dict.fromkeys(_CATEGORY_DOMAIN[c] for c in REQUIRED_CATEGORIES if c in _CATEGORY_DOMAIN))
+        domains_list = []
+        for d in domain_order:
+            if d in domains_map:
+                domains_list.append(domains_map[d])
+        # Append any extra domains not in the ordering
+        for d, val in domains_map.items():
+            if d not in domain_order:
+                domains_list.append(val)
+
+        return {
+            "summary": {
+                "total_requirements": total_requirements,
+                "total_categories_with_data": cats_with_data,
+                "total_domains": len(domains_map),
+                "total_jurisdictions": total_jurisdictions_row or 0,
+            },
+            "domains": domains_list,
+        }
 
 
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])

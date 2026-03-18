@@ -107,3 +107,8 @@ desktop/Matcha/build/
 .claude/worktrees/
 .claude/
 /soc/
+
+# Proposals / docs
+*.pdf
+DEAL_PROPOSAL_HEALTHCARE.md
+NOTES - Matcha_Healthcare_Proposal.pdf

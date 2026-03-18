@@ -1291,6 +1291,120 @@ async def _get_state_jurisdiction_id(conn, jurisdiction_id: UUID) -> Optional[UU
     return None
 
 
+async def _resolve_jurisdiction_id_for_level(
+    conn, leaf_jurisdiction_id: UUID, jurisdiction_level: str
+) -> UUID:
+    """Resolve the correct jurisdiction ID for a requirement based on its level.
+
+    Routes federal/state/county requirements to their proper jurisdiction row
+    instead of dumping everything into the leaf city. Falls back to leaf if
+    the parent jurisdiction doesn't exist yet.
+    """
+    level = (jurisdiction_level or "").lower().strip()
+
+    if level == "city" or not level:
+        return leaf_jurisdiction_id
+
+    if level == "county":
+        county_id = await _get_county_jurisdiction_id(conn, leaf_jurisdiction_id)
+        return county_id or leaf_jurisdiction_id
+
+    if level == "state":
+        state_id = await _get_state_jurisdiction_id(conn, leaf_jurisdiction_id)
+        return state_id or leaf_jurisdiction_id
+
+    if level == "federal":
+        # Look up the leaf's state to find the federal jurisdiction
+        leaf = await conn.fetchrow(
+            "SELECT state FROM jurisdictions WHERE id = $1", leaf_jurisdiction_id
+        )
+        if leaf:
+            fed_row = await conn.fetchrow(
+                "SELECT id FROM jurisdictions WHERE level = 'federal' AND state = 'US'"
+            )
+            if fed_row:
+                return fed_row["id"]
+        return leaf_jurisdiction_id
+
+    # Unknown level — treat as city
+    return leaf_jurisdiction_id
+
+
+async def _upsert_jurisdiction_requirements_routed(
+    conn, leaf_jurisdiction_id: UUID, reqs: List[Dict]
+) -> Dict[str, int]:
+    """Route requirements to their proper jurisdiction level, then upsert.
+
+    Instead of storing all requirements (federal, state, county, city) on
+    the leaf city jurisdiction, this routes each requirement to the
+    jurisdiction it actually belongs to. The resolve_jurisdiction_stack CTE
+    already walks city→county→state→federal, so storing each requirement
+    once at its source level eliminates duplication.
+    """
+    from collections import defaultdict
+
+    # Group requirements by their jurisdiction level
+    level_groups: Dict[str, List[Dict]] = defaultdict(list)
+    for req in reqs:
+        level = (req.get("jurisdiction_level") or "city").lower().strip()
+        level_groups[level].append(req)
+
+    # Resolve target jurisdiction for each level and upsert
+    affected_jurisdictions: set = set()
+    city_keys: set = set()  # Track city-level keys for cleanup
+
+    for level, group_reqs in level_groups.items():
+        target_jid = await _resolve_jurisdiction_id_for_level(
+            conn, leaf_jurisdiction_id, level
+        )
+        affected_jurisdictions.add(target_jid)
+
+        await _upsert_requirements_additive(conn, target_jid, group_reqs)
+
+        if target_jid == leaf_jurisdiction_id and level == "city":
+            for req in group_reqs:
+                city_keys.add(_compute_requirement_key(req))
+
+    # Level-scoped cleanup: only delete stale CITY-level rows from the leaf
+    # (preserves inherited requirements; only cleans up local ones)
+    if city_keys:
+        existing_rows = await conn.fetch(
+            """SELECT id, requirement_key FROM jurisdiction_requirements
+               WHERE jurisdiction_id = $1 AND jurisdiction_level = 'city'""",
+            leaf_jurisdiction_id,
+        )
+        for row in existing_rows:
+            if row["requirement_key"] not in city_keys:
+                await conn.execute(
+                    "DELETE FROM jurisdiction_requirements WHERE id = $1", row["id"]
+                )
+
+    # Update requirement_count + last_verified_at on all affected jurisdictions
+    for jid in affected_jurisdictions:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+            jid,
+        )
+        await conn.execute(
+            "UPDATE jurisdictions SET last_verified_at = NOW(), requirement_count = $1, updated_at = NOW() WHERE id = $2",
+            count,
+            jid,
+        )
+
+    # Always touch last_verified_at on the leaf even if no city-level requirements
+    if leaf_jurisdiction_id not in affected_jurisdictions:
+        await conn.execute(
+            "UPDATE jurisdictions SET last_verified_at = NOW(), updated_at = NOW() WHERE id = $1",
+            leaf_jurisdiction_id,
+        )
+
+    return {
+        "total": len(reqs),
+        "levels_routed": {level: len(group) for level, group in level_groups.items()},
+        "jurisdictions_affected": len(affected_jurisdictions),
+    }
+
+
 async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[Dict]):
     """Upsert requirements to a jurisdiction without deleting existing rows."""
     for req in reqs:
@@ -1904,17 +2018,7 @@ async def _refresh_repository_missing_categories(
     for req in merged_requirements:
         _clamp_varchar_fields(req)
 
-    await _upsert_jurisdiction_requirements(conn, jurisdiction_id, merged_requirements)
-
-    if has_local_ordinance is False:
-        county_jid = await _get_county_jurisdiction_id(conn, jurisdiction_id)
-        if county_jid:
-            await _upsert_jurisdiction_requirements(
-                conn, county_jid, merged_requirements
-            )
-            print(
-                f"[Compliance] Also cached refreshed coverage to county jurisdiction {county_jid}"
-            )
+    await _upsert_jurisdiction_requirements_routed(conn, jurisdiction_id, merged_requirements)
 
     for req in refreshed_requirements:
         source_url = req.get("source_url", "")
@@ -4104,22 +4208,9 @@ async def run_compliance_check_stream(
 
             # If Gemini was called, contribute results to jurisdiction repository.
             if not used_repository:
-                await _upsert_jurisdiction_requirements(
+                await _upsert_jurisdiction_requirements_routed(
                     conn, jurisdiction_id, requirements
                 )
-
-                # Also write to county jurisdiction so other cities in same county can reuse
-                if has_local_ordinance is False:
-                    county_jid = await _get_county_jurisdiction_id(
-                        conn, jurisdiction_id
-                    )
-                    if county_jid:
-                        await _upsert_jurisdiction_requirements(
-                            conn, county_jid, requirements
-                        )
-                        print(
-                            f"[Compliance] Also cached to county jurisdiction {county_jid}"
-                        )
 
                 # Learn from successful research: record any new sources seen
                 for req in requirements:
@@ -6393,22 +6484,9 @@ async def run_compliance_check_background(
 
             # Contribute to repository after Gemini call.
             if not used_repository:
-                await _upsert_jurisdiction_requirements(
+                await _upsert_jurisdiction_requirements_routed(
                     conn, jurisdiction_id, requirements
                 )
-
-                # Also write to county jurisdiction so other cities in same county can reuse
-                if has_local_ordinance is False:
-                    county_jid = await _get_county_jurisdiction_id(
-                        conn, jurisdiction_id
-                    )
-                    if county_jid:
-                        await _upsert_jurisdiction_requirements(
-                            conn, county_jid, requirements
-                        )
-                        print(
-                            f"[Compliance] Also cached to county jurisdiction {county_jid}"
-                        )
 
                 # Learn from successful research: record any new sources seen
                 for req in requirements:
