@@ -2793,12 +2793,15 @@ async def cleanup_duplicate_requirements(
         ("rest", "lactation"), ("lactation", "rest"),
         ("14", "16"), ("16", "14"),
         ("hourly", "salary"), ("salary", "hourly"),
+        ("contractor", "private"), ("private", "contractor"),
+        ("religion", "disability"), ("disability", "religion"),
     ]
     _POISON_SET = set(_POISON_PAIRS)
 
     def _title_tokens(title: str) -> set:
         s = title.lower().strip()
-        s = _re.sub(r"\([^)]*\)", " ", s)
+        # Remove parentheses but KEEP their content (age groups, employer sizes live here)
+        s = s.replace("(", " ").replace(")", " ")
         s = _re.sub(r"\bcalifornia\b|\bnew york\b|\btexas\b|\bflorida\b|\billinois\b|\bchicago\b", " ", s)
         s = _re.sub(r"\bca\b|\bny\b|\btx\b|\bfl\b|\bil\b", " ", s)
         s = _re.sub(r"\bstate\b|\bcity\b|\bcounty\b|\bfederal\b|\bbaseline\b|\bgeneral\b", " ", s)
