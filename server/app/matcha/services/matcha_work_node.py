@@ -246,8 +246,22 @@ async def build_compliance_context(company_id: UUID) -> str:
                     continue
 
                 # Group by category and determine governing requirement
+                # Parse JSON string trigger_conditions — asyncpg may return
+                # JSONB as str depending on column type / driver config.
                 by_cat: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
                 for row in stack_rows:
+                    tc = row.get("trigger_conditions")
+                    if isinstance(tc, str):
+                        try:
+                            row["trigger_conditions"] = json.loads(tc)
+                        except (json.JSONDecodeError, TypeError):
+                            row["trigger_conditions"] = None
+                    rtc = row.get("rule_trigger_condition")
+                    if isinstance(rtc, str):
+                        try:
+                            row["rule_trigger_condition"] = json.loads(rtc)
+                        except (json.JSONDecodeError, TypeError):
+                            row["rule_trigger_condition"] = None
                     cat = row.get("category") or "uncategorized"
                     by_cat[cat].append(row)
 
