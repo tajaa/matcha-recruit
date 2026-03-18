@@ -31,7 +31,7 @@ CORE_SECTION_KEYS = {
     "acknowledgement",
 }
 MAX_SECTION_PREVIEWS = 12
-MAX_RED_FLAGS = 20
+MAX_RED_FLAGS = 50
 
 # Relevance detection: if a document matches fewer than MIN_HANDBOOK_SIGNALS
 # of these phrases it almost certainly isn't an employee handbook.
@@ -390,18 +390,25 @@ def parse_handbook_sections(text: str) -> list[ParsedHandbookSection]:
 
 
 def _state_specific_content(sections: Iterable[ParsedHandbookSection], state: str, all_states: list[str]) -> str:
+    sections = list(sections)
     state_code = (state or "").upper()
     state_name = STATE_NAMES.get(state_code, state_code).lower()
+    abbrev_re = re.compile(r"\b" + re.escape(state_code) + r"\b") if len(state_code) == 2 else None
+
     matched: list[str] = []
     for section in sections:
-        haystack = f"{section.title}\n{section.content}".lower()
-        if state_name and state_name in haystack:
+        haystack = f"{section.title}\n{section.content}"
+        haystack_lower = haystack.lower()
+        if state_name and state_name in haystack_lower:
             matched.append(section.content)
+        elif abbrev_re and abbrev_re.search(haystack):
+            matched.append(section.content)
+
     if matched:
         return "\n\n".join(matched)
-    if len(all_states) == 1:
-        return "\n\n".join(section.content for section in sections)
-    return ""
+    # Fall back to full handbook text so multi-state handbooks with generic
+    # language are checked per-category rather than flagging everything red.
+    return "\n\n".join(section.content for section in sections)
 
 
 def _city_specific_content(sections: Iterable[ParsedHandbookSection], city: Optional[str]) -> str:
@@ -424,7 +431,7 @@ def _keyword_list(category: str, requirement_title: str) -> list[str]:
     words = [
         word
         for word in re.split(r"[^a-z0-9]+", f"{normalized_category} {requirement_title.lower()}")
-        if len(word) >= 4
+        if len(word) >= 5
     ]
     deduped: list[str] = []
     seen: set[str] = set()
@@ -455,6 +462,7 @@ HIGH_SEVERITY_CATEGORIES = {
 }
 MEDIUM_SEVERITY_CATEGORIES = {
     "minor_work_permit", "scheduling_reporting",
+    "harassment", "workers_compensation",
 }
 
 
@@ -465,6 +473,32 @@ def _assign_severity(category: str) -> str:
     if cat in MEDIUM_SEVERITY_CATEGORIES:
         return "medium"
     return "low"
+
+
+_MIN_CONTENT_CHARS = 50
+
+
+def _keyword_match_with_depth(lowered_text: str, keywords: list[str], category: str) -> bool:
+    """Check if any keyword appears in text with sufficient surrounding content.
+
+    For HIGH/MEDIUM severity categories (mandatory), the keyword must appear
+    in a paragraph of at least _MIN_CONTENT_CHARS characters so that a bare
+    table-of-contents line like "4. Minimum Wage" doesn't count as coverage.
+    For low-severity (fallback) categories, any match suffices.
+    """
+    if not keywords:
+        return False
+    cat = (category or "").strip().lower()
+    needs_depth = cat in HIGH_SEVERITY_CATEGORIES or cat in MEDIUM_SEVERITY_CATEGORIES
+    for keyword in keywords:
+        if keyword not in lowered_text:
+            continue
+        if not needs_depth:
+            return True
+        for para in lowered_text.split("\n\n"):
+            if keyword in para and len(para) >= _MIN_CONTENT_CHARS:
+                return True
+    return False
 
 
 def _audit_location_group(
@@ -514,7 +548,7 @@ def _audit_location_group(
             label = _category_label(category)
             flag_key = f"{location.label}:{category}"
 
-            if keywords and any(keyword in lowered_text for keyword in keywords):
+            if keywords and _keyword_match_with_depth(lowered_text, keywords, category):
                 location_coverage[loc_key]["covered"].add(category)
                 if flag_key not in seen_flag_keys:
                     seen_flag_keys.add(flag_key)
@@ -632,6 +666,7 @@ def audit_uploaded_handbook(
     )
 
     red_flags.sort(key=lambda item: (_severity_rank(item["severity"]), item["jurisdiction"], item["section_title"]))
+    total_red_flag_count = len(red_flags)
     red_flags = red_flags[:MAX_RED_FLAGS]
 
     jurisdiction_summaries, strength_score, strength_label = compute_coverage_summaries(location_coverage)
@@ -656,4 +691,5 @@ def audit_uploaded_handbook(
         "handbook_analysis_generated_at": datetime.now(timezone.utc).isoformat(),
         "handbook_strength_score": strength_score,
         "handbook_strength_label": strength_label,
+        "handbook_total_red_flag_count": total_red_flag_count,
     }

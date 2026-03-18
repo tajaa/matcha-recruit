@@ -140,13 +140,18 @@ STRICT_TEMPLATE_INDUSTRIES = {"hospitality"}
 
 MANDATORY_STATE_TOPIC_RULES: dict[str, tuple[str, ...]] = {
     "minimum_wage": ("minimum_wage", "minimum wage", "wage floor", "min wage", "hourly wage", "wage and hour"),
-    "overtime": ("overtime", "ot", "time and a half", "overtime pay", "hours worked", "weekly hours"),
+    "overtime": ("overtime", "time and a half", "overtime pay", "hours worked", "weekly hours"),
     "pay_frequency": ("pay_frequency", "pay frequency", "payday", "pay period", "wage payment", "pay schedule"),
     "sick_leave": ("sick_leave", "paid sick", "sick leave", "sick time", "pto", "paid time off", "earned sick"),
     "meal_breaks": ("meal_break", "meal period", "rest break", "meal and rest", "break period", "rest period", "meal break"),
     "final_pay": ("final_pay", "final pay", "final paycheck", "separation pay", "final wage", "last paycheck", "termination pay"),
-    "minor_work_permit": ("minor_work_permit", "minor work", "youth employment", "child labor", "work permit", "working minor"),
-    "scheduling_reporting": ("scheduling_reporting", "predictive scheduling", "fair workweek", "reporting time", "scheduling", "work schedule", "shift scheduling"),
+    "minor_work_permit": ("minor_work_permit", "minor work", "youth employment", "child labor", "working minor"),
+    "scheduling_reporting": ("scheduling_reporting", "predictive scheduling", "fair workweek", "reporting time", "work schedule", "shift scheduling"),
+    "discrimination": ("discrimination", "equal employment", "protected class", "anti-discrimination", "title vii", "eeoc"),
+    "workers_compensation": ("workers_compensation", "workers compensation", "workers' compensation", "workplace injury", "injury report", "work-related injury"),
+    "family_leave": ("family_leave", "family leave", "fmla", "parental leave", "maternity leave", "paternity leave", "family medical"),
+    "pregnancy_accommodation": ("pregnancy_accommodation", "pregnancy", "pregnant worker", "lactation", "nursing mother", "reasonable accommodation"),
+    "harassment": ("harassment", "anti-harassment", "sexual harassment", "hostile work environment", "harassment policy", "harassment training"),
 }
 
 MANDATORY_STATE_TOPIC_LABELS: dict[str, str] = {
@@ -158,6 +163,11 @@ MANDATORY_STATE_TOPIC_LABELS: dict[str, str] = {
     "final_pay": "final pay",
     "minor_work_permit": "youth employment",
     "scheduling_reporting": "scheduling/reporting time",
+    "discrimination": "discrimination/EEO",
+    "workers_compensation": "workers' compensation",
+    "family_leave": "family/medical leave",
+    "pregnancy_accommodation": "pregnancy accommodation",
+    "harassment": "harassment prevention",
 }
 
 LEGAL_OPERATIONAL_HOOKS = {
@@ -4276,11 +4286,13 @@ class HandbookService:
             raise ValueError("Handbook not found")
 
         scope_label = ", ".join(sorted({scope.state for scope in handbook.scopes})) or "N/A"
+        _br = "<br/>"
+        _nl = "\n"
         section_html = "".join(
             f"""
             <section class="section">
                 <h2>{html.escape(section.title)}</h2>
-                <div class="content">{html.escape(section.content).replace("\n", "<br/>")}</div>
+                <div class="content">{html.escape(section.content).replace(_nl, _br)}</div>
             </section>
             """
             for section in handbook.sections

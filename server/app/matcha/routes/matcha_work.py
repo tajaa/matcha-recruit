@@ -104,6 +104,7 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
     "handbook_strength_score",
     "handbook_strength_label",
     "handbook_analysis_progress",
+    "handbook_total_red_flag_count",
 }
 VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys()) - HANDBOOK_UPLOAD_MANAGED_FIELDS
 VALID_POLICY_FIELDS = set(PolicyDocument.model_fields.keys())
@@ -1434,6 +1435,7 @@ async def upload_thread_handbook(
                     accumulated_red_flags,
                     key=lambda item: (_severity_rank(item["severity"]), item["jurisdiction"], item["section_title"]),
                 )
+                total_red_count = len(accumulated_red_flags)
                 sorted_red = sorted_red[:MAX_RED_FLAGS]
 
                 # Compute running summaries.
@@ -1459,6 +1461,7 @@ async def upload_thread_handbook(
                     "handbook_strength_score": strength_score,
                     "handbook_strength_label": strength_label,
                     "handbook_analysis_generated_at": datetime.now(timezone.utc).isoformat(),
+                    "handbook_total_red_flag_count": total_red_count,
                 }
 
                 await doc_svc.apply_update(
