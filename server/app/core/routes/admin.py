@@ -2277,14 +2277,15 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
         tr = conn.transaction()
         await tr.start()
         try:
+            display_name = f"{raw_city.strip()}, {state}" if city else state
             row = await conn.fetchrow("""
-                INSERT INTO jurisdictions (city, state, county, parent_id)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (city, state) DO UPDATE SET
+                INSERT INTO jurisdictions (city, state, county, parent_id, display_name)
+                VALUES ($1, $2, $3, $4, $5)
+                ON CONFLICT (COALESCE(city, ''), state) DO UPDATE SET
                     parent_id = COALESCE(EXCLUDED.parent_id, jurisdictions.parent_id),
                     county = COALESCE(EXCLUDED.county, jurisdictions.county)
                 RETURNING *
-            """, city, state, county, request.parent_id)
+            """, city, state, county, request.parent_id, display_name)
             await tr.commit()
         except Exception:
             await tr.rollback()
@@ -4548,17 +4549,19 @@ async def _get_or_create_metro_jurisdiction(city: str, state: str) -> UUID:
             )
         except Exception:
             county = None
+        display_name = f"{city.strip()}, {state_key}"
         row = await conn.fetchrow(
             """
-            INSERT INTO jurisdictions (city, state, county)
-            VALUES ($1, $2, $3)
-            ON CONFLICT (city, state) DO UPDATE SET
+            INSERT INTO jurisdictions (city, state, county, display_name)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (COALESCE(city, ''), state) DO UPDATE SET
                 county = COALESCE(jurisdictions.county, EXCLUDED.county)
             RETURNING id
             """,
             city_key,
             state_key,
             county,
+            display_name,
         )
         return row["id"]
 

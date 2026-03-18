@@ -992,15 +992,17 @@ async def _get_or_create_jurisdiction(
         county = ref_county
 
     # 2. Get or create city jurisdiction
+    city_display = f"{city.strip()}, {norm_state}"
     await conn.execute(
         """
-        INSERT INTO jurisdictions (city, state, county)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (city, state) DO NOTHING
+        INSERT INTO jurisdictions (city, state, county, display_name, level)
+        VALUES ($1, $2, $3, $4, 'city')
+        ON CONFLICT (COALESCE(city, ''), state) DO NOTHING
         """,
         norm_city,
         norm_state,
         county,
+        city_display,
     )
     city_row = await conn.fetchrow(
         "SELECT id, county, parent_id FROM jurisdictions WHERE city = $1 AND state = $2",
@@ -1011,16 +1013,17 @@ async def _get_or_create_jurisdiction(
 
     # 3. Get or create state jurisdiction (uses empty-string city convention)
     state_j = await conn.fetchrow(
-        "SELECT id FROM jurisdictions WHERE city = '' AND state = $1",
+        "SELECT id FROM jurisdictions WHERE COALESCE(city, '') = '' AND state = $1",
         norm_state,
     )
     if not state_j:
         await conn.execute(
-            "INSERT INTO jurisdictions (city, state) VALUES ('', $1) ON CONFLICT (city, state) DO NOTHING",
+            "INSERT INTO jurisdictions (city, state, display_name, level) VALUES ('', $1, $2, 'state') ON CONFLICT (COALESCE(city, ''), state) DO NOTHING",
+            norm_state,
             norm_state,
         )
         state_j = await conn.fetchrow(
-            "SELECT id FROM jurisdictions WHERE city = '' AND state = $1",
+            "SELECT id FROM jurisdictions WHERE COALESCE(city, '') = '' AND state = $1",
             norm_state,
         )
     state_id = state_j["id"]
@@ -1045,14 +1048,15 @@ async def _get_or_create_jurisdiction(
         if not county_j:
             await conn.execute(
                 """
-                INSERT INTO jurisdictions (city, state, county, parent_id)
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (city, state) DO NOTHING
+                INSERT INTO jurisdictions (city, state, county, parent_id, display_name, level)
+                VALUES ($1, $2, $3, $4, $5, 'county')
+                ON CONFLICT (COALESCE(city, ''), state) DO NOTHING
                 """,
                 f"_county_{county_norm}",
                 norm_state,
                 county,
                 state_id,
+                f"{county}, {norm_state}",
             )
             county_j = await conn.fetchrow(
                 "SELECT id FROM jurisdictions WHERE city = $1 AND state = $2",
@@ -1451,15 +1455,21 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
         requirement_key = _compute_requirement_key(req)
         tc = req.get("trigger_conditions")
         tc_json = json.dumps(tc) if tc else None
-        aet = req.get("applicable_entity_types")
+        aet_raw = req.get("applicable_entity_types")
+        aet = json.dumps(aet_raw) if aet_raw else None
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
-                 applicable_industries, trigger_conditions, applicable_entity_types)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18)
+                 applicable_industries, trigger_conditions, applicable_entity_types,
+                 category_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
+                    COALESCE(
+                        (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
+                        (SELECT id FROM compliance_categories LIMIT 1)
+                    ))
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1502,6 +1512,7 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
             req.get("applicable_industries"),
             tc_json,
             aet,
+            req.get("category"),  # $19: duplicate for category_id subquery
         )
 
 
@@ -2170,15 +2181,21 @@ async def _upsert_jurisdiction_requirements(
         new_keys.add(requirement_key)
         tc = req.get("trigger_conditions")
         tc_json = json.dumps(tc) if tc else None
-        aet = req.get("applicable_entity_types")
+        aet_raw = req.get("applicable_entity_types")
+        aet = json.dumps(aet_raw) if aet_raw else None
         await conn.execute(
             """
             INSERT INTO jurisdiction_requirements
                 (jurisdiction_id, requirement_key, category, rate_type, jurisdiction_level, jurisdiction_name,
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
-                 applicable_industries, trigger_conditions, applicable_entity_types)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18)
+                 applicable_industries, trigger_conditions, applicable_entity_types,
+                 category_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
+                    COALESCE(
+                        (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
+                        (SELECT id FROM compliance_categories LIMIT 1)
+                    ))
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -2221,6 +2238,7 @@ async def _upsert_jurisdiction_requirements(
             req.get("applicable_industries"),
             tc_json,
             aet,
+            req.get("category"),  # $19: duplicate for category_id subquery
         )
 
     # Remove jurisdiction rows not in new result set
@@ -3866,6 +3884,9 @@ async def run_compliance_check_stream(
     source_context: str = ""
     corrections_context: str = ""
     preemption_rules: Dict[str, bool] = {}
+    new_count = 0
+    updated_count = 0
+    alert_count = 0
 
     async with get_connection() as conn:
         # Load industry profile for industry-aware research prompts
@@ -6535,6 +6556,9 @@ async def run_compliance_check_background(
     source_context: str = ""
     corrections_context: str = ""
     preemption_rules: Dict[str, bool] = {}
+    new_count = 0
+    updated_count = 0
+    alert_count = 0
 
     async with get_connection() as conn:
         # Load industry profile for industry-aware research prompts

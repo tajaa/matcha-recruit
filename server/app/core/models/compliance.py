@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Optional, List, Any
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from uuid import UUID
 from datetime import datetime, date
 
@@ -117,6 +117,14 @@ class BusinessLocation(BaseModel):
     facility_attributes: Optional[dict] = None
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("facility_attributes", mode="before")
+    @classmethod
+    def parse_facility_attributes(cls, v):
+        if isinstance(v, str):
+            import json
+            return json.loads(v)
+        return v
 
 
 class ComplianceRequirement(BaseModel):

@@ -348,11 +348,11 @@ class LeaveEligibilityService:
 
                 # Ensure state-level jurisdiction rows exist
                 await conn.execute("""
-                    INSERT INTO jurisdictions (city, state)
-                    SELECT DISTINCT '', UPPER(ljr.state)
+                    INSERT INTO jurisdictions (city, state, display_name, level)
+                    SELECT DISTINCT '', UPPER(ljr.state), UPPER(ljr.state), 'state'
                     FROM leave_jurisdiction_rules ljr
                     WHERE ljr.state != 'US'
-                    ON CONFLICT (city, state) DO NOTHING
+                    ON CONFLICT (COALESCE(city, ''), state) DO NOTHING
                 """)
 
                 await conn.execute("""

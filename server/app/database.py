@@ -2835,10 +2835,11 @@ async def init_db():
 
         # Backfill: create jurisdictions from existing locations
         await conn.execute("""
-            INSERT INTO jurisdictions (city, state, county)
-            SELECT DISTINCT LOWER(city), UPPER(state), county
+            INSERT INTO jurisdictions (city, state, county, display_name, level)
+            SELECT DISTINCT LOWER(city), UPPER(state), county,
+                   city || ', ' || UPPER(state), 'city'
             FROM business_locations WHERE is_active = true
-            ON CONFLICT (city, state) DO NOTHING
+            ON CONFLICT (COALESCE(city, ''), state) DO NOTHING
         """)
 
         # Backfill: link existing locations to jurisdictions
