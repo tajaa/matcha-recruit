@@ -2753,6 +2753,228 @@ async def cleanup_duplicate_jurisdictions(
         }
 
 
+@router.post("/jurisdictions/cleanup-duplicate-requirements", dependencies=[Depends(require_admin)])
+async def cleanup_duplicate_requirements(
+    dry_run: bool = Query(True),
+    jurisdiction_id: Optional[UUID] = Query(None, description="Scope to a single jurisdiction"),
+):
+    """Find and remove semantically duplicate requirements within each jurisdiction+category.
+
+    Uses three safety layers to avoid false positives:
+    1. Jaccard token overlap >= 0.7 (strict)
+    2. Poison-token pairs block matches between distinct regulation types
+    3. When both rows have a regulation_key prefix, they must match
+
+    Default is dry_run=true — returns what WOULD be deleted without touching data.
+    """
+    import re as _re
+
+    # Pairs of tokens that indicate DIFFERENT regulations — if one title
+    # contains the first and the other contains the second, never merge.
+    _POISON_PAIRS = [
+        ("meal", "rest"), ("rest", "meal"),
+        ("tipped", "state"), ("state", "tipped"),
+        ("tipped", "general"), ("general", "tipped"),
+        ("tipped", "exempt"), ("exempt", "tipped"),
+        ("sick", "family"), ("family", "sick"),
+        ("sick", "prenatal"), ("prenatal", "sick"),
+        ("sick", "disability"), ("disability", "sick"),
+        ("sick", "bereavement"), ("bereavement", "sick"),
+        ("family", "disability"), ("disability", "family"),
+        ("family", "pregnancy"), ("pregnancy", "family"),
+        ("family", "bereavement"), ("bereavement", "family"),
+        ("termination", "resignation"), ("resignation", "termination"),
+        ("termination", "layoff"), ("layoff", "termination"),
+        ("resignation", "layoff"), ("layoff", "resignation"),
+        ("daily", "weekly"), ("weekly", "daily"),
+        ("minimum", "exempt"), ("exempt", "minimum"),
+        ("large", "small"), ("small", "large"),
+        ("meal", "lactation"), ("lactation", "meal"),
+        ("rest", "lactation"), ("lactation", "rest"),
+        ("14", "16"), ("16", "14"),
+        ("hourly", "salary"), ("salary", "hourly"),
+    ]
+    _POISON_SET = set(_POISON_PAIRS)
+
+    def _title_tokens(title: str) -> set:
+        s = title.lower().strip()
+        s = _re.sub(r"\([^)]*\)", " ", s)
+        s = _re.sub(r"\bcalifornia\b|\bnew york\b|\btexas\b|\bflorida\b|\billinois\b|\bchicago\b", " ", s)
+        s = _re.sub(r"\bca\b|\bny\b|\btx\b|\bfl\b|\bil\b", " ", s)
+        s = _re.sub(r"\bstate\b|\bcity\b|\bcounty\b|\bfederal\b|\bbaseline\b|\bgeneral\b", " ", s)
+        s = _re.sub(r"\brequirements?\b|\bregulations?\b|\blaws?\b|\brules?\b|\bact\b", " ", s)
+        s = _re.sub(r"[^a-z0-9]+", " ", s)
+        return {t for t in s.split() if len(t) > 1}
+
+    def _jaccard(a: set, b: set) -> float:
+        if not a or not b:
+            return 0.0
+        return len(a & b) / len(a | b)
+
+    def _has_poison_conflict(tokens_a: set, tokens_b: set) -> bool:
+        for ta in tokens_a:
+            for tb in tokens_b:
+                if (ta, tb) in _POISON_SET:
+                    return True
+        return False
+
+    def _regulation_key_prefix(req_key: str) -> str:
+        """Extract the category:regulation part, ignoring title-based suffixes."""
+        # Keys look like 'leave:fmla' or 'leave:paid sick leave healthy workplaces...'
+        # Canonical keys are short: 'leave:fmla', 'leave:state_paid_sick_leave'
+        # Title-based keys are long with spaces: 'leave:paid sick leave ...'
+        parts = req_key.split(":", 1)
+        if len(parts) < 2:
+            return ""
+        val = parts[1].strip()
+        # Title-based keys contain spaces; canonical keys use underscores only
+        if " " in val:
+            return ""  # title-based, no stable prefix
+        return val
+
+    def _is_match(req_a: dict, req_b: dict, tokens_a: set, tokens_b: set) -> bool:
+        # Guard 1: Both have canonical regulation_key → must match exactly
+        prefix_a = _regulation_key_prefix(req_a.get("requirement_key", ""))
+        prefix_b = _regulation_key_prefix(req_b.get("requirement_key", ""))
+        if prefix_a and prefix_b:
+            return prefix_a == prefix_b
+
+        # Guard 2: Poison token pairs → never merge
+        if _has_poison_conflict(tokens_a, tokens_b):
+            return False
+
+        # Guard 3: Jaccard >= 0.7
+        return _jaccard(tokens_a, tokens_b) >= 0.7
+
+    async with get_connection() as conn:
+        where_clause = "WHERE jr.status = 'active'"
+        params: list = []
+        if jurisdiction_id:
+            where_clause += " AND jr.jurisdiction_id = $1"
+            params.append(jurisdiction_id)
+
+        rows = await conn.fetch(
+            f"""
+            SELECT jr.id, jr.jurisdiction_id, jr.category, jr.requirement_key,
+                   jr.title, jr.applicable_industries,
+                   jr.last_verified_at, jr.updated_at, jr.created_at,
+                   j.display_name AS jurisdiction_name
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON jr.jurisdiction_id = j.id
+            {where_clause}
+            ORDER BY jr.jurisdiction_id, jr.category, jr.last_verified_at DESC NULLS LAST
+            """,
+            *params,
+        )
+
+        from collections import defaultdict
+        groups: dict[tuple, list] = defaultdict(list)
+        for r in rows:
+            groups[(r["jurisdiction_id"], r["category"])].append(dict(r))
+
+        total_duplicates = 0
+        total_groups_with_dupes = 0
+        details = []
+
+        for (jid, cat), reqs in groups.items():
+            if len(reqs) < 2:
+                continue
+
+            clusters: list[list[dict]] = []
+            assigned = set()
+
+            for i, req_a in enumerate(reqs):
+                if i in assigned:
+                    continue
+                cluster = [req_a]
+                assigned.add(i)
+                tokens_a = _title_tokens(req_a["title"] or "")
+
+                for j, req_b in enumerate(reqs):
+                    if j in assigned:
+                        continue
+                    tokens_b = _title_tokens(req_b["title"] or "")
+                    if _is_match(req_a, req_b, tokens_a, tokens_b):
+                        cluster.append(req_b)
+                        assigned.add(j)
+
+                if len(cluster) > 1:
+                    clusters.append(cluster)
+
+            if not clusters:
+                continue
+
+            total_groups_with_dupes += 1
+            jur_name = reqs[0].get("jurisdiction_name", str(jid))
+
+            for cluster in clusters:
+                primary = cluster[0]  # sorted by last_verified_at DESC
+                duplicates = cluster[1:]
+                total_duplicates += len(duplicates)
+
+                merged_industries = set()
+                for r in cluster:
+                    for ind in (r.get("applicable_industries") or []):
+                        merged_industries.add(ind)
+
+                details.append({
+                    "jurisdiction": jur_name,
+                    "category": cat,
+                    "keep": {
+                        "id": str(primary["id"]),
+                        "title": primary["title"],
+                        "requirement_key": primary["requirement_key"],
+                    },
+                    "remove": [
+                        {
+                            "id": str(d["id"]),
+                            "title": d["title"],
+                            "requirement_key": d["requirement_key"],
+                        }
+                        for d in duplicates
+                    ],
+                    "merged_industries": sorted(merged_industries) if merged_industries else None,
+                })
+
+                if not dry_run:
+                    if merged_industries:
+                        await conn.execute(
+                            """UPDATE jurisdiction_requirements
+                               SET applicable_industries = $2, updated_at = NOW()
+                               WHERE id = $1""",
+                            primary["id"],
+                            sorted(merged_industries),
+                        )
+                    dup_ids = [d["id"] for d in duplicates]
+                    await conn.execute(
+                        "DELETE FROM jurisdiction_requirements WHERE id = ANY($1)",
+                        dup_ids,
+                    )
+
+        if not dry_run and details:
+            await conn.execute(
+                """
+                UPDATE jurisdictions j
+                SET requirement_count = sub.cnt, updated_at = NOW()
+                FROM (
+                    SELECT jurisdiction_id, COUNT(*) AS cnt
+                    FROM jurisdiction_requirements
+                    GROUP BY jurisdiction_id
+                ) sub
+                WHERE j.id = sub.jurisdiction_id
+                """
+            )
+
+        return {
+            "status": "ok",
+            "dry_run": dry_run,
+            "categories_with_duplicates": total_groups_with_dupes,
+            "duplicate_rows": total_duplicates,
+            "clusters": len(details),
+            "details": details[:200],
+        }
+
+
 @router.delete("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
 async def delete_jurisdiction(jurisdiction_id: UUID):
     """Delete a jurisdiction if it has no linked business locations."""

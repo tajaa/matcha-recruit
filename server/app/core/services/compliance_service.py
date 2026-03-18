@@ -2732,6 +2732,17 @@ def _compute_requirement_key(req) -> str:
     )
     cat_key = _normalize_category(cat) or ""
 
+    # Include rate_type in key for minimum_wage to allow multiple entries per jurisdiction.
+    # This MUST run before the regulation_key path — minimum_wage uses rate_type as the
+    # primary discriminator (general vs tipped vs healthcare vs exempt_salary, etc.).
+    if cat_key == "minimum_wage":
+        normalized_rate_type = (
+            _coerce_minimum_wage_rate_type(req)
+            if isinstance(req, dict)
+            else (_normalize_rate_type(rate_type) or "general")
+        )
+        return f"{cat_key}:{normalized_rate_type}"
+
     # Prefer Gemini-provided regulation_key when present — but validate it
     # against the known canonical keys. If Gemini invents a key not in the
     # registry, try to match it; if no match, fall back to title-based key.
@@ -2747,16 +2758,6 @@ def _compute_requirement_key(req) -> str:
     # Fallback: title-based key computation
     base_title = _base_title(title or "", jname)
     base_key = _normalize_title_key(base_title)
-
-    # Include rate_type in key for minimum_wage to allow multiple entries per jurisdiction.
-    # Always emit a rate_type key for minimum_wage to keep keys stable.
-    if cat_key == "minimum_wage":
-        normalized_rate_type = (
-            _coerce_minimum_wage_rate_type(req)
-            if isinstance(req, dict)
-            else (_normalize_rate_type(rate_type) or "general")
-        )
-        return f"{cat_key}:{normalized_rate_type}"
 
     # Prefix triggered requirements to avoid collision with baseline keys
     aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
