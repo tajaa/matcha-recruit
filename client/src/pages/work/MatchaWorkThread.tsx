@@ -291,6 +291,8 @@ export default function MatchaWorkThread() {
                       <ComplianceReasoningPanel
                         locations={m.metadata.compliance_reasoning}
                         aiSteps={m.metadata.ai_reasoning_steps}
+                        referencedCategories={m.metadata.referenced_categories}
+                        referencedLocations={m.metadata.referenced_locations}
                       />
                     )}
                   </>

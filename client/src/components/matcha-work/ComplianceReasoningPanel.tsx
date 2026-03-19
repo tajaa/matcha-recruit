@@ -10,15 +10,39 @@ import ComplianceDecisionTree from './ComplianceDecisionTree'
 interface ComplianceReasoningPanelProps {
   locations: ComplianceReasoningLocation[]
   aiSteps?: AIReasoningStep[]
+  referencedCategories?: string[]
+  referencedLocations?: string[]
 }
 
-export default function ComplianceReasoningPanel({ locations, aiSteps }: ComplianceReasoningPanelProps) {
+export default function ComplianceReasoningPanel({ locations, aiSteps, referencedCategories, referencedLocations }: ComplianceReasoningPanelProps) {
   const [expanded, setExpanded] = useState(false)
   const [selectedLocation, setSelectedLocation] = useState(0)
   const [selectedCategory, setSelectedCategory] = useState(0)
 
-  const totalCategories = locations.reduce((sum, loc) => sum + loc.categories.length, 0)
-  const currentLocation = locations[selectedLocation]
+  // Filter to referenced locations, then referenced categories, removing empty locations
+  // Gemini may return abbreviated labels (e.g. "San Francisco, CA") vs full labels
+  // (e.g. "San Francisco (San Francisco, CA)"), so fall back to substring matching
+  const filteredLocations = (() => {
+    let filtered = referencedLocations?.length
+      ? locations.filter((loc) =>
+          referencedLocations.some((ref) => loc.location_label === ref || loc.location_label.includes(ref))
+        )
+      : locations
+
+    if (referencedCategories?.length) {
+      filtered = filtered
+        .map((loc) => ({
+          ...loc,
+          categories: loc.categories.filter((cat) => referencedCategories.includes(cat.category)),
+        }))
+        .filter((loc) => loc.categories.length > 0)
+    }
+
+    return filtered.length > 0 ? filtered : locations
+  })()
+
+  const totalCategories = filteredLocations.reduce((sum, loc) => sum + loc.categories.length, 0)
+  const currentLocation = filteredLocations[selectedLocation]
   const currentCategory = currentLocation?.categories[selectedCategory]
 
   return (
@@ -31,7 +55,7 @@ export default function ComplianceReasoningPanel({ locations, aiSteps }: Complia
         <Shield size={12} className="text-cyan-500 shrink-0" />
         <span className="font-medium">Compliance Evidence</span>
         <span className="text-zinc-500">
-          — {totalCategories} categor{totalCategories === 1 ? 'y' : 'ies'} across {locations.length} location{locations.length === 1 ? '' : 's'}
+          — {totalCategories} categor{totalCategories === 1 ? 'y' : 'ies'} across {filteredLocations.length} location{filteredLocations.length === 1 ? '' : 's'}
         </span>
         <ChevronDown
           size={12}
@@ -51,9 +75,9 @@ export default function ComplianceReasoningPanel({ locations, aiSteps }: Complia
           >
             <div className="px-3 pb-3 space-y-3">
               {/* Location selector */}
-              {locations.length > 1 && (
+              {filteredLocations.length > 1 && (
                 <div className="flex flex-wrap gap-1.5">
-                  {locations.map((loc, i) => (
+                  {filteredLocations.map((loc, i) => (
                     <button
                       key={loc.location_id}
                       onClick={() => { setSelectedLocation(i); setSelectedCategory(0) }}

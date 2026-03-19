@@ -63,6 +63,8 @@ export interface ComplianceReasoningLocation {
 export interface MWMessageMetadata {
   compliance_reasoning?: ComplianceReasoningLocation[]
   ai_reasoning_steps?: AIReasoningStep[]
+  referenced_categories?: string[]
+  referenced_locations?: string[]
 }
 
 export interface MWMessage {

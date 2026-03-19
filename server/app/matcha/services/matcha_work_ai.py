@@ -203,9 +203,13 @@ Output constraints:
   "updates": {{}},
   "missing_fields": [],
   "reply": "",
-  "compliance_reasoning": []
+  "compliance_reasoning": [],
+  "referenced_categories": [],
+  "referenced_locations": []
 }}
 - In "compliance_reasoning", output your step-by-step reasoning ONLY when the user's question involves compliance analysis and COMPLIANCE MODE context is present. Each step: {{"step": 1, "question": "Does federal law apply?", "answer": "Yes — FLSA sets baseline at $7.25/hr", "conclusion": "Federal floor established", "sources": ["29 U.S.C. 206"]}}. Show the chain of questions you evaluated to reach your answer. Leave as [] for non-compliance questions.
+- In "referenced_categories", list the exact category slugs from the COMPLIANCE MODE data that you referenced in your answer (e.g. ["leave", "minimum_wage", "meal_breaks"]). Only include categories you actually discussed. Leave as [] for non-compliance questions.
+- In "referenced_locations", list the exact location labels from the Compliance Locations data that you discussed in your answer (e.g. ["San Francisco HQ (San Francisco, CA)", "NYC Office (New York, NY)"]). Use the full label string exactly as it appears in the company profile. Only include locations you actually referenced. Leave as [] for non-compliance questions.
 - "updates" may include only keys from valid_update_fields.
 - If no state changes are needed, set "updates": {{}}.
 - If mode != skill, use "operation": "none" unless a clarify step for skill action is needed.
@@ -299,6 +303,8 @@ class AIResponse:
     missing_fields: list[str] = field(default_factory=list)
     token_usage: dict | None = field(default=None)
     compliance_reasoning: list[dict] | None = field(default=None)
+    referenced_categories: list[str] | None = field(default=None)
+    referenced_locations: list[str] | None = field(default=None)
 
 
 class MatchaWorkAIProvider:
@@ -455,6 +461,20 @@ class GeminiProvider(MatchaWorkAIProvider):
         if isinstance(raw_compliance_reasoning, list) and raw_compliance_reasoning:
             compliance_reasoning = raw_compliance_reasoning
 
+        raw_referenced_categories = parsed.get("referenced_categories")
+        referenced_categories = None
+        if isinstance(raw_referenced_categories, list) and raw_referenced_categories:
+            referenced_categories = [str(c).strip() for c in raw_referenced_categories if str(c).strip()]
+            if not referenced_categories:
+                referenced_categories = None
+
+        raw_referenced_locations = parsed.get("referenced_locations")
+        referenced_locations = None
+        if isinstance(raw_referenced_locations, list) and raw_referenced_locations:
+            referenced_locations = [str(loc).strip() for loc in raw_referenced_locations if str(loc).strip()]
+            if not referenced_locations:
+                referenced_locations = None
+
         return AIResponse(
             assistant_reply=reply,
             structured_update=updates if updates else None,
@@ -465,6 +485,8 @@ class GeminiProvider(MatchaWorkAIProvider):
             missing_fields=missing_fields,
             token_usage=self._extract_usage_metadata(response, model),
             compliance_reasoning=compliance_reasoning,
+            referenced_categories=referenced_categories,
+            referenced_locations=referenced_locations,
         )
 
     async def estimate_usage(

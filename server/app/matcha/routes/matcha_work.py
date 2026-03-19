@@ -287,6 +287,10 @@ def _build_compliance_metadata(
         metadata["compliance_reasoning"] = chains
     if ai_steps:
         metadata["ai_reasoning_steps"] = ai_steps
+    if ai_resp and ai_resp.referenced_categories:
+        metadata["referenced_categories"] = ai_resp.referenced_categories
+    if ai_resp and ai_resp.referenced_locations:
+        metadata["referenced_locations"] = ai_resp.referenced_locations
     return metadata
 
 
