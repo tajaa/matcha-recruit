@@ -137,14 +137,17 @@ export default function Dashboard() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
-            Command Center
-          </h1>
-          <span className="flex items-center gap-1.5 rounded-full bg-emerald-900/40 border border-emerald-800/40 px-2.5 py-0.5 text-[10px] font-medium text-emerald-400 uppercase tracking-wide">
-            <Zap className="h-3 w-3" /> Live
-          </span>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
+              Command Center
+            </h1>
+            <span className="flex items-center gap-1.5 rounded-full bg-emerald-950/60 border border-emerald-800/30 px-2.5 py-0.5 text-[10px] font-medium text-emerald-400/90 uppercase tracking-wider">
+              <Zap className="h-2.5 w-2.5" /> Live
+            </span>
+          </div>
+          <p className="text-sm text-zinc-600 mt-1">Monitor compliance, incidents, and team operations.</p>
         </div>
         <div className="flex gap-2">
           {hasFeature('policies') && (
@@ -212,7 +215,7 @@ export default function Dashboard() {
 
       {/* Quick setup nudge */}
       {hasZeroEmployees && hasZeroPolicies && (
-        <div className="mb-6 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5 flex items-center gap-4">
+        <div className="mb-8 rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-5 flex items-center gap-4">
           <div className="flex-1">
             <p className="text-sm font-medium text-zinc-200">Quick Setup</p>
             <p className="text-xs text-zinc-500 mt-0.5">
@@ -229,21 +232,24 @@ export default function Dashboard() {
       )}
 
       {/* Tab buttons */}
-      <div className="flex gap-2 mb-6">
-        <Button
-          size="sm"
-          variant={tab === 'overview' ? 'secondary' : 'ghost'}
-          onClick={() => setTab('overview')}
-        >
-          Overview
-        </Button>
-        <Button
-          size="sm"
-          variant={tab === 'operations' ? 'secondary' : 'ghost'}
-          onClick={() => setTab('operations')}
-        >
-          Operations
-        </Button>
+      <div className="flex gap-1 mb-8 border-b border-zinc-800/60 pb-px">
+        {(['overview', 'operations'] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 text-xs font-medium transition-colors relative ${
+              tab === t
+                ? 'text-zinc-100'
+                : 'text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {tab === t && (
+              <span className="absolute bottom-0 left-2 right-2 h-px bg-zinc-300 rounded-full" />
+            )}
+          </button>
+        ))}
       </div>
 
       {/* Overview tab */}

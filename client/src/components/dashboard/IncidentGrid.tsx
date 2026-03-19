@@ -19,7 +19,7 @@ export function IncidentGrid({ summary }: IncidentGridProps) {
   if (!summary || summary.total_open === 0) {
     return (
       <Card className="p-5">
-        <h3 className="text-sm font-medium text-zinc-200 mb-2">Incidents</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-2">Incidents</h3>
         <p className="text-xs text-zinc-600">No open incidents</p>
       </Card>
     )
@@ -35,7 +35,7 @@ export function IncidentGrid({ summary }: IncidentGridProps) {
   return (
     <Card className="p-5">
       <div className="flex items-center justify-between mb-4">
-        <h3 className="text-sm font-medium text-zinc-200">Incidents</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Incidents</h3>
         {summary.recent_7_days > 0 && (
           <Badge variant="warning">+{summary.recent_7_days} this week</Badge>
         )}

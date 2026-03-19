@@ -39,7 +39,7 @@ export function GettingStarted({ userId, onboardingNeeded, enabledFeatures }: Ge
   return (
     <Card className="p-5 mb-6">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-medium text-zinc-200">Getting Started</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Getting Started</h3>
         <button
           type="button"
           onClick={() => { localStorage.setItem(dismissKey, '1'); setDismissed(true) }}

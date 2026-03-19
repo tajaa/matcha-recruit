@@ -26,7 +26,7 @@ export function ComplianceWidget() {
   if (!summary || summary.total_locations === 0) {
     return (
       <Card className="p-5">
-        <h3 className="text-sm font-medium text-zinc-200 mb-1">Compliance</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-1">Compliance</h3>
         <p className="text-xs text-zinc-600">Add business locations to track compliance requirements.</p>
       </Card>
     )
@@ -35,7 +35,7 @@ export function ComplianceWidget() {
   return (
     <Card className="p-5 space-y-4">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-zinc-200">Compliance</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Compliance</h3>
         <a href="/app/compliance" className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">View All &rarr;</a>
       </div>
 

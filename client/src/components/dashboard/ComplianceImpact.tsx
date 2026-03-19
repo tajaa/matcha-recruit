@@ -129,7 +129,7 @@ export function ComplianceImpact({ initialData }: ComplianceImpactProps = {}) {
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Shield className="h-4 w-4 text-emerald-400" />
-            <h3 className="text-sm font-medium text-zinc-200">Compliance Impact</h3>
+            <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Compliance Impact</h3>
           </div>
           <div className="flex gap-1">
             {[30, 60, 90].map((d) => (

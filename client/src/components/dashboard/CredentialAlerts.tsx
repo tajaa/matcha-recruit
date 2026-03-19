@@ -24,7 +24,7 @@ export function CredentialAlerts({ summary, expirations }: CredentialAlertsProps
 
   return (
     <Card className="p-5">
-      <h3 className="text-sm font-medium text-zinc-200 mb-3">Credential Alerts</h3>
+      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-3">Credential Alerts</h3>
 
       <div className="flex gap-2 mb-4">
         {summary.expired > 0 && (
