@@ -200,7 +200,7 @@ export default function HandbookDetail() {
             <span className="text-xs text-zinc-700">/</span>
           </div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">{handbook.title}</h1>
+            <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">{handbook.title}</h1>
             <Badge variant={STATUS_BADGE[handbook.status]}>{handbook.status}</Badge>
             <Badge variant="neutral">v{handbook.active_version}</Badge>
           </div>

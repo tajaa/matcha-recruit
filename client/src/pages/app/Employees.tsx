@@ -37,7 +37,7 @@ export default function Employees() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">
+          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
             Employees
           </h1>
           <p className="mt-2 text-sm text-zinc-500">

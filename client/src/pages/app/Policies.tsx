@@ -153,7 +153,7 @@ export default function Policies() {
 
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Policies</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Policies</h1>
           <p className="mt-1 text-sm text-zinc-500">Upload, manage, and distribute company policies.</p>
         </div>
         <div className="flex gap-2">

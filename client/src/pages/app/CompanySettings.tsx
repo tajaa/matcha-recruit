@@ -300,7 +300,7 @@ export default function CompanySettings() {
   return (
     <div>
       <div className="flex items-center justify-between mb-1">
-        <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Company</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Company</h1>
       </div>
       <p className="text-sm text-zinc-500 mb-5">Manage your company profile and locations.</p>
 

@@ -60,7 +60,7 @@ export default function Settings() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">
+      <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
         Settings
       </h1>
       <p className="mt-2 text-sm text-zinc-500">Platform-wide configuration.</p>

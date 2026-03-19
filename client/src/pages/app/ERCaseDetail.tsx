@@ -192,7 +192,7 @@ export default function ERCaseDetail() {
           &larr;
         </Link>
         <span className="text-xs text-zinc-500 font-mono">{case_.case_number}</span>
-        <h1 className="text-xl font-semibold text-zinc-100 font-[Space_Grotesk]">
+        <h1 className="text-xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
           {case_.title}
         </h1>
         <Badge variant={statusVariant[case_.status] ?? 'neutral'}>

@@ -75,7 +75,7 @@ export default function IRList() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">
+          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
             Incident Reporting
           </h1>
           <p className="mt-1 text-sm text-zinc-500">

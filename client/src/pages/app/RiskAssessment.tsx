@@ -46,7 +46,7 @@ export default function RiskAssessment() {
       <div>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Risk Assessment</h1>
+            <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Risk Assessment</h1>
             <p className="mt-1 text-sm text-zinc-500">Holistic workforce risk scoring across compliance, incidents, ER cases, and more.</p>
           </div>
           {isAdmin && companies.length > 0 && (
@@ -81,7 +81,7 @@ export default function RiskAssessment() {
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Risk Assessment</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Risk Assessment</h1>
           <p className="mt-1 text-[10px] text-zinc-500 font-mono uppercase tracking-wider">
             Computed {new Date(a.computed_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
           </p>

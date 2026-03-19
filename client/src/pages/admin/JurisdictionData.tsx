@@ -183,7 +183,7 @@ export default function JurisdictionData() {
     <div>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Jurisdiction Data</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Jurisdiction Data</h1>
           <p className="mt-1 text-sm text-zinc-500">Compliance data repository overview</p>
         </div>
         <div className="flex items-center gap-2">

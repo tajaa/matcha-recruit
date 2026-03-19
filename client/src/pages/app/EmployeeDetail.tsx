@@ -109,7 +109,7 @@ export default function EmployeeDetail() {
         <Link to="/app/employees" className="text-zinc-500 hover:text-zinc-300 transition-colors">
           &larr;
         </Link>
-        <h1 className="text-xl font-semibold text-zinc-100 font-[Space_Grotesk]">
+        <h1 className="text-xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
           {employee.first_name} {employee.last_name}
         </h1>
         <EmployeeStatusBadge status={employee.employment_status} />

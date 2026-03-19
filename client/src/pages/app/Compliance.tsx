@@ -116,7 +116,7 @@ export default function Compliance() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Compliance</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Compliance</h1>
           <p className="mt-1 text-sm text-zinc-500">Jurisdictional requirements, alerts, and location management.</p>
         </div>
       </div>

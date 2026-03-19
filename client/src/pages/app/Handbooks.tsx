@@ -218,7 +218,7 @@ export default function Handbooks() {
       )}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">Handbooks</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Handbooks</h1>
           <p className="mt-1 text-sm text-zinc-500">Create, manage, and distribute employee handbooks.</p>
         </div>
         <Button size="sm" onClick={() => navigate('/app/handbook/new')}>Create Handbook</Button>
