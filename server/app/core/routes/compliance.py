@@ -547,13 +547,20 @@ async def get_alerts_endpoint(
     severity: Optional[str] = None,
     limit: int = 50,
     company_id: Optional[str] = Query(None),
+    location_id: Optional[str] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     company_id = await resolve_company_id(current_user, company_id)
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    return await get_company_alerts(company_id, status, severity, limit)
+    loc_uuid = None
+    if location_id:
+        try:
+            loc_uuid = UUID(location_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid location_id")
+    return await get_company_alerts(company_id, status, severity, limit, location_id=loc_uuid)
 
 
 @router.put("/alerts/{alert_id}/read")

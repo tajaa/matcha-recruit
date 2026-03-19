@@ -36,7 +36,7 @@ export default function Compliance() {
   const [editingLocation, setEditingLocation] = useState<BusinessLocation | null>(null)
   const [saving, setSaving] = useState(false)
 
-  const data = useComplianceData()
+  const data = useComplianceData(selectedId)
   const detail = useLocationDetail(selectedId)
 
   const onCheckComplete = useCallback(() => {

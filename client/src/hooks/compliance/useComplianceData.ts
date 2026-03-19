@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import {
   fetchLocations,
   fetchSummary,
@@ -22,13 +22,17 @@ import type {
   LocationUpdate,
 } from '../../types/compliance'
 
-export function useComplianceData() {
+export function useComplianceData(selectedLocationId?: string | null) {
   const [locations, setLocations] = useState<BusinessLocation[]>([])
   const [summary, setSummary] = useState<ComplianceSummary | null>(null)
   const [alerts, setAlerts] = useState<ComplianceAlert[]>([])
   const [pinnedRequirements, setPinnedRequirements] = useState<PinnedRequirement[]>([])
   const [jurisdictions, setJurisdictions] = useState<JurisdictionOption[]>([])
   const [loading, setLoading] = useState(true)
+
+  // Use ref so loadAlerts identity doesn't change on every location switch
+  const locationRef = useRef(selectedLocationId)
+  locationRef.current = selectedLocationId
 
   const loadLocations = useCallback(async () => {
     try { setLocations(await fetchLocations()) } catch { setLocations([]) }
@@ -39,7 +43,7 @@ export function useComplianceData() {
   }, [])
 
   const loadAlerts = useCallback(async (status?: string) => {
-    try { setAlerts(await fetchAlerts(status)) } catch { setAlerts([]) }
+    try { setAlerts(await fetchAlerts(status, undefined, locationRef.current ?? undefined)) } catch { setAlerts([]) }
   }, [])
 
   const loadPinnedRequirements = useCallback(async () => {
@@ -57,6 +61,13 @@ export function useComplianceData() {
   }, [loadLocations, loadSummary, loadAlerts, loadPinnedRequirements])
 
   useEffect(() => { refreshAll() }, [refreshAll])
+
+  // Reload alerts when selected location changes (without full page reload)
+  const mounted = useRef(false)
+  useEffect(() => {
+    if (!mounted.current) { mounted.current = true; return }
+    loadAlerts('unread')
+  }, [selectedLocationId, loadAlerts])
 
   // Mutations
   const createLoc = useCallback(async (data: LocationCreate) => {

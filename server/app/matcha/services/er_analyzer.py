@@ -330,6 +330,32 @@ Rules:
 - Keep reasoning concise but cite specific evidence
 - If precedent data is sparse, say so honestly in precedent_note"""
 
+HEALTHCARE_OUTCOME_RULES = """
+HEALTHCARE JUST CULTURE FRAMEWORK — MANDATORY FOR THIS COMPANY
+This company operates in healthcare ({specialties_context}). Apply the following overrides:
+
+RANKING HIERARCHY (overrides default "sort by evidence strength"):
+1. Severity of potential patient harm (highest weight)
+2. Evidence strength
+3. Historical precedent (lowest weight — see precedent override below)
+
+SAFETY PROTOCOL RULES:
+- High-alert medications include: chemotherapy agents, opioids, insulin, anticoagulants, concentrated electrolytes, neuromuscular blocking agents, and parenteral nutrition.
+- Bypassing a safety protocol for ANY high-alert medication carries PRESUMPTIVE LETHAL RISK.
+- Evaluate by what COULD have happened (potential harm), not what DID happen (actual outcome). A near-miss is NOT a mitigating factor — it is luck, not competence.
+
+JUST CULTURE DISTINCTIONS (must be reflected in reasoning):
+- Human error (slip/lapse — e.g., miscounted dose under fatigue): system-level fix + retraining. Recommended action: retraining.
+- At-risk behavior (conscious choice to bypass a known safety step — e.g., skipping double-check because "it takes too long"): disciplinary action scaling to termination based on severity of potential harm. For high-alert medications, recommended action: termination.
+- Reckless behavior (conscious disregard of substantial and unjustifiable risk — e.g., overriding safety alert without clinical justification): termination is the FIRST-ranked outcome, not an alternative.
+
+PRECEDENT OVERRIDE:
+- Past lenient outcomes for similar violations do NOT lower the ranking of severe-harm outcomes.
+- If historical data shows warnings/retraining for safety protocol bypasses, note in precedent_note that prior outcomes may reflect institutional under-response and should not set the standard for patient safety cases.
+
+Apply these rules to the outcome ranking. The most severe clinically-appropriate action must be ranked FIRST when the violation involves potential patient harm, regardless of what past cases show.
+"""
+
 
 SUGGESTED_GUIDANCE_PROMPT = """You are an Employee Relations investigation assistant generating interactive next-step guidance for an active case.
 
@@ -799,6 +825,7 @@ class ERAnalyzer:
         analysis_summary: str,
         policy_findings: str,
         precedent_stats: dict,
+        healthcare_context: dict | None = None,
     ) -> dict[str, Any]:
         """Generate AI-analyzed outcome recommendations for case determination.
 
@@ -807,6 +834,7 @@ class ERAnalyzer:
             analysis_summary: Combined timeline/discrepancy analysis summary.
             policy_findings: Policy violation analysis summary.
             precedent_stats: Past case outcome counts for this company.
+            healthcare_context: If set, applies Just Culture framework for clinical safety.
 
         Returns:
             Dict with outcomes list and case_summary.
@@ -818,6 +846,10 @@ class ERAnalyzer:
                 policy_findings=policy_findings or "No policy findings available.",
                 precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
             )
+            if healthcare_context:
+                specialties = healthcare_context.get("specialties")
+                specialties_str = ", ".join(specialties) if specialties else "general healthcare"
+                prompt += "\n\n" + HEALTHCARE_OUTCOME_RULES.format(specialties_context=specialties_str)
             text = await self._generate_content_async(prompt)
             result = self._parse_json_response(text)
             result["generated_at"] = datetime.now(timezone.utc).isoformat()
@@ -848,6 +880,7 @@ class ERAnalyzer:
         policy_findings: str,
         precedent_stats: dict,
         on_status: Callable[[str], Any] | None = None,
+        healthcare_context: dict | None = None,
     ) -> dict[str, Any]:
         """Generate outcome analysis with streaming status callbacks.
 
@@ -861,6 +894,10 @@ class ERAnalyzer:
                 policy_findings=policy_findings or "No policy findings available.",
                 precedent_stats=json.dumps(precedent_stats, indent=2, default=str) if precedent_stats else "No prior case data available.",
             )
+            if healthcare_context:
+                specialties = healthcare_context.get("specialties")
+                specialties_str = ", ".join(specialties) if specialties else "general healthcare"
+                prompt += "\n\n" + HEALTHCARE_OUTCOME_RULES.format(specialties_context=specialties_str)
 
             accumulated = ""
             fired_phases: set[str] = set()

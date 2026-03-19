@@ -2875,8 +2875,25 @@ async def generate_outcome_analysis_stream(
             company_id,
         )
 
+        company_row = await conn.fetchrow(
+            "SELECT industry, healthcare_specialties FROM companies WHERE id = $1",
+            company_id,
+        )
+
     precedent_stats = {r["outcome"]: r["cnt"] for r in precedent_rows}
     total_closed = sum(precedent_stats.values())
+
+    healthcare_context = None
+    if company_row:
+        is_healthcare = (
+            (company_row["industry"] or "").lower() in ("healthcare", "health care", "medical")
+            or bool(company_row["healthcare_specialties"])
+        )
+        if is_healthcare:
+            healthcare_context = {
+                "industry": company_row["industry"],
+                "specialties": company_row["healthcare_specialties"] or [],
+            }
 
     async def event_stream():
         def sse(event: dict) -> str:
@@ -2931,6 +2948,9 @@ async def generate_outcome_analysis_stream(
             "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
         }
 
+        if healthcare_context:
+            yield sse({"type": "status", "message": "Applying Just Culture framework for clinical safety analysis..."})
+
         yield sse({"type": "status", "message": "Starting AI outcome analysis..."})
 
         try:
@@ -2949,6 +2969,7 @@ async def generate_outcome_analysis_stream(
                     policy_findings=policy_findings,
                     precedent_stats=precedent_display,
                     on_status=on_status,
+                    healthcare_context=healthcare_context,
                 )
             )
 
@@ -3068,8 +3089,25 @@ async def generate_outcome_analysis(
             company_id,
         )
 
+        company_row = await conn.fetchrow(
+            "SELECT industry, healthcare_specialties FROM companies WHERE id = $1",
+            company_id,
+        )
+
     precedent_stats = {r["outcome"]: r["cnt"] for r in precedent_rows}
     total_closed = sum(precedent_stats.values())
+
+    healthcare_context = None
+    if company_row:
+        is_healthcare = (
+            (company_row["industry"] or "").lower() in ("healthcare", "health care", "medical")
+            or bool(company_row["healthcare_specialties"])
+        )
+        if is_healthcare:
+            healthcare_context = {
+                "industry": company_row["industry"],
+                "specialties": company_row["healthcare_specialties"] or [],
+            }
 
     analysis_map: dict[str, dict[str, Any]] = {}
     for row in analysis_rows:
@@ -3109,6 +3147,7 @@ async def generate_outcome_analysis(
         analysis_summary=analysis_summary,
         policy_findings=policy_findings,
         precedent_stats={"total_closed_cases": total_closed, "outcome_distribution": precedent_stats},
+        healthcare_context=healthcare_context,
     )
 
     outcomes = []

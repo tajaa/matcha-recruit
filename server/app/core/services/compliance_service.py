@@ -5559,6 +5559,7 @@ async def get_company_alerts(
     status: Optional[str] = None,
     severity: Optional[str] = None,
     limit: int = 50,
+    location_id: Optional[UUID] = None,
 ) -> List[AlertResponse]:
     from ...database import get_connection
 
@@ -5573,6 +5574,9 @@ async def get_company_alerts(
         """
         params = [company_id]
 
+        if location_id:
+            query += f" AND a.location_id = ${len(params) + 1}"
+            params.append(location_id)
         if status:
             query += f" AND a.status = ${len(params) + 1}"
             params.append(status)
