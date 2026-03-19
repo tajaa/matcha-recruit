@@ -10,73 +10,26 @@ const STATUS_OPTIONS = Object.entries(statusLabel).map(([value, label]) => ({ va
 
 type Tab = 'profile' | 'onboarding'
 
-type EditableFieldProps = {
-  label: string
-  value: string | null
-  onSave: (value: string) => Promise<void> | void
-  type?: string
-}
+const PROFILE_FIELDS: { key: string; label: string; type?: string }[] = [
+  { key: 'first_name', label: 'First Name' },
+  { key: 'last_name', label: 'Last Name' },
+  { key: 'work_email', label: 'Work Email', type: 'email' },
+  { key: 'personal_email', label: 'Personal Email', type: 'email' },
+  { key: 'phone', label: 'Phone', type: 'tel' },
+  { key: 'job_title', label: 'Job Title' },
+  { key: 'department', label: 'Department' },
+  { key: 'work_state', label: 'Work State' },
+  { key: 'work_city', label: 'Work City' },
+  { key: 'pay_classification', label: 'Pay Classification' },
+  { key: 'pay_rate', label: 'Pay Rate' },
+  { key: 'start_date', label: 'Start Date', type: 'date' },
+  { key: 'address', label: 'Address' },
+]
 
-function EditableField({ label, value, onSave, type = 'text' }: EditableFieldProps) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(value ?? '')
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
-
-  async function handleBlur() {
-    const trimmed = draft.trim()
-    if (trimmed === (value ?? '')) {
-      setEditing(false)
-      return
-    }
-    setSaving(true)
-    setSaveError('')
-    try {
-      await onSave(trimmed)
-      setEditing(false)
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : 'Save failed')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  if (editing) {
-    return (
-      <div>
-        <dt className="text-zinc-500 text-xs">{label}</dt>
-        <dd className="mt-1">
-          <Input
-            label=""
-            type={type}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={handleBlur}
-            onKeyDown={(e) => { if (e.key === 'Enter') handleBlur() }}
-            autoFocus
-            disabled={saving}
-            className="!py-1 text-sm"
-          />
-          {saveError && <p className="text-[10px] text-red-400 mt-0.5">{saveError}</p>}
-        </dd>
-      </div>
-    )
-  }
-
-  return (
-    <div
-      className="cursor-pointer group rounded-md px-2 py-1.5 -mx-2 hover:bg-zinc-800/50 transition-colors"
-      onClick={() => { setDraft(value ?? ''); setEditing(true) }}
-    >
-      <dt className="text-zinc-500 text-xs">{label}</dt>
-      <dd className="text-zinc-200 text-sm mt-0.5 flex items-center justify-between gap-2">
-        <span>{value || <span className="text-zinc-600 italic">Not set</span>}</span>
-        <svg className="w-3 h-3 text-zinc-600 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-        </svg>
-      </dd>
-    </div>
-  )
+function getFieldValue(employee: Record<string, unknown>, key: string): string {
+  const v = employee[key]
+  if (v == null) return ''
+  return String(v)
 }
 
 export default function EmployeeDetail() {
@@ -88,13 +41,54 @@ export default function EmployeeDetail() {
   } = useEmployeeDetail(employeeId!)
   const [tab, setTab] = useState<Tab>('profile')
   const [inviting, setInviting] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
 
   if (loading) return <p className="text-sm text-zinc-500">Loading employee...</p>
   if (error) return <p className="text-sm text-red-400">{error}</p>
   if (!employee) return <p className="text-sm text-zinc-500">Employee not found.</p>
 
-  async function handleFieldSave(field: string, value: string) {
-    await updateEmployee({ [field]: value || null })
+  function startEditing() {
+    const initial: Record<string, string> = {}
+    for (const f of PROFILE_FIELDS) {
+      initial[f.key] = getFieldValue(employee as unknown as Record<string, unknown>, f.key)
+    }
+    setDraft(initial)
+    setSaveError('')
+    setEditing(true)
+  }
+
+  function cancelEditing() {
+    setDraft({})
+    setSaveError('')
+    setEditing(false)
+  }
+
+  async function handleSave() {
+    const changes: Record<string, string | null> = {}
+    for (const f of PROFILE_FIELDS) {
+      const original = getFieldValue(employee as unknown as Record<string, unknown>, f.key)
+      const edited = (draft[f.key] ?? '').trim()
+      if (edited !== original) {
+        changes[f.key] = edited || null
+      }
+    }
+    if (Object.keys(changes).length === 0) {
+      setEditing(false)
+      return
+    }
+    setSaving(true)
+    setSaveError('')
+    try {
+      await updateEmployee(changes)
+      setEditing(false)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSaving(false)
+    }
   }
 
   async function handleInvite() {
@@ -118,6 +112,11 @@ export default function EmployeeDetail() {
             {typeLabel[employee.employment_type] ?? employee.employment_type}
           </Badge>
         )}
+        {!editing && tab === 'profile' && (
+          <Button variant="ghost" size="sm" onClick={startEditing}>
+            Edit Profile
+          </Button>
+        )}
       </div>
 
       {/* Layout: 2/3 main + 1/3 sidebar */}
@@ -140,34 +139,47 @@ export default function EmployeeDetail() {
 
           <Card className="p-5">
             {tab === 'profile' && (
-              <div className="grid grid-cols-2 gap-x-8 gap-y-4">
-                <EditableField label="First Name" value={employee.first_name}
-                  onSave={(v) => handleFieldSave('first_name', v)} />
-                <EditableField label="Last Name" value={employee.last_name}
-                  onSave={(v) => handleFieldSave('last_name', v)} />
-                <EditableField label="Work Email" value={employee.work_email}
-                  onSave={(v) => handleFieldSave('work_email', v)} type="email" />
-                <EditableField label="Personal Email" value={employee.personal_email}
-                  onSave={(v) => handleFieldSave('personal_email', v)} type="email" />
-                <EditableField label="Phone" value={employee.phone}
-                  onSave={(v) => handleFieldSave('phone', v)} type="tel" />
-                <EditableField label="Job Title" value={employee.job_title}
-                  onSave={(v) => handleFieldSave('job_title', v)} />
-                <EditableField label="Department" value={employee.department}
-                  onSave={(v) => handleFieldSave('department', v)} />
-                <EditableField label="Work State" value={employee.work_state}
-                  onSave={(v) => handleFieldSave('work_state', v)} />
-                <EditableField label="Work City" value={employee.work_city}
-                  onSave={(v) => handleFieldSave('work_city', v)} />
-                <EditableField label="Pay Classification" value={employee.pay_classification}
-                  onSave={(v) => handleFieldSave('pay_classification', v)} />
-                <EditableField label="Pay Rate" value={employee.pay_rate?.toString() ?? null}
-                  onSave={(v) => handleFieldSave('pay_rate', v)} />
-                <EditableField label="Start Date" value={employee.start_date}
-                  onSave={(v) => handleFieldSave('start_date', v)} type="date" />
-                <EditableField label="Address" value={employee.address}
-                  onSave={(v) => handleFieldSave('address', v)} />
-              </div>
+              <>
+                <div className="grid grid-cols-2 gap-x-8 gap-y-4">
+                  {PROFILE_FIELDS.map((f) => {
+                    const value = getFieldValue(employee as unknown as Record<string, unknown>, f.key)
+                    if (editing) {
+                      return (
+                        <div key={f.key}>
+                          <Input
+                            label={f.label}
+                            type={f.type ?? 'text'}
+                            value={draft[f.key] ?? ''}
+                            onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                            className="text-sm"
+                          />
+                        </div>
+                      )
+                    }
+                    return (
+                      <div key={f.key}>
+                        <dt className="text-zinc-500 text-xs">{f.label}</dt>
+                        <dd className="text-zinc-200 text-sm mt-0.5">
+                          {value || <span className="text-zinc-600 italic">Not set</span>}
+                        </dd>
+                      </div>
+                    )
+                  })}
+                </div>
+                {editing && (
+                  <div className="flex items-center gap-3 mt-6 pt-4 border-t border-zinc-800">
+                    {saveError && <p className="text-sm text-red-400 mr-auto">{saveError}</p>}
+                    <div className="ml-auto flex gap-2">
+                      <Button variant="ghost" size="sm" onClick={cancelEditing} disabled={saving}>
+                        Cancel
+                      </Button>
+                      <Button variant="primary" size="sm" onClick={handleSave} disabled={saving}>
+                        {saving ? 'Saving...' : 'Save Changes'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
             {tab === 'onboarding' && (
               <OnboardingTaskList employeeId={employeeId!} />

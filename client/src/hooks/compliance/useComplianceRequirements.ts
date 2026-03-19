@@ -66,14 +66,14 @@ export function useComplianceRequirements(requirements: ComplianceRequirement[] 
     for (const entry of orderedRequirementCategories) {
       const [category, reqs] = entry
       const sectionId = getSectionId(category)
-      if (sectionId !== 'labor' && reqs.length === 0) continue
+      if (reqs.length === 0) continue
       buckets.get(sectionId)?.push(entry)
     }
 
     const sections: CategorySection[] = []
     for (const id of SECTION_ORDER) {
       const categories = buckets.get(id)!
-      if (id !== 'labor' && categories.length === 0) continue
+      if (categories.length === 0) continue
       sections.push({
         id,
         label: SECTION_LABELS[id],
