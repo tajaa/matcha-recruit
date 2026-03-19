@@ -3484,6 +3484,82 @@ async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
     return result
 
 
+@router.get("/jurisdictions/api-sources", dependencies=[Depends(require_admin)])
+async def get_api_sources_overview():
+    """Get all requirements grouped by research_source with stats."""
+    async with get_connection() as conn:
+        # Counts by research_source
+        source_counts = await conn.fetch("""
+            SELECT
+                COALESCE(metadata->>'research_source', 'unknown') AS research_source,
+                COUNT(*) AS total,
+                COUNT(DISTINCT category) AS category_count,
+                COUNT(DISTINCT jurisdiction_id) AS jurisdiction_count,
+                MIN(created_at) AS earliest,
+                MAX(updated_at) AS latest
+            FROM jurisdiction_requirements
+            GROUP BY COALESCE(metadata->>'research_source', 'unknown')
+            ORDER BY total DESC
+        """)
+
+        # Recent official_api entries
+        recent_api = await conn.fetch("""
+            SELECT jr.id, jr.category, jr.title, jr.source_name, jr.source_url,
+                   jr.effective_date, jr.created_at, jr.jurisdiction_level,
+                   j.city, j.state
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE jr.metadata->>'research_source' = 'official_api'
+            ORDER BY jr.created_at DESC
+            LIMIT 100
+        """)
+
+        # Category breakdown for official_api
+        api_by_category = await conn.fetch("""
+            SELECT category, COUNT(*) AS count
+            FROM jurisdiction_requirements
+            WHERE metadata->>'research_source' = 'official_api'
+            GROUP BY category
+            ORDER BY count DESC
+        """)
+
+        def fmt(d):
+            return d.isoformat() if d else None
+
+        return {
+            "source_counts": [
+                {
+                    "research_source": r["research_source"],
+                    "total": r["total"],
+                    "category_count": r["category_count"],
+                    "jurisdiction_count": r["jurisdiction_count"],
+                    "earliest": fmt(r["earliest"]),
+                    "latest": fmt(r["latest"]),
+                }
+                for r in source_counts
+            ],
+            "recent_api": [
+                {
+                    "id": str(r["id"]),
+                    "category": r["category"],
+                    "title": r["title"],
+                    "source_name": r["source_name"],
+                    "source_url": r["source_url"],
+                    "effective_date": fmt(r["effective_date"]),
+                    "created_at": fmt(r["created_at"]),
+                    "jurisdiction_level": r["jurisdiction_level"],
+                    "city": r["city"],
+                    "state": r["state"],
+                }
+                for r in recent_api
+            ],
+            "api_by_category": [
+                {"category": r["category"], "count": r["count"]}
+                for r in api_by_category
+            ],
+        }
+
+
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
 async def get_jurisdiction_detail(jurisdiction_id: UUID):
     """Get full detail for a jurisdiction: requirements, legislation, linked locations."""
@@ -5406,6 +5482,7 @@ async def apply_jurisdiction_federal_sources(jurisdiction_id: UUID, payload: Dic
 
     result = await apply_federal_sources(jurisdiction_id, requirements)
     return {"ok": True, **result}
+
 
 
 # ──────────────────────────────────────────────────────────────────────────────
