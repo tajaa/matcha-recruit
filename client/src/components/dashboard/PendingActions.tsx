@@ -121,7 +121,7 @@ export function PendingActions({
   return (
     <Card className="p-0">
       <div className="px-5 pt-4 pb-3">
-        <h3 className="text-sm font-medium text-zinc-200">Pending Actions</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Pending Actions</h3>
       </div>
       {rows.length === 0 ? (
         <div className="flex items-center gap-2 px-5 pb-4 text-emerald-500">
@@ -135,7 +135,7 @@ export function PendingActions({
               key={row.key}
               type="button"
               onClick={() => navigate(row.href)}
-              className="flex items-center gap-3 w-full px-5 py-3 text-left hover:bg-zinc-800/50 transition-colors"
+              className="flex items-center gap-3 w-full px-5 py-3 text-left border-l-2 border-transparent hover:border-zinc-500 hover:bg-zinc-800/50 transition-all"
             >
               <span className={`h-2 w-2 rounded-full shrink-0 ${SEV_DOT[row.severity] || SEV_DOT.info}`} />
               <div className="flex-1 min-w-0">

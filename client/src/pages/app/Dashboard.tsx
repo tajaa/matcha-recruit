@@ -139,7 +139,7 @@ export default function Dashboard() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk]">
+          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
             Command Center
           </h1>
           <span className="flex items-center gap-1.5 rounded-full bg-emerald-900/40 border border-emerald-800/40 px-2.5 py-0.5 text-[10px] font-medium text-emerald-400 uppercase tracking-wide">
@@ -161,7 +161,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-6">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-8">
         <StatCard
           label="Compliance Alerts"
           value={(stats?.critical_compliance_alerts ?? 0) + (stats?.warning_compliance_alerts ?? 0)}

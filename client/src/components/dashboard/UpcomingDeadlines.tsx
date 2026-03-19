@@ -41,7 +41,7 @@ export function UpcomingDeadlines({ items, loading }: UpcomingDeadlinesProps) {
   if (loading) {
     return (
       <Card className="p-5">
-        <h3 className="text-sm font-medium text-zinc-200 mb-2">Upcoming Deadlines</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-2">Upcoming Deadlines</h3>
         <p className="text-xs text-zinc-500 animate-pulse">Loading...</p>
       </Card>
     )
@@ -50,7 +50,7 @@ export function UpcomingDeadlines({ items, loading }: UpcomingDeadlinesProps) {
   if (items.length === 0) {
     return (
       <Card className="p-5">
-        <h3 className="text-sm font-medium text-zinc-200 mb-2">Upcoming Deadlines</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-2">Upcoming Deadlines</h3>
         <p className="text-xs text-zinc-600">No upcoming deadlines</p>
       </Card>
     )
@@ -59,7 +59,7 @@ export function UpcomingDeadlines({ items, loading }: UpcomingDeadlinesProps) {
   return (
     <Card className="p-0">
       <div className="px-5 pt-4 pb-3">
-        <h3 className="text-sm font-medium text-zinc-200">Upcoming Deadlines</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Upcoming Deadlines</h3>
       </div>
       <div className="divide-y divide-zinc-800">
         {items.slice(0, 8).map((item, i) => (
@@ -67,7 +67,7 @@ export function UpcomingDeadlines({ items, loading }: UpcomingDeadlinesProps) {
             key={i}
             type="button"
             onClick={() => navigate(item.link)}
-            className="flex items-center gap-3 w-full px-5 py-2.5 text-left hover:bg-zinc-800/50 transition-colors"
+            className="flex items-center gap-3 w-full px-5 py-2.5 text-left border-l-2 border-transparent hover:border-zinc-500 hover:bg-zinc-800/50 transition-all"
           >
             <span className={`h-2 w-2 rounded-full shrink-0 ${SEV_DOT[item.severity] || SEV_DOT.info}`} />
             <span className="text-sm text-zinc-200 flex-1 truncate">{item.title}</span>

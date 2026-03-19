@@ -33,7 +33,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
   if (activities.length === 0) {
     return (
       <Card className="p-5">
-        <h3 className="text-sm font-medium text-zinc-200 mb-2">Activity</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-2">Activity</h3>
         <p className="text-xs text-zinc-600">No recent activity</p>
       </Card>
     )
@@ -42,7 +42,7 @@ export function ActivityFeed({ activities }: ActivityFeedProps) {
   return (
     <Card className="p-0">
       <div className="px-5 pt-4 pb-3">
-        <h3 className="text-sm font-medium text-zinc-200">Activity</h3>
+        <h3 className="text-sm font-medium text-zinc-200 tracking-wide">Activity</h3>
       </div>
       <div className="divide-y divide-zinc-800">
         {activities.map((a, i) => (
