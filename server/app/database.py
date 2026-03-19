@@ -4375,6 +4375,7 @@ async def init_db():
                 role VARCHAR(20) NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
                 content TEXT NOT NULL,
                 version_created INTEGER,
+                metadata JSONB,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
         """)

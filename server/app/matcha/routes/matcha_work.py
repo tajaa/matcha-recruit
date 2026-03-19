@@ -70,7 +70,7 @@ from ..services.matcha_work_handbook_upload import (
     parse_handbook_sections,
 )
 from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation
-from ..services.matcha_work_node import build_node_context, build_compliance_context
+from ..services.matcha_work_node import build_node_context, build_compliance_context, ComplianceContextResult
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
     PROVIDER_SLACK,
@@ -136,12 +136,19 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
 
 
 def _row_to_message(row: dict) -> MWMessageOut:
+    raw_meta = row.get("metadata")
+    if isinstance(raw_meta, str):
+        try:
+            raw_meta = json.loads(raw_meta)
+        except (json.JSONDecodeError, TypeError):
+            raw_meta = None
     return MWMessageOut(
         id=row["id"],
         thread_id=row["thread_id"],
         role=row["role"],
         content=row["content"],
         version_created=row.get("version_created"),
+        metadata=raw_meta,
         created_at=row["created_at"],
     )
 
@@ -264,6 +271,23 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: UUID) -> Th
         updated_at=thread["updated_at"],
         messages=[_row_to_message(row) for row in messages],
     )
+
+
+def _build_compliance_metadata(
+    compliance_result: ComplianceContextResult | None,
+    ai_resp,
+) -> dict | None:
+    """Merge pre-computed jurisdiction reasoning and Gemini's reasoning steps into message metadata."""
+    chains = compliance_result.reasoning_chains if compliance_result else None
+    ai_steps = ai_resp.compliance_reasoning if ai_resp else None
+    if not chains and not ai_steps:
+        return None
+    metadata: dict = {}
+    if chains:
+        metadata["compliance_reasoning"] = chains
+    if ai_steps:
+        metadata["ai_reasoning_steps"] = ai_steps
+    return metadata
 
 
 def _sse_data(payload: dict) -> str:
@@ -1684,12 +1708,13 @@ async def send_message(
     # Call AI with company context
     ai_provider = get_ai_provider()
     ctx = _build_company_context(profile)
+    compliance_result: ComplianceContextResult | None = None
     if thread.get("node_mode"):
         node_ctx = await build_node_context(company_id)
         ctx += "\n\n" + node_ctx
     if thread.get("compliance_mode"):
-        compliance_ctx = await build_compliance_context(company_id)
-        ctx += "\n\n" + compliance_ctx
+        compliance_result = await build_compliance_context(company_id)
+        ctx += "\n\n" + compliance_result.context_text
     ai_resp = await ai_provider.generate(
         msg_dicts, thread["current_state"], company_context=ctx,
         slide_index=body.slide_index, context_summary=context_summary,
@@ -1714,12 +1739,16 @@ async def send_message(
         current_user_id=current_user.id,
     )
 
+    # Build metadata from compliance reasoning chains
+    msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
+
     # Save assistant message
     assistant_msg = await doc_svc.add_message(
         thread_id,
         "assistant",
         assistant_reply_text,
         version_created=current_version if changed else None,
+        metadata=msg_metadata,
     )
 
     cost = calculate_call_cost(
@@ -1851,6 +1880,7 @@ async def send_message_stream(
 
     async def event_stream():
         nonlocal ctx
+        compliance_result: ComplianceContextResult | None = None
         try:
             # Build mode-specific context with status updates
             if thread.get("node_mode"):
@@ -1860,7 +1890,8 @@ async def send_message_stream(
 
             if thread.get("compliance_mode"):
                 yield _sse_data({"type": "status", "message": "Loading compliance data for your locations..."})
-                compliance_ctx = await build_compliance_context(company_id)
+                compliance_result = await build_compliance_context(company_id)
+                compliance_ctx = compliance_result.context_text
                 cat_count = compliance_ctx.count("Decision path:")
                 trigger_count = compliance_ctx.count("[trigger:")
                 loc_count = compliance_ctx.count("FACILITY PROFILE")
@@ -1910,12 +1941,16 @@ async def send_message_stream(
                 current_user_id=current_user.id,
             )
 
+            # Build metadata from compliance reasoning chains
+            msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
+
             # Save assistant message
             assistant_msg = await doc_svc.add_message(
                 thread_id,
                 "assistant",
                 assistant_reply_text,
                 version_created=current_version if changed else None,
+                metadata=msg_metadata,
             )
 
             final_usage = ai_resp.token_usage or estimated_usage

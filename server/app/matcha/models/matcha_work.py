@@ -242,6 +242,7 @@ class MWMessageOut(BaseModel):
     role: str
     content: str
     version_created: Optional[int] = None
+    metadata: Optional[dict] = None
     created_at: datetime
 
 

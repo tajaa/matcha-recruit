@@ -4,6 +4,7 @@ import Markdown from 'react-markdown'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode } from '../../api/matchaWork'
+import ComplianceReasoningPanel from '../../components/matcha-work/ComplianceReasoningPanel'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -284,7 +285,15 @@ export default function MatchaWorkThread() {
                 }`}
               >
                 {m.role === 'assistant' ? (
-                  <Markdown>{m.content}</Markdown>
+                  <>
+                    <Markdown>{m.content}</Markdown>
+                    {m.metadata?.compliance_reasoning && (
+                      <ComplianceReasoningPanel
+                        locations={m.metadata.compliance_reasoning}
+                        aiSteps={m.metadata.ai_reasoning_steps}
+                      />
+                    )}
+                  </>
                 ) : (
                   m.content
                 )}

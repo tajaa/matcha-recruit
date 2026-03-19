@@ -1115,9 +1115,9 @@ async def get_thread_messages(thread_id: UUID, limit: int | None = None) -> list
         if limit is not None:
             rows = await conn.fetch(
                 """
-                SELECT id, thread_id, role, content, version_created, created_at
+                SELECT id, thread_id, role, content, version_created, metadata, created_at
                 FROM (
-                    SELECT id, thread_id, role, content, version_created, created_at
+                    SELECT id, thread_id, role, content, version_created, metadata, created_at
                     FROM mw_messages
                     WHERE thread_id=$1
                     ORDER BY created_at DESC
@@ -1131,7 +1131,7 @@ async def get_thread_messages(thread_id: UUID, limit: int | None = None) -> list
         else:
             rows = await conn.fetch(
                 """
-                SELECT id, thread_id, role, content, version_created, created_at
+                SELECT id, thread_id, role, content, version_created, metadata, created_at
                 FROM mw_messages
                 WHERE thread_id=$1
                 ORDER BY created_at ASC
@@ -1146,18 +1146,20 @@ async def add_message(
     role: str,
     content: str,
     version_created: Optional[int] = None,
+    metadata: Optional[dict] = None,
 ) -> dict:
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO mw_messages(thread_id, role, content, version_created)
-            VALUES($1, $2, $3, $4)
-            RETURNING id, thread_id, role, content, version_created, created_at
+            INSERT INTO mw_messages(thread_id, role, content, version_created, metadata)
+            VALUES($1, $2, $3, $4, $5::jsonb)
+            RETURNING id, thread_id, role, content, version_created, metadata, created_at
             """,
             thread_id,
             role,
             content,
             version_created,
+            json.dumps(metadata) if metadata else None,
         )
         return dict(row)
 

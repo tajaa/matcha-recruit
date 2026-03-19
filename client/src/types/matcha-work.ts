@@ -21,12 +21,57 @@ export interface MWThread {
   updated_at: string
 }
 
+// Gemini's reasoning step
+export interface AIReasoningStep {
+  step: number
+  question: string
+  answer: string
+  conclusion: string
+  sources: string[]
+}
+
+// Pre-computed jurisdiction level
+export interface ComplianceReasoningLevel {
+  jurisdiction_level: string
+  jurisdiction_name: string
+  title: string
+  current_value: string | null
+  numeric_value: number | null
+  source_url: string | null
+  statute_citation: string | null
+  trigger_condition: Record<string, unknown> | null
+  is_governing: boolean
+}
+
+export interface ComplianceReasoningCategory {
+  category: string
+  governing_level: string
+  precedence_type: 'floor' | 'ceiling' | 'supersede' | 'additive' | null
+  reasoning_text: string | null
+  legal_citation: string | null
+  all_levels: ComplianceReasoningLevel[]
+}
+
+export interface ComplianceReasoningLocation {
+  location_id: string
+  location_label: string
+  facility_attributes: Record<string, unknown> | null
+  activated_profiles: { label: string; categories: string[] }[]
+  categories: ComplianceReasoningCategory[]
+}
+
+export interface MWMessageMetadata {
+  compliance_reasoning?: ComplianceReasoningLocation[]
+  ai_reasoning_steps?: AIReasoningStep[]
+}
+
 export interface MWMessage {
   id: string
   thread_id: string
   role: 'user' | 'assistant'
   content: string
   version_created: number | null
+  metadata: MWMessageMetadata | null
   created_at: string
 }
 

@@ -202,8 +202,10 @@ Output constraints:
   "confidence": 0.0,
   "updates": {{}},
   "missing_fields": [],
-  "reply": ""
+  "reply": "",
+  "compliance_reasoning": []
 }}
+- In "compliance_reasoning", output your step-by-step reasoning ONLY when the user's question involves compliance analysis and COMPLIANCE MODE context is present. Each step: {{"step": 1, "question": "Does federal law apply?", "answer": "Yes — FLSA sets baseline at $7.25/hr", "conclusion": "Federal floor established", "sources": ["29 U.S.C. 206"]}}. Show the chain of questions you evaluated to reach your answer. Leave as [] for non-compliance questions.
 - "updates" may include only keys from valid_update_fields.
 - If no state changes are needed, set "updates": {{}}.
 - If mode != skill, use "operation": "none" unless a clarify step for skill action is needed.
@@ -296,6 +298,7 @@ class AIResponse:
     confidence: float = 0.0
     missing_fields: list[str] = field(default_factory=list)
     token_usage: dict | None = field(default=None)
+    compliance_reasoning: list[dict] | None = field(default=None)
 
 
 class MatchaWorkAIProvider:
@@ -447,6 +450,11 @@ class GeminiProvider(MatchaWorkAIProvider):
         else:
             missing_fields = []
 
+        raw_compliance_reasoning = parsed.get("compliance_reasoning")
+        compliance_reasoning = None
+        if isinstance(raw_compliance_reasoning, list) and raw_compliance_reasoning:
+            compliance_reasoning = raw_compliance_reasoning
+
         return AIResponse(
             assistant_reply=reply,
             structured_update=updates if updates else None,
@@ -456,6 +464,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             confidence=confidence,
             missing_fields=missing_fields,
             token_usage=self._extract_usage_metadata(response, model),
+            compliance_reasoning=compliance_reasoning,
         )
 
     async def estimate_usage(

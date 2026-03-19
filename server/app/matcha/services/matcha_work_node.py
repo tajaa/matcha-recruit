@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from collections import defaultdict
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
@@ -16,11 +17,19 @@ from ...core.services.compliance_service import (
 
 logger = logging.getLogger(__name__)
 
+
+@dataclass
+class ComplianceContextResult:
+    """Holds both the text prompt for Gemini and the structured reasoning chains for storage."""
+    context_text: str
+    reasoning_chains: list[dict] | None = field(default=None)
+
+
 # TTL cache keyed by company_id — same pattern as _company_profile_cache
 _node_context_cache: dict[str, tuple[float, str]] = {}
 _NODE_CACHE_TTL = 120  # 2 minutes
 
-_compliance_context_cache: dict[str, tuple[float, str]] = {}
+_compliance_context_cache: dict[str, tuple[float, "ComplianceContextResult"]] = {}
 _COMPLIANCE_CACHE_TTL = 120  # 2 minutes
 
 
@@ -174,13 +183,14 @@ async def build_node_context(company_id: UUID) -> str:
     return result
 
 
-async def build_compliance_context(company_id: UUID) -> str:
+async def build_compliance_context(company_id: UUID) -> ComplianceContextResult:
     """Build compliance context with full reasoning chains from jurisdiction_requirements.
 
     Uses the jurisdiction hierarchy (federal→state→city), trigger evaluation, and
     precedence resolution to produce an annotated context that Gemini can synthesize
     into layered compliance explanations.
 
+    Returns a ComplianceContextResult with both the text prompt and structured reasoning chains.
     Locations without a jurisdiction_id fall back to the legacy compliance_requirements table.
     """
     cache_key = str(company_id)
@@ -212,6 +222,8 @@ async def build_compliance_context(company_id: UUID) -> str:
             "If the data below does not cover what the user asks about, suggest they run "
             "a compliance check to pull in the latest requirements."
         )
+
+        reasoning_chains: list[dict] = []
 
         if not locations:
             sections.append(
@@ -274,6 +286,12 @@ async def build_compliance_context(company_id: UUID) -> str:
 
                 sections.append("\n".join(lines))
 
+                # Build structured reasoning chain for this location
+                loc_chain = _build_location_reasoning_chain(
+                    loc, loc_label, facility_attrs, activated, governed,
+                )
+                reasoning_chains.append(loc_chain)
+
             # Fallback: locations without jurisdiction_id use legacy table
             if legacy_locations:
                 legacy_ids = [loc["id"] for loc in legacy_locations]
@@ -318,7 +336,11 @@ async def build_compliance_context(company_id: UUID) -> str:
 
                         sections.append("\n".join(loc_lines))
 
-    result = "\n".join(sections)
+    context_text = "\n".join(sections)
+    result = ComplianceContextResult(
+        context_text=context_text,
+        reasoning_chains=reasoning_chains if reasoning_chains else None,
+    )
     _compliance_context_cache[cache_key] = (now, result)
     return result
 
@@ -518,3 +540,64 @@ def _truncate(text: str, max_len: int) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 3] + "..."
+
+
+def _build_location_reasoning_chain(
+    loc: dict,
+    loc_label: str,
+    facility_attrs: Dict[str, Any],
+    activated_profiles: list,
+    governed: List[Dict[str, Any]],
+) -> dict:
+    """Build structured reasoning chain for a single location."""
+    categories = []
+    for cat_result in governed[:30]:
+        all_levels_structured = []
+        for row in cat_result.get("all_levels", []):
+            level = row.get("jur_level") or row.get("jurisdiction_level") or "unknown"
+            jur_name = row.get("jur_display_name") or row.get("jurisdiction_name") or ""
+            all_levels_structured.append({
+                "jurisdiction_level": level,
+                "jurisdiction_name": jur_name if jur_name else level.capitalize(),
+                "title": row.get("title") or "Untitled",
+                "current_value": row.get("current_value") or row.get("description") or None,
+                "numeric_value": _safe_float(row.get("numeric_value")),
+                "source_url": row.get("source_url"),
+                "statute_citation": row.get("statute_citation"),
+                "trigger_condition": row.get("trigger_conditions"),
+                "is_governing": (
+                    (row.get("jur_level") or row.get("jurisdiction_level"))
+                    == cat_result.get("governing_level")
+                ),
+            })
+
+        gov_req = cat_result.get("governing_requirement") or {}
+        categories.append({
+            "category": cat_result["category"],
+            "governing_level": cat_result.get("governing_level") or "unknown",
+            "precedence_type": cat_result.get("precedence_type"),
+            "reasoning_text": cat_result.get("reasoning_text"),
+            "legal_citation": cat_result.get("legal_citation") or gov_req.get("statute_citation"),
+            "all_levels": all_levels_structured,
+        })
+
+    return {
+        "location_id": str(loc["id"]),
+        "location_label": loc_label,
+        "facility_attributes": facility_attrs if facility_attrs else None,
+        "activated_profiles": [
+            {"label": p.label, "categories": list(p.applicable_categories)}
+            for p in activated_profiles
+        ],
+        "categories": categories,
+    }
+
+
+def _safe_float(val: Any) -> Optional[float]:
+    """Safely convert a value to float, returning None on failure."""
+    if val is None:
+        return None
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return None
