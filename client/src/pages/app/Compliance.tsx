@@ -190,6 +190,8 @@ export default function Compliance() {
                   locationId={selectedId!}
                   facilityAttributes={selectedLoc?.facility_attributes}
                   onUpdated={() => data.loadLocations()}
+                  allLocations={data.locations}
+                  source={selectedLoc?.source}
                 />
 
                 <ComplianceScanProgress scanning={check.scanning} messages={check.messages} />

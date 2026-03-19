@@ -113,6 +113,32 @@ async def list_companies():
         ]
 
 
+@router.get("/me", response_model=CompanyResponse)
+async def get_my_company(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get the current user's company."""
+    company_id = await get_client_company_id(current_user)
+    if not company_id:
+        raise HTTPException(status_code=404, detail="No company associated with this account")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            f"""
+            SELECT c.*, COUNT(i.id) as interview_count
+            FROM companies c
+            LEFT JOIN interviews i ON c.id = i.company_id
+            WHERE c.id = $1
+            GROUP BY c.id
+            """,
+            company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        return _row_to_response(row, interview_count=row["interview_count"])
+
+
 @router.get("/{company_id}", response_model=CompanyResponse)
 async def get_company(company_id: UUID):
     """Get a company by ID with its culture profile."""
@@ -147,8 +173,18 @@ async def get_company(company_id: UUID):
 
 
 @router.patch("/{company_id}", response_model=CompanyResponse)
-async def update_company(company_id: UUID, company: CompanyUpdate):
+async def update_company(
+    company_id: UUID,
+    company: CompanyUpdate,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
     """Update a company."""
+    # Verify client can only update their own company
+    if current_user.role != "admin":
+        user_company_id = await get_client_company_id(current_user)
+        if str(user_company_id) != str(company_id):
+            raise HTTPException(status_code=403, detail="Not authorized to update this company")
+
     async with get_connection() as conn:
         # Build update query dynamically
         updates = []

@@ -50,6 +50,9 @@ export function ComplianceLocationList({ locations, selectedId, onSelect, onEdit
                   {loc.employee_count > 0 && (
                     <span className="text-[11px] text-zinc-600">{loc.employee_count} employees</span>
                   )}
+                  {loc.source === 'employee_derived' && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-900/30 text-purple-400 border border-purple-800/40">Employee</span>
+                  )}
                   {loc.has_local_ordinance && (
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/30 text-emerald-400 border border-emerald-800/40">Local</span>
                   )}

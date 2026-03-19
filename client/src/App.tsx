@@ -25,6 +25,7 @@ import HandbookDetail from './pages/app/HandbookDetail'
 import HandbookForm from './pages/app/HandbookForm'
 import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
+import CompanySettings from './pages/app/CompanySettings'
 import ERExportDownload from './pages/shared/ERExportDownload'
 import WorkLayout from './layouts/WorkLayout'
 import MatchaWorkList from './pages/work/MatchaWorkList'
@@ -52,6 +53,7 @@ export default function App() {
       </Route>
       <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
         <Route index element={<Dashboard />} />
+        <Route path="company" element={<CompanySettings />} />
         <Route path="employees" element={<Employees />} />
         <Route path="employees/:employeeId" element={<EmployeeDetail />} />
         <Route path="onboarding" element={<Onboarding />} />

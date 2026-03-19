@@ -42,18 +42,28 @@ function getDismissKey(locationId: string): string {
   return `facility_profile_dismissed_${locationId}`
 }
 
+type LocationSummary = {
+  id: string
+  facility_attributes?: FacilityAttributes | null
+}
+
 type Props = {
   locationId: string
   facilityAttributes: FacilityAttributes | null | undefined
   onUpdated: (attrs: FacilityAttributes) => void
+  /** All company locations — used to offer "apply to all" */
+  allLocations?: LocationSummary[]
+  /** Location source — hide banner for employee-derived locations */
+  source?: 'manual' | 'employee_derived'
 }
 
-export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdated }: Props) {
+export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdated, allLocations, source }: Props) {
   const [expanded, setExpanded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [entityType, setEntityType] = useState(facilityAttributes?.entity_type || '')
   const [payers, setPayers] = useState<string[]>(facilityAttributes?.payer_contracts || [])
+  const [applyToAll, setApplyToAll] = useState(false)
   const [dismissed, setDismissed] = useState(
     () => localStorage.getItem(getDismissKey(locationId)) === 'true'
   )
@@ -67,13 +77,15 @@ export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdate
     setSaveError(null)
     setEntityType(facilityAttributes?.entity_type || '')
     setPayers(facilityAttributes?.payer_contracts || [])
+    setApplyToAll(false)
     setDismissed(localStorage.getItem(getDismissKey(locationId)) === 'true')
   }
 
   const hasAttrs = facilityAttributes &&
     (facilityAttributes.entity_type || (facilityAttributes.payer_contracts && facilityAttributes.payer_contracts.length > 0))
 
-  // If dismissed or no attrs at all to show, hide the banner
+  // Hide for employee-derived locations or dismissed
+  if (source === 'employee_derived') return null
   if (dismissed) return null
 
   function togglePayer(value: string) {
@@ -87,6 +99,11 @@ export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdate
     setDismissed(true)
   }
 
+  // Locations that don't have a facility profile yet (excluding current)
+  const otherUnprofiled = (allLocations || []).filter(
+    (l) => l.id !== locationId && !(l.facility_attributes?.entity_type)
+  )
+
   async function handleSave() {
     if (!entityType) return
     setSaving(true)
@@ -97,9 +114,20 @@ export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdate
         payer_contracts: payers.length > 0 ? payers : undefined,
       }
       const result = await updateFacilityAttributes(locationId, data)
+
+      // Apply to other locations without a profile
+      if (applyToAll && otherUnprofiled.length > 0) {
+        await Promise.all(
+          otherUnprofiled.map((l) =>
+            updateFacilityAttributes(l.id, data).then(() => {
+              localStorage.setItem(getDismissKey(l.id), 'true')
+            })
+          )
+        )
+      }
+
       onUpdated(result.facility_attributes)
       setExpanded(false)
-      // Mark as confirmed so banner doesn't reappear
       localStorage.setItem(getDismissKey(locationId), 'true')
       setDismissed(true)
     } catch {
@@ -207,12 +235,27 @@ export function FacilityProfileBanner({ locationId, facilityAttributes, onUpdate
           {saveError && (
             <p className="text-xs text-red-400">{saveError}</p>
           )}
+
+          {otherUnprofiled.length > 0 && (
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={applyToAll}
+                onChange={(e) => setApplyToAll(e.target.checked)}
+                className="rounded border-zinc-600 bg-zinc-900 text-cyan-500 focus:ring-cyan-500/30"
+              />
+              <span className="text-xs text-zinc-400">
+                Apply to all {otherUnprofiled.length} other location{otherUnprofiled.length > 1 ? 's' : ''} without a profile
+              </span>
+            </label>
+          )}
+
           <div className="flex items-center justify-between pt-1">
             <p className="text-[11px] text-zinc-600">
               Triggers additional compliance checks for your facility type and payers
             </p>
             <Button size="sm" onClick={handleSave} disabled={saving || !entityType}>
-              {saving ? 'Saving...' : 'Save Profile'}
+              {saving ? 'Saving...' : applyToAll ? `Save & Apply to ${otherUnprofiled.length + 1} Locations` : 'Save Profile'}
             </Button>
           </div>
         </div>

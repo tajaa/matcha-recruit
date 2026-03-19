@@ -1,8 +1,9 @@
-import { LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale, AlertTriangle, BookOpen, BarChart2, Sparkles } from 'lucide-react'
+import { LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale, AlertTriangle, BookOpen, BarChart2, Sparkles, Building2 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 
 const nav = [
   { to: '/app', icon: LayoutDashboard, label: 'Dashboard' },
+  { to: '/app/company', icon: Building2, label: 'Company' },
   { to: '/app/employees', icon: Users, label: 'Employees' },
   { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding' },
   { to: '/app/er-copilot', icon: Scale, label: 'ER Copilot' },
