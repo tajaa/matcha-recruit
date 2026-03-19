@@ -13,7 +13,10 @@ from ..services.redis_cache import (
     get_redis_cache,
     cache_get,
     cache_set,
+    cache_delete,
     jurisdictions_key,
+    compliance_dashboard_key,
+    pinned_requirements_key,
 )
 from ..models.auth import CurrentUser
 from ..models.compliance import (
@@ -707,7 +710,18 @@ async def get_compliance_dashboard_endpoint(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    return await get_compliance_dashboard(company_id, horizon_days=horizon_days)
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, compliance_dashboard_key(company_id, horizon_days))
+        if cached is not None:
+            return cached
+
+    result = await get_compliance_dashboard(company_id, horizon_days=horizon_days)
+
+    if redis:
+        await cache_set(redis, compliance_dashboard_key(company_id, horizon_days), result, ttl=180)
+
+    return result
 
 
 # =====================================================
@@ -905,6 +919,10 @@ async def pin_requirement_endpoint(
     if not result:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, pinned_requirements_key(company_id))
+
     return result
 
 
@@ -917,7 +935,18 @@ async def get_pinned_requirements_endpoint(
     if company_id is None:
         raise HTTPException(status_code=403, detail="Access denied")
 
-    return await get_pinned_requirements(company_id)
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, pinned_requirements_key(company_id))
+        if cached is not None:
+            return cached
+
+    result = await get_pinned_requirements(company_id)
+
+    if redis:
+        await cache_set(redis, pinned_requirements_key(company_id), result, ttl=300)
+
+    return result
 
 
 @router.get("/search")

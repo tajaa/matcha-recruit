@@ -53,3 +53,48 @@ def offer_letters_key(company_id) -> str:
 
 def jurisdictions_key() -> str:
     return "jurisdictions"
+
+def dashboard_stats_key(company_id) -> str:
+    return f"dashboard_stats:{company_id}"
+
+def dashboard_upcoming_key(company_id, days) -> str:
+    return f"dashboard_upcoming:{company_id}:{days}"
+
+def dashboard_credentials_key(company_id) -> str:
+    return f"dashboard_credentials:{company_id}"
+
+def dashboard_notifications_key(company_id, limit, offset) -> str:
+    return f"dashboard_notifications:{company_id}:{limit}:{offset}"
+
+def compliance_dashboard_key(company_id, horizon_days) -> str:
+    return f"compliance_dashboard:{company_id}:{horizon_days}"
+
+def pinned_requirements_key(company_id) -> str:
+    return f"pinned_requirements:{company_id}"
+
+def admin_jurisdictions_list_key() -> str:
+    return "admin_jurisdictions_list"
+
+def admin_jurisdiction_detail_key(jurisdiction_id) -> str:
+    return f"admin_jurisdiction_detail:{jurisdiction_id}"
+
+def admin_jurisdiction_data_overview_key() -> str:
+    return "admin_jurisdiction_data_overview"
+
+def admin_jurisdiction_policy_overview_key(category=None) -> str:
+    return f"admin_jurisdiction_policy_overview:{category or '_all'}"
+
+def admin_bookmarked_requirements_key() -> str:
+    return "admin_bookmarked_requirements"
+
+
+async def cache_delete_pattern(redis, prefix: str) -> None:
+    """Delete all keys matching a prefix. Use sparingly."""
+    try:
+        cursor = b"0"
+        while cursor:
+            cursor, keys = await redis.scan(cursor=cursor, match=f"{prefix}*", count=100)
+            if keys:
+                await redis.delete(*keys)
+    except Exception:
+        pass

@@ -31,6 +31,12 @@ from ..services.compliance_service import (
     run_compliance_check_stream,
     research_jurisdiction_repo_only,
 )
+from ..services.redis_cache import (
+    get_redis_cache, cache_get, cache_set, cache_delete, cache_delete_pattern,
+    admin_jurisdictions_list_key, admin_jurisdiction_detail_key,
+    admin_jurisdiction_data_overview_key, admin_jurisdiction_policy_overview_key,
+    admin_bookmarked_requirements_key,
+)
 from ..services.rate_limiter import get_rate_limiter
 from ..services.auth import hash_password
 from ..services.platform_settings import (
@@ -2305,6 +2311,10 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
         def fmt_date(d):
             return d.isoformat() if d else None
 
+        redis = get_redis_cache()
+        if redis:
+            await cache_delete(redis, admin_jurisdictions_list_key())
+
         return {
             "id": str(row["id"]),
             "city": row["city"],
@@ -2323,6 +2333,12 @@ async def create_jurisdiction(request: JurisdictionCreateRequest):
 @router.get("/jurisdictions", dependencies=[Depends(require_admin)])
 async def list_jurisdictions():
     """List all jurisdictions with requirement/legislation counts and linked locations."""
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, admin_jurisdictions_list_key())
+        if cached is not None:
+            return cached
+
     async with get_connection() as conn:
         all_rows = await conn.fetch("""
             SELECT
@@ -2519,7 +2535,7 @@ async def list_jurisdictions():
         total_requirements = sum(int(j["requirement_count"] or 0) for j in jurisdictions)
         total_legislation = sum(int(j["legislation_count"] or 0) for j in jurisdictions)
 
-        return {
+        result = {
             "jurisdictions": jurisdictions,
             "totals": {
                 "total_jurisdictions": len(jurisdictions),
@@ -2527,6 +2543,11 @@ async def list_jurisdictions():
                 "total_legislation": total_legislation,
             },
         }
+
+    if redis:
+        await cache_set(redis, admin_jurisdictions_list_key(), result, ttl=600)
+
+    return result
 
 
 @router.post("/jurisdictions/cleanup-duplicates", dependencies=[Depends(require_admin)])
@@ -3008,6 +3029,11 @@ async def delete_jurisdiction(jurisdiction_id: UUID):
         )
         await conn.execute("DELETE FROM jurisdictions WHERE id = $1", jurisdiction_id)
 
+        redis = get_redis_cache()
+        if redis:
+            await cache_delete(redis, admin_jurisdictions_list_key())
+            await cache_delete(redis, admin_jurisdiction_detail_key(jurisdiction_id))
+
         return {
             "status": "deleted",
             "id": str(jurisdiction["id"]),
@@ -3050,9 +3076,16 @@ async def jurisdiction_data_overview(bust: bool = False):
     """Aggregated view of the jurisdiction data repository."""
     import time
 
+    redis = get_redis_cache()
+    if not bust and redis:
+        cached = await cache_get(redis, admin_jurisdiction_data_overview_key())
+        if cached is not None:
+            return cached
+
+    # Legacy in-memory fallback
     global _data_overview_cache, _data_overview_cached_at
     now = time.monotonic()
-    if not bust and _data_overview_cache and (now - _data_overview_cached_at) < _DATA_OVERVIEW_CACHE_TTL:
+    if not bust and not redis and _data_overview_cache and (now - _data_overview_cached_at) < _DATA_OVERVIEW_CACHE_TTL:
         return _data_overview_cache
 
     async with get_connection() as conn:
@@ -3252,6 +3285,10 @@ async def jurisdiction_data_overview(bust: bool = False):
 
     _data_overview_cache = result
     _data_overview_cached_at = now
+
+    if redis:
+        await cache_set(redis, admin_jurisdiction_data_overview_key(), result, ttl=3600)
+
     return result
 
 
@@ -3312,6 +3349,12 @@ _CATEGORY_LABELS: dict[str, str] = {
 @router.get("/jurisdictions/policy-overview", dependencies=[Depends(require_admin)])
 async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
     """Policy browser: overview by domain→category, or detail for a single category."""
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, admin_jurisdiction_policy_overview_key(category))
+        if cached is not None:
+            return cached
+
     async with get_connection() as conn:
         if category:
             # ── Detail mode: all requirements for one category ──
@@ -3329,7 +3372,7 @@ async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
                 ORDER BY j.state, j.city NULLS FIRST
             """, category)
             domain = _CATEGORY_DOMAIN.get(category, "unknown")
-            return {
+            result = {
                 "category": {
                     "slug": category,
                     "name": _CATEGORY_LABELS.get(category, category),
@@ -3355,6 +3398,9 @@ async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
                     for r in rows
                 ],
             }
+            if redis:
+                await cache_set(redis, admin_jurisdiction_policy_overview_key(category), result, ttl=600)
+            return result
 
         # ── Overview mode: domain → category tree with counts ──
         cat_rows = await conn.fetch("""
@@ -3422,7 +3468,7 @@ async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
             if d not in domain_order:
                 domains_list.append(val)
 
-        return {
+        result = {
             "summary": {
                 "total_requirements": total_requirements,
                 "total_categories_with_data": cats_with_data,
@@ -3432,10 +3478,21 @@ async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
             "domains": domains_list,
         }
 
+    if redis:
+        await cache_set(redis, admin_jurisdiction_policy_overview_key(None), result, ttl=600)
+
+    return result
+
 
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
 async def get_jurisdiction_detail(jurisdiction_id: UUID):
     """Get full detail for a jurisdiction: requirements, legislation, linked locations."""
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, admin_jurisdiction_detail_key(jurisdiction_id))
+        if cached is not None:
+            return cached
+
     async with get_connection() as conn:
         j = await conn.fetchrow("SELECT * FROM jurisdictions WHERE id = $1", jurisdiction_id)
         if not j:
@@ -3486,7 +3543,7 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
         def fmt_decimal(v):
             return float(v) if v is not None else None
 
-        return {
+        result = {
             "id": str(j["id"]),
             "city": j["city"],
             "state": j["state"],
@@ -3558,6 +3615,11 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
             ],
         }
 
+    if redis:
+        await cache_set(redis, admin_jurisdiction_detail_key(jurisdiction_id), result, ttl=600)
+
+    return result
+
 
 class RequirementUpdate(BaseModel):
     """Partial update fields for a jurisdiction requirement."""
@@ -3589,7 +3651,7 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         UPDATE jurisdiction_requirements
         SET {', '.join(set_parts)}, updated_at = NOW()
         WHERE id = ${id_idx}
-        RETURNING id, requirement_key, category, jurisdiction_level, jurisdiction_name,
+        RETURNING id, jurisdiction_id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                   title, description, current_value, numeric_value,
                   source_url, source_name, effective_date, expiration_date,
                   previous_value, last_changed_at, last_verified_at, is_bookmarked,
@@ -3600,6 +3662,12 @@ async def update_requirement(requirement_id: UUID, body: RequirementUpdate):
         row = await conn.fetchrow(sql, *params)
         if not row:
             raise HTTPException(status_code=404, detail="Requirement not found")
+
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, admin_jurisdiction_detail_key(row["jurisdiction_id"]))
+        await cache_delete(redis, admin_jurisdiction_policy_overview_key(row["category"]))
+        await cache_delete(redis, admin_jurisdiction_policy_overview_key(None))
 
     def fmt_date(d):
         return d.isoformat() if d else None
@@ -3635,16 +3703,28 @@ async def toggle_requirement_bookmark(requirement_id: UUID):
             UPDATE jurisdiction_requirements
             SET is_bookmarked = NOT is_bookmarked, updated_at = NOW()
             WHERE id = $1
-            RETURNING id, is_bookmarked
+            RETURNING id, is_bookmarked, jurisdiction_id
         """, requirement_id)
         if not row:
             raise HTTPException(status_code=404, detail="Requirement not found")
+
+    redis = get_redis_cache()
+    if redis:
+        await cache_delete(redis, admin_bookmarked_requirements_key())
+        await cache_delete(redis, admin_jurisdiction_detail_key(row["jurisdiction_id"]))
+
     return {"id": str(row["id"]), "is_bookmarked": row["is_bookmarked"]}
 
 
 @router.get("/jurisdictions/requirements/bookmarked", dependencies=[Depends(require_admin)])
 async def list_bookmarked_requirements():
     """List all bookmarked jurisdiction requirements across all cities."""
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, admin_bookmarked_requirements_key())
+        if cached is not None:
+            return cached
+
     async with get_connection() as conn:
         rows = await conn.fetch("""
             SELECT jr.id, jr.requirement_key, jr.category, jr.jurisdiction_level,
@@ -3663,7 +3743,7 @@ async def list_bookmarked_requirements():
     def fmt_date(d):
         return d.isoformat() if d else None
 
-    return [
+    result = [
         {
             "id": str(r["id"]),
             "jurisdiction_id": str(r["jurisdiction_id"]),
@@ -3690,6 +3770,11 @@ async def list_bookmarked_requirements():
         }
         for r in rows
     ]
+
+    if redis:
+        await cache_set(redis, admin_bookmarked_requirements_key(), result, ttl=600)
+
+    return result
 
 
 @router.put("/jurisdictions/requirements/reorder", dependencies=[Depends(require_admin)])

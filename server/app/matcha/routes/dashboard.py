@@ -12,6 +12,11 @@ from pydantic import BaseModel
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id
 from ...core.models.auth import CurrentUser
+from ...core.services.redis_cache import (
+    get_redis_cache, cache_get, cache_set,
+    dashboard_stats_key, dashboard_credentials_key,
+    dashboard_upcoming_key, dashboard_notifications_key,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -89,6 +94,12 @@ async def get_dashboard_stats(
             pending_incidents=[],
             recent_activity=[],
         )
+
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, dashboard_stats_key(company_id))
+        if cached is not None:
+            return cached
 
     async with get_connection() as conn:
         # Active policies
@@ -295,7 +306,7 @@ async def get_dashboard_stats(
     except Exception:
         logger.exception("Failed to compute wage alerts for dashboard")
 
-    return DashboardStats(
+    result = DashboardStats(
         active_policies=active_policies,
         pending_signatures=pending_signatures,
         total_employees=total_employees,
@@ -309,6 +320,11 @@ async def get_dashboard_stats(
         er_case_summary=er_case_summary,
         stale_policies=stale_policies,
     )
+
+    if redis:
+        await cache_set(redis, dashboard_stats_key(company_id), result.model_dump(), ttl=120)
+
+    return result
 
 
 def _format_action(action: str, details: dict | None) -> str:
@@ -439,6 +455,12 @@ async def get_client_notifications(
     if company_id is None:
         return ClientNotificationsResponse(items=[], total=0)
 
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, dashboard_notifications_key(company_id, limit, offset))
+        if cached is not None:
+            return cached
+
     async with get_connection() as conn:
         # Build UNION ALL dynamically, skipping tables that don't exist.
         valid_parts: list[str] = []
@@ -494,7 +516,12 @@ async def get_client_notifications(
             )
         )
 
-    return ClientNotificationsResponse(items=items, total=total)
+    result = ClientNotificationsResponse(items=items, total=total)
+
+    if redis:
+        await cache_set(redis, dashboard_notifications_key(company_id, limit, offset), result.model_dump(), ttl=180)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +578,12 @@ async def get_credential_expirations(
             expirations=[],
         )
 
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, dashboard_credentials_key(company_id))
+        if cached is not None:
+            return cached
+
     async with get_connection() as conn:
         rows = await conn.fetch(
             """
@@ -603,10 +636,15 @@ async def get_credential_expirations(
             )
         )
 
-    return CredentialExpirationsResponse(
+    result = CredentialExpirationsResponse(
         summary=CredentialExpirationSummary(expired=expired, critical=critical, warning=warning),
         expirations=expirations,
     )
+
+    if redis:
+        await cache_set(redis, dashboard_credentials_key(company_id), result.model_dump(), ttl=300)
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -905,6 +943,13 @@ async def get_upcoming_deadlines(
 ):
     """Aggregate all time-sensitive items across the platform, sorted by urgency."""
     company_id = await get_client_company_id(current_user)
+
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, dashboard_upcoming_key(company_id, days))
+        if cached is not None:
+            return cached
+
     today = date.today()
     lookahead = today + timedelta(days=days)
 
@@ -958,4 +1003,9 @@ async def get_upcoming_deadlines(
     # Sort by urgency: most overdue / soonest first
     items.sort(key=lambda x: x.days_until)
 
-    return UpcomingResponse(items=items, total=len(items))
+    result = UpcomingResponse(items=items, total=len(items))
+
+    if redis:
+        await cache_set(redis, dashboard_upcoming_key(company_id, days), result.model_dump(), ttl=300)
+
+    return result
