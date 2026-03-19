@@ -32,13 +32,17 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
   const filteredRequirements = useMemo(() => {
     const q = searchQuery.trim().toLowerCase()
     if (!q) return requirements
-    return requirements.filter((r) =>
-      (r.title?.toLowerCase().includes(q)) ||
-      (r.description?.toLowerCase().includes(q)) ||
-      (r.current_value?.toLowerCase().includes(q)) ||
-      (r.jurisdiction_name?.toLowerCase().includes(q)) ||
-      (r.category?.toLowerCase().includes(q))
-    )
+    return requirements.filter((r) => {
+      const catLabel = (r.category && CATEGORY_LABELS[r.category]) || ''
+      return (
+        r.title?.toLowerCase().includes(q) ||
+        r.description?.toLowerCase().includes(q) ||
+        r.current_value?.toLowerCase().includes(q) ||
+        r.jurisdiction_name?.toLowerCase().includes(q) ||
+        r.category?.toLowerCase().includes(q) ||
+        catLabel.toLowerCase().includes(q)
+      )
+    })
   }, [requirements, searchQuery])
 
   const { sectionedCategories } = useComplianceRequirements(filteredRequirements)
@@ -68,23 +72,42 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <input
-          type="text"
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Search requirements..."
-          className="flex-1 bg-zinc-800 border border-zinc-600 rounded-md px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-400 transition-colors"
-        />
+        <div className="relative flex-1">
+          <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500 pointer-events-none" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search requirements..."
+            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg pl-9 pr-8 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
+          />
+          {searchQuery && (
+            <button type="button" onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 transition-colors">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          )}
+        </div>
         <div className="w-48 shrink-0">
           <Select label="" options={GROUP_OPTIONS} value={groupFilter}
             onChange={(e) => setGroupFilter(e.target.value as 'all' | CategoryGroup)} />
         </div>
-        <span className="text-xs text-zinc-500 shrink-0">
-          {searchQuery ? `${filteredRequirements.length} of ${requirements.length}` : requirements.length} requirements
+        <span className="text-[11px] font-medium px-2 py-1 rounded-md bg-zinc-800 text-zinc-400 border border-zinc-700 shrink-0 tabular-nums">
+          {searchQuery ? `${filteredRequirements.length} / ${requirements.length}` : requirements.length}
         </span>
       </div>
 
-      {filteredSections.length === 0 ? (
+      {filteredSections.length === 0 && searchQuery ? (
+        <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
+          <p className="text-sm text-zinc-500">No requirements matching &ldquo;{searchQuery}&rdquo;</p>
+          <button type="button" onClick={() => setSearchQuery('')}
+            className="text-xs text-emerald-500 hover:text-emerald-400 mt-1 transition-colors">Clear search</button>
+        </div>
+      ) : filteredSections.length === 0 ? (
         <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
           <p className="text-sm text-zinc-600">No requirements found. Run a compliance check to populate.</p>
         </div>
