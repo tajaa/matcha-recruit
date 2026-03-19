@@ -6,6 +6,57 @@ export type HandbookSourceType = 'template' | 'upload'
 export type HandbookSectionType = 'core' | 'state' | 'custom' | 'uploaded'
 export type HandbookChangeStatus = 'pending' | 'accepted' | 'rejected'
 
+export type WorkbookType =
+  | 'clinical_patient_care'
+  | 'infection_control'
+  | 'hipaa_privacy'
+  | 'safety_emergency'
+  | 'human_resources'
+  | 'administrative_operations'
+  | 'compliance_regulatory'
+  | 'financial_billing'
+  | 'operations'
+  | 'safety_compliance'
+  | 'it_security'
+  | 'finance'
+  | 'general'
+
+export const HEALTHCARE_WORKBOOK_TYPES: WorkbookType[] = [
+  'clinical_patient_care',
+  'infection_control',
+  'hipaa_privacy',
+  'safety_emergency',
+  'human_resources',
+  'administrative_operations',
+  'compliance_regulatory',
+  'financial_billing',
+]
+
+export const GENERAL_WORKBOOK_TYPES: WorkbookType[] = [
+  'human_resources',
+  'operations',
+  'safety_compliance',
+  'it_security',
+  'finance',
+  'general',
+]
+
+export const WORKBOOK_TYPE_LABELS: Record<WorkbookType, string> = {
+  clinical_patient_care: 'Clinical / Patient Care',
+  infection_control: 'Infection Control',
+  hipaa_privacy: 'HIPAA & Privacy',
+  safety_emergency: 'Safety & Emergency',
+  human_resources: 'Human Resources',
+  administrative_operations: 'Administrative / Operations',
+  compliance_regulatory: 'Compliance & Regulatory',
+  financial_billing: 'Financial / Billing',
+  operations: 'Operations',
+  safety_compliance: 'Safety & Compliance',
+  it_security: 'IT & Security',
+  finance: 'Finance',
+  general: 'General',
+}
+
 export type HandbookScope = {
   id: string
   state: string
@@ -87,6 +138,7 @@ export type HandbookListItem = {
   mode: HandbookMode
   source_type: HandbookSourceType
   active_version: number
+  workbook_type: WorkbookType | null
   scope_states: string[]
   pending_changes_count: number
   updated_at: string
@@ -102,6 +154,7 @@ export type HandbookDetail = {
   mode: HandbookMode
   source_type: HandbookSourceType
   active_version: number
+  workbook_type: WorkbookType | null
   file_url: string | null
   file_name: string | null
   scopes: HandbookScope[]
@@ -126,6 +179,7 @@ export type HandbookCreate = {
   file_name?: string | null
   create_from_template?: boolean
   auto_scope_from_employees?: boolean
+  workbook_type?: WorkbookType | null
 }
 
 export type HandbookUpdate = {
@@ -136,6 +190,7 @@ export type HandbookUpdate = {
   sections?: HandbookSectionInput[] | null
   file_url?: string | null
   file_name?: string | null
+  workbook_type?: WorkbookType | null
 }
 
 export type HandbookChangeRequest = {

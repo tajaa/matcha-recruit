@@ -2854,9 +2854,10 @@ class HandbookService:
                         """
                         INSERT INTO handbooks (
                             company_id, title, status, mode, source_type, active_version,
-                            file_url, file_name, created_by, guided_answers, created_at, updated_at
+                            file_url, file_name, created_by, guided_answers, workbook_type,
+                            created_at, updated_at
                         )
-                        VALUES ($1, $2, 'draft', $3, $4, 1, $5, $6, $7, $8, NOW(), NOW())
+                        VALUES ($1, $2, 'draft', $3, $4, 1, $5, $6, $7, $8, $9, NOW(), NOW())
                         RETURNING id
                         """,
                         company_id,
@@ -2867,6 +2868,7 @@ class HandbookService:
                         data.file_name,
                         created_by,
                         json.dumps(guided_answers),
+                        data.workbook_type,
                     )
 
                     for scope in normalized_scopes:
@@ -3118,6 +3120,10 @@ class HandbookService:
                     if data.file_name is not None:
                         updates.append(f"file_name = ${idx}")
                         params.append(data.file_name)
+                        idx += 1
+                    if data.workbook_type is not None:
+                        updates.append(f"workbook_type = ${idx}")
+                        params.append(data.workbook_type)
                         idx += 1
                     if should_invalidate_cached_file:
                         updates.append("file_url = NULL")

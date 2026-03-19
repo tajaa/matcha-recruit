@@ -5,13 +5,16 @@ import type {
   HandbookSourceType,
   HandbookSectionInput,
   HandbookGuidedSectionSuggestion,
+  WorkbookType,
 } from '../../types/handbook'
+import { WORKBOOK_TYPE_LABELS } from '../../types/handbook'
 
 type Props = {
   title: string
   mode: HandbookMode
   sourceType: HandbookSourceType
   industry: string
+  workbookType?: WorkbookType | null
   states: string[]
   profile: CompanyHandbookProfileInput
   customSections: HandbookSectionInput[]
@@ -38,6 +41,7 @@ export function HandbookReviewStep({
   mode,
   sourceType,
   industry,
+  workbookType,
   states,
   profile,
   customSections,
@@ -69,6 +73,12 @@ export function HandbookReviewStep({
             <span className="text-zinc-500">Industry:</span>{' '}
             <span className="text-zinc-200">{industry || 'general'}</span>
           </div>
+          {workbookType && (
+            <div>
+              <span className="text-zinc-500">Workbook:</span>{' '}
+              <span className="text-zinc-200">{WORKBOOK_TYPE_LABELS[workbookType]}</span>
+            </div>
+          )}
         </div>
       </Card>
 

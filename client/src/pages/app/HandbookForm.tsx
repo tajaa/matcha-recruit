@@ -9,6 +9,7 @@ import { HandbookProfileForm } from '../../components/handbook/HandbookProfileFo
 import { HandbookPolicyPack } from '../../components/handbook/HandbookPolicyPack'
 import { HandbookCustomSections } from '../../components/handbook/HandbookCustomSections'
 import { HandbookReviewStep } from '../../components/handbook/HandbookReviewStep'
+import { useMe } from '../../hooks/useMe'
 import type {
   HandbookMode,
   HandbookSourceType,
@@ -17,9 +18,15 @@ import type {
   HandbookGuidedDraftResponse,
   HandbookGuidedSectionSuggestion,
   HandbookWizardDraftState,
+  WorkbookType,
+} from '../../types/handbook'
+import {
+  HEALTHCARE_WORKBOOK_TYPES,
+  GENERAL_WORKBOOK_TYPES,
+  WORKBOOK_TYPE_LABELS,
 } from '../../types/handbook'
 
-const STEPS = ['Business Profile', 'State Scope', 'Company Profile', 'Policy Setup', 'Review']
+const STEPS = ['Business Profile', 'Workbook Type', 'State Scope', 'Company Profile', 'Policy Setup', 'Review']
 
 const DEFAULT_PROFILE: CompanyHandbookProfileInput = {
   legal_name: '',
@@ -43,6 +50,7 @@ export default function HandbookForm() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const isEdit = !!id
+  const { isHealthcare } = useMe()
 
   // Wizard state
   const [step, setStep] = useState(0)
@@ -50,6 +58,7 @@ export default function HandbookForm() {
   const [mode, setMode] = useState<HandbookMode>('single_state')
   const [sourceType, setSourceType] = useState<HandbookSourceType>('template')
   const [industry, setIndustry] = useState('general')
+  const [workbookType, setWorkbookType] = useState<WorkbookType | null>(null)
   const [states, setStates] = useState<string[]>([])
   const [autoDetected, setAutoDetected] = useState<string[]>([])
   const [profile, setProfile] = useState<CompanyHandbookProfileInput>(DEFAULT_PROFILE)
@@ -69,12 +78,14 @@ export default function HandbookForm() {
   const [error, setError] = useState<string | null>(null)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined)
 
+  const workbookOptions = isHealthcare ? HEALTHCARE_WORKBOOK_TYPES : GENERAL_WORKBOOK_TYPES
+
   // Build draft state for save/restore
   const buildDraftState = useCallback((): HandbookWizardDraftState => ({
-    step, title, mode, sourceType, industry, states, profile,
+    step, title, mode, sourceType, industry, workbookType, states, profile,
     customSections, guidedAnswers, suggestedSections,
     fileUrl, fileName,
-  }), [step, title, mode, sourceType, industry, states, profile, customSections, guidedAnswers, suggestedSections, fileUrl, fileName])
+  }), [step, title, mode, sourceType, industry, workbookType, states, profile, customSections, guidedAnswers, suggestedSections, fileUrl, fileName])
 
   function restoreDraft(s: HandbookWizardDraftState) {
     if (s.step != null) setStep(s.step as number)
@@ -82,6 +93,7 @@ export default function HandbookForm() {
     if (s.mode) setMode(s.mode as HandbookMode)
     if (s.sourceType) setSourceType(s.sourceType as HandbookSourceType)
     if (s.industry) setIndustry(s.industry as string)
+    if (s.workbookType) setWorkbookType(s.workbookType as WorkbookType)
     if (s.states) setStates(s.states as string[])
     if (s.profile) setProfile(s.profile as CompanyHandbookProfileInput)
     if (s.customSections) setCustomSections(s.customSections as HandbookSectionInput[])
@@ -100,6 +112,7 @@ export default function HandbookForm() {
           setTitle(hb.title)
           setMode(hb.mode)
           setSourceType(hb.source_type)
+          if (hb.workbook_type) setWorkbookType(hb.workbook_type)
           setStates(hb.scopes.map((s) => s.state))
           setProfile({
             legal_name: hb.profile.legal_name,
@@ -169,7 +182,7 @@ export default function HandbookForm() {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
     }
-  }, [step, title, mode, sourceType, industry, states, profile, customSections, guidedAnswers, suggestedSections, fileUrl, fileName, isEdit, loadingDraft, buildDraftState])
+  }, [step, title, mode, sourceType, industry, workbookType, states, profile, customSections, guidedAnswers, suggestedSections, fileUrl, fileName, isEdit, loadingDraft, buildDraftState])
 
   async function handleAutoDetect() {
     try {
@@ -234,6 +247,7 @@ export default function HandbookForm() {
           sections: customSections.length > 0 ? customSections : undefined,
           file_url: fileUrl,
           file_name: fileName,
+          workbook_type: workbookType,
         })
       } else {
         // Add conditional sections based on profile flags
@@ -269,6 +283,7 @@ export default function HandbookForm() {
           file_url: fileUrl ?? undefined,
           file_name: fileName ?? undefined,
           create_from_template: sourceType === 'template',
+          workbook_type: workbookType,
         })
         // Clear draft on success
         await handbooks.clearWizardDraft().catch(() => {})
@@ -285,10 +300,11 @@ export default function HandbookForm() {
   function canAdvance(): boolean {
     switch (step) {
       case 0: return title.trim().length >= 2
-      case 1: return states.length >= (mode === 'multi_state' ? 2 : 1)
-      case 2: return profile.legal_name.trim().length > 0 && profile.ceo_or_president.trim().length > 0
-      case 3: return sourceType === 'upload' ? !!fileUrl : true
-      case 4: return true
+      case 1: return workbookType !== null
+      case 2: return states.length >= (mode === 'multi_state' ? 2 : 1)
+      case 3: return profile.legal_name.trim().length > 0 && profile.ceo_or_president.trim().length > 0
+      case 4: return sourceType === 'upload' ? !!fileUrl : true
+      case 5: return true
       default: return false
     }
   }
@@ -349,9 +365,33 @@ export default function HandbookForm() {
         </HandbookWizardCard>
       )}
 
-      {/* Step 1: State Scope */}
+      {/* Step 1: Workbook Type */}
       {step === 1 && (
-        <HandbookWizardCard stepLabel="Step 2" title="State Scope" description="Select the states your handbook will cover." required>
+        <HandbookWizardCard stepLabel="Step 2" title="Workbook Type" description="Select the category for this handbook." required>
+          <div className="grid grid-cols-2 gap-3">
+            {workbookOptions.map((wt) => (
+              <button
+                key={wt}
+                type="button"
+                onClick={() => setWorkbookType(wt)}
+                className={`text-left p-3 rounded-lg border transition-colors ${
+                  workbookType === wt
+                    ? 'border-emerald-500 bg-emerald-500/10 ring-2 ring-emerald-500'
+                    : 'border-zinc-700 bg-zinc-800/50 hover:border-zinc-600'
+                }`}
+              >
+                <span className={`text-sm font-medium ${workbookType === wt ? 'text-emerald-400' : 'text-zinc-200'}`}>
+                  {WORKBOOK_TYPE_LABELS[wt]}
+                </span>
+              </button>
+            ))}
+          </div>
+        </HandbookWizardCard>
+      )}
+
+      {/* Step 2: State Scope */}
+      {step === 2 && (
+        <HandbookWizardCard stepLabel="Step 3" title="State Scope" description="Select the states your handbook will cover." required>
           <HandbookStateSelector
             selected={states}
             onChange={setStates}
@@ -362,16 +402,16 @@ export default function HandbookForm() {
         </HandbookWizardCard>
       )}
 
-      {/* Step 2: Company Profile */}
-      {step === 2 && (
-        <HandbookWizardCard stepLabel="Step 3" title="Company Profile" description="Enter your company details and workforce profile." required>
+      {/* Step 3: Company Profile */}
+      {step === 3 && (
+        <HandbookWizardCard stepLabel="Step 4" title="Company Profile" description="Enter your company details and workforce profile." required>
           <HandbookProfileForm profile={profile} onChange={setProfile} />
         </HandbookWizardCard>
       )}
 
-      {/* Step 3: Policy Setup */}
-      {step === 3 && (
-        <HandbookWizardCard stepLabel="Step 4" title="Policy Setup" description={sourceType === 'upload' ? 'Upload your existing handbook PDF.' : 'Build your policy pack using AI guidance.'}>
+      {/* Step 4: Policy Setup */}
+      {step === 4 && (
+        <HandbookWizardCard stepLabel="Step 5" title="Policy Setup" description={sourceType === 'upload' ? 'Upload your existing handbook PDF.' : 'Build your policy pack using AI guidance.'}>
           {sourceType === 'upload' ? (
             <div className="space-y-3">
               <FileUpload accept=".pdf" onFiles={handleFileUpload}>
@@ -403,14 +443,15 @@ export default function HandbookForm() {
         </HandbookWizardCard>
       )}
 
-      {/* Step 4: Review */}
-      {step === 4 && (
-        <HandbookWizardCard stepLabel="Step 5" title="Review" description="Review your handbook configuration before creating.">
+      {/* Step 5: Review */}
+      {step === 5 && (
+        <HandbookWizardCard stepLabel="Step 6" title="Review" description="Review your handbook configuration before creating.">
           <HandbookReviewStep
             title={title}
             mode={mode}
             sourceType={sourceType}
             industry={industry}
+            workbookType={workbookType}
             states={states}
             profile={profile}
             customSections={customSections}

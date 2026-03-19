@@ -1,9 +1,10 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { handbooks } from '../../api/client'
 import { Button, Badge } from '../../components/ui'
 import { HandbookDistributeModal } from '../../components/HandbookDistributeModal'
 import type { HandbookListItem } from '../../types/handbook'
+import { WORKBOOK_TYPE_LABELS } from '../../types/handbook'
 
 type Tab = 'all' | 'active' | 'draft' | 'archived'
 
@@ -31,6 +32,7 @@ export default function Handbooks() {
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [distributeId, setDistributeId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
 
   const fetchHandbooks = useCallback(async () => {
     try {
@@ -45,6 +47,26 @@ export default function Handbooks() {
   useEffect(() => { fetchHandbooks() }, [fetchHandbooks])
 
   const filtered = tab === 'all' ? items : items.filter((hb) => hb.status === tab)
+
+  const grouped = useMemo(() => {
+    const groups: Record<string, HandbookListItem[]> = {}
+    for (const hb of filtered) {
+      const key = hb.workbook_type || 'general'
+      if (!groups[key]) groups[key] = []
+      groups[key].push(hb)
+    }
+    return Object.entries(groups)
+      .sort(([a], [b]) =>
+        (WORKBOOK_TYPE_LABELS[a as keyof typeof WORKBOOK_TYPE_LABELS] ?? a)
+          .localeCompare(WORKBOOK_TYPE_LABELS[b as keyof typeof WORKBOOK_TYPE_LABELS] ?? b),
+      )
+  }, [filtered])
+
+  const useGrouping = grouped.length > 1
+
+  function toggleGroup(key: string) {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
 
   async function handlePublish(id: string) {
     setActionLoading(id)
@@ -79,6 +101,109 @@ export default function Handbooks() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Download failed')
     }
+  }
+
+  function renderRow(hb: HandbookListItem) {
+    return (
+      <div key={hb.id} className="px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <Link
+                to={`/app/handbook/${hb.id}`}
+                className="text-sm font-medium text-zinc-200 hover:text-emerald-400 truncate transition-colors"
+              >
+                {hb.title}
+              </Link>
+              <Badge variant={STATUS_BADGE[hb.status]}>{hb.status}</Badge>
+              {hb.pending_changes_count > 0 && (
+                <Badge variant="warning">{hb.pending_changes_count} pending</Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <span className="text-[11px] text-zinc-500">{MODE_LABEL[hb.mode]}</span>
+              <span className="text-[11px] text-zinc-700">&middot;</span>
+              <span className="text-[11px] text-zinc-500">{SOURCE_LABEL[hb.source_type]}</span>
+              <span className="text-[11px] text-zinc-700">&middot;</span>
+              <span className="text-[11px] text-zinc-500">v{hb.active_version}</span>
+              <span className="text-[11px] text-zinc-700">&middot;</span>
+              <span className="text-[11px] text-zinc-600">
+                Updated {new Date(hb.updated_at).toLocaleDateString()}
+              </span>
+              {hb.published_at && (
+                <>
+                  <span className="text-[11px] text-zinc-700">&middot;</span>
+                  <span className="text-[11px] text-zinc-600">
+                    Published {new Date(hb.published_at).toLocaleDateString()}
+                  </span>
+                </>
+              )}
+            </div>
+            {hb.scope_states.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {hb.scope_states.map((st) => (
+                  <span
+                    key={st}
+                    className="inline-block rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400"
+                  >
+                    {st}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0">
+            {hb.status !== 'archived' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => navigate(`/app/handbook/${hb.id}/edit`)}
+              >
+                Edit
+              </Button>
+            )}
+            {hb.status === 'draft' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => handlePublish(hb.id)}
+                disabled={actionLoading === hb.id}
+              >
+                Publish
+              </Button>
+            )}
+            {hb.status === 'active' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => handleArchive(hb.id)}
+                disabled={actionLoading === hb.id}
+              >
+                Archive
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => handleDownload(hb.id, hb.title)}
+            >
+              Download
+            </Button>
+            {hb.status === 'active' && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setDistributeId(hb.id)}
+                disabled={actionLoading === hb.id}
+              >
+                Distribute
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
@@ -128,108 +253,35 @@ export default function Handbooks() {
               {tab === 'all' ? 'No handbooks yet. Create one to get started.' : `No ${tab} handbooks.`}
             </p>
           </div>
+        ) : useGrouping ? (
+          <div className="space-y-3">
+            {grouped.map(([key, hbs]) => {
+              const label = WORKBOOK_TYPE_LABELS[key as keyof typeof WORKBOOK_TYPE_LABELS] ?? key
+              const isCollapsed = !!collapsed[key]
+              return (
+                <div key={key} className="border border-zinc-800 rounded-lg overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(key)}
+                    className="w-full flex items-center justify-between px-4 py-2.5 bg-zinc-800/40 hover:bg-zinc-800/60 transition-colors"
+                  >
+                    <span className="text-xs font-semibold text-zinc-300 tracking-wide uppercase">
+                      {label} ({hbs.length})
+                    </span>
+                    <span className="text-zinc-500 text-xs">{isCollapsed ? '+' : '\u2212'}</span>
+                  </button>
+                  {!isCollapsed && (
+                    <div className="divide-y divide-zinc-800">
+                      {hbs.map(renderRow)}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         ) : (
           <div className="border border-zinc-800 rounded-lg divide-y divide-zinc-800">
-            {filtered.map((hb) => (
-              <div key={hb.id} className="px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <Link
-                        to={`/app/handbook/${hb.id}`}
-                        className="text-sm font-medium text-zinc-200 hover:text-emerald-400 truncate transition-colors"
-                      >
-                        {hb.title}
-                      </Link>
-                      <Badge variant={STATUS_BADGE[hb.status]}>{hb.status}</Badge>
-                      {hb.pending_changes_count > 0 && (
-                        <Badge variant="warning">{hb.pending_changes_count} pending</Badge>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[11px] text-zinc-500">{MODE_LABEL[hb.mode]}</span>
-                      <span className="text-[11px] text-zinc-700">&middot;</span>
-                      <span className="text-[11px] text-zinc-500">{SOURCE_LABEL[hb.source_type]}</span>
-                      <span className="text-[11px] text-zinc-700">&middot;</span>
-                      <span className="text-[11px] text-zinc-500">v{hb.active_version}</span>
-                      <span className="text-[11px] text-zinc-700">&middot;</span>
-                      <span className="text-[11px] text-zinc-600">
-                        Updated {new Date(hb.updated_at).toLocaleDateString()}
-                      </span>
-                      {hb.published_at && (
-                        <>
-                          <span className="text-[11px] text-zinc-700">&middot;</span>
-                          <span className="text-[11px] text-zinc-600">
-                            Published {new Date(hb.published_at).toLocaleDateString()}
-                          </span>
-                        </>
-                      )}
-                    </div>
-                    {hb.scope_states.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1.5">
-                        {hb.scope_states.map((st) => (
-                          <span
-                            key={st}
-                            className="inline-block rounded border border-zinc-700 bg-zinc-800/60 px-1.5 py-0.5 text-[10px] text-zinc-400"
-                          >
-                            {st}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-1 shrink-0">
-                    {hb.status !== 'archived' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => navigate(`/app/handbook/${hb.id}/edit`)}
-                      >
-                        Edit
-                      </Button>
-                    )}
-                    {hb.status === 'draft' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handlePublish(hb.id)}
-                        disabled={actionLoading === hb.id}
-                      >
-                        Publish
-                      </Button>
-                    )}
-                    {hb.status === 'active' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => handleArchive(hb.id)}
-                        disabled={actionLoading === hb.id}
-                      >
-                        Archive
-                      </Button>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => handleDownload(hb.id, hb.title)}
-                    >
-                      Download
-                    </Button>
-                    {hb.status === 'active' && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => setDistributeId(hb.id)}
-                        disabled={actionLoading === hb.id}
-                      >
-                        Distribute
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ))}
+            {filtered.map(renderRow)}
           </div>
         )}
       </div>

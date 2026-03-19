@@ -1,5 +1,6 @@
 const STEPS = [
   'Business Profile',
+  'Workbook Type',
   'State Scope',
   'Company Profile',
   'Policy Setup',

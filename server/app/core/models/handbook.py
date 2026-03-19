@@ -10,6 +10,21 @@ HandbookMode = Literal["single_state", "multi_state"]
 HandbookSourceType = Literal["template", "upload"]
 HandbookSectionType = Literal["core", "state", "custom", "uploaded"]
 HandbookChangeStatus = Literal["pending", "accepted", "rejected"]
+WorkbookType = Literal[
+    "clinical_patient_care",
+    "infection_control",
+    "hipaa_privacy",
+    "safety_emergency",
+    "human_resources",
+    "administrative_operations",
+    "compliance_regulatory",
+    "financial_billing",
+    "operations",
+    "safety_compliance",
+    "it_security",
+    "finance",
+    "general",
+]
 
 
 class HandbookScopeInput(BaseModel):
@@ -59,6 +74,7 @@ class HandbookCreateRequest(BaseModel):
     file_name: Optional[str] = None
     create_from_template: bool = True
     auto_scope_from_employees: bool = False
+    workbook_type: Optional[WorkbookType] = None
 
     @model_validator(mode="after")
     def validate_shape(self):
@@ -80,6 +96,7 @@ class HandbookUpdateRequest(BaseModel):
     sections: Optional[list[HandbookSectionInput]] = None
     file_url: Optional[str] = None
     file_name: Optional[str] = None
+    workbook_type: Optional[WorkbookType] = None
 
     @model_validator(mode="after")
     def validate_mode_scopes(self):
@@ -122,6 +139,7 @@ class HandbookListItemResponse(BaseModel):
     mode: HandbookMode
     source_type: HandbookSourceType
     active_version: int
+    workbook_type: Optional[str] = None
     scope_states: list[str]
     pending_changes_count: int = 0
     updated_at: datetime
@@ -137,6 +155,7 @@ class HandbookDetailResponse(BaseModel):
     mode: HandbookMode
     source_type: HandbookSourceType
     active_version: int
+    workbook_type: Optional[str] = None
     file_url: Optional[str] = None
     file_name: Optional[str] = None
     scopes: list[HandbookScopeResponse]

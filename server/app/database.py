@@ -297,6 +297,10 @@ async def _ensure_handbook_tables(conn):
         ADD COLUMN IF NOT EXISTS guided_answers JSONB DEFAULT '{}'
     """)
     await conn.execute("""
+        ALTER TABLE handbooks
+        ADD COLUMN IF NOT EXISTS workbook_type VARCHAR(60)
+    """)
+    await conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_handbooks_company_id ON handbooks(company_id)
     """)
     await conn.execute("""
@@ -306,6 +310,9 @@ async def _ensure_handbook_tables(conn):
         CREATE UNIQUE INDEX IF NOT EXISTS idx_handbooks_company_active
         ON handbooks(company_id)
         WHERE status = 'active'
+    """)
+    await conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_handbooks_workbook_type ON handbooks(workbook_type)
     """)
 
     await conn.execute("""
