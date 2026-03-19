@@ -1468,8 +1468,19 @@ async def _upsert_jurisdiction_requirements_routed(
     }
 
 
-async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[Dict]):
-    """Upsert requirements to a jurisdiction without deleting existing rows."""
+async def _upsert_requirements_additive(
+    conn, jurisdiction_id: UUID, reqs: List[Dict], *, research_source: Optional[str] = None,
+):
+    """Upsert requirements to a jurisdiction without deleting existing rows.
+
+    research_source: optional tag stored in metadata.research_source to track
+    where data came from.  Known values:
+        "gemini"       – Gemini AI research
+        "official_api" – Government APIs (Federal Register, CMS, Congress.gov)
+        "claude_skill" – Claude compliance skill
+        "structured"   – Tier-1 structured data (CSV/scrape)
+        "manual"       – Admin manual edit
+    """
     # ── Data integrity pipeline ──
     for req in reqs:
         _clamp_varchar_fields(req)
@@ -1477,6 +1488,9 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
         if cat:
             req["category"] = cat
     await _validate_source_urls(reqs)
+
+    # Resolve metadata merge fragment once
+    meta_fragment = json.dumps({"research_source": research_source}) if research_source else None
 
     for req in reqs:
         requirement_key = _compute_requirement_key(req)
@@ -1491,12 +1505,13 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
                  applicable_industries, trigger_conditions, applicable_entity_types,
-                 category_id)
+                 category_id, metadata)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
                     COALESCE(
                         (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
                         (SELECT id FROM compliance_categories LIMIT 1)
-                    ))
+                    ),
+                    CASE WHEN $20::text IS NOT NULL THEN $20::jsonb ELSE '{}'::jsonb END)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1524,6 +1539,7 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
                 last_changed_at = CASE
                     WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
                     THEN NOW() ELSE jurisdiction_requirements.last_changed_at END,
+                metadata = COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) || EXCLUDED.metadata,
                 updated_at = NOW()
             """,
             jurisdiction_id,
@@ -1545,6 +1561,7 @@ async def _upsert_requirements_additive(conn, jurisdiction_id: UUID, reqs: List[
             tc_json,
             aet,
             req.get("category"),  # $19: duplicate for category_id subquery
+            meta_fragment,         # $20: research_source metadata
         )
 
 

@@ -3783,3 +3783,249 @@ def get_missing_regulations(
     expected = EXPECTED_REGULATION_KEYS.get(category, frozenset())
     missing_keys = expected - existing_keys
     return [REGULATION_MAP[k] for k in sorted(missing_keys) if k in REGULATION_MAP]
+
+
+# ---------------------------------------------------------------------------
+# CATEGORY_FEDERAL_REGISTER_AGENCIES — maps categories to Federal Register
+# agency slugs, CFR titles, and keywords for direct API fetching
+# ---------------------------------------------------------------------------
+
+CATEGORY_FEDERAL_REGISTER_AGENCIES: Dict[str, Dict] = {
+    # ── Labor ──────────────────────────────────────────────────────────────
+    "minimum_wage": {
+        "agencies": ["wage-and-hour-division", "labor-department"],
+        "cfr_titles": [29],
+        "keywords": ["minimum wage", "FLSA", "Fair Labor Standards"],
+    },
+    "overtime": {
+        "agencies": ["wage-and-hour-division"],
+        "cfr_titles": [29],
+        "keywords": ["overtime", "exempt", "salary threshold"],
+    },
+    "sick_leave": {
+        "agencies": ["wage-and-hour-division", "labor-department"],
+        "cfr_titles": [29],
+        "keywords": ["paid sick leave", "sick time", "earned sick"],
+    },
+    "meal_breaks": {
+        "agencies": ["wage-and-hour-division"],
+        "cfr_titles": [29],
+        "keywords": ["meal period", "rest break", "break time for nursing"],
+    },
+    "pay_frequency": {
+        "agencies": ["wage-and-hour-division"],
+        "cfr_titles": [29],
+        "keywords": ["pay frequency", "payday", "wage payment"],
+    },
+    "final_pay": {
+        "agencies": ["wage-and-hour-division"],
+        "cfr_titles": [29],
+        "keywords": ["final pay", "final wages", "wage payment upon separation"],
+    },
+    "minor_work_permit": {
+        "agencies": ["wage-and-hour-division"],
+        "cfr_titles": [29],
+        "keywords": ["child labor", "minor employment", "youth employment"],
+    },
+    "scheduling_reporting": {
+        "agencies": ["wage-and-hour-division", "labor-department"],
+        "cfr_titles": [29],
+        "keywords": ["scheduling", "reporting time", "predictive scheduling"],
+    },
+    "leave": {
+        "agencies": ["wage-and-hour-division", "labor-department"],
+        "cfr_titles": [29],
+        "keywords": ["FMLA", "family leave", "medical leave", "paid leave"],
+    },
+    "workplace_safety": {
+        "agencies": ["occupational-safety-and-health-administration"],
+        "cfr_titles": [29],
+        "keywords": ["OSHA", "workplace safety", "recordkeeping", "general duty"],
+    },
+    "workers_comp": {
+        "agencies": ["labor-department", "workers-compensation-programs-office"],
+        "cfr_titles": [20],
+        "keywords": ["workers compensation", "work injury", "occupational injury"],
+    },
+    "anti_discrimination": {
+        "agencies": ["equal-employment-opportunity-commission"],
+        "cfr_titles": [29],
+        "keywords": ["discrimination", "EEO", "Title VII", "ADA", "harassment"],
+    },
+    # ── Business / Tax ────────────────────────────────────────────────────
+    "business_license": {
+        "agencies": ["small-business-administration"],
+        "cfr_titles": [13],
+        "keywords": ["business license", "business registration"],
+    },
+    "tax_rate": {
+        "agencies": ["internal-revenue-service", "treasury-department"],
+        "cfr_titles": [26],
+        "keywords": ["employer tax", "payroll tax", "FICA", "FUTA"],
+    },
+    "posting_requirements": {
+        "agencies": ["wage-and-hour-division", "equal-employment-opportunity-commission", "occupational-safety-and-health-administration"],
+        "cfr_titles": [29],
+        "keywords": ["workplace poster", "posting requirement", "notice posting"],
+    },
+    # ── Healthcare ────────────────────────────────────────────────────────
+    "hipaa_privacy": {
+        "agencies": ["health-and-human-services-department"],
+        "cfr_titles": [45],
+        "keywords": ["HIPAA", "privacy rule", "protected health information"],
+    },
+    "billing_integrity": {
+        "agencies": ["centers-for-medicare-medicaid-services", "health-and-human-services-department"],
+        "cfr_titles": [42],
+        "keywords": ["billing fraud", "false claims", "anti-kickback", "Stark law"],
+    },
+    "clinical_safety": {
+        "agencies": ["centers-for-medicare-medicaid-services", "food-and-drug-administration"],
+        "cfr_titles": [42],
+        "keywords": ["patient safety", "conditions of participation", "clinical quality"],
+    },
+    "healthcare_workforce": {
+        "agencies": ["health-and-human-services-department", "centers-for-medicare-medicaid-services"],
+        "cfr_titles": [42],
+        "keywords": ["healthcare staffing", "nurse staffing", "provider enrollment"],
+    },
+    "corporate_integrity": {
+        "agencies": ["health-and-human-services-department"],
+        "cfr_titles": [42],
+        "keywords": ["corporate integrity", "OIG compliance", "compliance program"],
+    },
+    "research_consent": {
+        "agencies": ["health-and-human-services-department", "food-and-drug-administration"],
+        "cfr_titles": [45, 21],
+        "keywords": ["informed consent", "common rule", "human subjects", "IRB"],
+    },
+    "state_licensing": {
+        "agencies": ["centers-for-medicare-medicaid-services", "health-and-human-services-department"],
+        "cfr_titles": [42],
+        "keywords": ["provider licensing", "facility licensing", "certification"],
+    },
+    "emergency_preparedness": {
+        "agencies": ["centers-for-medicare-medicaid-services", "health-and-human-services-department"],
+        "cfr_titles": [42],
+        "keywords": ["emergency preparedness", "disaster planning", "EMTALA"],
+    },
+    # ── Oncology ──────────────────────────────────────────────────────────
+    "radiation_safety": {
+        "agencies": ["nuclear-regulatory-commission", "occupational-safety-and-health-administration"],
+        "cfr_titles": [10, 29],
+        "keywords": ["radiation safety", "ionizing radiation", "radioactive materials"],
+    },
+    "chemotherapy_handling": {
+        "agencies": ["occupational-safety-and-health-administration", "food-and-drug-administration"],
+        "cfr_titles": [29, 21],
+        "keywords": ["hazardous drugs", "chemotherapy", "cytotoxic", "USP 800"],
+    },
+    "tumor_registry": {
+        "agencies": ["health-and-human-services-department", "centers-for-medicare-medicaid-services"],
+        "cfr_titles": [42],
+        "keywords": ["tumor registry", "cancer registry", "cancer reporting"],
+    },
+    "oncology_clinical_trials": {
+        "agencies": ["food-and-drug-administration", "health-and-human-services-department"],
+        "cfr_titles": [21, 42],
+        "keywords": ["clinical trial", "oncology trial", "investigational drug"],
+    },
+    "oncology_patient_rights": {
+        "agencies": ["centers-for-medicare-medicaid-services", "health-and-human-services-department"],
+        "cfr_titles": [42],
+        "keywords": ["patient rights", "oncology patient", "cancer patient rights"],
+    },
+    # ── Medical Compliance ────────────────────────────────────────────────
+    "health_it": {
+        "agencies": ["health-and-human-services-department"],
+        "cfr_titles": [45],
+        "keywords": ["health IT", "electronic health record", "interoperability", "HITECH"],
+    },
+    "quality_reporting": {
+        "agencies": ["centers-for-medicare-medicaid-services"],
+        "cfr_titles": [42],
+        "keywords": ["quality reporting", "MIPS", "QPP", "value-based"],
+    },
+    "cybersecurity": {
+        "agencies": ["health-and-human-services-department"],
+        "cfr_titles": [45],
+        "keywords": ["cybersecurity", "HIPAA security", "breach notification"],
+    },
+    "environmental_safety": {
+        "agencies": ["environmental-protection-agency", "occupational-safety-and-health-administration"],
+        "cfr_titles": [40, 29],
+        "keywords": ["medical waste", "hazardous waste", "environmental compliance"],
+    },
+    "pharmacy_drugs": {
+        "agencies": ["food-and-drug-administration", "drug-enforcement-administration"],
+        "cfr_titles": [21],
+        "keywords": ["pharmacy", "controlled substance", "drug scheduling", "REMS"],
+    },
+    "payer_relations": {
+        "agencies": ["centers-for-medicare-medicaid-services"],
+        "cfr_titles": [42],
+        "keywords": ["payer", "managed care", "network adequacy", "Medicare Advantage"],
+    },
+    "reproductive_behavioral": {
+        "agencies": ["health-and-human-services-department", "substance-abuse-and-mental-health-services-administration"],
+        "cfr_titles": [42],
+        "keywords": ["reproductive health", "behavioral health", "mental health parity", "substance abuse"],
+    },
+    "pediatric_vulnerable": {
+        "agencies": ["health-and-human-services-department", "centers-for-medicare-medicaid-services"],
+        "cfr_titles": [42, 45],
+        "keywords": ["pediatric", "vulnerable populations", "elder abuse", "child abuse"],
+    },
+    "telehealth": {
+        "agencies": ["centers-for-medicare-medicaid-services", "health-and-human-services-department"],
+        "cfr_titles": [42],
+        "keywords": ["telehealth", "telemedicine", "remote patient monitoring"],
+    },
+    "medical_devices": {
+        "agencies": ["food-and-drug-administration"],
+        "cfr_titles": [21],
+        "keywords": ["medical device", "device safety", "510(k)", "premarket"],
+    },
+    "transplant_organ": {
+        "agencies": ["health-and-human-services-department", "centers-for-medicare-medicaid-services"],
+        "cfr_titles": [42],
+        "keywords": ["organ transplant", "organ procurement", "UNOS", "transplant center"],
+    },
+    # ── Supplementary ────────────────────────────────────────────────────
+    "antitrust": {
+        "agencies": ["federal-trade-commission", "justice-department"],
+        "cfr_titles": [16],
+        "keywords": ["antitrust", "healthcare merger", "competition", "FTC"],
+    },
+    "tax_exempt": {
+        "agencies": ["internal-revenue-service", "treasury-department"],
+        "cfr_titles": [26],
+        "keywords": ["tax exempt", "501(c)(3)", "nonprofit hospital", "community benefit"],
+    },
+    "language_access": {
+        "agencies": ["health-and-human-services-department"],
+        "cfr_titles": [45],
+        "keywords": ["language access", "LEP", "limited English", "interpreter"],
+    },
+    "records_retention": {
+        "agencies": ["health-and-human-services-department", "centers-for-medicare-medicaid-services"],
+        "cfr_titles": [42, 45],
+        "keywords": ["records retention", "medical records", "document retention"],
+    },
+    "marketing_comms": {
+        "agencies": ["federal-trade-commission", "food-and-drug-administration"],
+        "cfr_titles": [16, 21],
+        "keywords": ["healthcare marketing", "advertising", "FTC health claims"],
+    },
+    "emerging_regulatory": {
+        "agencies": ["health-and-human-services-department", "food-and-drug-administration"],
+        "cfr_titles": [42, 21],
+        "keywords": ["AI health", "digital health", "emerging technology", "precision medicine"],
+    },
+}
+
+# Healthcare-related categories for CMS data fetching
+CMS_CATEGORIES: FrozenSet[str] = frozenset(
+    k for k, v in CATEGORY_FEDERAL_REGISTER_AGENCIES.items()
+    if any(a in ("centers-for-medicare-medicaid-services",) for a in v["agencies"])
+)

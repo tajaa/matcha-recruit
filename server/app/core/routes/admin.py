@@ -5361,6 +5361,53 @@ async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
     )
 
 
+@router.post("/jurisdictions/{jurisdiction_id}/check-federal-sources", dependencies=[Depends(require_admin)])
+async def check_jurisdiction_federal_sources(jurisdiction_id: UUID):
+    """Fetch compliance data from government APIs (Federal Register, CMS, Congress.gov). Returns SSE stream."""
+    from ..services.federal_sources import fetch_federal_sources
+
+    async with get_connection() as conn:
+        j = await conn.fetchrow("SELECT id, city, state FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        if not j:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
+
+    async def event_stream():
+        try:
+            async for event in fetch_federal_sources(jurisdiction_id):
+                if event.get("type") == "heartbeat":
+                    yield ": heartbeat\n\n"
+                else:
+                    yield _to_sse(event)
+        except Exception:
+            logger.error("Federal sources check failed for %s", jurisdiction_id, exc_info=True)
+            yield _to_sse({"type": "error", "message": "Federal sources check failed"})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/jurisdictions/{jurisdiction_id}/apply-federal-sources", dependencies=[Depends(require_admin)])
+async def apply_jurisdiction_federal_sources(jurisdiction_id: UUID, payload: Dict = Body(...)):
+    """Apply previously fetched federal source requirements."""
+    from ..services.federal_sources import apply_federal_sources
+
+    async with get_connection() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        if not exists:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
+
+    requirements = payload.get("requirements", [])
+    if not requirements:
+        raise HTTPException(status_code=400, detail="No requirements to apply")
+
+    result = await apply_federal_sources(jurisdiction_id, requirements)
+    return {"ok": True, **result}
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Specialization Research Wizard
 # ──────────────────────────────────────────────────────────────────────────────

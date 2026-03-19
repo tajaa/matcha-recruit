@@ -87,6 +87,9 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
   const [scanning, setScanning] = useState(false)
   const [specialtyRunning, setSpecialtyRunning] = useState(false)
   const [medicalRunning, setMedicalRunning] = useState(false)
+  const [fedSourcesRunning, setFedSourcesRunning] = useState(false)
+  const [fedPreview, setFedPreview] = useState<{ results: any[]; by_category: Record<string, any[]>; total: number } | null>(null)
+  const [fedApplying, setFedApplying] = useState(false)
   const [scanMessages, setScanMessages] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>('requirements')
   const [specialtyFilter, setSpecialtyFilter] = useState<SpecialtyFilter>('all')
@@ -189,6 +192,50 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       }
       setMedicalRunning(false)
     }).catch(() => setMedicalRunning(false))
+  }
+
+  function startFedSourcesCheck() {
+    setFedSourcesRunning(true); setScanMessages([]); setFedPreview(null)
+    const token = localStorage.getItem('matcha_access_token')
+    const base = import.meta.env.VITE_API_URL || '/api'
+    fetch(`${base}/admin/jurisdictions/${id}/check-federal-sources`, {
+      method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    }).then(async (res) => {
+      const reader = res.body?.getReader()
+      const decoder = new TextDecoder()
+      if (!reader) return
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        for (const line of decoder.decode(value).split('\n')) {
+          if (line.startsWith(': ')) continue
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6)
+          if (data === '[DONE]') { setFedSourcesRunning(false); return }
+          try {
+            const ev = JSON.parse(data)
+            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setFedSourcesRunning(false); return }
+            if (ev.type === 'preview') {
+              setFedPreview({ results: ev.results, by_category: ev.by_category, total: ev.total })
+            }
+            if (ev.message) setScanMessages((p) => [...p, ev.message])
+          } catch {}
+        }
+      }
+      setFedSourcesRunning(false)
+    }).catch(() => setFedSourcesRunning(false))
+  }
+
+  async function applyFedSources() {
+    if (!fedPreview) return
+    setFedApplying(true)
+    try {
+      await api.post(`/admin/jurisdictions/${id}/apply-federal-sources`, { requirements: fedPreview.results })
+      setFedPreview(null)
+      fetchDetail()
+      onCheckComplete?.()
+    } catch { setScanMessages((p) => [...p, 'Error: Failed to apply federal sources']) }
+    finally { setFedApplying(false) }
   }
 
   async function toggleBookmark(reqId: string) {
@@ -420,20 +467,26 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
           )}
         </div>
         <div className="flex items-center gap-1.5">
-          <Button variant="secondary" size="sm" disabled={scanning || specialtyRunning || medicalRunning || loading} onClick={startCheck}>
+          <Button variant="secondary" size="sm" disabled={scanning || specialtyRunning || medicalRunning || fedSourcesRunning || loading} onClick={startCheck}>
             {scanning ? 'Scanning...' : 'Run Check'}
           </Button>
-          <button onClick={startSpecialtyCheck} disabled={scanning || specialtyRunning || medicalRunning || loading}
+          <button onClick={startSpecialtyCheck} disabled={scanning || specialtyRunning || medicalRunning || fedSourcesRunning || loading}
             className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
               text-purple-400 border-purple-500/40 hover:bg-purple-500/10 disabled:opacity-30"
             title="Research healthcare + oncology specialty policies">
             {specialtyRunning ? 'Running...' : 'Specialty'}
           </button>
-          <button onClick={startMedicalCheck} disabled={scanning || specialtyRunning || medicalRunning || loading}
+          <button onClick={startMedicalCheck} disabled={scanning || specialtyRunning || medicalRunning || fedSourcesRunning || loading}
             className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
               text-teal-400 border-teal-500/40 hover:bg-teal-500/10 disabled:opacity-30"
             title="Research health specs (17 categories)">
             {medicalRunning ? 'Running...' : 'Health Specs'}
+          </button>
+          <button onClick={startFedSourcesCheck} disabled={scanning || specialtyRunning || medicalRunning || fedSourcesRunning || loading}
+            className="px-2.5 py-1.5 text-[11px] font-medium border rounded transition-colors
+              text-amber-400 border-amber-500/40 hover:bg-amber-500/10 disabled:opacity-30"
+            title="Fetch from Federal Register, CMS, Congress.gov">
+            {fedSourcesRunning ? 'Fetching...' : 'Fed Sources'}
           </button>
         </div>
       </div>
@@ -488,9 +541,56 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
       </div>
 
       {/* SSE scan log */}
-      {(scanning || specialtyRunning || medicalRunning) && scanMessages.length > 0 && (
+      {(scanning || specialtyRunning || medicalRunning || fedSourcesRunning) && scanMessages.length > 0 && (
         <div className="border border-zinc-800 rounded-lg px-3 py-2.5 mb-3 max-h-28 overflow-y-auto">
           {scanMessages.map((msg, i) => <p key={i} className="text-xs text-zinc-500 leading-5">{msg}</p>)}
+        </div>
+      )}
+
+      {/* Federal Sources preview */}
+      {fedPreview && (
+        <div className="border border-amber-500/30 rounded-lg px-3 py-2.5 mb-3 bg-amber-500/5">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[11px] font-medium text-amber-400">
+              {fedPreview.total} results from government APIs · {Object.keys(fedPreview.by_category).length} categories
+            </p>
+            <div className="flex gap-1.5">
+              <button onClick={() => setFedPreview(null)}
+                className="px-2 py-1 text-[11px] text-zinc-400 border border-zinc-700 rounded hover:bg-zinc-800 transition-colors">
+                Dismiss
+              </button>
+              <button onClick={applyFedSources} disabled={fedApplying}
+                className="px-2 py-1 text-[11px] font-medium text-amber-400 border border-amber-500/40 rounded hover:bg-amber-500/10 disabled:opacity-30 transition-colors">
+                {fedApplying ? 'Applying...' : `Apply ${fedPreview.total}`}
+              </button>
+            </div>
+          </div>
+          <div className="max-h-64 overflow-y-auto space-y-2">
+            {Object.entries(fedPreview.by_category).sort(([a], [b]) => a.localeCompare(b)).map(([cat, items]) => (
+              <div key={cat}>
+                <p className="text-[10px] font-medium text-zinc-300 uppercase tracking-wider mb-0.5">
+                  {getCategoryLabel(cat)} <span className="text-zinc-600">({items.length})</span>
+                </p>
+                {items.map((item: any, i: number) => (
+                  <div key={i} className="ml-2 mb-1">
+                    <p className="text-[11px] text-zinc-300 leading-4">
+                      {item.title}
+                      {item.source_url && (
+                        <a href={item.source_url} target="_blank" rel="noreferrer"
+                          className="ml-1 text-amber-500/60 hover:text-amber-400 text-[10px]">↗</a>
+                      )}
+                    </p>
+                    {item.description && (
+                      <p className="text-[10px] text-zinc-600 leading-3.5 mt-0.5">{item.description}</p>
+                    )}
+                    <p className="text-[10px] text-zinc-600">
+                      {item.source_name}{item.effective_date ? ` · ${item.effective_date}` : ''}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
