@@ -198,6 +198,7 @@ async def apply_federal_sources(
         result = await _upsert_requirements_additive(
             conn, jurisdiction_id, requirements,
             research_source="official_api",
+            source_tier="tier_1_government",
         )
 
         # Update requirement_count

@@ -3512,7 +3512,7 @@ async def get_api_sources_overview():
             FROM jurisdiction_requirements jr
             JOIN jurisdictions j ON j.id = jr.jurisdiction_id
             WHERE jr.metadata->>'research_source' = 'official_api'
-            ORDER BY jr.created_at DESC
+            ORDER BY COALESCE(jr.updated_at, jr.created_at) DESC
             LIMIT 100
         """)
 

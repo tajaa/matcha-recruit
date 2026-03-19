@@ -44,6 +44,16 @@ async def main():
         """)
         count = int(result.split()[-1]) if result else 0
         print(f"Backfilled {count} rows with research_source = 'official_api'")
+
+        # Upgrade existing API-sourced rows to tier_1_government
+        result2 = await conn.execute("""
+            UPDATE jurisdiction_requirements
+            SET source_tier = 'tier_1_government'
+            WHERE metadata->>'research_source' = 'official_api'
+              AND (source_tier IS NULL OR source_tier != 'tier_1_government')
+        """)
+        count2 = int(result2.split()[-1]) if result2 else 0
+        print(f"Upgraded {count2} API-sourced rows to source_tier = 'tier_1_government'")
     finally:
         await conn.close()
 

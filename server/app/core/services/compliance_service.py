@@ -1470,6 +1470,7 @@ async def _upsert_jurisdiction_requirements_routed(
 
 async def _upsert_requirements_additive(
     conn, jurisdiction_id: UUID, reqs: List[Dict], *, research_source: Optional[str] = None,
+    source_tier: Optional[str] = None,
 ):
     """Upsert requirements to a jurisdiction without deleting existing rows.
 
@@ -1505,13 +1506,14 @@ async def _upsert_requirements_additive(
                  title, description, current_value, numeric_value, source_url, source_name,
                  effective_date, expiration_date, last_verified_at, requires_written_policy,
                  applicable_industries, trigger_conditions, applicable_entity_types,
-                 category_id, metadata)
+                 category_id, metadata, source_tier)
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), $15, $16, $17, $18,
                     COALESCE(
                         (SELECT id FROM compliance_categories WHERE slug = $19 LIMIT 1),
                         (SELECT id FROM compliance_categories LIMIT 1)
                     ),
-                    CASE WHEN $20::text IS NOT NULL THEN $20::jsonb ELSE '{}'::jsonb END)
+                    CASE WHEN $20::text IS NOT NULL THEN $20::jsonb ELSE '{}'::jsonb END,
+                    $21::source_tier_enum)
             ON CONFLICT (jurisdiction_id, requirement_key) DO UPDATE SET
                 category = EXCLUDED.category,
                 rate_type = EXCLUDED.rate_type,
@@ -1540,6 +1542,13 @@ async def _upsert_requirements_additive(
                     WHEN jurisdiction_requirements.current_value IS DISTINCT FROM EXCLUDED.current_value
                     THEN NOW() ELSE jurisdiction_requirements.last_changed_at END,
                 metadata = COALESCE(jurisdiction_requirements.metadata, '{}'::jsonb) || EXCLUDED.metadata,
+                source_tier = CASE
+                    WHEN EXCLUDED.source_tier IS NOT NULL
+                     AND (jurisdiction_requirements.source_tier IS NULL
+                          OR EXCLUDED.source_tier < jurisdiction_requirements.source_tier)
+                    THEN EXCLUDED.source_tier
+                    ELSE jurisdiction_requirements.source_tier
+                END,
                 updated_at = NOW()
             """,
             jurisdiction_id,
@@ -1562,6 +1571,7 @@ async def _upsert_requirements_additive(
             aet,
             req.get("category"),  # $19: duplicate for category_id subquery
             meta_fragment,         # $20: research_source metadata
+            source_tier,           # $21: source_tier enum value
         )
 
 
