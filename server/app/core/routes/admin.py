@@ -3504,8 +3504,10 @@ async def get_api_sources_overview():
 
         # Recent official_api entries
         recent_api = await conn.fetch("""
-            SELECT jr.id, jr.category, jr.title, jr.source_name, jr.source_url,
-                   jr.effective_date, jr.created_at, jr.jurisdiction_level,
+            SELECT jr.id, jr.category, jr.title, jr.description, jr.current_value,
+                   jr.source_name, jr.source_url,
+                   jr.effective_date, jr.created_at, jr.updated_at, jr.jurisdiction_level,
+                   jr.jurisdiction_name, jr.last_verified_at,
                    j.city, j.state
             FROM jurisdiction_requirements jr
             JOIN jurisdictions j ON j.id = jr.jurisdiction_id
@@ -3543,11 +3545,16 @@ async def get_api_sources_overview():
                     "id": str(r["id"]),
                     "category": r["category"],
                     "title": r["title"],
+                    "description": r["description"],
+                    "current_value": r["current_value"],
                     "source_name": r["source_name"],
                     "source_url": r["source_url"],
                     "effective_date": fmt(r["effective_date"]),
                     "created_at": fmt(r["created_at"]),
+                    "updated_at": fmt(r["updated_at"]),
                     "jurisdiction_level": r["jurisdiction_level"],
+                    "jurisdiction_name": r["jurisdiction_name"],
+                    "last_verified_at": fmt(r["last_verified_at"]),
                     "city": r["city"],
                     "state": r["state"],
                 }
