@@ -69,6 +69,7 @@ export default function Companies() {
   const [form, setForm] = useState<RegisterForm>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
   const [addError, setAddError] = useState('')
+  const [runningAssessment, setRunningAssessment] = useState<string | null>(null)
 
   function fetchCompanies() {
     setLoading(true)
@@ -90,6 +91,15 @@ export default function Companies() {
     setCompanies((prev) =>
       prev.map((c) => (c.id === id ? { ...c, status: 'approved' } : c))
     )
+  }
+
+  async function runAssessment(id: string) {
+    setRunningAssessment(id)
+    try {
+      await api.post(`/risk-assessment/admin/run/${id}`, {})
+    } finally {
+      setRunningAssessment(null)
+    }
   }
 
   async function reject(id: string) {
@@ -218,7 +228,7 @@ export default function Companies() {
                     <td className="px-4 py-3">{c.company_size ?? '—'}</td>
                     <td className="px-4 py-3">{statusBadge(c.status)}</td>
                     <td className="px-4 py-3 text-right">
-                      {(c.status === 'pending') && (
+                      {c.status === 'pending' ? (
                         <div className="flex justify-end gap-2">
                           <Button size="sm" onClick={() => approve(c.id)}>
                             Approve
@@ -227,7 +237,16 @@ export default function Companies() {
                             Reject
                           </Button>
                         </div>
-                      )}
+                      ) : (!c.status || c.status === 'approved') ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => runAssessment(c.id)}
+                          disabled={runningAssessment === c.id}
+                        >
+                          {runningAssessment === c.id ? 'Running...' : 'Run Assessment'}
+                        </Button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}
