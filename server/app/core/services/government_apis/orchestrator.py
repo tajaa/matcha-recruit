@@ -156,6 +156,40 @@ async def apply_government_sources(
             source_tier=source_tier,
         )
 
+        # When tier_1 rows land, supersede any coexisting Gemini/lower-tier rows
+        # in the same categories so they can't pollute authoritative data.
+        superseded = 0
+        if source_tier == "tier_1_government" and requirements:
+            tier1_categories = list({r["category"] for r in requirements if r.get("category")})
+            if tier1_categories:
+                superseded = await conn.fetchval(
+                    """WITH updated AS (
+                        UPDATE jurisdiction_requirements
+                        SET status = 'superseded', updated_at = NOW()
+                        WHERE jurisdiction_id = $1
+                          AND category = ANY($2)
+                          AND status = 'active'
+                          AND (source_tier IS NULL OR source_tier = 'tier_3_aggregator')
+                          AND requirement_key NOT IN (
+                              SELECT requirement_key FROM jurisdiction_requirements
+                              WHERE jurisdiction_id = $1
+                                AND category = ANY($2)
+                                AND source_tier = 'tier_1_government'
+                          )
+                        RETURNING 1
+                    )
+                    SELECT COUNT(*) FROM updated""",
+                    jurisdiction_id,
+                    tier1_categories,
+                )
+                if superseded:
+                    logger.info(
+                        "Superseded %d lower-tier rows for jurisdiction %s (tier_1 applied)",
+                        superseded,
+                        jurisdiction_id,
+                    )
+        result["superseded"] = superseded
+
         count = await conn.fetchval(
             "SELECT COUNT(*) FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
             jurisdiction_id,
