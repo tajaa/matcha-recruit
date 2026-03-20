@@ -633,7 +633,7 @@ export default function Landing() {
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2.5 pr-6 border-r border-zinc-700/50">
               <img src="/logo.svg" alt="Matcha" className="h-6 w-6" />
-              <span className="text-sm font-bold tracking-[0.25em] font-[Orbitron] uppercase">
+              <span className="text-base font-bold tracking-[0.25em] uppercase">
                 Matcha
               </span>
             </div>
@@ -674,9 +674,9 @@ export default function Landing() {
             <GlitchText
               text="Intelligence."
               cycleWords={["Compliance.", "Risk Assessment.", "Risk Management."]}
-              className="block text-5xl sm:text-6xl lg:text-7xl italic font-light tracking-tight leading-[1.1] mt-1 font-[Space_Grotesk]"
+              className="block text-5xl sm:text-6xl lg:text-7xl italic font-light tracking-tight leading-[1.1] mt-1"
             />
-            <p className="mt-8 text-lg sm:text-xl text-zinc-400 font-[Space_Grotesk] font-light">
+            <p className="mt-8 text-lg sm:text-xl text-zinc-400 font-light">
               Increase your{' '}
               <span className="text-amber-500 font-normal">signal to noise ratio</span>.
             </p>
@@ -745,14 +745,14 @@ export default function Landing() {
                 >
                   <div className="flex items-center gap-2 mb-5">
                     <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: section.accent }} />
-                    <span className="text-[10px] tracking-[0.3em] font-[Space_Mono] uppercase text-zinc-500">
+                    <span className="text-xs tracking-[0.3em] uppercase text-zinc-500">
                       {section.category}
                     </span>
                   </div>
-                  <h2 className="font-[Orbitron] text-2xl sm:text-3xl font-bold uppercase tracking-wide text-zinc-100 mb-5">
+                  <h2 className="text-3xl sm:text-4xl font-bold uppercase tracking-wide text-zinc-100 mb-5">
                     {section.title}
                   </h2>
-                  <p className="text-sm text-zinc-400 font-[Space_Mono] leading-relaxed max-w-md">
+                  <p className="text-base text-zinc-400 leading-relaxed max-w-md">
                     {section.desc}
                   </p>
                 </motion.div>
@@ -786,13 +786,13 @@ export default function Landing() {
           />
           <div className="relative max-w-7xl mx-auto">
             <div className="text-center mb-10">
-              <span className="font-[Orbitron] text-[10px] tracking-[0.3em] text-zinc-500 uppercase">
+              <span className="text-xs tracking-[0.3em] text-zinc-500 uppercase">
                 Agentic Workspace
               </span>
-              <h2 className="font-[Space_Grotesk] text-3xl sm:text-4xl font-light text-zinc-200 mt-4">
+              <h2 className="text-4xl sm:text-5xl font-light text-zinc-200 mt-4">
                 Matcha Work
               </h2>
-              <p className="text-zinc-500 font-[Space_Mono] text-xs sm:text-sm mt-4 max-w-lg mx-auto leading-relaxed">
+              <p className="text-zinc-500 text-sm sm:text-base mt-4 max-w-lg mx-auto leading-relaxed">
                 Multi-threaded document workspace for compliance research, ER case analysis, regulatory reasoning chains, and cross-referencing organizational data.
               </p>
             </div>
