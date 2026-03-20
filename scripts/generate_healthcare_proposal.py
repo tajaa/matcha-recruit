@@ -559,61 +559,59 @@ HTML_CONTENT = f"""
   <h2>Compliance &amp; Legal</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Compliance Engine</span> &mdash; Agentic jurisdiction research across federal, state, and local levels. Multi-location support with preemption rule analysis. Tiered data approach: structured requirements, curated repository, and Agentic research for emerging regulations.</p>
+    <p><span class="feature-name">Compliance Engine</span> &mdash; Agentic jurisdiction research across federal, state, and local levels. Multi-location support with preemption rule analysis. Tiered data approach: structured requirements, curated repository, and Agentic research for emerging regulations. For an oncology practice operating across multiple states, this means continuous monitoring of CMS Conditions of Participation, state radiation control program requirements, and applicable Joint Commission standards — all in a single dashboard with citation links rather than scattered across regulatory agency websites. When CMS publishes updated Oncology Care Model guidance or a state modifies chemo handling disposal rules, the engine surfaces the change and maps it to the affected facility before the next survey cycle.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Agentic policy documents tailored to specific jurisdictions. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation.</p>
+    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Agentic policy documents tailored to specific jurisdictions. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation. In an oncology setting, this includes HIPAA workforce policies, radiation safety acknowledgments, chemotherapy handling protocols required by OSHA's Hazardous Drugs standard, and state-specific mandated reporter obligations — all generated from the jurisdiction profile rather than drafted from scratch by HR. Electronic acknowledgment collection creates the documented workforce training record that Joint Commission surveyors and state licensing boards expect to see during on-site reviews.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Legislative Tracker</span> &mdash; Agentic monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity.</p>
+    <p><span class="feature-name">Legislative Tracker</span> &mdash; Agentic monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity. In the oncology sector, this includes tracking CMS reimbursement rule changes that carry workforce compliance implications, state prior authorization reform laws affecting clinical staffing decisions, and No Surprises Act regulatory updates. Pattern detection flags when multiple states simultaneously advance nurse staffing ratio bills or surprise billing disclosure requirements — giving compliance and HR teams time to prepare before the effective date rather than reacting after publication.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, locations, and tenure.</p>
+    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, locations, and tenure. Given that healthcare accounts for 21% of all EEOC charges filed nationally, the peer benchmarking dimension is particularly revealing — allowing The Oncology Institute to compare its EEOC charge rate per thousand employees against the NAICS 621 ambulatory care cohort rather than against an industry-averaged baseline that obscures the true sectoral risk. Monte Carlo loss projections give the CFO a defensible dollar range for D&amp;O risk reporting and employment practices liability insurance negotiations.</p>
   </div>
 
   <h2>Investigations &amp; Risk</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across locations.</p>
+    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across locations. For an oncology practice, incident tracking covers chemotherapy spill and exposure events, needle-stick injuries, patient-handling musculoskeletal incidents, and behavioral events — all in a single system with OSHA 300 recordability determinations built into the intake workflow. Trend analytics across clinic locations can surface whether a particular infusion room or shift configuration is driving a disproportionate share of hazardous drug exposure incidents, enabling targeted corrective action before an OSHA inspection or workers' comp audit.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with Agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with Agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel. In a clinical setting, ER Copilot handles the documentation-heavy investigations that arise from patient complaint-triggered HR cases, license-based discipline matters, and FMLA interference claims — categories that are elevated in healthcare due to the emotional intensity of clinical work and the complexity of FMLA interactions with shift-based schedules. When a case does reach outside employment counsel, the encrypted PDF export delivers a complete, chronological record in a form attorneys can immediately use, cutting preliminary review time and the associated billable hours.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with Agentic accommodation suggestions, undue hardship assessment, and job function analysis.</p>
+    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with Agentic accommodation suggestions, undue hardship assessment, and job function analysis. In oncology settings, accommodation requests frequently involve radiation exposure limitations for pregnant technologists, physical lifting restrictions for nurses, or schedule modifications for employees managing their own chronic conditions — each requiring a role-specific essential functions analysis rather than a generic response. The interactive process workflow documents every communication and decision point, creating a defensible record that withstands EEOC scrutiny even when accommodation is ultimately denied on undue hardship grounds.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Agentic-generated narrative memo suitable for counsel review.</p>
+    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Agentic-generated narrative memo suitable for counsel review. For a healthcare employer, this means the system automatically flags when a proposed termination involves an employee who recently filed an OSHA hazardous drug complaint, requested FMLA, or raised a patient safety concern — categories that trigger whistleblower protection under Section 11(c) of OSHA, FMLA, and the False Claims Act respectively. Catching those facts before a termination decision is finalized is far less expensive than litigating a retaliation claim after the employee files with DOL or HHS.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support.</p>
+    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support. In a healthcare system that may periodically restructure care delivery teams across facilities, the group layoff disclosure automation handles the OWBPA requirement to disclose the ages and job titles of all employees in the decisional unit — a step that is frequently omitted in healthcare RIFs and renders the released claims unenforceable. The built-in revocation tracking replaces informal email chains with a documented, timestamped process that satisfies both OWBPA and any applicable state law analog.</p>
   </div>
 
   <h2>Workforce Management</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Employee Directory &amp; Bulk Import</span> &mdash; Centralized employee records with CSV bulk upload, batch creation, Google Workspace and Slack account provisioning for new hires.</p>
+    <p><span class="feature-name">Employee Directory &amp; Bulk Import</span> &mdash; Centralized employee records with CSV bulk upload, batch creation, Google Workspace and Slack account provisioning for new hires. For a 650-person oncology organization with clinical staff distributed across multiple clinic locations, a centralized directory eliminates the fragmented spreadsheets and shared drives that make it impossible to get a real-time count of employees by facility, role, or credential status. Bulk import from your HRIS means adding a new acquired practice or clinic to the platform takes hours, not weeks — and every employee record becomes the anchor for onboarding tasks, accommodation history, and ER case data.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by category. Progress analytics with funnel metrics, bottleneck identification, and completion tracking across the organization.</p>
-  </div>
-
-  <div class="feature-block">
-    <p><span class="feature-name">Offer Letters</span> &mdash; Agentic salary guidance by role and market. Customizable templates with company branding and logo. Magic-link electronic signing for candidates. Multi-round salary range negotiation. PDF generation.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by category. Progress analytics with funnel metrics, bottleneck identification, and completion tracking across the organization. For oncology clinical roles, onboarding templates include credential and license verification gates, radiation safety training completion, chemotherapy handling competency sign-offs, and HIPAA workforce training acknowledgments — the exact documentation set that Joint Commission and state health department surveyors audit. Completion analytics give the compliance team a real-time view of which new hires are behind on mandatory training before a survey window opens, replacing the end-of-quarter fire drill.</p>
   </div>
 
   <h2>Agentic Document Workspace (Matcha Work)</h2>
 
   <div class="feature-block">
-    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode for cross-referencing organizational information. Supports offer letters, reviews, workbooks, onboarding plans, presentations, handbooks, and policies. <strong>Monthly usage credits included.</strong></p>
+    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode for cross-referencing organizational information. Supports performance reviews, workbooks, onboarding plans, presentations, handbooks, and policies.</p>
+    <p><span class="feature-name">Chat with Your Data</span> &mdash; Ask questions directly against your employee records, incident logs, compliance requirements, and ER cases. Surface patterns, pull ad-hoc reports, and get answers without exporting to spreadsheets. A compliance manager can ask "which facilities have open OSHA hazardous drug requirements with no assigned owner" and receive an immediately actionable list, without a manual audit across multiple spreadsheets. Clinical HR teams can query incident data to determine whether needle-stick rates at a specific clinic have increased since a staffing model change — the kind of correlation analysis that takes hours in Excel but seconds here.</p>
+    <p><span class="feature-name">Chain of Reasoning Compliance Querying</span> &mdash; Multi-step compliance analysis that walks through regulatory logic step by step&mdash;citing sources, applying preemption rules, and surfacing gaps&mdash;before returning a final answer. Designed for complex federal/state interactions where a single lookup is not enough. For an oncology organization, this means asking whether a proposed remote work arrangement for a licensed clinical coordinator triggers any state telehealth licensing requirements or HIPAA minimum necessary standard concerns — and receiving a step-by-step analysis that cites the applicable CMS guidance, state law, and HIPAA Privacy Rule provision rather than a single-sentence answer that leaves the compliance team uncertain. <strong>Monthly usage credits included.</strong></p>
   </div>
 
 

@@ -479,7 +479,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha is an agentic workforce risk management platform built for manufacturing organizations operating at the intersection of heavy OSHA compliance, active labor relations, and multi-department workforce management. For Giti Tire, that means jurisdiction-level compliance monitoring across federal and South Carolina state-plan OSHA requirements, incident tracking across a large production floor, proactive employment relations case management, and pre-termination risk intelligence&mdash;all in a single platform. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps your team can act on with confidence.
+    Matcha is an agentic workforce risk management platform built for manufacturing organizations operating at the intersection of heavy OSHA compliance, active labor relations, and multi-department workforce management. For Giti Tire, that means jurisdiction-level compliance monitoring across federal and multi-state OSHA requirements, incident tracking across a large production floor, proactive employment relations case management, and pre-termination risk intelligence&mdash;all in a single platform. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps your team can act on with confidence.
   </div>
 
   <h1>Investment Summary</h1>
@@ -553,61 +553,59 @@ HTML_CONTENT = f"""
   <h2>Compliance &amp; Legal</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Compliance Engine</span> &mdash; Agentic jurisdiction research across federal and state levels. Covers SC state-plan OSHA standards, federal FLSA, NLRA, and applicable environmental and chemical exposure regulations. Multi-location support with preemption rule analysis and tiered data approach for emerging regulatory changes.</p>
+    <p><span class="feature-name">Compliance Engine</span> &mdash; Jurisdiction research across federal and state levels for all active locations. Covers state-plan and federal OSHA standards, FLSA, NLRA, and applicable environmental and chemical exposure regulations. Multi-location support with preemption rule analysis and tiered data approach for emerging regulatory changes. For a South Carolina manufacturer operating under federal OSHA alongside states with their own approved plans, this means a single dashboard that surfaces the controlling standard at each facility without manual cross-referencing. Chemical process change at one plant? The engine flags updated PEL requirements and SDS obligations in the affected jurisdiction before a coordinator even opens a browser.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Agentic policy documents tailored to manufacturing environments and South Carolina jurisdiction. Covers OSHA-mandated written programs (HazCom, LOTO, Respiratory Protection, Hearing Conservation), employment policies, and NLRA-compliant solicitation and communication policies. Electronic signature collection with audit trails.</p>
+    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Policy documents tailored to manufacturing environments across all active jurisdictions. Covers OSHA-mandated written programs (HazCom, LOTO, Respiratory Protection, Hearing Conservation), employment policies, and NLRA-compliant solicitation and communication policies. Electronic signature collection with audit trails. In a unionized or pre-petition environment, having electronically signed, timestamped acknowledgments of solicitation and no-distribution policies is a frontline defense if those policies are challenged at the NLRB. When a new state location comes online, the handbook auto-generates with jurisdiction-specific provisions already populated — no starting from a blank template.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Legislative Tracker</span> &mdash; Agentic monitoring of regulatory changes across federal and SC state-plan OSHA, NLRB guidance, and employment law with pattern detection for coordinated legislative activity.</p>
+    <p><span class="feature-name">Legislative Tracker</span> &mdash; Real-time monitoring of regulatory changes across federal and state-plan OSHA, NLRB guidance, and multi-state employment law with pattern detection for coordinated legislative activity. For a tire manufacturer, this means automatic alerts when OSHA proposes updates to chemical exposure limits for compounds like carbon black or styrene-butadiene, giving safety teams lead time to update SOPs before enforcement deadlines. Pattern detection also flags when multiple states simultaneously introduce "right to organize" or heat illness prevention bills — letting HR get ahead of coordinated legislative waves rather than reacting jurisdiction by jurisdiction.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, shifts, and tenure.</p>
+    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, shifts, and tenure. For Giti's multi-plant footprint, this means seeing at a glance which facility is carrying disproportionate OSHA incident rate risk relative to NAICS 3262 (rubber products) peers — before an OSHA programmed inspection targets it. Monte Carlo outputs translate that risk into a dollar range your CFO can use in budget conversations, grounded in your own historical data.</p>
   </div>
 
   <h2>Investigations &amp; Risk</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting designed for high-volume manufacturing environments. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Covers machine incidents, chemical exposure events, ergonomic injuries, near-misses, and behavioral incidents. Trend analytics and pattern detection across shifts and departments.</p>
+    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting designed for high-volume manufacturing environments. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Covers machine incidents, chemical exposure events, ergonomic injuries, near-misses, and behavioral incidents. Trend analytics and pattern detection across shifts and departments. In a tire plant environment, the system can correlate ergonomic strain incidents by production line and shift to identify equipment or scheduling patterns driving injury clusters — giving the safety team data to act on before OSHA receives an employee complaint. OSHA 300 logs are maintained in real time and exportable in the required format, eliminating the end-of-year scramble to reconstruct recordable incidents from scattered emails and paper forms.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel. Particularly valuable in active labor relations environments where documentation quality determines outcomes.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel. Particularly valuable in active labor relations environments where documentation quality determines outcomes. In a manufacturing setting with shift supervisors making real-time discipline decisions, ER Copilot creates a centralized, searchable case record that prevents inconsistent treatment claims — the most common gateway to NLRA and Title VII exposure. When a grievance escalates to arbitration, the encrypted case export gives outside counsel a complete, timestamped record in minutes rather than weeks of document collection.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with agentic accommodation suggestions, undue hardship assessment, and job function analysis for physical manufacturing roles.</p>
+    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with agentic accommodation suggestions, undue hardship assessment, and job function analysis for physical manufacturing roles. In a plant environment where most jobs carry essential physical functions — lifting, standing, operating machinery — the system analyzes job descriptions to surface feasible modifications like duty reassignment or shift changes without requiring HR to build the legal case from scratch. Undue hardship analysis includes the specific cost and operational factors relevant to production-floor roles, producing a documented record that satisfies the EEOC's interactive process standard.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Critical in manufacturing environments with active labor relations activity, where termination timing and documentation are subject to heightened scrutiny. Agentic-generated narrative memo suitable for counsel review.</p>
+    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Critical in manufacturing environments with active labor relations activity, where termination timing and documentation are subject to heightened scrutiny. Agentic-generated narrative memo suitable for counsel review. The system flags when a proposed termination falls within 90 days of a protected activity (OSHA complaint, NLRA organizing activity, workers' comp filing) — the exact window that triggers heightened NLRB and OSHA retaliation scrutiny. That single check, applied consistently across 900 employees and multiple facilities, eliminates the most common source of six-figure wrongful termination exposure in manufacturing.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support.</p>
+    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support. For a manufacturer conducting a reduction in force across multiple facilities, the system automatically generates the required OWBPA group layoff disclosures listing decisional unit, eligibility factors, job titles, and ages of affected and retained employees — a form that outside counsel typically charges $3,000–$8,000 to draft. Electronic delivery and revocation tracking are built in, creating a complete compliance record without HR managing certified mail or chasing returned documents.</p>
   </div>
 
   <h2>Workforce Management</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Employee Directory &amp; Bulk Import</span> &mdash; Centralized employee records with CSV bulk upload, batch creation, Google Workspace and Slack account provisioning for new hires.</p>
+    <p><span class="feature-name">Employee Directory &amp; Bulk Import</span> &mdash; Centralized employee records with CSV bulk upload, batch creation, Google Workspace and Slack account provisioning for new hires. For a 900-person, multi-plant workforce with production floor, maintenance, warehouse, and office populations, bulk import eliminates the manual entry bottleneck when bringing a new shift or facility online. A single HRIS export can populate the entire directory, trigger onboarding task assignments by department and role, and provision system access — all in one operation.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by role and shift. Supports OSHA-mandated pre-floor training workflows (HazCom, LOTO, PPE, machine-specific orientation) as well as office and supervisory onboarding. Progress analytics with funnel metrics, bottleneck identification, and completion tracking.</p>
-  </div>
-
-  <div class="feature-block">
-    <p><span class="feature-name">Offer Letters</span> &mdash; Agentic salary guidance by role and market. Customizable templates with company branding. Magic-link electronic signing for candidates. Multi-round salary range negotiation. PDF generation.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by role and shift. Supports OSHA-mandated pre-floor training workflows (HazCom, LOTO, PPE, machine-specific orientation) as well as office and supervisory onboarding. Progress analytics with funnel metrics, bottleneck identification, and completion tracking. For a plant that onboards production floor employees in cohorts, the system can enforce a gate — no badge access or machine assignment until OSHA pre-floor training tasks are marked complete and verified — reducing both OSHA citation risk and workers' comp exposure from undertrained new hires. Completion dashboards give safety managers a real-time view of training status across all shifts without pulling reports from multiple systems.</p>
   </div>
 
   <h2>Agentic Document Workspace (Matcha Work)</h2>
 
   <div class="feature-block">
-    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode. Supports OSHA written program drafting, ER case memos, onboarding plans, handbooks, and policies. <strong>Monthly usage credits included.</strong></p>
+    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode. Supports OSHA written program drafting, ER case memos, onboarding plans, handbooks, and policies.</p>
+    <p><span class="feature-name">Chat with Your Data</span> &mdash; Ask questions directly against your employee records, incident logs, compliance requirements, and ER cases. Surface patterns, pull ad-hoc reports, and get answers without exporting to spreadsheets. A safety manager can ask "which production line has the highest rate of ergonomic incidents in the past six months" and receive a cited, filterable answer in seconds rather than building a pivot table. HR business partners can query ER case data by supervisor to spot patterns of inconsistent discipline before they become a class action.</p>
+    <p><span class="feature-name">Chain of Reasoning Compliance Querying</span> &mdash; Multi-step compliance analysis that walks through regulatory logic step by step&mdash;citing sources, applying preemption rules, and surfacing gaps&mdash;before returning a final answer. Designed for complex federal/state interactions where a single lookup is not enough. For a South Carolina manufacturer, this means asking whether the state-plan OSHA PSM standard applies to a rubber vulcanization process and what it requires beyond the federal baseline — and receiving a step-by-step analysis with CFR and SC regulation citations rather than a $400/hour outside consultant call. <strong>Monthly usage credits included.</strong></p>
   </div>
 
 </div>
@@ -636,13 +634,13 @@ HTML_CONTENT = f"""
         <td class="phase">Discovery &amp; Gap Analysis</td>
         <td>Weeks 1&ndash;2</td>
         <td class="cost">$3,500</td>
-        <td>Organizational mapping, HRIS audit, shift structure inventory, regulatory gap analysis &mdash; audit existing OSHA written programs (HazCom, LOTO, Respiratory Protection, Hearing Conservation, Benzene/Butadiene exposure programs), incident log history, SC state-plan compliance status, and NLRA-related policy documentation</td>
+        <td>Organizational mapping, HRIS audit, shift structure inventory, regulatory gap analysis &mdash; audit existing OSHA written programs (HazCom, LOTO, Respiratory Protection, Hearing Conservation, Benzene/Butadiene exposure programs), incident log history, state-plan compliance status across active jurisdictions, and NLRA-related policy documentation</td>
       </tr>
       <tr>
         <td class="phase">Configuration &amp; Templating</td>
         <td>Weeks 3&ndash;4</td>
         <td class="cost">$3,500</td>
-        <td>Jurisdiction setup (federal + SC state-plan OSHA), compliance baseline scan, build role-specific onboarding templates (production floor, maintenance, quality, warehouse, supervisory), OSHA pre-floor training workflows, NLRA-compliant policy templates, handbook ingestion</td>
+        <td>Jurisdiction setup (federal + multi-state OSHA for all active locations), compliance baseline scan, build role-specific onboarding templates (production floor, maintenance, quality, warehouse, supervisory), OSHA pre-floor training workflows, NLRA-compliant policy templates, handbook ingestion</td>
       </tr>
       <tr>
         <td class="phase">Data Migration &amp; Manual Run</td>
@@ -741,7 +739,7 @@ HTML_CONTENT = f"""
     </tbody>
   </table>
 
-  <p style="font-size:9pt; color:#6b7280; margin-top:8px;">Savings driven by ER Copilot handling employment relations investigations internally, Pre-Termination Intelligence reducing exposure in a high-scrutiny labor environment, the Compliance Engine automating SC state-plan OSHA and federal monitoring, and Incident Reports eliminating manual OSHA 300/300A log preparation.</p>
+  <p style="font-size:9pt; color:#6b7280; margin-top:8px;">Savings driven by ER Copilot handling employment relations investigations internally, Pre-Termination Intelligence reducing exposure in a high-scrutiny labor environment, the Compliance Engine automating multi-state and federal OSHA monitoring, and Incident Reports eliminating manual OSHA 300/300A log preparation.</p>
 
   <table class="roi-table" style="margin-top: 20px;">
     <thead>
