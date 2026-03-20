@@ -448,7 +448,7 @@ HTML_CONTENT = f"""
 
   <div class="cover-top">
     <div class="logo-text">matcha</div>
-    <div class="logo-sub">HR Intelligence, Risk &amp; Employee Relations</div>
+    <div class="logo-sub">Risk, Compliance, Employee Relations Intelligence</div>
   </div>
 
   <div class="cover-middle">
@@ -457,6 +457,7 @@ HTML_CONTENT = f"""
       <strong>Service Proposal</strong>
     </div>
     <div class="cover-divider"></div>
+    <div style="font-size: 10pt; font-style: italic; opacity: 0.75; margin-bottom: 18px; letter-spacing: 0.2px;">&ldquo;Manage your risk or your risk will manage you.&rdquo;</div>
     <div class="cover-meta">
       Prepared for <strong>{CLIENT_NAME}</strong><br>
       {EMPLOYEE_COUNT} Employees &middot; Full Platform Access<br>
@@ -466,7 +467,8 @@ HTML_CONTENT = f"""
 
   <div class="cover-bottom">
     <div class="cover-footer">
-      Confidential &mdash; This document contains proprietary pricing and is intended solely for the named recipient.
+      Confidential &mdash; This document contains proprietary pricing and is intended solely for the named recipient.<br>
+      hey-matcha.com &middot; aaron@hey-matcha.com
     </div>
   </div>
 </div>
