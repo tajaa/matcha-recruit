@@ -1,0 +1,576 @@
+Full eCFR Test Output
+Generated: 2026-03-19 22:09:25
+Total: 94 requirements across 45 categories
+============================================================
+
+[anti_discrimination]  (6 parts)
+  key:   anti_discrimination:29 cfr part 1600 employee responsibilities and conduct
+  title: 29 CFR Part 1600 – Employee Responsibilities and Conduct
+  value: Part 1600, 1 sections. Last amended: 2017-01-03.
+  url:   https://www.ecfr.gov/current/title-29/part-1600
+  key:   anti_discrimination:29 cfr part 1604 guidelines on discrimination because of sex
+  title: 29 CFR Part 1604 – Guidelines on Discrimination Because of Sex
+  value: Part 1604, 11 sections. Last amended: 2017-01-03.
+  url:   https://www.ecfr.gov/current/title-29/part-1604
+  key:   anti_discrimination:29 cfr part 1605 guidelines on discrimination because of religion
+  title: 29 CFR Part 1605 – Guidelines on Discrimination Because of Religion
+  value: Part 1605, 3 sections. Last amended: 2017-01-03.
+  url:   https://www.ecfr.gov/current/title-29/part-1605
+  key:   anti_discrimination:29 cfr part 1606 guidelines on discrimination because of national origin
+  title: 29 CFR Part 1606 – Guidelines on Discrimination Because of National Origin
+  value: Part 1606, 8 sections. Last amended: 2017-01-03.
+  url:   https://www.ecfr.gov/current/title-29/part-1606
+  key:   anti_discrimination:29 cfr part 1607 uniform guidelines on employee selection procedures 1978
+  title: 29 CFR Part 1607 – Uniform Guidelines on Employee Selection Procedures (1978)
+  value: Part 1607, 18 sections. Last amended: 2017-01-03.
+  url:   https://www.ecfr.gov/current/title-29/part-1607
+  key:   anti_discrimination:29 cfr part 1608 affirmative action appropriate under title vii of the civil rights act of 1964 as amended
+  title: 29 CFR Part 1608 – Affirmative Action Appropriate Under Title VII of the Civil Rights Act of 1964, as Amended
+  value: Part 1608, 12 sections. Last amended: 2017-01-03.
+  url:   https://www.ecfr.gov/current/title-29/part-1608
+
+[antitrust]  (2 parts)
+  key:   antitrust:16 cfr part 801 coverage rules
+  title: 16 CFR Part 801 – Coverage Rules
+  value: Part 801, 19 sections. Last amended: 2016-12-22.
+  url:   https://www.ecfr.gov/current/title-16/part-801
+  key:   antitrust:16 cfr part 802 exemption rules
+  title: 16 CFR Part 802 – Exemption Rules
+  value: Part 802, 29 sections. Last amended: 2016-12-22.
+  url:   https://www.ecfr.gov/current/title-16/part-802
+
+[billing_integrity]  (2 parts)
+  key:   billing_integrity:42 cfr part 1001 program integrity medicare and state health care programs
+  title: 42 CFR Part 1001 – Program Integrity—Medicare and State Health Care Programs
+  value: Part 1001, 6 subparts, 38 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-1001
+  key:   billing_integrity:42 cfr part 1003 civil money penalties assessments and exclusions
+  title: 42 CFR Part 1003 – Civil Money Penalties, Assessments and Exclusions
+  value: Part 1003, 15 subparts, 57 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-1003
+
+[business_license]  (2 parts)
+  key:   business_license:13 cfr part 121 small business size regulations
+  title: 13 CFR Part 121 – Small Business Size Regulations
+  value: Part 121, 2 subparts, 77 sections. Last amended: 2016-12-28.
+  url:   https://www.ecfr.gov/current/title-13/part-121
+  key:   business_license:13 cfr part 124 8 a business development small disadvantaged business status determinations
+  title: 13 CFR Part 124 – 8(a) Business Development/Small Disadvantaged Business Status Determinations
+  value: Part 124, 2 subparts, 64 sections. Last amended: 2016-12-28.
+  url:   https://www.ecfr.gov/current/title-13/part-124
+
+[chemotherapy_handling]  (3 parts)
+  key:   chemotherapy_handling:29 cfr part 1910 occupational safety and health standards
+  title: 29 CFR Part 1910 – Occupational Safety and Health Standards
+  value: Part 1910, 23 subparts, 204 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-29/part-1910
+  key:   chemotherapy_handling:21 cfr part 210 current good manufacturing practice in manufacturing processing packing or holding of drugs general
+  title: 21 CFR Part 210 – Current Good Manufacturing Practice in Manufacturing, Processing, Packing, or Holding of Drugs; General
+  value: Part 210, 3 sections. Last amended: 2016-11-29.
+  url:   https://www.ecfr.gov/current/title-21/part-210
+  key:   chemotherapy_handling:21 cfr part 211 current good manufacturing practice for finished pharmaceuticals
+  title: 21 CFR Part 211 – Current Good Manufacturing Practice for Finished Pharmaceuticals
+  value: Part 211, 11 subparts, 60 sections. Last amended: 2016-11-29.
+  url:   https://www.ecfr.gov/current/title-21/part-211
+
+[clinical_safety]  (4 parts)
+  key:   clinical_safety:42 cfr part 482 conditions of participation for hospitals
+  title: 42 CFR Part 482 – Conditions of Participation for Hospitals
+  value: Part 482, 5 subparts, 46 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-482
+  key:   clinical_safety:42 cfr part 483 requirements for states and long term care facilities
+  title: 42 CFR Part 483 – Requirements for States and Long Term Care Facilities
+  value: Part 483, 9 subparts, 82 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-483
+  key:   clinical_safety:42 cfr part 484 home health services
+  title: 42 CFR Part 484 – Home Health Services
+  value: Part 484, 6 subparts, 47 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-484
+  key:   clinical_safety:42 cfr part 485 conditions of participation specialized providers
+  title: 42 CFR Part 485 – Conditions of Participation: Specialized Providers
+  value: Part 485, 9 subparts, 85 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-485
+
+[corporate_integrity]  (1 parts)
+  key:   corporate_integrity:42 cfr part 1001 program integrity medicare and state health care programs
+  title: 42 CFR Part 1001 – Program Integrity—Medicare and State Health Care Programs
+  value: Part 1001, 6 subparts, 38 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-1001
+
+[cybersecurity]  (1 parts)
+  key:   cybersecurity:45 cfr part 164 security and privacy
+  title: 45 CFR Part 164 – Security and Privacy
+  value: Part 164, 5 subparts, 41 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-164
+
+[emergency_preparedness]  (2 parts)
+  key:   emergency_preparedness:42 cfr part 482 conditions of participation for hospitals
+  title: 42 CFR Part 482 – Conditions of Participation for Hospitals
+  value: Part 482, 5 subparts, 46 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-482
+  key:   emergency_preparedness:42 cfr part 485 conditions of participation specialized providers
+  title: 42 CFR Part 485 – Conditions of Participation: Specialized Providers
+  value: Part 485, 9 subparts, 85 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-485
+
+[emerging_regulatory]  (2 parts)
+  key:   emerging_regulatory:45 cfr part 170 health information technology standards implementation specifications and certification criteria and certification programs for health information technology
+  title: 45 CFR Part 170 – Health Information Technology Standards, Implementation Specifications, and Certification Criteria and Certification Programs for Health Information Technology
+  value: Part 170, 5 subparts, 51 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-170
+  key:   emerging_regulatory:21 cfr part 890 physical medicine devices
+  title: 21 CFR Part 890 – Physical Medicine Devices
+  value: Part 890, 6 subparts, 91 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-21/part-890
+
+[environmental_safety]  (4 parts)
+  key:   environmental_safety:40 cfr part 260 hazardous waste management system general
+  title: 40 CFR Part 260 – Hazardous Waste Management System: General
+  value: Part 260, 3 subparts, 20 sections. Last amended: 2016-11-28.
+  url:   https://www.ecfr.gov/current/title-40/part-260
+  key:   environmental_safety:40 cfr part 261 identification and listing of hazardous waste
+  title: 40 CFR Part 261 – Identification and Listing of Hazardous Waste
+  value: Part 261, 15 subparts, 92 sections. Last amended: 2016-11-28.
+  url:   https://www.ecfr.gov/current/title-40/part-261
+  key:   environmental_safety:40 cfr part 262 standards applicable to generators of hazardous waste
+  title: 40 CFR Part 262 – Standards Applicable to Generators of Hazardous Waste
+  value: Part 262, 11 subparts, 69 sections. Last amended: 2016-11-28.
+  url:   https://www.ecfr.gov/current/title-40/part-262
+  key:   environmental_safety:29 cfr part 1910 occupational safety and health standards
+  title: 29 CFR Part 1910 – Occupational Safety and Health Standards
+  value: Part 1910, 23 subparts, 204 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-29/part-1910
+
+[final_pay]  (1 parts)
+  key:   final_pay:29 cfr part 531 wage payments under the fair labor standards act of 1938
+  title: 29 CFR Part 531 – Wage Payments Under the Fair Labor Standards Act of 1938
+  value: Part 531, 4 subparts, 34 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-531
+
+[health_it]  (1 parts)
+  key:   health_it:45 cfr part 170 health information technology standards implementation specifications and certification criteria and certification programs for health information technology
+  title: 45 CFR Part 170 – Health Information Technology Standards, Implementation Specifications, and Certification Criteria and Certification Programs for Health Information Technology
+  value: Part 170, 5 subparts, 51 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-170
+
+[healthcare_workforce]  (2 parts)
+  key:   healthcare_workforce:42 cfr part 482 conditions of participation for hospitals
+  title: 42 CFR Part 482 – Conditions of Participation for Hospitals
+  value: Part 482, 5 subparts, 46 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-482
+  key:   healthcare_workforce:42 cfr part 488 survey certification and enforcement procedures
+  title: 42 CFR Part 488 – Survey, Certification, and Enforcement Procedures
+  value: Part 488, 14 subparts, 148 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-488
+
+[hipaa_privacy]  (2 parts)
+  key:   hipaa_privacy:45 cfr part 160 general administrative requirements
+  title: 45 CFR Part 160 – General Administrative Requirements
+  value: Part 160, 5 subparts, 61 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-160
+  key:   hipaa_privacy:45 cfr part 164 security and privacy
+  title: 45 CFR Part 164 – Security and Privacy
+  value: Part 164, 5 subparts, 41 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-164
+
+[language_access]  (2 parts)
+  key:   language_access:45 cfr part 80 nondiscrimination under programs receiving federal assistance through the department of health and human services effectuation of title vi of the civil rights act of 1964
+  title: 45 CFR Part 80 – Nondiscrimination Under Programs Receiving Federal Assistance Through the Department of Health and Human Services Effectuation of Title VI of the Civil Rights Act of 1964
+  value: Part 80, 13 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-80
+  key:   language_access:45 cfr part 84 nondiscrimination on the basis of disability in programs or activities receiving federal financial assistance
+  title: 45 CFR Part 84 – 
+Nondiscrimination on the Basis of Disability in Programs or Activities Receiving Federal Financial Assistance
+  value: Part 84, 11 subparts, 66 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-84
+
+[leave]  (1 parts)
+  key:   leave:29 cfr part 825 the family and medical leave act of 1993
+  title: 29 CFR Part 825 – The Family and Medical Leave Act of 1993
+  value: Part 825, 8 subparts, 79 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-825
+
+[marketing_comms]  (2 parts)
+  key:   marketing_comms:16 cfr part 255 guides concerning use of endorsements and testimonials in advertising
+  title: 16 CFR Part 255 – Guides Concerning Use of Endorsements and Testimonials in Advertising
+  value: Part 255, 7 sections. Last amended: 2016-12-22.
+  url:   https://www.ecfr.gov/current/title-16/part-255
+  key:   marketing_comms:21 cfr part 202 prescription drug advertising
+  title: 21 CFR Part 202 – Prescription Drug Advertising
+  value: Part 202, 1 sections. Last amended: 2016-11-29.
+  url:   https://www.ecfr.gov/current/title-21/part-202
+
+[meal_breaks]  (1 parts)
+  key:   meal_breaks:29 cfr part 785 hours worked
+  title: 29 CFR Part 785 – Hours Worked
+  value: Part 785, 5 subparts, 50 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-785
+
+[medical_devices]  (4 parts)
+  key:   medical_devices:21 cfr part 800 general
+  title: 21 CFR Part 800 – General
+  value: Part 800, 3 subparts, 6 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-21/part-800
+  key:   medical_devices:21 cfr part 801 labeling
+  title: 21 CFR Part 801 – Labeling
+  value: Part 801, 7 subparts, 38 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-21/part-801
+  key:   medical_devices:21 cfr part 807 establishment registration and device listing for manufacturers and initial importers of devices
+  title: 21 CFR Part 807 – Establishment Registration and Device Listing for Manufacturers and Initial Importers of Devices
+  value: Part 807, 5 subparts, 24 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-21/part-807
+  key:   medical_devices:21 cfr part 820 quality management system regulation
+  title: 21 CFR Part 820 – Quality Management System Regulation
+  value: Part 820, 3 subparts, 9 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-21/part-820
+
+[minimum_wage]  (1 parts)
+  key:   minimum_wage:exempt_salary
+  title: 29 CFR Part 780 – Exemptions Applicable to Agriculture, Processing of Agricultural Commodities, and Related Subjects Under the Fair Labor Standards Act
+  value: Part 780, 11 subparts, 265 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-780
+
+[minor_work_permit]  (1 parts)
+  key:   minor_work_permit:29 cfr part 570 child labor regulations orders and statements of interpretation
+  title: 29 CFR Part 570 – Child Labor Regulations, Orders and Statements of Interpretation
+  value: Part 570, 8 subparts, 74 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-570
+
+[oncology_clinical_trials]  (4 parts)
+  key:   oncology_clinical_trials:21 cfr part 50 protection of human subjects
+  title: 21 CFR Part 50 – Protection of Human Subjects
+  value: Part 50, 4 subparts, 15 sections. Last amended: 2016-12-29.
+  url:   https://www.ecfr.gov/current/title-21/part-50
+  key:   oncology_clinical_trials:21 cfr part 56 institutional review boards
+  title: 21 CFR Part 56 – Institutional Review Boards
+  value: Part 56, 5 subparts, 20 sections. Last amended: 2016-12-29.
+  url:   https://www.ecfr.gov/current/title-21/part-56
+  key:   oncology_clinical_trials:21 cfr part 312 investigational new drug application
+  title: 21 CFR Part 312 – Investigational New Drug Application
+  value: Part 312, 9 subparts, 60 sections. Last amended: 2016-12-23.
+  url:   https://www.ecfr.gov/current/title-21/part-312
+  key:   oncology_clinical_trials:42 cfr part 11 clinical trials registration and results information submission
+  title: 42 CFR Part 11 – Clinical Trials Registration and Results Information Submission
+  value: Part 11, 5 subparts, 20 sections. Last amended: 2017-01-18.
+  url:   https://www.ecfr.gov/current/title-42/part-11
+
+[oncology_patient_rights]  (1 parts)
+  key:   oncology_patient_rights:42 cfr part 482 conditions of participation for hospitals
+  title: 42 CFR Part 482 – Conditions of Participation for Hospitals
+  value: P
+  title: 42 CFR Part 11 – Clinical Trials Registration and Results Information Submission
+  value: Part 11, 5 subparts, 20 sections. Last amended: 2017-01-18.
+  url:   https://www.ecfr.gov/current/title-42/part-11
+
+[oncology_patient_rights]  (1 parts)
+  key:   oncology_patient_rights:42 cfr part 482 conditions of participation for hospitals
+  title: 42 CFR Part 482 – Conditions of Participation for Hospitals
+  value: Part 482, 5 subparts, 46 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-482
+
+[overtime]  (3 parts)
+  key:   overtime:29 cfr part 541 defining and delimiting the exemptions for executive administrative professional computer and outside sales employees
+  title: 29 CFR Part 541 – Defining and Delimiting the Exemptions for Executive, Administrative, Professional, Computer and Outside Sales Employees
+  value: Part 541, 8 subparts, 50 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-541
+  key:   overtime:29 cfr part 778 overtime compensation
+  title: 29 CFR Part 778 – Overtime Compensation
+  value: Part 778, 7 subparts, 121 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-778
+  key:   overtime:29 cfr part 785 hours worked
+  title: 29 CFR Part 785 – Hours Worked
+  value: Part 785, 5 subparts, 50 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-785
+
+[pay_frequency]  (1 parts)
+  key:   pay_frequency:29 cfr part 516 records to be kept by employers
+  title: 29 CFR Part 516 – Records to Be Kept by Employers
+  value: Part 516, 2 subparts, 35 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-516
+
+[payer_relations]  (2 parts)
+  key:   payer_relations:42 cfr part 422 medicare advantage program
+  title: 42 CFR Part 422 – Medicare Advantage Program
+  value: Part 422, 23 subparts, 277 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-422
+  key:   payer_relations:42 cfr part 423 voluntary medicare prescription drug benefit
+  title: 42 CFR Part 423 – Voluntary Medicare Prescription Drug Benefit
+  value: Part 423, 26 subparts, 319 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-423
+
+[pediatric_vulnerable]  (2 parts)
+  key:   pediatric_vulnerable:42 cfr part 441 services requirements and limits applicable to specific services
+  title: 42 CFR Part 441 – Services: Requirements and Limits Applicable to Specific Services
+  value: Part 441, 13 subparts, 140 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-441
+  key:   pediatric_vulnerable:42 cfr part 483 requirements for states and long term care facilities
+  title: 42 CFR Part 483 – Requirements for States and Long Term Care Facilities
+  value: Part 483, 9 subparts, 82 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-483
+
+[pharmacy_drugs]  (3 parts)
+  key:   pharmacy_drugs:21 cfr part 1301 registration of manufacturers distributors and dispensers of controlled substances
+  title: 21 CFR Part 1301 – Registration of Manufacturers, Distributors, and Dispensers of Controlled Substances
+  value: Part 1301, 50 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-21/part-1301
+  key:   pharmacy_drugs:21 cfr part 1306 prescriptions
+  title: 21 CFR Part 1306 – Prescriptions
+  value: Part 1306, 24 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-21/part-1306
+  key:   pharmacy_drugs:21 cfr part 1308 schedules of controlled substances
+  title: 21 CFR Part 1308 – Schedules of Controlled Substances
+  value: Part 1308, 28 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-21/part-1308
+
+[posting_requirements]  (1 parts)
+  key:   posting_requirements:29 cfr part 516 records to be kept by employers
+  title: 29 CFR Part 516 – Records to Be Kept by Employers
+  value: Part 516, 2 subparts, 35 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-516
+
+[quality_reporting]  (2 parts)
+  key:   quality_reporting:42 cfr part 414 payment for part b medical and other health services
+  title: 42 CFR Part 414 – Payment for Part B Medical and Other Health Services
+  value: Part 414, 18 subparts, 198 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-414
+  key:   quality_reporting:42 cfr part 415 services furnished by physicians in providers supervising physicians in teaching settings and residents in certain settings
+  title: 42 CFR Part 415 – Services Furnished by Physicians in Providers, Supervising Physicians in Teaching Settings, and Residents in Certain Settings
+  value: Part 415, 5 subparts, 30 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-415
+
+[radiation_safety]  (3 parts)
+  key:   radiation_safety:10 cfr part 20 standards for protection against radiation
+  title: 10 CFR Part 20 – Standards for Protection Against Radiation
+  value: Part 20, 15 subparts, 72 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-10/part-20
+  key:   radiation_safety:10 cfr part 35 medical use of byproduct material
+  title: 10 CFR Part 35 – Medical Use of Byproduct Material
+  value: Part 35, 13 subparts, 111 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-10/part-35
+  key:   radiation_safety:29 cfr part 1910 occupational safety and health standards
+  title: 29 CFR Part 1910 – Occupational Safety and Health Standards
+  value: Part 1910, 23 subparts, 204 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-29/part-1910
+
+[records_retention]  (2 parts)
+  key:   records_retention:42 cfr part 485 conditions of participation specialized providers
+  title: 42 CFR Part 485 – Conditions of Participation: Specialized Providers
+  value: Part 485, 9 subparts, 85 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-485
+  key:   records_retention:45 cfr part 164 security and privacy
+  title: 45 CFR Part 164 – Security and Privacy
+  value: Part 164, 5 subparts, 41 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-164
+
+[reproductive_behavioral]  (2 parts)
+  key:   reproductive_behavioral:42 cfr part 2 confidentiality of substance use disorder patient records
+  title: 42 CFR Part 2 – Confidentiality of Substance Use Disorder Patient Records
+  value: Part 2, 5 subparts, 38 sections. Last amended: 2015-12-19.
+  url:   https://www.ecfr.gov/current/title-42/part-2
+  key:   reproductive_behavioral:42 cfr part 438 managed care
+  title: 42 CFR Part 438 – Managed Care
+  value: Part 438, 11 subparts, 106 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-438
+
+[research_consent]  (3 parts)
+  key:   research_consent:45 cfr part 46 protection of human subjects
+  title: 45 CFR Part 46 – Protection of Human Subjects
+  value: Part 46, 5 subparts, 50 sections. Last amended: 2016-12-30.
+  url:   https://www.ecfr.gov/current/title-45/part-46
+  key:   research_consent:21 cfr part 50 protection of human subjects
+  title: 21 CFR Part 50 – Protection of Human Subjects
+  value: Part 50, 4 subparts, 15 sections. Last amended: 2016-12-29.
+  url:   https://www.ecfr.gov/current/title-21/part-50
+  key:   research_consent:21 cfr part 56 institutional review boards
+  title: 21 CFR Part 56 – Institutional Review Boards
+  value: Part 56, 5 subparts, 20 sections. Last amended: 2016-12-29.
+  url:   https://www.ecfr.gov/current/title-21/part-56
+
+[scheduling_reporting]  (2 parts)
+  key:   scheduling_reporting:29 cfr part 516 records to be kept by employers
+  title: 29 CFR Part 516 – Records to Be Kept by Employers
+  value: Part 516, 2 subparts, 35 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-516
+  key:   scheduling_reporting:29 cfr part 785 hours worked
+  title: 29 CFR Part 785 – Hours Worked
+  value: Part 785, 5 subparts, 50 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-785
+
+[sick_leave]  (1 parts)
+  key:   sick_leave:29 cfr part 825 the family and medical leave act of 1993
+  title: 29 CFR Part 825 – The Family and Medical Leave Act of 1993
+  value: Part 825, 8 subparts, 79 sections. Last amended: 2016-12-01.
+  url:   https://www.ecfr.gov/current/title-29/part-825
+
+[state_licensing]  (2 parts)
+  key:   state_licensing:42 cfr part 482 conditions of participation for hospitals
+  title: 42 CFR Part 482 – Conditions of Participation for Hospitals
+  value: Part 482, 5 subparts, 46 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-482
+  key:   state_licensing:42 cfr part 489 provider agreements and supplier approval
+  title: 42 CFR Part 489 – Provider Agreements and Supplier Approval
+  value: Part 489, 8 subparts, 49 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-489
+
+[tax_exempt]  (2 parts)
+  key:   tax_exempt:26 cfr part 1 income taxes
+  title: 26 CFR Part 1 – Income Taxes
+  value: Part 1, 3769 sections. Last amended: 2026-01-15.
+  url:   https://www.ecfr.gov/current/title-26/part-1
+  key:   tax_exempt:26 cfr part 53 foundation and similar excise taxes
+  title: 26 CFR Part 53 – Foundation and Similar Excise Taxes
+  value: Part 53, 12 subparts, 104 sections. Last amended: 2023-10-16.
+  url:   https://www.ecfr.gov/current/title-26/part-53
+
+[tax_rate]  (2 parts)
+  key:   tax_rate:26 cfr part 31 employment taxes and collection of income tax at source
+  title: 26 CFR Part 31 – Employment Taxes and Collection of Income Tax at Source
+  value: Part 31, 7 subparts, 352 sections. Last amended: 2024-10-21.
+  url:   https://www.ecfr.gov/current/title-26/part-31
+  key:   tax_rate:26 cfr part 54 pension excise taxes
+  title: 26 CFR Part 54 – Pension Excise Taxes
+  value: Part 54, 120 sections. Last amended: 2024-11-22.
+  url:   https://www.ecfr.gov/current/title-26/part-54
+
+[telehealth]  (2 parts)
+  key:   telehealth:42 cfr part 410 supplementary medical insurance smi benefits
+  title: 42 CFR Part 410 – Supplementary Medical Insurance (SMI) Benefits
+  value: Part 410, 9 subparts, 96 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-410
+  key:   telehealth:42 cfr part 414 payment for part b medical and other health services
+  title: 42 CFR Part 414 – Payment for Part B Medical and Other Health Services
+  value: Part 414, 18 subparts, 198 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-414
+
+[transplant_organ]  (1 parts)
+  key:   transplant_organ:42 cfr part 486 conditions for coverage of specialized services furnished by suppliers
+  title: 42 CFR Part 486 – Conditions for Coverage of Specialized Services Furnished by Suppliers
+  value: Part 486, 7 subparts, 34 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-486
+
+[tumor_registry]  (1 parts)
+  key:   tumor_registry:42 cfr part 482 conditions of participation for hospitals
+  title: 42 CFR Part 482 – Conditions of Participation for Hospitals
+  value: Part 482, 5 subparts, 46 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-42/part-482
+
+[workers_comp]  (2 parts)
+  key:   workers_comp:20 cfr part 10 claims for compensation under the federal employees compensation act as amended
+  title: 20 CFR Part 10 – Claims for Compensation Under the Federal Employees' Compensation Act, as Amended
+  value: Part 10, 10 subparts, 225 sections. Last amended: 2016-08-01.
+  url:   https://www.ecfr.gov/current/title-20/part-10
+  key:   workers_comp:20 cfr part 702 administration and procedure
+  title: 20 CFR Part 702 – Administration and Procedure
+  value: Part 702, 8 subparts, 159 sections. Last amended: 2016-10-18.
+  url:   https://www.ecfr.gov/current/title-20/part-702
+
+[workplace_safety]  (3 parts)
+  key:   workplace_safety:29 cfr part 1903 inspections citations and proposed penalties
+  title: 29 CFR Part 1903 – Inspections, Citations and Proposed Penalties
+  value: Part 1903, 23 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-29/part-1903
+  key:   workplace_safety:29 cfr part 1904 recording and reporting occupational injuries and illnesses
+  title: 29 CFR Part 1904 – Recording and Reporting Occupational Injuries and Illnesses
+  value: Part 1904, 7 subparts, 31 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-29/part-1904
+  key:   workplace_safety:29 cfr part 1910 occupational safety and health standards
+  title: 29 CFR Part 1910 – Occupational Safety and Health Standards
+  value: Part 1910, 23 subparts, 204 sections. Last amended: 2017-01-01.
+  url:   https://www.ecfr.gov/current/title-29/part-1910
+
+============================================================
+SUMMARY
+============================================================
+Total requirements:  94
+Categories covered:  45
+Unique keys:         94
+Duplicate keys:      0 (all unique)
+
+Full output written to: test_ecfr_full_output.txt
+ cfr part 802 exemption rules
+  billing_integrity:42 cfr part 1001 program integrity medicare and state health care programs
+  billing_integrity:42 cfr part 1003 civil money penalties assessments and exclusions
+  business_license:13 cfr part 121 small business size regulations
+  business_license:13 cfr part 124 8 a business development small disadvantaged business status determinations
+  chemotherapy_handling:21 cfr part 210 current good manufacturing practice in manufacturing processing packing or holding of drugs general
+  chemotherapy_handling:21 cfr part 211 current good manufacturing practice for finished pharmaceuticals
+  chemotherapy_handling:29 cfr part 1910 occupational safety and health standards
+  clinical_safety:42 cfr part 482 conditions of participation for hospitals
+  clinical_safety:42 cfr part 483 requirements for states and long term care facilities
+  clinical_safety:42 cfr part 484 home health services
+  clinical_safety:42 cfr part 485 conditions of participation specialized providers
+  corporate_integrity:42 cfr part 1001 program integrity medicare and state health care programs
+  cybersecurity:45 cfr part 164 security and privacy
+  emergency_preparedness:42 cfr part 482 conditions of participation for hospitals
+  emergency_preparedness:42 cfr part 485 conditions of participation specialized providers
+  emerging_regulatory:21 cfr part 890 physical medicine devices
+  emerging_regulatory:45 cfr part 170 health information technology standards implementation specifications and certification criteria and certification programs for health information technology
+  environmental_safety:29 cfr part 1910 occupational safety and health standards
+  environmental_safety:40 cfr part 260 hazardous waste management system general
+  environmental_safety:40 cfr part 261 identification and listing of hazardous waste
+  environmental_safety:40 cfr part 262 standards applicable to generators of hazardous waste
+  final_pay:29 cfr part 531 wage payments under the fair labor standards act of 1938
+  health_it:45 cfr part 170 health information technology standards implementation specifications and certification criteria and certification programs for health information technology
+  healthcare_workforce:42 cfr part 482 conditions of participation for hospitals
+  healthcare_workforce:42 cfr part 488 survey certification and enforcement procedures
+  hipaa_privacy:45 cfr part 160 general administrative requirements
+  hipaa_privacy:45 cfr part 164 security and privacy
+  language_access:45 cfr part 80 nondiscrimination under programs receiving federal assistance through the department of health and human services effectuation of title vi of the civil rights act of 1964
+  language_access:45 cfr part 84 nondiscrimination on the basis of disability in programs or activities receiving federal financial assistance
+  leave:29 cfr part 825 the family and medical leave act of 1993
+  marketing_comms:16 cfr part 255 guides concerning use of endorsements and testimonials in advertising
+  marketing_comms:21 cfr part 202 prescription drug advertising
+  meal_breaks:29 cfr part 785 hours worked
+  medical_devices:21 cfr part 800 general
+  medical_devices:21 cfr part 801 labeling
+  medical_devices:21 cfr part 807 establishment registration and device listing for manufacturers and initial importers of devices
+  medical_devices:21 cfr part 820 quality management system regulation
+  minimum_wage:exempt_salary
+  minor_work_permit:29 cfr part 570 child labor regulations orders and statements of interpretation
+  oncology_clinical_trials:21 cfr part 312 investigational new drug application
+  oncology_clinical_trials:21 cfr part 50 protection of human subjects
+  oncology_clinical_trials:21 cfr part 56 institutional review boards
+  oncology_clinical_trials:42 cfr part 11 clinical trials registration and results information submission
+  oncology_patient_rights:42 cfr part 482 conditions of participation for hospitals
+  overtime:29 cfr part 541 defining and delimiting the exemptions for executive administrative professional computer and outside sales employees
+  overtime:29 cfr part 778 overtime compensation
+  overtime:29 cfr part 785 hours worked
+  pay_frequency:29 cfr part 516 records to be kept by employers
+  payer_relations:42 cfr part 422 medicare advantage program
+  payer_relations:42 cfr part 423 voluntary medicare prescription drug benefit
+  pediatric_vulnerable:42 cfr part 441 services requirements and limits applicable to specific services
+  pediatric_vulnerable:42 cfr part 483 requirements for states and long term care facilities
+  pharmacy_drugs:21 cfr part 1301 registration of manufacturers distributors and dispensers of controlled substances
+  pharmacy_drugs:21 cfr part 1306 prescriptions
+  pharmacy_drugs:21 cfr part 1308 schedules of controlled substances
+  posting_requirements:29 cfr part 516 records to be kept by employers
+  quality_reporting:42 cfr part 414 payment for part b medical and other health services
+  quality_reporting:42 cfr part 415 services furnished by physicians in providers supervising physicians in teaching settings and residents in certain settings
+  radiation_safety:10 cfr part 20 standards for protection against radiation
+  radiation_safety:10 cfr part 35 medical use of byproduct material
+  radiation_safety:29 cfr part 1910 occupational safety and health standards
+  records_retention:42 cfr part 485 conditions of participation specialized providers
+  records_retention:45 cfr part 164 security and privacy
+  reproductive_behavioral:42 cfr part 2 confidentiality of substance use disorder patient records
+  reproductive_behavioral:42 cfr part 438 managed care
+  research_consent:21 cfr part 50 protection of human subjects
+  research_consent:21 cfr part 56 institutional review boards
+  research_consent:45 cfr part 46 protection of human subjects
+  scheduling_reporting:29 cfr part 516 records to be kept by employers
+  scheduling_reporting:29 cfr part 785 hours worked
+  sick_leave:29 cfr part 825 the family and medical leave act of 1993
+  state_licensing:42 cfr part 482 conditions of participation for hospitals
+  state_licensing:42 cfr part 489 provider agreements and supplier approval
+  tax_exempt:26 cfr part 1 income taxes
+  tax_exempt:26 cfr part 53 foundation and similar excise taxes
+  tax_rate:26 cfr part 31 employment taxes and collection of income tax at source
+  tax_rate:26 cfr part 54 pension excise taxes
+  telehealth:42 cfr part 410 supplementary medical insurance smi benefits
+  telehealth:42 cfr part 414 payment for part b medical and other health services
+  transplant_organ:42 cfr part 486 conditions for coverage of specialized services furnished by suppliers
+  tumor_registry:42 cfr part 482 conditions of participation for hospitals
+  workers_comp:20 cfr part 10 claims for compensation under the federal employees compensation act as amended
+  workers_comp:20 cfr part 702 administration and procedure
+  workplace_safety:29 cfr part 1903 inspections citations and proposed penalties
+  workplace_safety:29 cfr part 1904 recording and reporting occupational injuries and illnesses
+  workplace_safety:29 cfr part 1910 occupational safety and health standards

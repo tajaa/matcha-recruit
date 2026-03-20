@@ -270,10 +270,11 @@ async def fetch_ecfr_requirements(
             # Be a good API citizen
             await asyncio.sleep(0.3)
 
-    # Dedup by (title, part) slug within each category — first occurrence wins
+    # Dedup by (category, title) — same CFR part can appear in multiple categories
+    # (e.g., 29 CFR 1910 is valid for workplace_safety, radiation_safety, etc.)
     requirements = dedup_by_key(
         requirements,
-        key_fn=lambda r: r.get("title", "").lower()[:120],
+        key_fn=lambda r: f"{r.get('category', '')}-{r.get('title', '').lower()[:120]}",
     )
 
     yield {
