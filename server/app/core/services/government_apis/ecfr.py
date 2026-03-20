@@ -115,7 +115,7 @@ def _parse_structure(data: dict, title_num: int, part_num: int) -> Tuple[str, Li
     part_node = find_part(data) or data
 
     part_label = (
-        part_node.get("label_level")
+        part_node.get("label_description")
         or part_node.get("label")
         or part_node.get("heading")
         or f"Part {part_num}"
