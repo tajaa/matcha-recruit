@@ -2,9 +2,9 @@
 ## RECRUITING & HR PLATFORM
 # Platform Service Proposal
 
-**Prepared for Healthcare Institute**
+**Prepared for The Oncology Institute**
 650 Employees · Full Platform Access
-March 18, 2026
+March 19, 2026
 
 *Confidential — This document contains proprietary pricing and is intended solely for the named recipient.*
 
@@ -12,7 +12,7 @@ March 18, 2026
 
 ## Executive Summary
 
-Matcha is an AI-powered HR and compliance platform built for multi-location organizations in regulated industries. For healthcare employers managing complex jurisdiction requirements, credentialing, incident tracking, and workforce compliance, Matcha consolidates fragmented HR operations into a single platform—reducing legal exposure, eliminating manual tracking, and delivering real-time compliance visibility across every facility.
+Matcha is an agentic workforce risk management platform built for multi-location healthcare organizations. From jurisdiction-level compliance monitoring and incident investigations to pre-termination risk scoring and leave administration, Matcha consolidates fragmented HR operations into a single platform—reducing legal exposure, eliminating manual tracking, and delivering real-time risk visibility across every facility. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
 
 ---
 
@@ -23,12 +23,14 @@ Matcha is an AI-powered HR and compliance platform built for multi-location orga
 | LINE ITEM | AMOUNT |
 |---|---|
 | List Rate (Per Employee Per Month) | $14.00 |
-| 500+ Seat Discount (10%) | –$1.40 |
-| **Discounted PEPM × 650 employees** | **$12.60** |
-| Monthly Platform Cost | $8,190.00 |
-| Annual Platform Cost (12 months) | $98,280.00 |
-| One-Time Implementation & Onboarding | $15,000.00 |
-| **Year 1 Total Contract Value** | **$113,280.00** |
+| Channel Partner Discount (21%) | –$3.00 |
+| **Discounted PEPM × 650 employees** | **$11.00** |
+| Monthly Platform Cost | $7,150.00 |
+| Annual Platform Cost (12 months) | $85,800.00 |
+| One-Time Implementation & Onboarding | $13,500.00 |
+| **Year 1 Total Contract Value** | **$99,300.00** |
+
+**Partner Rate Available:** $9.50 PEPM for organizations that commit to: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.
 
 ---
 
@@ -36,17 +38,29 @@ Matcha is an AI-powered HR and compliance platform built for multi-location orga
 
 ### Compliance & Legal
 
-**Compliance Engine** — AI-powered jurisdiction research across federal, state, and local levels. Multi-location support with preemption rule analysis. Automated wage and hour monitoring. Tiered data approach: structured requirements, curated repository, and AI-generated research for emerging regulations.
+**Compliance Engine** — Agentic jurisdiction research across federal, state, and local levels. Multi-location support with preemption rule analysis. Tiered data approach: structured requirements, curated repository, and agentic research for emerging regulations.
 
-**Policies & Handbooks** — AI-generated policy documents tailored to specific jurisdictions. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation.
+**Policies & Handbooks** — Agentic policy documents tailored to specific jurisdictions. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation.
 
 **I-9 / E-Verify** — Employment eligibility verification tracking, document management, expiration monitoring, and compliance summary dashboard.
 
 **COBRA Administration** — Qualifying event tracking with auto-computed deadlines for employer notice, administrator notification, election periods, and continuation coverage.
 
-**Training & Certifications** — Requirement creation, bulk assignment, expiration monitoring, and compliance dashboard with completion rates by requirement.
+**Legislative Tracker** — Agentic monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity.
 
-**Legislative Tracker** — AI-powered monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity.
+**Risk Assessment** — Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, locations, and tenure.
+
+### Investigations & Risk
+
+**Incident Reports** — Agentic safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across locations.
+
+**ER Copilot** — Employment relations case management with agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel.
+
+**ADA Accommodations** — Interactive process workflow management with agentic accommodation suggestions, undue hardship assessment, and job function analysis.
+
+**Pre-Termination Intelligence** — 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Agentic-generated narrative memo suitable for counsel review.
+
+**Separation Agreements** — OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support.
 
 ### Workforce Management
 
@@ -54,27 +68,11 @@ Matcha is an AI-powered HR and compliance platform built for multi-location orga
 
 **Onboarding** — Task-based onboarding templates organized by category. Progress analytics with funnel metrics, bottleneck identification, and completion tracking across the organization.
 
-**PTO & Leave Management** — FMLA eligibility tracking, state-level Paid Family & Medical Leave (PFML) support, hours-based accrual tracking, and self-service request workflows.
+**Offer Letters** — Agentic salary guidance by role and market. Customizable templates with company branding and logo. Magic-link electronic signing for candidates. Multi-round salary range negotiation. PDF generation.
 
-**Offer Letters** — AI-powered salary guidance by role and market. Customizable templates with company branding and logo. Magic-link electronic signing for candidates. Multi-round salary range negotiation. PDF generation.
+### Agentic Document Workspace (Matcha Work)
 
-### Investigations & Risk
-
-**IR Incidents** — AI-categorized safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across locations.
-
-**ER Copilot** — Employment relations case management with AI-powered document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel.
-
-**ADA Accommodations** — Interactive process workflow management with AI-powered accommodation suggestions, undue hardship assessment, and job function analysis.
-
-**Pre-Termination Intelligence** — 9-dimension AI risk assessment scanning legal, compliance, and organizational factors before separation decisions. AI-generated narrative memo suitable for counsel review.
-
-**Separation Agreements** — OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support.
-
-**Risk Assessment** — Monte Carlo simulation-based organizational risk modeling. Cohort heat maps across departments, locations, and tenure. Anomaly detection. Executive-ready report generation with benchmarking against industry peers.
-
-### AI Document Workspace (Matcha Work)
-
-Chat-driven document creation with threading, iterative drafts, and internal data search mode for cross-referencing organizational information. Supports offer letters, reviews, workbooks, onboarding plans, presentations, handbooks, and policies. **$75/month usage credit included.**
+Chat-driven document creation with threading, iterative drafts, and internal data search mode for cross-referencing organizational information. Supports offer letters, reviews, workbooks, onboarding plans, presentations, handbooks, and policies. **Monthly usage credits included.**
 
 ---
 
@@ -84,24 +82,24 @@ Chat-driven document creation with threading, iterative drafts, and internal dat
 
 | PHASE | TIMELINE | INVESTMENT | ACTIVITIES |
 |---|---|---|---|
-| **Discovery** | Weeks 1–2 | $3,000 | Organizational mapping, HRIS audit, location inventory, compliance gap analysis |
-| **Configuration** | Weeks 3–4 | $4,500 | Location setup, compliance baseline scan, leave policy configuration, handbook ingestion & compliance review |
-| **Data Migration** | Weeks 5–6 | $3,750 | Employee data import, historical records migration, policy document ingestion |
-| **UAT & Training** | Week 7 | $2,250 | Admin and manager training sessions, user acceptance testing, parallel run |
-| **Go-Live** | Week 8 | $1,500 | Production cutover, CSM handoff, post-launch monitoring |
+| **Discovery & Gap Analysis** | Weeks 1–2 | $4,500 | Organizational mapping, HRIS audit, location inventory, regulatory gap analysis — audit existing documentation, certifications, and licenses against oncology-specific requirements (radiation safety certs, chemo handling training, CRT licensing, tumor registry compliance) |
+| **Configuration & Templating** | Weeks 3–4 | $4,000 | Location/jurisdiction setup, compliance baseline scan, build role-specific onboarding templates (rad tech, RN, pharmacist, physicist), credential expiration workflows, handbook ingestion |
+| **Data Migration & Manual Run** | Weeks 5–6 | $2,500 | Employee data import, historical records migration, policy document ingestion, run first onboarding cohort manually using templates to validate completeness |
+| **UAT & Automation** | Week 7 | $1,500 | Admin training, user acceptance testing, convert validated manual workflows to automated ingestion pipelines |
+| **Go-Live** | Week 8 | $1,000 | Production cutover, CSM handoff, post-launch monitoring |
 
 ## Contract Terms
 
 | | |
 |---|---|
 | Initial Term | 12 months from go-live date |
-| Price Lock | Discounted PEPM of $12.60 locked for the initial 12-month term |
+| Price Lock | Discounted PEPM of $11.00 locked for the initial 12-month term |
 | Auto-Renewal | Automatic 12-month renewal periods |
 | Opt-Out Notice | 60-day written notice required before any renewal period |
 | Employee True-Up | Quarterly adjustment based on active employee headcount |
-| Matcha Work Credits | $75/month included; overage at $0.10/1K tokens |
+| Matcha Work Credits | Monthly credits included |
 | Dedicated CSM | Assigned at contract signing through go-live and beyond |
-| Data Security | HIPAA-compliant AWS infrastructure with executed BAA; encrypted in transit (TLS/SSL enforced) and at rest |
+| Data Security | HIPAA-compliant infrastructure with executed BAAs (AWS and Google Cloud); encrypted in transit (TLS/SSL enforced) and at rest |
 | Value Validation | 90-day post-go-live review to confirm platform adoption and ROI |
 | Renewal Pricing | May adjust with 60-day written notice prior to renewal |
 
@@ -121,10 +119,9 @@ Healthcare is the #1 most-targeted industry by the EEOC — **21% of all charges
 | ER cases sent to outside counsel (4/yr) | $72,000/yr | **$40,000** |
 | HR staff time on compliance tasks | $130,000/yr | **$36,000** |
 | Handbook & policy legal review | $8,000/yr | **$6,500** |
-| FMLA/leave administration | $40,000/yr | **$14,000** |
 | OSHA incident admin & reporting | $15,000/yr | **$8,500** |
-| I-9, COBRA, training administration | $8,000/yr | **$4,000** |
-| **Annual hard savings** | | **$146,000** |
+| Compliance training & certification tracking | $8,000/yr | **$4,000** |
+| **Annual hard savings** | | **$132,000** |
 
 Savings are driven by ER Copilot handling investigations internally instead of at outside counsel rates, the Compliance Engine automating jurisdiction monitoring across 7 modules, and Pre-Termination Intelligence reducing the volume of matters that require attorney involvement.
 
@@ -143,17 +140,17 @@ Savings are driven by ER Copilot handling investigations internally instead of a
 
 | | YEAR 1 | YEAR 2 | YEAR 3 | 3-YEAR TOTAL |
 |---|---|---|---|---|
-| Platform cost | $98,280 | $98,280 | $98,280 | $294,840 |
-| Implementation | $15,000 | — | — | $15,000 |
-| **Total investment** | **$113,280** | **$98,280** | **$98,280** | **$309,840** |
-| Hard savings | $146,000 | $146,000 | $146,000 | $438,000 |
+| Platform cost | $85,800 | $85,800 | $85,800 | $257,400 |
+| Implementation | $13,500 | — | — | $13,500 |
+| **Total investment** | **$99,300** | **$85,800** | **$85,800** | **$270,900** |
+| Hard savings | $132,000 | $132,000 | $132,000 | $396,000 |
 | Risk reduction value | $59,000 | $59,000 | $59,000 | $177,000 |
-| **Total value delivered** | **$205,000** | **$205,000** | **$205,000** | **$615,000** |
-| **Net savings** | **$91,720** | **$106,720** | **$106,720** | **$305,160** |
+| **Total value delivered** | **$191,000** | **$191,000** | **$191,000** | **$573,000** |
+| **Net savings** | **$91,700** | **$105,200** | **$105,200** | **$302,100** |
 
-**Year 1 ROI: 1.8×. Platform pays for itself by month 7.**
+**Year 1 ROI: 1.9×. Platform pays for itself by month 6.**
 
-**3-year net savings: $305,000.**
+**3-year net savings: $302,000.**
 
 ---
 
@@ -167,7 +164,7 @@ Name & Title: ___________________________
 
 Date: ___________________________
 
-**Healthcare Institute**
+**The Oncology Institute**
 
 Signature: ___________________________
 

@@ -6,17 +6,23 @@ from datetime import date
 from weasyprint import HTML
 
 OUTPUT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-VERSION = "v2"
+VERSION = "v5"
 OUTPUT_PATH = os.path.join(OUTPUT_DIR, f"Matcha_Healthcare_Proposal_{VERSION}.pdf")
 
 # ── Config ──────────────────────────────────────────────────────────────────
-CLIENT_NAME = "Healthcare Institute"
+CLIENT_NAME = "The Oncology Institute"
 EMPLOYEE_COUNT = 650
-PEPM = 9.00
-IMPL_FEE = 15_000
+LIST_PEPM = 14.00
+PEPM = 11.00
+DISCOUNT_AMT = LIST_PEPM - PEPM
+PARTNER_PEPM = 9.50
+IMPL_FEE = 13_500
 MONTHLY = PEPM * EMPLOYEE_COUNT
 ANNUAL = MONTHLY * 12
 YEAR1_TCV = ANNUAL + IMPL_FEE
+PARTNER_MONTHLY = PARTNER_PEPM * EMPLOYEE_COUNT
+PARTNER_ANNUAL = PARTNER_MONTHLY * 12
+PARTNER_YEAR1_TCV = PARTNER_ANNUAL + IMPL_FEE
 TODAY = date.today().strftime("%B %d, %Y")
 
 HTML_CONTENT = f"""
@@ -50,7 +56,7 @@ HTML_CONTENT = f"""
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    background: linear-gradient(165deg, #064e3b 0%, #065f46 40%, #047857 100%);
+    background: linear-gradient(165deg, #1a1a2e 0%, #2d2d3f 40%, #3d3d52 100%);
     color: white;
     padding: 0;
     position: relative;
@@ -156,7 +162,7 @@ HTML_CONTENT = f"""
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 2px solid #064e3b;
+    border-bottom: 2px solid #1a1a2e;
     padding-bottom: 10px;
     margin-bottom: 32px;
   }}
@@ -164,7 +170,7 @@ HTML_CONTENT = f"""
   .page-header-logo {{
     font-size: 11pt;
     font-weight: 700;
-    color: #064e3b;
+    color: #1a1a2e;
     letter-spacing: -0.3px;
   }}
 
@@ -178,18 +184,19 @@ HTML_CONTENT = f"""
   h1 {{
     font-size: 20pt;
     font-weight: 700;
-    color: #064e3b;
-    margin-bottom: 18px;
+    color: #1a1a2e;
+    margin-top: 8px;
+    margin-bottom: 22px;
     letter-spacing: -0.3px;
   }}
 
   h2 {{
     font-size: 13pt;
     font-weight: 700;
-    color: #064e3b;
-    margin-top: 24px;
-    margin-bottom: 10px;
-    padding-bottom: 4px;
+    color: #1a1a2e;
+    margin-top: 28px;
+    margin-bottom: 14px;
+    padding-bottom: 6px;
     border-bottom: 1px solid #d1d5db;
   }}
 
@@ -206,8 +213,8 @@ HTML_CONTENT = f"""
   }}
 
   .executive-summary {{
-    background: #f0fdf4;
-    border-left: 4px solid #064e3b;
+    background: #f5f5f7;
+    border-left: 4px solid #1a1a2e;
     padding: 18px 22px;
     margin-bottom: 24px;
     font-size: 11pt;
@@ -217,10 +224,10 @@ HTML_CONTENT = f"""
 
   /* ── Pricing Table ──────────────────────────────────────────── */
   .pricing-box {{
-    border: 2px solid #064e3b;
+    border: 1px solid #d1d5db;
     border-radius: 6px;
     overflow: hidden;
-    margin: 16px 0 20px 0;
+    margin: 8px 0 20px 0;
   }}
 
   .pricing-box table {{
@@ -229,7 +236,7 @@ HTML_CONTENT = f"""
   }}
 
   .pricing-box th {{
-    background: #064e3b;
+    background: #1a1a2e;
     color: white;
     padding: 10px 18px;
     text-align: left;
@@ -249,10 +256,11 @@ HTML_CONTENT = f"""
   }}
 
   .pricing-box .total-row td {{
-    background: #f0fdf4;
+    background: #f5f5f7;
     font-weight: 700;
     font-size: 11.5pt;
-    border-top: 2px solid #064e3b;
+    border-top: 2px solid #1a1a2e;
+    padding: 13px 18px;
   }}
 
   .pricing-box .amount {{
@@ -264,13 +272,14 @@ HTML_CONTENT = f"""
   .pricing-note {{
     font-size: 9pt;
     color: #6b7280;
-    margin-top: 8px;
+    margin-top: 12px;
+    margin-bottom: 8px;
     font-style: italic;
   }}
 
   /* ── Feature Lists ──────────────────────────────────────────── */
   .feature-block {{
-    margin-bottom: 14px;
+    margin-bottom: 16px;
   }}
 
   .feature-block p {{
@@ -280,7 +289,7 @@ HTML_CONTENT = f"""
 
   .feature-name {{
     font-weight: 700;
-    color: #064e3b;
+    color: #1a1a2e;
   }}
 
   ul {{
@@ -301,7 +310,7 @@ HTML_CONTENT = f"""
   }}
 
   .timeline-table th {{
-    background: #064e3b;
+    background: #1a1a2e;
     color: white;
     padding: 9px 14px;
     text-align: left;
@@ -322,7 +331,7 @@ HTML_CONTENT = f"""
 
   .timeline-table .phase {{
     font-weight: 700;
-    color: #064e3b;
+    color: #1a1a2e;
     white-space: nowrap;
   }}
 
@@ -351,7 +360,7 @@ HTML_CONTENT = f"""
 
   .term-label {{
     font-weight: 700;
-    color: #064e3b;
+    color: #1a1a2e;
     min-width: 180px;
     flex-shrink: 0;
   }}
@@ -365,7 +374,7 @@ HTML_CONTENT = f"""
   }}
 
   .roi-table th {{
-    background: #064e3b;
+    background: #1a1a2e;
     color: white;
     padding: 9px 14px;
     text-align: left;
@@ -385,15 +394,15 @@ HTML_CONTENT = f"""
   }}
 
   .roi-highlight {{
-    background: #f0fdf4;
-    border: 1px solid #064e3b;
+    background: #f5f5f7;
+    border: 1px solid #1a1a2e;
     border-radius: 4px;
     padding: 14px 18px;
     margin-top: 12px;
     text-align: center;
     font-size: 12pt;
     font-weight: 700;
-    color: #064e3b;
+    color: #1a1a2e;
   }}
 
   /* ── Signature Block ────────────────────────────────────────── */
@@ -439,7 +448,7 @@ HTML_CONTENT = f"""
 
   <div class="cover-top">
     <div class="logo-text">matcha</div>
-    <div class="logo-sub">Recruiting &amp; HR Platform</div>
+    <div class="logo-sub">HR Intelligence, Risk &amp; Employee Relations</div>
   </div>
 
   <div class="cover-middle">
@@ -474,7 +483,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha is an AI-powered HR and compliance platform built for multi-location organizations in regulated industries. For healthcare employers managing complex jurisdiction requirements, credentialing, incident tracking, and workforce compliance, Matcha consolidates fragmented HR operations into a single platform&mdash;reducing legal exposure, eliminating manual tracking, and delivering real-time compliance visibility across every facility.
+    Matcha is an agentic workforce risk management platform built for multi-location healthcare organizations. From jurisdiction-level compliance monitoring and incident investigations to pre-termination risk scoring, Matcha consolidates fragmented HR operations into a single platform&mdash;reducing legal exposure, eliminating manual tracking, and delivering real-time risk visibility across every facility. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
   </div>
 
   <h1>Investment Summary</h1>
@@ -484,36 +493,53 @@ HTML_CONTENT = f"""
       <thead>
         <tr>
           <th>Line Item</th>
-          <th style="text-align:right">Amount</th>
+          <th style="text-align:right; color:#6b7280; font-weight:500; font-size:11px;">Channel Rate</th>
+          <th style="text-align:right; color:#6b7280; font-weight:500; font-size:11px;">Partner Rate</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>Per Employee Per Month (PEPM) &times; {EMPLOYEE_COUNT} employees</td>
-          <td class="amount">${PEPM:.2f}</td>
+          <td>List Rate (Per Employee Per Month)</td>
+          <td class="amount">${LIST_PEPM:.2f}</td>
+          <td class="amount">${LIST_PEPM:.2f}</td>
+        </tr>
+        <tr>
+          <td>Discount</td>
+          <td class="amount">&ndash;${DISCOUNT_AMT:.2f} (21%)</td>
+          <td class="amount">&ndash;${LIST_PEPM - PARTNER_PEPM:.2f} (32%)</td>
+        </tr>
+        <tr>
+          <td><strong>Discounted PEPM &times; {EMPLOYEE_COUNT} employees</strong></td>
+          <td class="amount"><strong>${PEPM:.2f}</strong></td>
+          <td class="amount"><strong>${PARTNER_PEPM:.2f}</strong></td>
         </tr>
         <tr>
           <td>Monthly Platform Cost</td>
           <td class="amount">${MONTHLY:,.2f}</td>
+          <td class="amount">${PARTNER_MONTHLY:,.2f}</td>
         </tr>
         <tr>
           <td>Annual Platform Cost (12 months)</td>
           <td class="amount">${ANNUAL:,.2f}</td>
+          <td class="amount">${PARTNER_ANNUAL:,.2f}</td>
         </tr>
         <tr>
           <td>One-Time Implementation &amp; Onboarding</td>
+          <td class="amount">${IMPL_FEE:,.2f}</td>
           <td class="amount">${IMPL_FEE:,.2f}</td>
         </tr>
         <tr class="total-row">
           <td>Year 1 Total Contract Value</td>
           <td class="amount">${YEAR1_TCV:,.2f}</td>
+          <td class="amount">${PARTNER_YEAR1_TCV:,.2f}</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <p class="pricing-note">
-    All platform features included at the flat PEPM rate&mdash;no module upsells or per-feature charges.
+    <strong>Channel Rate ($11.00 PEPM)</strong> — standard broker-introduced pricing, all features included, no module upsells.<br>
+    <strong>Partner Rate ($9.50 PEPM)</strong> — available for organizations that commit to: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.<br>
     Price locked for the 12-month initial term. Employee count subject to quarterly true-up.
   </p>
 
@@ -533,11 +559,11 @@ HTML_CONTENT = f"""
   <h2>Compliance &amp; Legal</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Compliance Engine</span> &mdash; AI-powered jurisdiction research across federal, state, and local levels. Multi-location support with preemption rule analysis. Automated wage and hour monitoring. Tiered data approach: structured requirements, curated repository, and AI-generated research for emerging regulations.</p>
+    <p><span class="feature-name">Compliance Engine</span> &mdash; Agentic jurisdiction research across federal, state, and local levels. Multi-location support with preemption rule analysis. Tiered data approach: structured requirements, curated repository, and Agentic research for emerging regulations.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; AI-generated policy documents tailored to specific jurisdictions. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation.</p>
+    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Agentic policy documents tailored to specific jurisdictions. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation.</p>
   </div>
 
   <div class="feature-block">
@@ -549,11 +575,33 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Training &amp; Certifications</span> &mdash; Requirement creation, bulk assignment, expiration monitoring, and compliance dashboard with completion rates by requirement.</p>
+    <p><span class="feature-name">Legislative Tracker</span> &mdash; Agentic monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Legislative Tracker</span> &mdash; AI-powered monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity.</p>
+    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, locations, and tenure.</p>
+  </div>
+
+  <h2>Investigations &amp; Risk</h2>
+
+  <div class="feature-block">
+    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across locations.</p>
+  </div>
+
+  <div class="feature-block">
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with Agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel.</p>
+  </div>
+
+  <div class="feature-block">
+    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with Agentic accommodation suggestions, undue hardship assessment, and job function analysis.</p>
+  </div>
+
+  <div class="feature-block">
+    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Agentic-generated narrative memo suitable for counsel review.</p>
+  </div>
+
+  <div class="feature-block">
+    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support.</p>
   </div>
 
   <h2>Workforce Management</h2>
@@ -567,56 +615,13 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">PTO &amp; Leave Management</span> &mdash; FMLA eligibility tracking, state-level Paid Family &amp; Medical Leave (PFML) support, hours-based accrual tracking, and self-service request workflows.</p>
+    <p><span class="feature-name">Offer Letters</span> &mdash; Agentic salary guidance by role and market. Customizable templates with company branding and logo. Magic-link electronic signing for candidates. Multi-round salary range negotiation. PDF generation.</p>
   </div>
+
+  <h2>Agentic Document Workspace (Matcha Work)</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Offer Letters</span> &mdash; AI-powered salary guidance by role and market. Customizable templates with company branding and logo. Magic-link electronic signing for candidates. Multi-round salary range negotiation. PDF generation.</p>
-  </div>
-
-</div>
-
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- PAGE 4: PLATFORM CAPABILITIES (2 of 2)                                -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<div class="page">
-  <div class="page-header">
-    <div class="page-header-logo">matcha</div>
-    <div class="page-header-right">Platform Capabilities</div>
-  </div>
-
-  <h2>Investigations &amp; Risk</h2>
-
-  <div class="feature-block">
-    <p><span class="feature-name">IR Incidents</span> &mdash; AI-categorized safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across locations.</p>
-  </div>
-
-  <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with AI-powered document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel.</p>
-  </div>
-
-  <div class="feature-block">
-    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with AI-powered accommodation suggestions, undue hardship assessment, and job function analysis.</p>
-  </div>
-
-  <div class="feature-block">
-    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension AI risk assessment scanning legal, compliance, and organizational factors before separation decisions. AI-generated narrative memo suitable for counsel review.</p>
-  </div>
-
-  <div class="feature-block">
-    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support.</p>
-  </div>
-
-  <h2>Analytics &amp; Culture</h2>
-
-  <div class="feature-block">
-    <p><span class="feature-name">Risk Assessment</span> &mdash; Monte Carlo simulation-based organizational risk modeling. Cohort heat maps across departments, locations, and tenure. Anomaly detection. Executive-ready report generation with benchmarking against industry peers.</p>
-  </div>
-
-  <h2>AI Document Workspace (Matcha Work)</h2>
-
-  <div class="feature-block">
-    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode for cross-referencing organizational information. Supports offer letters, reviews, workbooks, onboarding plans, presentations, handbooks, and policies. <strong>$75/month usage credit included.</strong></p>
+    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode for cross-referencing organizational information. Supports offer letters, reviews, workbooks, onboarding plans, presentations, handbooks, and policies. <strong>Monthly usage credits included.</strong></p>
   </div>
 
 
@@ -645,33 +650,33 @@ HTML_CONTENT = f"""
     </thead>
     <tbody>
       <tr>
-        <td class="phase">Discovery</td>
+        <td class="phase">Discovery &amp; Gap Analysis</td>
         <td>Weeks 1&ndash;2</td>
-        <td class="cost">$3,000</td>
-        <td>Organizational mapping, HRIS audit, location inventory, compliance gap analysis</td>
-      </tr>
-      <tr>
-        <td class="phase">Configuration</td>
-        <td>Weeks 3&ndash;4</td>
         <td class="cost">$4,500</td>
-        <td>Location setup, compliance baseline scan, leave policy configuration, existing handbook ingestion &amp; compliance review</td>
+        <td>Organizational mapping, HRIS audit, location inventory, regulatory gap analysis &mdash; audit existing documentation, certifications, and licenses against oncology-specific requirements (radiation safety certs, chemo handling training, CRT licensing, tumor registry compliance)</td>
       </tr>
       <tr>
-        <td class="phase">Data Migration</td>
+        <td class="phase">Configuration &amp; Templating</td>
+        <td>Weeks 3&ndash;4</td>
+        <td class="cost">$4,000</td>
+        <td>Location/jurisdiction setup, compliance baseline scan, build role-specific onboarding templates (rad tech, RN, pharmacist, physicist), credential expiration workflows, handbook ingestion</td>
+      </tr>
+      <tr>
+        <td class="phase">Data Migration &amp; Manual Run</td>
         <td>Weeks 5&ndash;6</td>
-        <td class="cost">$3,750</td>
-        <td>Employee data import, historical records migration, existing handbook and policy ingestion</td>
+        <td class="cost">$2,500</td>
+        <td>Employee data import, historical records migration, policy document ingestion, run first onboarding cohort manually using templates to validate completeness</td>
       </tr>
       <tr>
-        <td class="phase">UAT &amp; Training</td>
+        <td class="phase">UAT &amp; Automation</td>
         <td>Week 7</td>
-        <td class="cost">$2,250</td>
-        <td>Admin and manager training sessions, user acceptance testing, parallel run</td>
+        <td class="cost">$1,500</td>
+        <td>Admin training, user acceptance testing, convert validated manual workflows to automated ingestion pipelines</td>
       </tr>
       <tr>
         <td class="phase">Go-Live</td>
         <td>Week 8</td>
-        <td class="cost">$1,500</td>
+        <td class="cost">$1,000</td>
         <td>Production cutover, CSM handoff, post-launch monitoring</td>
       </tr>
     </tbody>
@@ -681,11 +686,13 @@ HTML_CONTENT = f"""
 
   <ul class="terms-list">
     <li><span class="term-label">Initial Term</span> 12 months from go-live date</li>
-    <li><span class="term-label">Price Lock</span> PEPM rate of $9.00 locked for the initial 12-month term</li>
+    <li><span class="term-label">Price Lock</span> PEPM rate of $11.00 locked for the initial 12-month term</li>
+    <li><span class="term-label">Partner Rate</span> $9.50 PEPM available with quarterly video insights, anonymized case study &amp; data sharing, logo rights, public review within 90 days, and annual prepayment or 2-year term</li>
+    <li><span class="term-label">Data Security</span> HIPAA-compliant infrastructure with executed BAAs (AWS and Google Cloud); encrypted in transit (TLS/SSL enforced) and at rest</li>
     <li><span class="term-label">Auto-Renewal</span> Automatic 12-month renewal periods</li>
     <li><span class="term-label">Opt-Out Notice</span> 60-day written notice required before any renewal period</li>
     <li><span class="term-label">Employee True-Up</span> Quarterly adjustment based on active employee headcount</li>
-    <li><span class="term-label">Matcha Work Credits</span> $75/month included; overage at $0.10/1K tokens</li>
+    <li><span class="term-label">Matcha Work Credits</span> Monthly credits included</li>
     <li><span class="term-label">Value Validation</span> 90-day post-go-live review to confirm platform adoption and ROI</li>
     <li><span class="term-label">Renewal Pricing</span> May adjust with 60-day written notice prior to renewal</li>
   </ul>
@@ -703,50 +710,59 @@ HTML_CONTENT = f"""
 
   <h1>Return on Investment</h1>
 
+  <p style="margin-bottom: 14px;">Healthcare is the #1 most-targeted industry by the EEOC &mdash; <strong>21% of all charges filed nationally</strong>, despite representing roughly 10% of the workforce. Healthcare employers face EEOC charges at <strong>2&times; the rate of any other industry</strong>, and the Department of Labor recovered <strong>$53 million in back wages from healthcare employers in FY2025 alone</strong>.</p>
+
   <table class="roi-table">
     <thead>
       <tr>
-        <th>Current Cost Center</th>
-        <th>Without Matcha</th>
-        <th>With Matcha</th>
+        <th>What You Spend Today</th>
+        <th style="text-align:right">Current Cost</th>
+        <th style="text-align:right">You Save</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <td>Outside employment counsel</td>
-        <td>$150,000&ndash;$350,000+/yr</td>
-        <td>Reduced 40&ndash;60% via AI-guided compliance and ER Copilot</td>
+        <td style="text-align:right">$98,000/yr</td>
+        <td style="text-align:right"><strong>$37,000</strong></td>
       </tr>
       <tr>
-        <td>Manual compliance tracking</td>
-        <td>$85,000&ndash;$170,000/yr (1&ndash;2 FTE)</td>
-        <td>Automated, real-time monitoring</td>
+        <td>ER cases sent to outside counsel (4/yr)</td>
+        <td style="text-align:right">$72,000/yr</td>
+        <td style="text-align:right"><strong>$40,000</strong></td>
       </tr>
       <tr>
-        <td>Audit remediation</td>
-        <td>$10,000&ndash;$100,000+ per event</td>
-        <td>Proactive detection reduces exposure</td>
+        <td>HR staff time on compliance tasks</td>
+        <td style="text-align:right">$130,000/yr</td>
+        <td style="text-align:right"><strong>$36,000</strong></td>
       </tr>
       <tr>
-        <td>EEOC/DOL claim defense</td>
-        <td>$15,000&ndash;$50,000 per claim</td>
-        <td>Pre-termination intelligence reduces claim risk</td>
+        <td>Handbook &amp; policy legal review</td>
+        <td style="text-align:right">$8,000/yr</td>
+        <td style="text-align:right"><strong>$6,500</strong></td>
       </tr>
       <tr>
-        <td>Multi-location handbook maintenance</td>
-        <td>$5,000&ndash;$20,000/yr (legal review)</td>
-        <td>AI-generated, jurisdiction-aware, auto-updated</td>
+        <td>OSHA incident admin &amp; reporting</td>
+        <td style="text-align:right">$15,000/yr</td>
+        <td style="text-align:right"><strong>$8,500</strong></td>
       </tr>
       <tr>
-        <td>Incident tracking &amp; OSHA reporting</td>
-        <td>Manual, error-prone</td>
-        <td>Automated categorization and log generation</td>
+        <td>Compliance training &amp; certification tracking</td>
+        <td style="text-align:right">$8,000/yr</td>
+        <td style="text-align:right"><strong>$4,000</strong></td>
+      </tr>
+      <tr style="background:#f5f5f7;">
+        <td><strong>Annual hard savings</strong></td>
+        <td></td>
+        <td style="text-align:right"><strong>$132,000</strong></td>
       </tr>
     </tbody>
   </table>
 
+  <p style="font-size:9pt; color:#6b7280; margin-top:8px;">Savings driven by ER Copilot handling investigations internally instead of at outside counsel rates, the Compliance Engine automating jurisdiction monitoring, and Pre-Termination Intelligence reducing matters requiring attorney involvement.</p>
+
   <div class="roi-highlight">
-    Estimated annual risk reduction: $200,000&ndash;$500,000+
+    Year 1 ROI: 1.9&times; &middot; Platform pays for itself by month 6 &middot; 3-year net savings: $302,000
   </div>
 
   <h1 style="margin-top: 32px;">Dedicated Support</h1>
