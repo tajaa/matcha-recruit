@@ -113,3 +113,6 @@ HEALTHCARE_SAVINGS_MODEL.md
 NOTES - Matcha_Healthcare_Proposal.pdf
 PLAN-*.md
 scripts/grab-ss.sh
+
+# Deal proposals (confidential, not tracked)
+deals/
