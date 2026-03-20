@@ -80,6 +80,9 @@ class Settings:
     gemini_hourly_limit: int = 200
     gemini_daily_limit: int = 5000
 
+    # Government APIs
+    openstates_api_key: Optional[str] = None  # OpenStates legislative tracking (free key)
+
     # Stripe (Matcha Work billing)
     stripe_secret_key: Optional[str] = None
     stripe_webhook_secret: Optional[str] = None
@@ -171,6 +174,7 @@ def load_settings() -> Settings:
         compliance_emails_enabled=os.getenv("COMPLIANCE_EMAILS_ENABLED", "true").lower() in ("true", "1", "yes"),
         gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "200")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "5000")),
+        openstates_api_key=os.getenv("OPENSTATES_API_KEY"),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),
         stripe_webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET"),
         stripe_success_url=os.getenv(
