@@ -85,6 +85,7 @@ export default function MatchaWorkThread() {
       thread_id: threadId,
       role: 'user',
       content,
+      metadata: null,
       version_created: null,
       created_at: new Date().toISOString(),
     }

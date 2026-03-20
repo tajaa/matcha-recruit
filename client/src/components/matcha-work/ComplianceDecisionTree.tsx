@@ -12,7 +12,6 @@ import { ExternalLink } from 'lucide-react'
 import type {
   AIReasoningStep,
   ComplianceReasoningCategory,
-  ComplianceReasoningLevel,
 } from '../../types/matcha-work'
 import dagre from '@dagrejs/dagre'
 
