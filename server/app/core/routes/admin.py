@@ -23,7 +23,11 @@ from ..services.credential_crypto import decrypt_credential_fields
 from ..feature_flags import merge_company_features
 from ..services.email import get_email_service
 from ..models.compliance import AutoCheckSettings
-from ..compliance_registry import TRIGGER_PROFILES
+from ..compliance_registry import (
+    TRIGGER_PROFILES,
+    LABOR_CATEGORIES, HEALTHCARE_CATEGORIES, ONCOLOGY_CATEGORIES,
+    MEDICAL_COMPLIANCE_CATEGORIES, SUPPLEMENTARY_CATEGORIES,
+)
 from ..services.compliance_service import (
     update_auto_check_settings,
     _jurisdiction_row_to_dict,
@@ -3567,6 +3571,280 @@ async def get_api_sources_overview():
         }
 
 
+@router.get("/jurisdictions/quality-audit", dependencies=[Depends(require_admin)])
+async def get_quality_audit(
+    state: Optional[str] = None,
+    category: Optional[str] = None,
+    min_completeness: Optional[int] = None,
+    max_completeness: Optional[int] = None,
+    stale_only: bool = False,
+    tier: Optional[str] = None,
+    source: Optional[str] = None,
+    limit: int = 200,
+    offset: int = 0,
+):
+    """Data quality audit: requirements with completeness scores, staleness, and provenance."""
+    import hashlib
+
+    cache_key = "admin:quality-audit:" + hashlib.md5(
+        f"{state}:{category}:{min_completeness}:{max_completeness}:{stale_only}:{tier}:{source}:{limit}:{offset}".encode()
+    ).hexdigest()
+
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, cache_key)
+        if cached is not None:
+            return cached
+
+    async with get_connection() as conn:
+        # Base WHERE conditions for paginated results
+        conditions = ["jr.status = 'active'"]
+        params: List[Any] = []
+
+        if state:
+            params.append(state.upper())
+            conditions.append(f"j.state = ${len(params)}")
+        if category:
+            params.append(category)
+            conditions.append(f"jr.category = ${len(params)}")
+        if tier:
+            params.append(tier)
+            conditions.append(f"jr.source_tier::text = ${len(params)}")
+        if source:
+            if source == "unknown":
+                conditions.append("jr.metadata->>'research_source' IS NULL")
+            else:
+                params.append(source)
+                conditions.append(f"jr.metadata->>'research_source' = ${len(params)}")
+        if stale_only:
+            conditions.append("(jr.last_verified_at IS NULL OR jr.last_verified_at < NOW() - INTERVAL '90 days')")
+
+        where_clause = " AND ".join(conditions)
+
+        # Summary query (no limit/offset)
+        summary_sql = f"""
+            SELECT
+                COUNT(*) AS total,
+                AVG(
+                    CASE WHEN jr.title IS NOT NULL AND jr.title != '' THEN 25 ELSE 0 END +
+                    CASE WHEN jr.description IS NOT NULL AND jr.description != '' THEN 30 ELSE 0 END +
+                    CASE WHEN jr.source_url IS NOT NULL AND jr.source_url != '' THEN 20 ELSE 0 END +
+                    CASE WHEN jr.effective_date IS NOT NULL THEN 15 ELSE 0 END +
+                    CASE WHEN jr.current_value IS NOT NULL AND jr.current_value != '' THEN 10 ELSE 0 END
+                )::int AS avg_completeness,
+                COUNT(*) FILTER (WHERE jr.last_verified_at IS NULL OR jr.last_verified_at < NOW() - INTERVAL '90 days') AS stale_count,
+                COUNT(*) FILTER (WHERE jr.source_url IS NULL OR jr.source_url = '') AS missing_source_url
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE {where_clause}
+        """
+        summary_row = await conn.fetchrow(summary_sql, *params)
+
+        tier_rows = await conn.fetch(f"""
+            SELECT COALESCE(jr.source_tier::text, 'unknown') AS tier, COUNT(*) AS cnt
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE {where_clause}
+            GROUP BY COALESCE(jr.source_tier::text, 'unknown')
+        """, *params)
+
+        provenance_rows = await conn.fetch(f"""
+            SELECT COALESCE(jr.metadata->>'research_source', 'unknown') AS src, COUNT(*) AS cnt
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE {where_clause}
+            GROUP BY COALESCE(jr.metadata->>'research_source', 'unknown')
+        """, *params)
+
+        # Completeness filter (applied after scoring, so we use a subquery)
+        having_conditions: List[str] = []
+        post_params = list(params)
+        if min_completeness is not None:
+            post_params.append(min_completeness)
+            having_conditions.append(f"completeness_score >= ${len(post_params)}")
+        if max_completeness is not None:
+            post_params.append(max_completeness)
+            having_conditions.append(f"completeness_score <= ${len(post_params)}")
+
+        post_params.append(limit)
+        limit_param = len(post_params)
+        post_params.append(offset)
+        offset_param = len(post_params)
+
+        having_clause = f"WHERE {' AND '.join(having_conditions)}" if having_conditions else ""
+
+        rows_sql = f"""
+            SELECT *
+            FROM (
+                SELECT
+                    jr.id, jr.jurisdiction_id, jr.category, jr.title, jr.description,
+                    jr.source_url, jr.source_tier::text AS source_tier, jr.status::text AS status,
+                    jr.current_value, jr.effective_date, jr.last_verified_at, jr.is_bookmarked,
+                    jr.created_at, jr.updated_at, jr.metadata,
+                    j.display_name AS jurisdiction_name, j.state, j.city,
+                    (
+                        CASE WHEN jr.title IS NOT NULL AND jr.title != '' THEN 25 ELSE 0 END +
+                        CASE WHEN jr.description IS NOT NULL AND jr.description != '' THEN 30 ELSE 0 END +
+                        CASE WHEN jr.source_url IS NOT NULL AND jr.source_url != '' THEN 20 ELSE 0 END +
+                        CASE WHEN jr.effective_date IS NOT NULL THEN 15 ELSE 0 END +
+                        CASE WHEN jr.current_value IS NOT NULL AND jr.current_value != '' THEN 10 ELSE 0 END
+                    ) AS completeness_score,
+                    EXTRACT(DAY FROM NOW() - jr.last_verified_at)::int AS staleness_days
+                FROM jurisdiction_requirements jr
+                JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+                WHERE {where_clause}
+            ) scored
+            {having_clause}
+            ORDER BY completeness_score ASC, staleness_days DESC NULLS FIRST
+            LIMIT ${limit_param} OFFSET ${offset_param}
+        """
+        rows = await conn.fetch(rows_sql, *post_params)
+
+        def fmt(d):
+            return d.isoformat() if d else None
+
+        result = {
+            "summary": {
+                "total": summary_row["total"],
+                "avg_completeness": summary_row["avg_completeness"] or 0,
+                "stale_count": summary_row["stale_count"],
+                "missing_source_url": summary_row["missing_source_url"],
+                "tier_breakdown": {r["tier"]: r["cnt"] for r in tier_rows},
+                "provenance_breakdown": {r["src"]: r["cnt"] for r in provenance_rows},
+            },
+            "requirements": [
+                {
+                    "id": str(r["id"]),
+                    "jurisdiction_id": str(r["jurisdiction_id"]),
+                    "category": r["category"],
+                    "title": r["title"],
+                    "description": r["description"],
+                    "source_url": r["source_url"],
+                    "source_tier": r["source_tier"],
+                    "current_value": r["current_value"],
+                    "effective_date": fmt(r["effective_date"]),
+                    "last_verified_at": fmt(r["last_verified_at"]),
+                    "is_bookmarked": r["is_bookmarked"],
+                    "created_at": fmt(r["created_at"]),
+                    "updated_at": fmt(r["updated_at"]),
+                    "jurisdiction_name": r["jurisdiction_name"],
+                    "state": r["state"],
+                    "city": r["city"],
+                    "completeness_score": r["completeness_score"],
+                    "staleness_days": r["staleness_days"],
+                    "research_source": (r["metadata"] or {}).get("research_source") if r["metadata"] else None,
+                }
+                for r in rows
+            ],
+        }
+
+    if redis:
+        await cache_set(redis, cache_key, result, ttl=300)
+
+    return result
+
+
+DOMAIN_CATEGORIES = {
+    "healthcare": sorted(HEALTHCARE_CATEGORIES | ONCOLOGY_CATEGORIES | MEDICAL_COMPLIANCE_CATEGORIES),
+    "hr": sorted(LABOR_CATEGORIES | SUPPLEMENTARY_CATEGORIES),
+}
+
+
+@router.get("/jurisdictions/coverage-matrix", dependencies=[Depends(require_admin)])
+async def get_coverage_matrix(
+    state: Optional[str] = None,
+    domain: Optional[str] = None,
+):
+    """Coverage matrix: jurisdiction × category grid with tier, completeness, and staleness."""
+    import hashlib
+
+    cache_key = "admin:coverage-matrix:" + hashlib.md5(
+        f"{state}:{domain}".encode()
+    ).hexdigest()
+
+    redis = get_redis_cache()
+    if redis:
+        cached = await cache_get(redis, cache_key)
+        if cached is not None:
+            return cached
+
+    async with get_connection() as conn:
+        where_conditions = ["1=1"]
+        join_conditions = ["jr.jurisdiction_id = j.id", "jr.status = 'active'"]
+        params: List[Any] = []
+
+        if state:
+            params.append(state.upper())
+            where_conditions.append(f"j.state = ${len(params)}")
+
+        domain_cats = DOMAIN_CATEGORIES.get(domain) if domain else None
+        if domain_cats:
+            params.append(domain_cats)
+            join_conditions.append(f"jr.category = ANY(${len(params)})")
+
+        where_clause = " AND ".join(where_conditions)
+        join_clause = " AND ".join(join_conditions)
+
+        rows = await conn.fetch(f"""
+            SELECT
+                j.id, j.display_name, j.state, j.city,
+                jr.category,
+                COUNT(jr.id) AS req_count,
+                MAX(CASE jr.source_tier::text
+                    WHEN 'tier_1_government' THEN 3
+                    WHEN 'tier_2_official_secondary' THEN 2
+                    WHEN 'tier_3_aggregator' THEN 1
+                    ELSE 0 END) AS best_tier,
+                AVG(
+                    CASE WHEN jr.title IS NOT NULL AND jr.title != '' THEN 25 ELSE 0 END +
+                    CASE WHEN jr.description IS NOT NULL AND jr.description != '' THEN 30 ELSE 0 END +
+                    CASE WHEN jr.source_url IS NOT NULL AND jr.source_url != '' THEN 20 ELSE 0 END +
+                    CASE WHEN jr.effective_date IS NOT NULL THEN 15 ELSE 0 END +
+                    CASE WHEN jr.current_value IS NOT NULL AND jr.current_value != '' THEN 10 ELSE 0 END
+                )::int AS avg_completeness,
+                MAX(EXTRACT(DAY FROM NOW() - jr.last_verified_at))::int AS max_staleness_days
+            FROM jurisdictions j
+            LEFT JOIN jurisdiction_requirements jr ON {join_clause}
+            WHERE {where_clause}
+            GROUP BY j.id, j.display_name, j.state, j.city, jr.category
+            ORDER BY j.state, j.display_name, jr.category
+        """, *params)
+
+        jurisdictions_seen: Dict[str, Any] = {}
+        categories_seen: set = set(domain_cats) if domain_cats else set()
+        cells: Dict[str, Any] = {}
+
+        for r in rows:
+            jid = str(r["id"])
+            if jid not in jurisdictions_seen:
+                jurisdictions_seen[jid] = {
+                    "id": jid,
+                    "name": r["display_name"],
+                    "state": r["state"],
+                    "city": r["city"],
+                }
+            cat = r["category"]
+            if cat is not None:
+                categories_seen.add(cat)
+                cells[f"{jid}:{cat}"] = {
+                    "req_count": r["req_count"],
+                    "best_tier": r["best_tier"],
+                    "avg_completeness": r["avg_completeness"],
+                    "max_staleness_days": r["max_staleness_days"],
+                }
+
+        result = {
+            "jurisdictions": list(jurisdictions_seen.values()),
+            "categories": sorted(categories_seen),
+            "cells": cells,
+        }
+
+    if redis:
+        await cache_set(redis, cache_key, result, ttl=600)
+
+    return result
+
+
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
 async def get_jurisdiction_detail(jurisdiction_id: UUID):
     """Get full detail for a jurisdiction: requirements, legislation, linked locations."""
@@ -5354,7 +5632,7 @@ async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
                         category_counts[c] = category_counts.get(c, 0) + 1
 
                     if reqs:
-                        await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                        await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="manual")
                         total_new = len(reqs)
 
                     # Emit per-category status

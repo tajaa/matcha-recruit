@@ -316,7 +316,7 @@ async def import_file(filepath: str, dry_run: bool = False):
             for category in sorted(by_category.keys()):
                 reqs = by_category[category]
                 print(f"  {category}: {len(reqs)} upserted")
-                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="claude_skill")
                 total += len(reqs)
 
             print(f"\nDone: {total} requirements upserted across {len(by_category)} categories.")

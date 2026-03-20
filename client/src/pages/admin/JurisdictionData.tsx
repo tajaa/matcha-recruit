@@ -8,6 +8,9 @@ import {
 import JurisdictionDetailPanel from '../../components/admin/JurisdictionDetailPanel'
 import ExplorerTab from '../../components/admin/jurisdiction/ExplorerTab'
 import PolicyBrowserTab from '../../components/admin/jurisdiction/PolicyBrowserTab'
+import CoverageHeatmap from '../../components/admin/jurisdiction/CoverageHeatmap'
+import RequirementAuditTable from '../../components/admin/jurisdiction/RequirementAuditTable'
+import GapIntelligencePanel from '../../components/admin/jurisdiction/GapIntelligencePanel'
 import ProfileEditorModal from '../../components/admin/jurisdiction/ProfileEditorModal'
 import SpecialtyFilterSelect from '../../components/admin/jurisdiction/SpecialtyFilterSelect'
 import { useIndustryProfiles } from '../../components/admin/jurisdiction/useIndustryProfiles'
@@ -63,6 +66,7 @@ function getShortLabel(cat: string) {
 
 export default function JurisdictionData() {
   const [tab, setTab] = useState<Tab>('explorer')
+  const [qualityView, setQualityView] = useState<'heatmap' | 'table' | 'gaps'>('heatmap')
   const [overview, setOverview] = useState<DataOverview | null>(null)
   const [loadingOverview, setLoadingOverview] = useState(true)
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null)
@@ -345,97 +349,51 @@ export default function JurisdictionData() {
 
       {/* ── Data Quality Tab ── */}
       {tab === 'quality' && (
-        <div className="space-y-5">
-          <div>
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Tier Breakdown</h2>
-            <div className="border border-zinc-800 rounded-lg p-4 space-y-3">
-              {[
-                { tier: 1, label: 'Tier 1 — Structured (government feeds)', count: sum.tier_breakdown[1] ?? 0, color: 'bg-emerald-500', textColor: 'text-emerald-400' },
-                { tier: 2, label: 'Tier 2 — Repository (verified data)', count: sum.tier_breakdown[2] ?? 0, color: 'bg-amber-400', textColor: 'text-amber-400' },
-                { tier: 3, label: 'Tier 3 — Gemini (AI research)', count: sum.tier_breakdown[3] ?? 0, color: 'bg-red-400', textColor: 'text-red-400' },
-              ].map(({ tier, label, count, color, textColor }) => {
-                const total = (sum.tier_breakdown[1] ?? 0) + (sum.tier_breakdown[2] ?? 0) + (sum.tier_breakdown[3] ?? 0)
-                const pct = total > 0 ? Math.round((count / total) * 100) : 0
-                return (
-                  <div key={tier}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-sm text-zinc-300">{label}</span>
-                      <span className={`text-sm font-mono font-bold ${textColor}`}>{count} ({pct}%)</span>
-                    </div>
-                    <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
-                      <div className={`h-full rounded-full ${color} transition-all`} style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
+        <div className="space-y-4">
+          {/* Segmented control */}
+          <div className="flex items-center gap-1">
+            {([
+              { id: 'heatmap' as const, label: 'Heatmap' },
+              { id: 'table' as const, label: 'Audit Table' },
+              { id: 'gaps' as const, label: 'Gaps' },
+            ]).map((v) => (
+              <Button
+                key={v.id}
+                variant={qualityView === v.id ? 'secondary' : 'ghost'}
+                size="sm"
+                onClick={() => setQualityView(v.id)}
+              >
+                {v.label}
+              </Button>
+            ))}
           </div>
 
-          <div>
-            <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Data Freshness</h2>
-            <div className="grid grid-cols-4 gap-3">
-              {[
-                { label: '≤ 7 days', value: sum.freshness['7d'], color: 'text-emerald-400' },
-                { label: '8–30 days', value: sum.freshness['30d'], color: 'text-zinc-100' },
-                { label: '31–90 days', value: sum.freshness['90d'], color: 'text-amber-400' },
-                { label: '> 90 days', value: sum.freshness['stale'], color: 'text-red-400' },
-              ].map((f) => {
-                const freshTotal = sum.freshness['7d'] + sum.freshness['30d'] + sum.freshness['90d'] + sum.freshness['stale']
-                const pct = freshTotal > 0 ? Math.round((f.value / freshTotal) * 100) : 0
-                return (
-                  <div key={f.label} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
-                    <p className={`text-2xl font-bold ${f.color}`}>{f.value.toLocaleString()}</p>
-                    <p className="text-[10px] text-zinc-500 uppercase tracking-wider mt-0.5">{f.label}</p>
-                    <p className="text-[10px] font-mono text-zinc-600">{pct}%</p>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {overview!.structured_sources.length > 0 && (
-            <div>
-              <h2 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">Structured Data Sources</h2>
-              <div className="border border-zinc-800 rounded-lg overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-zinc-900/50 text-zinc-400">
-                    <tr>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Source</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Type</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Categories</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Records</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Last Fetch</th>
-                      <th className="text-left py-2 px-3 font-medium text-[10px] uppercase tracking-wide">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-800">
-                    {overview!.structured_sources.map((src, i) => (
-                      <tr key={i} className="hover:bg-zinc-800/30">
-                        <td className="py-2 px-3 text-zinc-200 font-medium">{src.source_name}</td>
-                        <td className="py-2 px-3 text-zinc-500 font-mono text-xs">{src.source_type}</td>
-                        <td className="py-2 px-3">
-                          <div className="flex flex-wrap gap-1">
-                            {src.categories.map((c) => (
-                              <span key={c} className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400">
-                                {getShortLabel(c)}
-                              </span>
-                            ))}
-                          </div>
-                        </td>
-                        <td className="py-2 px-3 font-mono text-zinc-400">{src.record_count.toLocaleString()}</td>
-                        <td className="py-2 px-3 text-zinc-500 text-[11px]">{fmtDate(src.last_fetched_at)}</td>
-                        <td className="py-2 px-3">
-                          <span className={`text-xs ${src.is_active ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {src.is_active ? 'Active' : 'Inactive'}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+          {qualityView === 'heatmap' && (
+            <CoverageHeatmap
+              onCellClick={(jurisdictionId, category) => {
+                // Navigate to explorer and open the jurisdiction detail panel
+                const flat = allCities.find((c) => c.id === jurisdictionId)
+                if (flat) {
+                  openCity(flat)
+                  setTab('explorer')
+                } else {
+                  console.log('[Quality] Cell clicked:', { jurisdictionId, category })
+                }
+              }}
+            />
           )}
+
+          {qualityView === 'table' && (
+            <RequirementAuditTable
+              onEditRequirement={(requirementId) => {
+                // Open the jurisdiction that owns this requirement in the detail panel
+                // For now log — full wiring would require a req→jurisdiction lookup
+                console.log('[Quality] Edit requirement:', requirementId)
+              }}
+            />
+          )}
+
+          {qualityView === 'gaps' && <GapIntelligencePanel />}
         </div>
       )}
 

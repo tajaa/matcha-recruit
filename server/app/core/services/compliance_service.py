@@ -1394,7 +1394,7 @@ async def _resolve_jurisdiction_id_for_level(
 
 
 async def _upsert_jurisdiction_requirements_routed(
-    conn, leaf_jurisdiction_id: UUID, reqs: List[Dict]
+    conn, leaf_jurisdiction_id: UUID, reqs: List[Dict], *, research_source: Optional[str] = None
 ) -> Dict[str, int]:
     """Route requirements to their proper jurisdiction level, then upsert.
 
@@ -1422,7 +1422,7 @@ async def _upsert_jurisdiction_requirements_routed(
         )
         affected_jurisdictions.add(target_jid)
 
-        await _upsert_requirements_additive(conn, target_jid, group_reqs)
+        await _upsert_requirements_additive(conn, target_jid, group_reqs, research_source=research_source)
 
         if target_jid == leaf_jurisdiction_id and level == "city":
             for req in group_reqs:
@@ -1673,7 +1673,7 @@ async def _research_healthcare_requirements_for_jurisdiction(
                     req["applicable_industries"] = ["healthcare"]
 
             if reqs:
-                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
                 total_new += len(reqs)
                 added_requirements.extend(reqs)
                 print(
@@ -1762,7 +1762,7 @@ async def _research_healthcare_requirements_for_jurisdiction(
                         req["applicable_industries"] = ["healthcare"]
 
                 if triggered_reqs:
-                    await _upsert_requirements_additive(conn, jurisdiction_id, triggered_reqs)
+                    await _upsert_requirements_additive(conn, jurisdiction_id, triggered_reqs, research_source="gemini")
                     total_new += len(triggered_reqs)
                     added_requirements.extend(triggered_reqs)
                     print(
@@ -1870,7 +1870,7 @@ async def _research_oncology_requirements_for_jurisdiction(
                 req["applicable_industries"] = ["healthcare:oncology"]
 
         if reqs:
-            await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+            await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
             total_new = len(reqs)
             added_requirements.extend(reqs)
             # Log per-category breakdown
@@ -2016,7 +2016,7 @@ async def _research_medical_compliance_for_jurisdiction(
                     req["applicable_industries"] = [tag]
 
             if reqs:
-                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
                 total_new += len(reqs)
                 added_requirements.extend(reqs)
                 by_cat: Dict[str, int] = {}
@@ -2113,7 +2113,7 @@ async def _fill_from_state_fallback(
         # Cache to state jurisdiction additively (don't delete existing state rows)
         state_jid = await _get_state_jurisdiction_id(conn, jurisdiction_id)
         if state_jid:
-            await _upsert_requirements_additive(conn, state_jid, state_researched)
+            await _upsert_requirements_additive(conn, state_jid, state_researched, research_source="gemini")
             print(
                 f"[Compliance] Cached {len(state_researched)} state-level reqs to jurisdiction {state_jid}"
             )
@@ -2207,7 +2207,7 @@ async def _refresh_repository_missing_categories(
     merged_requirements = await _filter_with_preemption(
         conn, merged_requirements, state
     )
-    await _upsert_jurisdiction_requirements_routed(conn, jurisdiction_id, merged_requirements)
+    await _upsert_jurisdiction_requirements_routed(conn, jurisdiction_id, merged_requirements, research_source="structured")
 
     for req in refreshed_requirements:
         source_url = req.get("source_url", "")
@@ -4570,7 +4570,7 @@ async def run_compliance_check_stream(
                         )
                         if triggered_reqs:
                             await _upsert_requirements_additive(
-                                conn, jurisdiction_id, triggered_reqs
+                                conn, jurisdiction_id, triggered_reqs, research_source="gemini"
                             )
                             requirements.extend(triggered_reqs)
                     except Exception as e:
@@ -4672,7 +4672,7 @@ async def run_compliance_check_stream(
             # If Gemini was called, contribute results to jurisdiction repository.
             if not used_repository:
                 await _upsert_jurisdiction_requirements_routed(
-                    conn, jurisdiction_id, requirements
+                    conn, jurisdiction_id, requirements, research_source="gemini"
                 )
 
                 # Learn from successful research: record any new sources seen
@@ -7079,7 +7079,7 @@ async def run_compliance_check_background(
                         )
                         if triggered_reqs:
                             await _upsert_requirements_additive(
-                                conn, jurisdiction_id, triggered_reqs
+                                conn, jurisdiction_id, triggered_reqs, research_source="gemini"
                             )
                             requirements.extend(triggered_reqs)
                     except Exception as e:
@@ -7165,7 +7165,7 @@ async def run_compliance_check_background(
             # Contribute to repository after Gemini call.
             if not used_repository:
                 await _upsert_jurisdiction_requirements_routed(
-                    conn, jurisdiction_id, requirements
+                    conn, jurisdiction_id, requirements, research_source="gemini"
                 )
 
                 # Learn from successful research: record any new sources seen
@@ -7513,7 +7513,7 @@ async def research_jurisdiction_repo_only(
 
                 if industry_only:
                     await _upsert_requirements_additive(
-                        conn, jurisdiction_id, industry_only
+                        conn, jurisdiction_id, industry_only, research_source="gemini"
                     )
                     updated_requirements = updated_requirements + industry_only
                     yield {
@@ -8311,7 +8311,7 @@ async def research_specialization_for_jurisdiction(
                     req["applicable_industries"] = [industry_tag]
 
             if reqs:
-                await _upsert_requirements_additive(conn, jurisdiction_id, reqs)
+                await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
                 total_new += len(reqs)
                 added_requirements.extend(reqs)
         except Exception as e:
