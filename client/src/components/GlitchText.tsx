@@ -16,11 +16,13 @@ export function GlitchText({ text, cycleWords, className, style }: {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const currentDisplayRef = useRef(text)
+  const decodeRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const decodeInto = (target: string, onDone: () => void) => {
+    if (decodeRef.current) clearInterval(decodeRef.current)
     const targetArr = target.split('')
     let progress = 0
-    const decode = setInterval(() => {
+    decodeRef.current = setInterval(() => {
       setChars(prev =>
         prev.map((_, i) => {
           const t = targetArr[i] ?? ' '
@@ -31,7 +33,8 @@ export function GlitchText({ text, cycleWords, className, style }: {
       )
       progress += 0.5
       if (progress >= targetArr.length) {
-        clearInterval(decode)
+        clearInterval(decodeRef.current!)
+        decodeRef.current = null
         setChars(targetArr)
         currentDisplayRef.current = target
         onDone()
@@ -42,11 +45,12 @@ export function GlitchText({ text, cycleWords, className, style }: {
   // Decode left-to-right on mount
   useEffect(() => {
     decodeInto(text, () => {})
+    return () => { if (decodeRef.current) clearInterval(decodeRef.current) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // Periodic glitch — paused when off-screen
-  const { ref: glitchRef, isVisible: glitchVisible } = useInViewport()
+  const { ref: glitchRef, isVisible: glitchVisible } = useInViewport<HTMLSpanElement>()
   const glitchVisibleRef = useRef(glitchVisible)
   glitchVisibleRef.current = glitchVisible
 
@@ -97,13 +101,14 @@ export function GlitchText({ text, cycleWords, className, style }: {
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
       if (intervalRef.current) clearInterval(intervalRef.current)
+      if (decodeRef.current) clearInterval(decodeRef.current)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [text, cycleWords])
 
   return (
     <span
-      ref={glitchRef as React.RefObject<HTMLSpanElement>}
+      ref={glitchRef}
       className={className}
       style={{
         ...style,

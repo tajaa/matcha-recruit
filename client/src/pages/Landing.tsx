@@ -10,6 +10,22 @@ const ParticleSphere = lazy(() => import('../components/ParticleSphere'))
 const SCAN_LINE_BG = 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(161,161,170,0.03) 2px, rgba(161,161,170,0.03) 4px)'
 const DOT_GRID_BG = 'radial-gradient(circle, rgba(161,161,170,0.4) 1px, transparent 1px)'
 
+/* ── Pre-computed static waveforms for SignalMonitor ──────────── */
+const _wave = (freq: number, amp: number, phase: number) =>
+  Array.from({ length: 80 }, (_, i) => {
+    const x = (i / 79) * 100
+    const y = 50 + Math.sin((i / 79) * Math.PI * freq + phase) * amp
+    return `${x},${y}`
+  }).join(' ')
+const SIGNAL_WAVE_1 = _wave(4, 15, 0)
+const SIGNAL_WAVE_2 = _wave(6, 8, 1.5)
+const SIGNAL_WAVE_3 = _wave(2.5, 20, 3)
+
+/* ── Static data for PatternGrid & RadarChart ────────────────── */
+const PATTERN_INCIDENTS = new Set([12, 23, 34, 45, 52, 63, 33, 22])
+const RADAR_DIMS = ['Legal', 'Compliance', 'Tenure', 'Performance', 'Protected Class', 'Documentation', 'Precedent', 'Timing', 'Org Impact']
+const RADAR_VALUES = [0.7, 0.9, 0.4, 0.6, 0.85, 0.3, 0.5, 0.75, 0.65]
+
 /* ── Jurisdiction Cascade (Compliance Engine) ─────────────────── */
 function JurisdictionCascade() {
   const ref = useRef<HTMLDivElement>(null)
@@ -91,7 +107,7 @@ function JurisdictionCascade() {
 /* ── Signal Monitor (Legislative Tracker) ─────────────────────── */
 function SignalMonitor() {
   const ref = useRef<HTMLDivElement>(null)
-  const inView = useInView(ref, { once: true, margin: '-80px' })
+  const inView = useInView(ref, { margin: '-80px' })
   const [scanX, setScanX] = useState(0)
 
   useEffect(() => {
@@ -104,13 +120,6 @@ function SignalMonitor() {
     raf = requestAnimationFrame(animate)
     return () => cancelAnimationFrame(raf)
   }, [inView])
-
-  const wave = (freq: number, amp: number, phase: number) =>
-    Array.from({ length: 80 }, (_, i) => {
-      const x = (i / 79) * 100
-      const y = 50 + Math.sin((i / 79) * Math.PI * freq + phase) * amp
-      return `${x},${y}`
-    }).join(' ')
 
   return (
     <div ref={ref} className="relative h-72 lg:h-80 overflow-hidden" style={{ backgroundImage: SCAN_LINE_BG }}>
@@ -125,7 +134,7 @@ function SignalMonitor() {
 
         {/* Waveforms */}
         <polyline
-          points={wave(4, 15, 0)}
+          points={SIGNAL_WAVE_1}
           fill="none"
           stroke="#f59e0b"
           strokeWidth="0.4"
@@ -135,7 +144,7 @@ function SignalMonitor() {
           <animateTransform attributeName="transform" type="translate" from="-2,0" to="2,0" dur="3s" repeatCount="indefinite" />
         </polyline>
         <polyline
-          points={wave(6, 8, 1.5)}
+          points={SIGNAL_WAVE_2}
           fill="none"
           stroke="#d97706"
           strokeWidth="0.3"
@@ -145,7 +154,7 @@ function SignalMonitor() {
           <animateTransform attributeName="transform" type="translate" from="1,0" to="-1,0" dur="4s" repeatCount="indefinite" />
         </polyline>
         <polyline
-          points={wave(2.5, 20, 3)}
+          points={SIGNAL_WAVE_3}
           fill="none"
           stroke="#fbbf24"
           strokeWidth="0.25"
@@ -343,7 +352,6 @@ function PatternGrid() {
   const inView = useInView(ref, { once: true, margin: '-80px' })
   const rows = 7
   const cols = 10
-  const incidents = new Set([12, 23, 34, 45, 52, 63, 33, 22])
   const epicenter = 33
 
   return (
@@ -357,7 +365,7 @@ function PatternGrid() {
           const epicRow = Math.floor(epicenter / cols)
           const epicCol = epicenter % cols
           const dist = Math.sqrt((row - epicRow) ** 2 + (col - epicCol) ** 2)
-          const isIncident = incidents.has(i)
+          const isIncident = PATTERN_INCIDENTS.has(i)
 
           return (
             <div
@@ -396,7 +404,7 @@ function PatternGrid() {
       ))}
 
       <div className="absolute bottom-3 right-3 text-[8px] font-[Space_Mono] text-amber-500/50 uppercase tracking-widest">
-        {incidents.size} Incidents // Pattern Detected
+        {PATTERN_INCIDENTS.size} Incidents // Pattern Detected
       </div>
     </div>
   )
@@ -406,8 +414,6 @@ function PatternGrid() {
 function RadarChart() {
   const ref = useRef<HTMLDivElement>(null)
   const inView = useInView(ref, { once: true, margin: '-80px' })
-  const dims = ['Legal', 'Compliance', 'Tenure', 'Performance', 'Protected Class', 'Documentation', 'Precedent', 'Timing', 'Org Impact']
-  const values = [0.7, 0.9, 0.4, 0.6, 0.85, 0.3, 0.5, 0.75, 0.65]
   const cx = 50, cy = 50, r = 35
 
   const toXY = (angle: number, radius: number) => ({
@@ -415,8 +421,8 @@ function RadarChart() {
     y: cy + Math.sin(angle - Math.PI / 2) * radius,
   })
 
-  const polygon = values.map((v, i) => {
-    const angle = (i / dims.length) * Math.PI * 2
+  const polygon = RADAR_VALUES.map((v, i) => {
+    const angle = (i / RADAR_DIMS.length) * Math.PI * 2
     const p = toXY(angle, r * v)
     return `${p.x},${p.y}`
   }).join(' ')
@@ -430,8 +436,8 @@ function RadarChart() {
         {[0.25, 0.5, 0.75, 1].map(scale => (
           <polygon
             key={scale}
-            points={dims.map((_, i) => {
-              const a = (i / dims.length) * Math.PI * 2
+            points={RADAR_DIMS.map((_, i) => {
+              const a = (i / RADAR_DIMS.length) * Math.PI * 2
               const p = toXY(a, r * scale)
               return `${p.x},${p.y}`
             }).join(' ')}
@@ -442,8 +448,8 @@ function RadarChart() {
         ))}
 
         {/* Axes */}
-        {dims.map((_, i) => {
-          const a = (i / dims.length) * Math.PI * 2
+        {RADAR_DIMS.map((_, i) => {
+          const a = (i / RADAR_DIMS.length) * Math.PI * 2
           const p = toXY(a, r)
           return <line key={i} x1={cx} y1={cy} x2={p.x} y2={p.y} stroke="#3f3f46" strokeWidth="0.2" />
         })}
@@ -465,8 +471,8 @@ function RadarChart() {
         </polygon>
 
         {/* Data points */}
-        {values.map((v, i) => {
-          const a = (i / dims.length) * Math.PI * 2
+        {RADAR_VALUES.map((v, i) => {
+          const a = (i / RADAR_DIMS.length) * Math.PI * 2
           const p = toXY(a, r * v)
           return (
             <circle
@@ -487,8 +493,8 @@ function RadarChart() {
         })}
 
         {/* Labels */}
-        {dims.map((label, i) => {
-          const a = (i / dims.length) * Math.PI * 2
+        {RADAR_DIMS.map((label, i) => {
+          const a = (i / RADAR_DIMS.length) * Math.PI * 2
           const p = toXY(a, r + 8)
           return (
             <text
@@ -500,7 +506,7 @@ function RadarChart() {
               className="font-[Space_Mono]"
               style={{
                 fontSize: '2.5px',
-                fill: values[i] > 0.7 ? '#ef4444' : '#71717a',
+                fill: RADAR_VALUES[i] > 0.7 ? '#ef4444' : '#71717a',
                 opacity: inView ? 1 : 0,
                 transition: 'opacity 0.5s',
                 transitionDelay: `${i * 100 + 600}ms`,
@@ -531,6 +537,7 @@ function TerminalTyping() {
   const inView = useInView(ref, { once: true, margin: '-80px' })
   const [queryIdx, setQueryIdx] = useState(0)
   const [responseIdx, setResponseIdx] = useState(0)
+  const t3Ref = useRef<ReturnType<typeof setInterval> | null>(null)
   const query = '> What are the overtime exemption requirements for salaried employees in California vs. federal FLSA?'
   const response = 'Analyzing federal FLSA § 13(a)(1) against CA Labor Code § 515... California applies a stricter salary threshold ($66,560/yr vs federal $35,568). The duties test also diverges: CA requires >50% time on exempt duties while federal uses the primary duty test. Recommendation: Apply CA standard for all CA-based employees.'
 
@@ -543,15 +550,14 @@ function TerminalTyping() {
       })
     }, 35)
     const t2 = setTimeout(() => {
-      const t3 = setInterval(() => {
+      t3Ref.current = setInterval(() => {
         setResponseIdx(prev => {
-          if (prev >= response.length) { clearInterval(t3); return prev }
+          if (prev >= response.length) { clearInterval(t3Ref.current!); t3Ref.current = null; return prev }
           return prev + 2
         })
       }, 15)
-      return () => clearInterval(t3)
     }, query.length * 35 + 500)
-    return () => { clearInterval(t1); clearTimeout(t2) }
+    return () => { clearInterval(t1); clearTimeout(t2); if (t3Ref.current) clearInterval(t3Ref.current) }
   }, [inView])
 
   return (
