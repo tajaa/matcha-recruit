@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Generate a professional PDF deal proposal for a healthcare client."""
+"""Generate a professional PDF deal proposal for Giti Tire."""
 
 import os
 from datetime import date
 from weasyprint import HTML
 
-OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals", "onc")
-VERSION = "v6"
-OUTPUT_PATH = os.path.join(OUTPUT_DIR, f"Matcha_Healthcare_Proposal_{VERSION}.pdf")
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals", "giti")
+VERSION = "v1"
+OUTPUT_PATH = os.path.join(OUTPUT_DIR, f"Matcha_Giti_Proposal_{VERSION}.pdf")
 
 # ── Config ──────────────────────────────────────────────────────────────────
-CLIENT_NAME = "The Oncology Institute"
-EMPLOYEE_COUNT = 650
+CLIENT_NAME = "Giti Tire"
+EMPLOYEE_COUNT = 900
 LIST_PEPM = 14.00
 PEPM = 11.00
 DISCOUNT_AMT = LIST_PEPM - PEPM
 PARTNER_PEPM = 9.50
-IMPL_FEE = 13_500
+IMPL_FEE = 16_000
 MONTHLY = PEPM * EMPLOYEE_COUNT
 ANNUAL = MONTHLY * 12
 YEAR1_TCV = ANNUAL + IMPL_FEE
@@ -24,6 +24,17 @@ PARTNER_MONTHLY = PARTNER_PEPM * EMPLOYEE_COUNT
 PARTNER_ANNUAL = PARTNER_MONTHLY * 12
 PARTNER_YEAR1_TCV = PARTNER_ANNUAL + IMPL_FEE
 TODAY = date.today().strftime("%B %d, %Y")
+
+# ROI numbers
+HARD_SAVINGS = 168_000
+RISK_REDUCTION = 62_000
+TOTAL_VALUE = HARD_SAVINGS + RISK_REDUCTION
+NET_Y1 = TOTAL_VALUE - YEAR1_TCV
+ROI_MULTIPLE = TOTAL_VALUE / YEAR1_TCV
+YEAR2_NET = TOTAL_VALUE - ANNUAL
+THREE_YEAR_INVEST = YEAR1_TCV + (ANNUAL * 2)
+THREE_YEAR_VALUE = TOTAL_VALUE * 3
+THREE_YEAR_NET = THREE_YEAR_VALUE - THREE_YEAR_INVEST
 
 HTML_CONTENT = f"""
 <!DOCTYPE html>
@@ -49,7 +60,6 @@ HTML_CONTENT = f"""
     line-height: 1.55;
   }}
 
-  /* ── Cover Page ─────────────────────────────────────────────── */
   .cover {{
     page-break-after: always;
     height: 100vh;
@@ -147,7 +157,6 @@ HTML_CONTENT = f"""
     padding-top: 16px;
   }}
 
-  /* ── Content Pages ──────────────────────────────────────────── */
   .page {{
     page-break-after: always;
     padding: 55px 60px;
@@ -200,14 +209,6 @@ HTML_CONTENT = f"""
     border-bottom: 1px solid #d1d5db;
   }}
 
-  h3 {{
-    font-size: 11pt;
-    font-weight: 700;
-    color: #1a1a2e;
-    margin-top: 16px;
-    margin-bottom: 6px;
-  }}
-
   p {{
     margin-bottom: 10px;
   }}
@@ -222,7 +223,6 @@ HTML_CONTENT = f"""
     color: #1a1a2e;
   }}
 
-  /* ── Pricing Table ──────────────────────────────────────────── */
   .pricing-box {{
     border: 1px solid #d1d5db;
     border-radius: 6px;
@@ -277,7 +277,6 @@ HTML_CONTENT = f"""
     font-style: italic;
   }}
 
-  /* ── Feature Lists ──────────────────────────────────────────── */
   .feature-block {{
     margin-bottom: 16px;
   }}
@@ -301,7 +300,6 @@ HTML_CONTENT = f"""
     margin-bottom: 4px;
   }}
 
-  /* ── Implementation Timeline ────────────────────────────────── */
   .timeline-table {{
     width: 100%;
     border-collapse: collapse;
@@ -342,7 +340,6 @@ HTML_CONTENT = f"""
     white-space: nowrap;
   }}
 
-  /* ── Contract Terms ─────────────────────────────────────────── */
   .terms-list {{
     list-style: none;
     padding: 0;
@@ -365,7 +362,6 @@ HTML_CONTENT = f"""
     flex-shrink: 0;
   }}
 
-  /* ── ROI Table ──────────────────────────────────────────────── */
   .roi-table {{
     width: 100%;
     border-collapse: collapse;
@@ -405,7 +401,17 @@ HTML_CONTENT = f"""
     color: #1a1a2e;
   }}
 
-  /* ── Signature Block ────────────────────────────────────────── */
+  .callout-box {{
+    background: #fff8ed;
+    border: 1px solid #f59e0b;
+    border-left: 4px solid #f59e0b;
+    border-radius: 4px;
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 9.5pt;
+    color: #1a1a2e;
+  }}
+
   .signature-section {{
     margin-top: 36px;
     display: flex;
@@ -439,23 +445,16 @@ HTML_CONTENT = f"""
 </head>
 <body>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- COVER PAGE                                                            -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- COVER -->
 <div class="cover">
   <div class="cover-accent"></div>
   <div class="cover-accent-2"></div>
-
   <div class="cover-top">
     <div class="logo-text">matcha</div>
     <div class="logo-sub">HR Intelligence, Risk &amp; Employee Relations</div>
   </div>
-
   <div class="cover-middle">
-    <div class="cover-title">
-      Platform<br>
-      <strong>Service Proposal</strong>
-    </div>
+    <div class="cover-title">Platform<br><strong>Service Proposal</strong></div>
     <div class="cover-divider"></div>
     <div class="cover-meta">
       Prepared for <strong>{CLIENT_NAME}</strong><br>
@@ -463,7 +462,6 @@ HTML_CONTENT = f"""
       {TODAY}
     </div>
   </div>
-
   <div class="cover-bottom">
     <div class="cover-footer">
       Confidential &mdash; This document contains proprietary pricing and is intended solely for the named recipient.
@@ -471,9 +469,7 @@ HTML_CONTENT = f"""
   </div>
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- PAGE 2: EXECUTIVE SUMMARY + PRICING                                   -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 2: EXEC SUMMARY + PRICING -->
 <div class="page">
   <div class="page-header">
     <div class="page-header-logo">matcha</div>
@@ -483,7 +479,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha is an agentic workforce risk management platform built for multi-location healthcare organizations. From jurisdiction-level compliance monitoring and incident investigations to pre-termination risk scoring, Matcha consolidates fragmented HR operations into a single platform&mdash;reducing legal exposure, eliminating manual tracking, and delivering real-time risk visibility across every facility. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
+    Matcha is an agentic workforce risk management platform built for manufacturing organizations operating at the intersection of heavy OSHA compliance, active labor relations, and multi-department workforce management. For Giti Tire, that means jurisdiction-level compliance monitoring across federal and South Carolina state-plan OSHA requirements, incident tracking across a large production floor, proactive employment relations case management, and pre-termination risk intelligence&mdash;all in a single platform. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps your team can act on with confidence.
   </div>
 
   <h1>Investment Summary</h1>
@@ -493,8 +489,8 @@ HTML_CONTENT = f"""
       <thead>
         <tr>
           <th>Line Item</th>
-          <th style="text-align:right; color:#6b7280; font-weight:500; font-size:11px;">Channel Rate</th>
-          <th style="text-align:right; color:#6b7280; font-weight:500; font-size:11px;">Partner Rate</th>
+          <th style="text-align:right; color:#9ca3af; font-weight:500; font-size:11px;">Channel Rate</th>
+          <th style="text-align:right; color:#9ca3af; font-weight:500; font-size:11px;">Partner Rate</th>
         </tr>
       </thead>
       <tbody>
@@ -545,9 +541,7 @@ HTML_CONTENT = f"""
 
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- PAGE 3: PLATFORM CAPABILITIES (1 of 2)                                -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 3: PLATFORM CAPABILITIES -->
 <div class="page">
   <div class="page-header">
     <div class="page-header-logo">matcha</div>
@@ -559,37 +553,37 @@ HTML_CONTENT = f"""
   <h2>Compliance &amp; Legal</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Compliance Engine</span> &mdash; Agentic jurisdiction research across federal, state, and local levels. Multi-location support with preemption rule analysis. Tiered data approach: structured requirements, curated repository, and Agentic research for emerging regulations.</p>
+    <p><span class="feature-name">Compliance Engine</span> &mdash; Agentic jurisdiction research across federal and state levels. Covers SC state-plan OSHA standards, federal FLSA, NLRA, and applicable environmental and chemical exposure regulations. Multi-location support with preemption rule analysis and tiered data approach for emerging regulatory changes.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Agentic policy documents tailored to specific jurisdictions. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation.</p>
+    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Agentic policy documents tailored to manufacturing environments and South Carolina jurisdiction. Covers OSHA-mandated written programs (HazCom, LOTO, Respiratory Protection, Hearing Conservation), employment policies, and NLRA-compliant solicitation and communication policies. Electronic signature collection with audit trails.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Legislative Tracker</span> &mdash; Agentic monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity.</p>
+    <p><span class="feature-name">Legislative Tracker</span> &mdash; Agentic monitoring of regulatory changes across federal and SC state-plan OSHA, NLRB guidance, and employment law with pattern detection for coordinated legislative activity.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, locations, and tenure.</p>
+    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, shifts, and tenure.</p>
   </div>
 
   <h2>Investigations &amp; Risk</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across locations.</p>
+    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting designed for high-volume manufacturing environments. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Covers machine incidents, chemical exposure events, ergonomic injuries, near-misses, and behavioral incidents. Trend analytics and pattern detection across shifts and departments.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with Agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel. Particularly valuable in active labor relations environments where documentation quality determines outcomes.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with Agentic accommodation suggestions, undue hardship assessment, and job function analysis.</p>
+    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with agentic accommodation suggestions, undue hardship assessment, and job function analysis for physical manufacturing roles.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Agentic-generated narrative memo suitable for counsel review.</p>
+    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Critical in manufacturing environments with active labor relations activity, where termination timing and documentation are subject to heightened scrutiny. Agentic-generated narrative memo suitable for counsel review.</p>
   </div>
 
   <div class="feature-block">
@@ -603,25 +597,22 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by category. Progress analytics with funnel metrics, bottleneck identification, and completion tracking across the organization.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by role and shift. Supports OSHA-mandated pre-floor training workflows (HazCom, LOTO, PPE, machine-specific orientation) as well as office and supervisory onboarding. Progress analytics with funnel metrics, bottleneck identification, and completion tracking.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Offer Letters</span> &mdash; Agentic salary guidance by role and market. Customizable templates with company branding and logo. Magic-link electronic signing for candidates. Multi-round salary range negotiation. PDF generation.</p>
+    <p><span class="feature-name">Offer Letters</span> &mdash; Agentic salary guidance by role and market. Customizable templates with company branding. Magic-link electronic signing for candidates. Multi-round salary range negotiation. PDF generation.</p>
   </div>
 
   <h2>Agentic Document Workspace (Matcha Work)</h2>
 
   <div class="feature-block">
-    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode for cross-referencing organizational information. Supports offer letters, reviews, workbooks, onboarding plans, presentations, handbooks, and policies. <strong>Monthly usage credits included.</strong></p>
+    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode. Supports OSHA written program drafting, ER case memos, onboarding plans, handbooks, and policies. <strong>Monthly usage credits included.</strong></p>
   </div>
-
 
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- PAGE 5: IMPLEMENTATION + TERMS                                        -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 4: IMPLEMENTATION + TERMS -->
 <div class="page">
   <div class="page-header">
     <div class="page-header-logo">matcha</div>
@@ -644,26 +635,26 @@ HTML_CONTENT = f"""
       <tr>
         <td class="phase">Discovery &amp; Gap Analysis</td>
         <td>Weeks 1&ndash;2</td>
-        <td class="cost">$4,500</td>
-        <td>Organizational mapping, HRIS audit, location inventory, regulatory gap analysis &mdash; audit existing documentation, certifications, and licenses against oncology-specific requirements (radiation safety certs, chemo handling training, CRT licensing, tumor registry compliance)</td>
+        <td class="cost">$3,500</td>
+        <td>Organizational mapping, HRIS audit, shift structure inventory, regulatory gap analysis &mdash; audit existing OSHA written programs (HazCom, LOTO, Respiratory Protection, Hearing Conservation, Benzene/Butadiene exposure programs), incident log history, SC state-plan compliance status, and NLRA-related policy documentation</td>
       </tr>
       <tr>
         <td class="phase">Configuration &amp; Templating</td>
         <td>Weeks 3&ndash;4</td>
-        <td class="cost">$4,000</td>
-        <td>Location/jurisdiction setup, compliance baseline scan, build role-specific onboarding templates (rad tech, RN, pharmacist, physicist), credential expiration workflows, handbook ingestion</td>
+        <td class="cost">$3,500</td>
+        <td>Jurisdiction setup (federal + SC state-plan OSHA), compliance baseline scan, build role-specific onboarding templates (production floor, maintenance, quality, warehouse, supervisory), OSHA pre-floor training workflows, NLRA-compliant policy templates, handbook ingestion</td>
       </tr>
       <tr>
         <td class="phase">Data Migration &amp; Manual Run</td>
         <td>Weeks 5&ndash;6</td>
         <td class="cost">$2,500</td>
-        <td>Employee data import, historical records migration, policy document ingestion, run first onboarding cohort manually using templates to validate completeness</td>
+        <td>Employee data import, OSHA 300 log migration, historical incident records, policy document ingestion, run first onboarding cohort manually using templates to validate completeness</td>
       </tr>
       <tr>
         <td class="phase">UAT &amp; Automation</td>
         <td>Week 7</td>
-        <td class="cost">$1,500</td>
-        <td>Admin training, user acceptance testing, convert validated manual workflows to automated ingestion pipelines</td>
+        <td class="cost">$1,000</td>
+        <td>Admin and supervisor training, user acceptance testing, convert validated manual workflows to automated ingestion pipelines</td>
       </tr>
       <tr>
         <td class="phase">Go-Live</td>
@@ -680,20 +671,19 @@ HTML_CONTENT = f"""
     <li><span class="term-label">Initial Term</span> 12 months from go-live date</li>
     <li><span class="term-label">Price Lock</span> PEPM rate of $11.00 locked for the initial 12-month term</li>
     <li><span class="term-label">Partner Rate</span> $9.50 PEPM available with quarterly video insights, anonymized case study &amp; data sharing, logo rights, public review within 90 days, and annual prepayment or 2-year term</li>
-    <li><span class="term-label">Data Security</span> HIPAA-compliant infrastructure with executed BAAs (AWS and Google Cloud); encrypted in transit (TLS/SSL enforced) and at rest</li>
+    <li><span class="term-label">Data Security</span> Encrypted in transit (TLS/SSL enforced) and at rest</li>
     <li><span class="term-label">Auto-Renewal</span> Automatic 12-month renewal periods</li>
     <li><span class="term-label">Opt-Out Notice</span> 60-day written notice required before any renewal period</li>
     <li><span class="term-label">Employee True-Up</span> Quarterly adjustment based on active employee headcount</li>
     <li><span class="term-label">Matcha Work Credits</span> Monthly credits included</li>
+    <li><span class="term-label">Dedicated CSM</span> Assigned at contract signing through go-live and beyond</li>
     <li><span class="term-label">Value Validation</span> 90-day post-go-live review to confirm platform adoption and ROI</li>
     <li><span class="term-label">Renewal Pricing</span> May adjust with 60-day written notice prior to renewal</li>
   </ul>
 
 </div>
 
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
-<!-- PAGE 6: ROI + SUPPORT + SIGNATURES                                    -->
-<!-- ═══════════════════════════════════════════════════════════════════════ -->
+<!-- PAGE 5: ROI + SIGNATURES -->
 <div class="page">
   <div class="page-header">
     <div class="page-header-logo">matcha</div>
@@ -702,7 +692,7 @@ HTML_CONTENT = f"""
 
   <h1>Return on Investment</h1>
 
-  <p style="margin-bottom: 14px;">Healthcare is the #1 most-targeted industry by the EEOC &mdash; <strong>21% of all charges filed nationally</strong>, despite representing roughly 10% of the workforce. Healthcare employers face EEOC charges at <strong>2&times; the rate of any other industry</strong>, and the Department of Labor recovered <strong>$53 million in back wages from healthcare employers in FY2025 alone</strong>.</p>
+  <p style="margin-bottom: 14px;">Manufacturing employers carry a disproportionate OSHA and employment relations burden. Rubber and plastics manufacturing (NAICS 3262) runs a Total Recordable Incident Rate nearly double the all-industry average, EEOC charges in manufacturing have trended upward as workforces have grown, and the DOL recovered <strong>$36 million in back wages from manufacturing employers in FY2025</strong>&mdash;with overtime and shift differential violations driving the majority of claims. For employers in active labor relations environments, the cost of a single poorly-documented termination can exceed the annual platform cost many times over.</p>
 
   <table class="roi-table">
     <thead>
@@ -715,55 +705,118 @@ HTML_CONTENT = f"""
     <tbody>
       <tr>
         <td>Outside employment counsel</td>
-        <td style="text-align:right">$98,000/yr</td>
-        <td style="text-align:right"><strong>$37,000</strong></td>
+        <td style="text-align:right">$105,000/yr</td>
+        <td style="text-align:right"><strong>$63,000</strong></td>
       </tr>
       <tr>
         <td>ER cases sent to outside counsel (4/yr)</td>
         <td style="text-align:right">$72,000/yr</td>
-        <td style="text-align:right"><strong>$40,000</strong></td>
+        <td style="text-align:right"><strong>$50,000</strong></td>
       </tr>
       <tr>
         <td>HR staff time on compliance tasks</td>
-        <td style="text-align:right">$130,000/yr</td>
-        <td style="text-align:right"><strong>$36,000</strong></td>
+        <td style="text-align:right">$120,000/yr</td>
+        <td style="text-align:right"><strong>$60,000</strong></td>
       </tr>
       <tr>
         <td>Handbook &amp; policy legal review</td>
-        <td style="text-align:right">$8,000/yr</td>
-        <td style="text-align:right"><strong>$6,500</strong></td>
-      </tr>
-      <tr>
-        <td>OSHA incident admin &amp; reporting</td>
-        <td style="text-align:right">$15,000/yr</td>
+        <td style="text-align:right">$10,000/yr</td>
         <td style="text-align:right"><strong>$8,500</strong></td>
       </tr>
       <tr>
+        <td>OSHA incident admin &amp; reporting</td>
+        <td style="text-align:right">$22,000/yr</td>
+        <td style="text-align:right"><strong>$16,500</strong></td>
+      </tr>
+      <tr>
         <td>Compliance training &amp; certification tracking</td>
-        <td style="text-align:right">$8,000/yr</td>
-        <td style="text-align:right"><strong>$4,000</strong></td>
+        <td style="text-align:right">$14,000/yr</td>
+        <td style="text-align:right"><strong>$10,000</strong></td>
       </tr>
       <tr style="background:#f5f5f7;">
         <td><strong>Annual hard savings</strong></td>
         <td></td>
-        <td style="text-align:right"><strong>$132,000</strong></td>
+        <td style="text-align:right"><strong>${HARD_SAVINGS:,.0f}</strong></td>
       </tr>
     </tbody>
   </table>
 
-  <p style="font-size:9pt; color:#6b7280; margin-top:8px;">Savings driven by ER Copilot handling investigations internally instead of at outside counsel rates, the Compliance Engine automating jurisdiction monitoring, and Pre-Termination Intelligence reducing matters requiring attorney involvement.</p>
+  <p style="font-size:9pt; color:#6b7280; margin-top:8px;">Savings driven by ER Copilot handling employment relations investigations internally, Pre-Termination Intelligence reducing exposure in a high-scrutiny labor environment, the Compliance Engine automating SC state-plan OSHA and federal monitoring, and Incident Reports eliminating manual OSHA 300/300A log preparation.</p>
+
+  <table class="roi-table" style="margin-top: 20px;">
+    <thead>
+      <tr>
+        <th></th>
+        <th style="text-align:right">Year 1</th>
+        <th style="text-align:right">Year 2</th>
+        <th style="text-align:right">Year 3</th>
+        <th style="text-align:right">3-Year Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Platform cost</td>
+        <td style="text-align:right">${ANNUAL:,.0f}</td>
+        <td style="text-align:right">${ANNUAL:,.0f}</td>
+        <td style="text-align:right">${ANNUAL:,.0f}</td>
+        <td style="text-align:right">${ANNUAL*3:,.0f}</td>
+      </tr>
+      <tr>
+        <td>Implementation</td>
+        <td style="text-align:right">${IMPL_FEE:,.0f}</td>
+        <td style="text-align:right">&mdash;</td>
+        <td style="text-align:right">&mdash;</td>
+        <td style="text-align:right">${IMPL_FEE:,.0f}</td>
+      </tr>
+      <tr>
+        <td><strong>Total investment</strong></td>
+        <td style="text-align:right"><strong>${YEAR1_TCV:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${ANNUAL:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${ANNUAL:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${THREE_YEAR_INVEST:,.0f}</strong></td>
+      </tr>
+      <tr>
+        <td>Hard savings</td>
+        <td style="text-align:right">${HARD_SAVINGS:,.0f}</td>
+        <td style="text-align:right">${HARD_SAVINGS:,.0f}</td>
+        <td style="text-align:right">${HARD_SAVINGS:,.0f}</td>
+        <td style="text-align:right">${HARD_SAVINGS*3:,.0f}</td>
+      </tr>
+      <tr>
+        <td>Risk reduction value</td>
+        <td style="text-align:right">${RISK_REDUCTION:,.0f}</td>
+        <td style="text-align:right">${RISK_REDUCTION:,.0f}</td>
+        <td style="text-align:right">${RISK_REDUCTION:,.0f}</td>
+        <td style="text-align:right">${RISK_REDUCTION*3:,.0f}</td>
+      </tr>
+      <tr style="background:#f5f5f7;">
+        <td><strong>Total value delivered</strong></td>
+        <td style="text-align:right"><strong>${TOTAL_VALUE:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${TOTAL_VALUE:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${TOTAL_VALUE:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${THREE_YEAR_VALUE:,.0f}</strong></td>
+      </tr>
+      <tr style="background:#f5f5f7;">
+        <td><strong>Net savings</strong></td>
+        <td style="text-align:right"><strong>${NET_Y1:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${YEAR2_NET:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${YEAR2_NET:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${THREE_YEAR_NET:,.0f}</strong></td>
+      </tr>
+    </tbody>
+  </table>
 
   <div class="roi-highlight">
-    Year 1 ROI: 1.9&times; &middot; Platform pays for itself by month 6 &middot; 3-year net savings: $302,000
+    Year 1 ROI: {ROI_MULTIPLE:.1f}&times; &middot; Platform pays for itself by month 6 &middot; 3-year net savings: ${THREE_YEAR_NET:,.0f}
   </div>
 
-  <h1 style="margin-top: 32px;">Dedicated Support</h1>
+  <h1 style="margin-top: 28px;">Dedicated Support</h1>
 
   <ul>
     <li><strong>Customer Success Manager</strong> assigned at contract signing through go-live and beyond</li>
-    <li>Admin and manager training sessions included in implementation</li>
+    <li>Admin and supervisor training sessions included in implementation</li>
     <li>Ongoing CSM check-ins post go-live</li>
-    <li>Platform support for configuration changes, new location rollouts, and feature adoption</li>
+    <li>Platform support for configuration changes, headcount adjustments, and feature adoption</li>
   </ul>
 
   <div class="signature-section">
