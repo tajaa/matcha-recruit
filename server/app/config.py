@@ -83,6 +83,10 @@ class Settings:
     # Government APIs
     openstates_api_key: Optional[str] = None  # OpenStates legislative tracking (free key)
 
+    # SAML SSO
+    saml_sp_entity_id: str = "https://hey-matcha.com/api/sso/metadata"
+    saml_sp_acs_url: str = "https://hey-matcha.com/api/sso/acs"
+
     # Stripe (Matcha Work billing)
     stripe_secret_key: Optional[str] = None
     stripe_webhook_secret: Optional[str] = None
@@ -175,6 +179,8 @@ def load_settings() -> Settings:
         gemini_hourly_limit=int(os.getenv("GEMINI_HOURLY_LIMIT", "200")),
         gemini_daily_limit=int(os.getenv("GEMINI_DAILY_LIMIT", "5000")),
         openstates_api_key=os.getenv("OPENSTATES_API_KEY"),
+        saml_sp_entity_id=os.getenv("SAML_SP_ENTITY_ID", "https://hey-matcha.com/api/sso/metadata"),
+        saml_sp_acs_url=os.getenv("SAML_SP_ACS_URL", "https://hey-matcha.com/api/sso/acs"),
         stripe_secret_key=os.getenv("STRIPE_SECRET_KEY"),
         stripe_webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET"),
         stripe_success_url=os.getenv(

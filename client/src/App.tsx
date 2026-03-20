@@ -27,6 +27,7 @@ import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
 import CompanySettings from './pages/app/CompanySettings'
 import ERExportDownload from './pages/shared/ERExportDownload'
+import SSOCallback from './pages/SSOCallback'
 import WorkLayout from './layouts/WorkLayout'
 import MatchaWorkList from './pages/work/MatchaWorkList'
 import MatchaWorkThread from './pages/work/MatchaWorkThread'
@@ -36,6 +37,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
+      <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/s/:token" element={<ERExportDownload />} />
       <Route path="/work" element={<WorkLayout />}>
         <Route index element={<MatchaWorkList />} />

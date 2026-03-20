@@ -37,6 +37,8 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [ssoMode, setSsoMode] = useState(false)
+  const [ssoLoading, setSsoLoading] = useState(false)
   const navigate = useNavigate()
 
   async function handleSubmit(e: React.FormEvent) {
@@ -55,41 +57,88 @@ export default function Login() {
     }
   }
 
+  function handleSSOLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email) { setError('Enter your email to sign in with SSO'); return }
+    setSsoLoading(true)
+    setError('')
+    // Redirect to the SAML login endpoint — backend handles the IdP redirect
+    const baseUrl = import.meta.env.VITE_API_URL || '/api'
+    window.location.href = `${baseUrl}/sso/login?email=${encodeURIComponent(email)}`
+  }
+
   return (
     <div className="relative min-h-screen bg-zinc-900 flex items-center justify-center px-4 overflow-hidden">
       <AsciiHalftone />
       <div className="relative z-10 w-full max-w-sm">
         <Logo className="justify-center mb-10 grayscale" />
 
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <GrayInput
-            id="email"
-            label="Email"
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@company.com"
-          />
-          <GrayInput
-            id="password"
-            label="Password"
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder="••••••••"
-          />
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <Button
-            type="submit"
-            variant="secondary"
-            className="w-full tracking-[0.15em] font-[Space_Mono] uppercase border border-zinc-600"
-            disabled={loading}
-          >
-            {loading ? 'Signing in...' : 'Sign in'}
-          </Button>
-        </form>
+        {ssoMode ? (
+          <form onSubmit={handleSSOLogin} className="space-y-5">
+            <GrayInput
+              id="sso-email"
+              label="Work Email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@company.com"
+            />
+            {error && <p className="text-sm text-red-400">{error}</p>}
+            <Button
+              type="submit"
+              variant="secondary"
+              className="w-full tracking-[0.15em] font-[Space_Mono] uppercase border border-zinc-600"
+              disabled={ssoLoading}
+            >
+              {ssoLoading ? 'Redirecting...' : 'Continue with SSO'}
+            </Button>
+            <button
+              type="button"
+              onClick={() => { setSsoMode(false); setError('') }}
+              className="w-full text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Sign in with password instead
+            </button>
+          </form>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-5">
+            <GrayInput
+              id="email"
+              label="Email"
+              type="email"
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@company.com"
+            />
+            <GrayInput
+              id="password"
+              label="Password"
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+            />
+            {error && <p className="text-sm text-red-400">{error}</p>}
+            <Button
+              type="submit"
+              variant="secondary"
+              className="w-full tracking-[0.15em] font-[Space_Mono] uppercase border border-zinc-600"
+              disabled={loading}
+            >
+              {loading ? 'Signing in...' : 'Sign in'}
+            </Button>
+            <button
+              type="button"
+              onClick={() => { setSsoMode(true); setError('') }}
+              className="w-full text-sm text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Sign in with SSO
+            </button>
+          </form>
+        )}
 
         <p className="mt-6 text-center text-sm text-zinc-500">
           Don&apos;t have an account?{' '}

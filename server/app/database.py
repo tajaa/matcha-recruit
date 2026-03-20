@@ -749,6 +749,28 @@ async def init_db():
             )
         """)
 
+        # SSO/SAML configuration per company
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS company_sso_configs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL UNIQUE REFERENCES companies(id) ON DELETE CASCADE,
+                enabled BOOLEAN DEFAULT false,
+                idp_entity_id TEXT NOT NULL,
+                idp_sso_url TEXT NOT NULL,
+                idp_x509_cert TEXT NOT NULL,
+                email_domain VARCHAR(255) NOT NULL,
+                default_role VARCHAR(20) DEFAULT 'employee',
+                auto_provision BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_company_sso_configs_domain
+            ON company_sso_configs(email_domain)
+            WHERE enabled = true
+        """)
+
         # Add status columns for existing companies tables (migration)
         await conn.execute("""
             DO $$
