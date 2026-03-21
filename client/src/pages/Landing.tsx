@@ -651,7 +651,7 @@ export default function Landing() {
           >
             <div className="flex items-center gap-2.5">
               <img src="/logo.svg" alt="Matcha" className="h-5 w-5" />
-              <span className="text-sm font-bold tracking-[0.25em] uppercase">
+              <span className="text-sm font-[Orbitron] font-bold tracking-[0.25em] uppercase">
                 Matcha
               </span>
             </div>
