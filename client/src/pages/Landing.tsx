@@ -665,7 +665,12 @@ export default function Landing() {
               </span>
             </div>
             <div className="flex items-center gap-5">
-              {/* TODO: re-enable Pricing button once contact form email is working */}
+              <span
+                onClick={() => setIsPricingOpen(true)}
+                className="hidden sm:inline text-[11px] tracking-[0.2em] text-zinc-400 font-[Space_Mono] uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300"
+              >
+                Pricing
+              </span>
               <LinkButton
                 to="/login"
                 variant="ghost"

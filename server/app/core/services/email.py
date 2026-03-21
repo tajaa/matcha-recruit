@@ -544,7 +544,7 @@ Sent on behalf of {company_name} via Matcha
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping contact form email")
             return False
 
         contact_email = self.settings.contact_email
@@ -614,48 +614,13 @@ Message:
 Sent from Matcha Recruit contact form
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": contact_email,
-                    "name": "Matcha Team",
-                }
-            ],
-            "reply_to": {
-                "email": sender_email,
-                "name": sender_name,
-            },
-            "subject": f"Contact Form: {company_name} - {sender_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent contact form email from %s", sender_email)
-                    return True
-                else:
-                    logger.warning("Failed to send contact form: %s - %s", response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending contact form")
-            return False
+        return await self.send_email(
+            to_email=contact_email,
+            to_name="Matcha Team",
+            subject=f"Contact Form: {company_name} - {sender_name}",
+            html_content=html_content,
+            text_content=text_content,
+        )
 
     async def send_policy_signature_email(
         self,
