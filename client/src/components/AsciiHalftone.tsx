@@ -19,7 +19,7 @@ export function AsciiHalftone() {
     let animId: number
     const isVisible = { current: true }
 
-    const chars = '.·:+*#@'
+    const chars = '.·:+*#@\u2588'
     const CELL = 8
 
     function resize() {
@@ -85,14 +85,15 @@ export function AsciiHalftone() {
 
           const charIdx = Math.min(chars.length - 1, Math.floor(intensity * chars.length))
           const char = chars[charIdx]
+          if (char === ' ') continue
 
-          const alpha = 0.08 + intensity * 0.35
-          ctx!.fillStyle = `rgba(161, 161, 170, ${alpha})`
+          const alpha = 0.12 + intensity * 0.45
+          ctx!.fillStyle = `rgba(0, 0, 0, ${alpha})`
           ctx!.fillText(char, x + CELL / 2, y + CELL / 2)
         }
       }
 
-      time += 0.04
+      time += 0.015
       animId = requestAnimationFrame(draw)
     }
 
