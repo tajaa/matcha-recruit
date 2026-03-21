@@ -637,7 +637,7 @@ Sent from Matcha Recruit contact form
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping policy signature email")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -720,44 +720,13 @@ If you have questions, please contact your administrator.
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": f"Action Required: Please sign {policy_title}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent policy signature email to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        return await self.send_email(
+            to_email=to_email,
+            to_name=to_name,
+            subject=f"Action Required: Please sign {policy_title}",
+            html_content=html_content,
+            text_content=text_content,
+        )
 
     async def send_broker_client_setup_invitation_email(
         self,
@@ -991,7 +960,7 @@ For security, please change your password after your first login.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping employee invitation email")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1082,44 +1051,13 @@ If you weren't expecting this invitation, please contact your HR administrator.
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": f"Welcome to {company_name} - Set Up Your Account",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent employee invitation to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        return await self.send_email(
+            to_email=to_email,
+            to_name=to_name,
+            subject=f"Welcome to {company_name} - Set Up Your Account",
+            html_content=html_content,
+            text_content=text_content,
+        )
 
 
     async def send_employee_welcome_email(
@@ -1135,7 +1073,7 @@ If you weren't expecting this invitation, please contact your HR administrator.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping employee welcome email")
+            logger.warning("Gmail not configured, skipping employee welcome email")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1278,44 +1216,13 @@ Questions? Contact your HR administrator.
 - Matcha Recruit / {company_name}
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": f"You're all set — welcome to {company_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent employee welcome email to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send welcome email to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending welcome email to %s", to_email)
-            return False
+        return await self.send_email(
+            to_email=to_email,
+            to_name=to_name,
+            subject=f"You're all set — welcome to {company_name}",
+            html_content=html_content,
+            text_content=text_content,
+        )
 
     async def send_task_reminder(
         self,
