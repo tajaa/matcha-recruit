@@ -1228,7 +1228,7 @@ async def portal_upload_credential_document(
 
     from ...core.services.storage import get_storage
     storage = get_storage()
-    file_path = await storage.upload_file(
+    file_path = await storage.upload_private_file(
         file_bytes, filename,
         prefix=f"employee-credentials/{company_id}/{employee_id}",
         content_type=file.content_type,

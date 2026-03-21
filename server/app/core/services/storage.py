@@ -17,6 +17,7 @@ class StorageService:
     def __init__(self):
         settings = get_settings()
         self.bucket = settings.s3_bucket
+        self.private_bucket = settings.s3_private_bucket
         self.region = settings.s3_region
         self.cloudfront_domain = settings.cloudfront_domain
         self.app_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
@@ -222,6 +223,69 @@ class StorageService:
             os.unlink(local_path)
             return True
         return False
+
+    async def upload_private_file(
+        self,
+        file_bytes: bytes,
+        filename: str,
+        prefix: str = "documents",
+        content_type: Optional[str] = None,
+    ) -> str:
+        """Upload a file to the private bucket. Returns an s3:// URI (no CloudFront)."""
+        bucket = self.private_bucket or self.bucket
+        if not self.s3_client or not bucket:
+            raise RuntimeError("S3 not configured for private uploads")
+
+        key = self._generate_key(filename, prefix)
+        extra_args = {}
+        if content_type:
+            extra_args["ContentType"] = content_type
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: self.s3_client.put_object(
+                Bucket=bucket,
+                Key=key,
+                Body=file_bytes,
+                ServerSideEncryption="AES256",
+                **extra_args,
+            ),
+        )
+        return f"s3://{bucket}/{key}"
+
+    def get_presigned_download_url(self, path: str, expires_in: int = 900) -> Optional[str]:
+        """Get a time-limited presigned download URL for a private s3:// path."""
+        if not path.startswith("s3://") or not self.s3_client:
+            return None
+
+        parts = path[5:].split("/", 1)
+        bucket = parts[0]
+        key = parts[1] if len(parts) > 1 else ""
+
+        try:
+            return self.s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key},
+                ExpiresIn=expires_in,
+            )
+        except ClientError:
+            return None
+
+    async def delete_private_file(self, path: str) -> bool:
+        """Delete a file from the private bucket given an s3:// URI."""
+        if not path.startswith("s3://") or not self.s3_client:
+            return False
+
+        parts = path[5:].split("/", 1)
+        bucket = parts[0]
+        key = parts[1] if len(parts) > 1 else ""
+
+        try:
+            self.s3_client.delete_object(Bucket=bucket, Key=key)
+            return True
+        except ClientError:
+            return False
 
     def get_presigned_url(self, path: str, expires_in: int = 3600) -> Optional[str]:
         """Get a presigned URL for downloading a file.

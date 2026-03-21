@@ -42,6 +42,7 @@ class Settings:
 
     # S3 Storage
     s3_bucket: Optional[str] = None
+    s3_private_bucket: Optional[str] = None  # Private bucket for sensitive docs (credentials)
     s3_region: str = "us-east-1"
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
@@ -155,6 +156,7 @@ def load_settings() -> Settings:
         chat_jwt_access_token_expire_minutes=int(os.getenv("CHAT_JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),
         chat_jwt_refresh_token_expire_days=int(os.getenv("CHAT_JWT_REFRESH_TOKEN_EXPIRE_DAYS", "30")),
         s3_bucket=os.getenv("S3_BUCKET"),
+        s3_private_bucket=os.getenv("S3_PRIVATE_BUCKET"),
         s3_region=os.getenv("S3_REGION", "us-east-1"),
         aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),

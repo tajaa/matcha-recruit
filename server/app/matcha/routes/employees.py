@@ -4885,7 +4885,7 @@ async def upload_credential_document(
             raise HTTPException(status_code=404, detail="Employee not found")
 
     storage = get_storage()
-    file_path = await storage.upload_file(
+    file_path = await storage.upload_private_file(
         file_bytes, filename,
         prefix=f"employee-credentials/{company_id}/{employee_id}",
         content_type=file.content_type,
@@ -4951,7 +4951,7 @@ async def delete_credential_document(
             raise HTTPException(status_code=404, detail="Document not found")
 
         storage = get_storage()
-        await storage.delete_file(row["file_path"])
+        await storage.delete_private_file(row["file_path"])
 
         await conn.execute("DELETE FROM credential_documents WHERE id = $1", document_id)
 
@@ -5095,9 +5095,7 @@ async def download_credential_document(
             raise HTTPException(status_code=404, detail="Document not found")
 
     storage = get_storage()
-    presigned = storage.get_presigned_url(row["file_path"])
-    if presigned:
-        return {"url": presigned, "filename": row["filename"]}
-
-    # Fallback: return the stored path (CloudFront URL or local)
-    return {"url": row["file_path"], "filename": row["filename"]}
+    presigned = storage.get_presigned_download_url(row["file_path"])
+    if not presigned:
+        raise HTTPException(status_code=500, detail="Unable to generate download URL")
+    return {"url": presigned, "filename": row["filename"]}
