@@ -21,6 +21,7 @@ export type OnboardingCategory =
   | 'training'
   | 'admin'
   | 'return_to_work'
+  | 'credentials'
 
 export type Employee = {
   id: string
@@ -69,7 +70,49 @@ export type OnboardingTask = {
   completed_at: string | null
   completed_by: string | null
   notes: string | null
+  document_type: string | null
   created_at: string
+}
+
+export type CredentialDocument = {
+  id: string
+  company_id: string
+  employee_id: string
+  document_type: string
+  filename: string
+  file_path: string
+  mime_type: string | null
+  file_size: number | null
+  extracted_data: Record<string, unknown> | null
+  extraction_status: string
+  review_status: string
+  reviewed_by: string | null
+  reviewed_at: string | null
+  review_notes: string | null
+  uploaded_by: string | null
+  uploaded_via: string
+  created_at: string
+  updated_at: string
+}
+
+export type EmployeeCredentials = {
+  employee_id: string
+  license_type: string | null
+  license_number: string | null
+  license_state: string | null
+  license_expiration: string | null
+  npi_number: string | null
+  dea_number: string | null
+  dea_expiration: string | null
+  board_certification: string | null
+  board_certification_expiration: string | null
+  clinical_specialty: string | null
+  oig_last_checked: string | null
+  oig_status: string | null
+  malpractice_carrier: string | null
+  malpractice_policy_number: string | null
+  malpractice_expiration: string | null
+  health_clearances: Record<string, unknown>
 }
 
 export type OnboardingProgress = {

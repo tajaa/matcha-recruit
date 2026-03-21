@@ -1,5 +1,7 @@
+import { useRef, useState } from 'react'
 import { Badge, Button } from '../ui'
 import { useOnboardingTasks } from '../../hooks/employees/useOnboardingTasks'
+import { useCredentialDocuments } from '../../hooks/employees/useCredentialDocuments'
 import type { OnboardingTask } from '../../types/employee'
 
 const categoryLabel: Record<string, string> = {
@@ -8,6 +10,7 @@ const categoryLabel: Record<string, string> = {
   training: 'Training',
   admin: 'Admin',
   return_to_work: 'Return to Work',
+  credentials: 'Credentials',
 }
 
 const statusVariant = {
@@ -16,8 +19,56 @@ const statusVariant = {
   pending: 'warning',
 } as const
 
+function CredentialUploadButton({
+  employeeId,
+  documentType,
+  onUploaded,
+}: {
+  employeeId: string
+  documentType: string
+  onUploaded: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const { upload } = useCredentialDocuments(employeeId)
+  const [uploading, setUploading] = useState(false)
+
+  const handleFile = async (file: File) => {
+    setUploading(true)
+    try {
+      await upload(file, documentType)
+      onUploaded()
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <>
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        accept=".pdf,.png,.jpg,.jpeg,.gif,.tiff"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (file) handleFile(file)
+          e.target.value = ''
+        }}
+      />
+      <Button
+        size="sm"
+        variant="primary"
+        disabled={uploading}
+        onClick={() => inputRef.current?.click()}
+      >
+        {uploading ? 'Uploading...' : 'Upload'}
+      </Button>
+    </>
+  )
+}
+
 export function OnboardingTaskList({ employeeId }: { employeeId: string }) {
-  const { tasks, loading, updateTask } = useOnboardingTasks(employeeId)
+  const { tasks, loading, updateTask, refetch } = useOnboardingTasks(employeeId)
 
   if (loading) return <p className="text-xs text-zinc-500">Loading tasks...</p>
   if (tasks.length === 0) return <p className="text-xs text-zinc-500">No onboarding tasks.</p>
@@ -67,10 +118,18 @@ export function OnboardingTaskList({ employeeId }: { employeeId: string }) {
                 </Badge>
                 {t.status === 'pending' && (
                   <div className="flex gap-1">
-                    <Button size="sm" variant="ghost"
-                      onClick={() => updateTask(t.id, { status: 'completed' })}>
-                      Complete
-                    </Button>
+                    {t.category === 'credentials' && t.document_type ? (
+                      <CredentialUploadButton
+                        employeeId={employeeId}
+                        documentType={t.document_type}
+                        onUploaded={refetch}
+                      />
+                    ) : (
+                      <Button size="sm" variant="ghost"
+                        onClick={() => updateTask(t.id, { status: 'completed' })}>
+                        Complete
+                      </Button>
+                    )}
                     <Button size="sm" variant="ghost"
                       onClick={() => updateTask(t.id, { status: 'skipped' })}>
                       Skip

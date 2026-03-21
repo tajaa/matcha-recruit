@@ -409,7 +409,7 @@ async def create_template(
     company_id = await get_client_company_id(current_user)
 
     # Validate category
-    valid_categories = ["documents", "equipment", "training", "admin", "return_to_work", "priority"]
+    valid_categories = ["documents", "equipment", "training", "admin", "return_to_work", "priority", "credentials"]
     if request.category not in valid_categories:
         raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {valid_categories}")
 
@@ -467,7 +467,7 @@ async def update_template(
 
         # Validate category if provided
         if request.category:
-            valid_categories = ["documents", "equipment", "training", "admin", "return_to_work", "priority"]
+            valid_categories = ["documents", "equipment", "training", "admin", "return_to_work", "priority", "credentials"]
             if request.category not in valid_categories:
                 raise HTTPException(status_code=400, detail=f"Invalid category. Must be one of: {valid_categories}")
 

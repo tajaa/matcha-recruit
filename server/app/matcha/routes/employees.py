@@ -1049,6 +1049,33 @@ async def create_employee(
         except Exception:
             logger.exception("Failed to auto-assign onboarding tasks for employee %s", row["id"])
 
+        # Auto-create credential onboarding tasks based on job title
+        try:
+            from ...core.services.credential_inference import infer_credential_requirements
+            job_title_val = None
+            if org_fields_available:
+                job_title_val = row.get("job_title")
+            if not job_title_val:
+                job_title_val = body.job_title
+            cred_reqs = await infer_credential_requirements(job_title_val)
+            if cred_reqs:
+                cred_base_date = start_date or date.today()
+                cred_due = cred_base_date + timedelta(days=7)
+                for req in cred_reqs:
+                    await conn.execute(
+                        "INSERT INTO employee_onboarding_tasks "
+                        "(id, employee_id, title, description, category, is_employee_task, due_date, status, document_type) "
+                        "VALUES (gen_random_uuid(), $1, $2, $3, 'credentials', TRUE, $4, 'pending', $5)",
+                        row["id"],
+                        f"Upload {req.label}",
+                        f"Upload your {req.label.lower()} document for verification",
+                        cred_due,
+                        req.document_type,
+                    )
+                logger.info("Created %d credential tasks for employee %s (%s)", len(cred_reqs), row["id"], job_title_val)
+        except Exception:
+            logger.exception("Failed to auto-create credential tasks for employee %s", row["id"])
+
         google_workspace_auto_provision = False
         slack_auto_provision = False
         try:
@@ -2454,6 +2481,7 @@ class EmployeeOnboardingTaskResponse(BaseModel):
     completed_at: Optional[datetime]
     completed_by: Optional[UUID]
     notes: Optional[str]
+    document_type: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -2804,6 +2832,7 @@ async def get_employee_onboarding_tasks(
                 completed_at=row["completed_at"],
                 completed_by=row["completed_by"],
                 notes=row["notes"],
+                document_type=row.get("document_type"),
                 created_at=row["created_at"],
             )
             for row in rows
@@ -3160,6 +3189,7 @@ async def update_employee_onboarding_task(
             completed_at=row["completed_at"],
             completed_by=row["completed_by"],
             notes=row["notes"],
+            document_type=row.get("document_type"),
             created_at=row["created_at"],
         )
 
@@ -5038,6 +5068,17 @@ async def approve_credential_document(
                     ON CONFLICT (employee_id) DO UPDATE SET {', '.join(set_clauses)}
                 """
                 await conn.execute(sql, *values)
+
+        # Auto-complete matching credential onboarding task
+        try:
+            await conn.execute(
+                """UPDATE employee_onboarding_tasks
+                   SET status = 'completed', completed_at = NOW(), completed_by = $1, updated_at = NOW()
+                   WHERE employee_id = $2 AND document_type = $3 AND status = 'pending'""",
+                current_user.id, employee_id, row["document_type"],
+            )
+        except Exception:
+            logger.exception("Failed to auto-complete onboarding task for credential doc %s", document_id)
 
     return {"message": "Document approved", "applied_to_credentials": body.apply_to_credentials}
 

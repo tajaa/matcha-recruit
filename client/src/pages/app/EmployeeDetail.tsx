@@ -3,12 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Badge, Button, Card, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { OnboardingTaskList } from '../../components/employees/OnboardingTaskList'
+import { CredentialManager } from '../../components/employees/CredentialManager'
 import { useEmployeeDetail } from '../../hooks/employees/useEmployeeDetail'
 import { typeLabel, statusLabel } from '../../types/employee'
 
 const STATUS_OPTIONS = Object.entries(statusLabel).map(([value, label]) => ({ value, label }))
 
-type Tab = 'profile' | 'onboarding'
+type Tab = 'profile' | 'onboarding' | 'credentials'
 
 const PROFILE_FIELDS: { key: string; label: string; type?: string }[] = [
   { key: 'first_name', label: 'First Name' },
@@ -125,7 +126,7 @@ export default function EmployeeDetail() {
         <div className="col-span-2">
           {/* Tabs */}
           <div className="flex gap-1 mb-4">
-            {(['profile', 'onboarding'] as const).map((t) => (
+            {(['profile', 'onboarding', 'credentials'] as const).map((t) => (
               <Button
                 key={t}
                 variant={tab === t ? 'primary' : 'ghost'}
@@ -183,6 +184,9 @@ export default function EmployeeDetail() {
             )}
             {tab === 'onboarding' && (
               <OnboardingTaskList employeeId={employeeId!} />
+            )}
+            {tab === 'credentials' && (
+              <CredentialManager employeeId={employeeId!} />
             )}
           </Card>
         </div>
