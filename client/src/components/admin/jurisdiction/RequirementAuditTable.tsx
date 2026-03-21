@@ -266,8 +266,8 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
                       <td className="py-1.5 px-3 text-zinc-400 text-[11px] whitespace-nowrap">
                         {CATEGORY_SHORT_LABELS[req.category] ?? req.category}
                       </td>
-                      <td className="py-1.5 px-3 text-zinc-300 text-[11px] max-w-[180px]" title={req.title}>
-                        {req.title?.length > 40 ? req.title.slice(0, 40) + '…' : req.title}
+                      <td className="py-1.5 px-3 text-zinc-300 text-[11px] max-w-[180px]" title={req.title ?? undefined}>
+                        {(req.title?.length ?? 0) > 40 ? req.title!.slice(0, 40) + '…' : req.title}
                       </td>
                       <td className="py-1.5 px-3">
                         <div className="flex items-center gap-1.5">
@@ -283,8 +283,8 @@ export default function RequirementAuditTable({ onEditRequirement }: Requirement
                           <span className="text-[10px] font-mono text-zinc-500">{Math.round(req.completeness_score)}%</span>
                         </div>
                       </td>
-                      <td className="py-1.5 px-3">{tierBadge(req.source_tier)}</td>
-                      <td className="py-1.5 px-3">{provenanceBadge(req.research_source)}</td>
+                      <td className="py-1.5 px-3">{tierBadge(req.source_tier ?? '')}</td>
+                      <td className="py-1.5 px-3">{provenanceBadge(req.research_source ?? '')}</td>
                       <td className="py-1.5 px-3">{stalenessCell(req.staleness_days)}</td>
                       <td className="py-1.5 px-3">{qualityFlags(req)}</td>
                       <td className="py-1.5 px-3">

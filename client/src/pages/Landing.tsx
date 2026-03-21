@@ -3,6 +3,7 @@ import { motion, useInView } from 'framer-motion'
 import { LinkButton } from '../components/ui'
 import { AsciiHalftone } from '../components/AsciiHalftone'
 import { GlitchText } from '../components/GlitchText'
+import { PricingContactModal } from '../components/PricingContactModal'
 
 const ParticleSphere = lazy(() => import('../components/ParticleSphere'))
 
@@ -631,8 +632,11 @@ const SECTIONS = [
 ]
 
 export default function Landing() {
+  const [isPricingOpen, setIsPricingOpen] = useState(false)
+
   return (
     <div className="relative bg-zinc-900 text-zinc-100 overflow-hidden">
+      <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <div className="relative z-10">
         {/* Nav */}
         <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center px-6 pt-5">
@@ -661,7 +665,10 @@ export default function Landing() {
               </span>
             </div>
             <div className="flex items-center gap-5">
-              <span className="hidden sm:inline text-[11px] tracking-[0.2em] text-zinc-400 font-[Space_Mono] uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300">
+              <span
+                onClick={() => setIsPricingOpen(true)}
+                className="hidden sm:inline text-[11px] tracking-[0.2em] text-zinc-400 font-[Space_Mono] uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300"
+              >
                 Pricing
               </span>
               <LinkButton

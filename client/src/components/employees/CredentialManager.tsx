@@ -106,7 +106,7 @@ function DocumentCard({
             </>
           )}
           {confirming ? (
-            <Button size="sm" variant="danger" onClick={() => { onDelete(); setConfirming(false) }}>
+            <Button size="sm" variant="primary" className="!bg-red-600 hover:!bg-red-500" onClick={() => { onDelete(); setConfirming(false) }}>
               Confirm
             </Button>
           ) : (
