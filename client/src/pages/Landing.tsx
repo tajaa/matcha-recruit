@@ -635,38 +635,51 @@ export default function Landing() {
     <div className="relative bg-zinc-900 text-zinc-100 overflow-hidden">
       <div className="relative z-10">
         {/* Nav */}
-        <nav className="flex items-center justify-between px-8 py-4 border-b border-zinc-700/50">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2.5 pr-6 border-r border-zinc-700/50">
-              <img src="/logo.svg" alt="Matcha" className="h-6 w-6" />
-              <span className="text-base font-bold tracking-[0.25em] uppercase">
+        <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center px-6 pt-5">
+          <div
+            className="flex items-center justify-between w-full max-w-6xl px-6 py-3 rounded-full border border-zinc-700/30"
+            style={{
+              background: 'rgba(24, 24, 27, 0.6)',
+              backdropFilter: 'blur(16px) saturate(1.4)',
+              WebkitBackdropFilter: 'blur(16px) saturate(1.4)',
+              boxShadow: '0 0 20px rgba(0,0,0,0.3), inset 0 0.5px 0 rgba(255,255,255,0.05)',
+            }}
+          >
+            <div className="flex items-center gap-2.5">
+              <img src="/logo.svg" alt="Matcha" className="h-5 w-5" />
+              <span className="text-sm font-bold tracking-[0.25em] uppercase">
                 Matcha
               </span>
             </div>
-            <div className="hidden sm:flex items-center gap-2 text-xs tracking-[0.15em] text-zinc-500 font-[Space_Mono]">
-              <span className="inline-block h-2 w-2 bg-emerald-500 rounded-sm" />
-              ACTIVE MODULE // HERO
+            <div className="hidden sm:flex items-center gap-1.5">
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
+              </span>
+              <span className="text-[10px] tracking-[0.2em] text-zinc-500 font-[Space_Mono] uppercase">
+                Systems Online
+              </span>
             </div>
-          </div>
-          <div className="flex items-center gap-6">
-            <span className="hidden sm:inline text-xs tracking-[0.2em] text-zinc-400 font-[Space_Mono] uppercase hover:text-zinc-200 cursor-pointer transition-colors">
-              Pricing
-            </span>
-            <LinkButton
-              to="/login"
-              variant="secondary"
-              size="sm"
-              className="tracking-[0.2em] font-[Space_Mono] uppercase border border-zinc-600"
-            >
-              Login
-            </LinkButton>
+            <div className="flex items-center gap-5">
+              <span className="hidden sm:inline text-[11px] tracking-[0.2em] text-zinc-400 font-[Space_Mono] uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300">
+                Pricing
+              </span>
+              <LinkButton
+                to="/login"
+                variant="ghost"
+                size="sm"
+                className="tracking-[0.2em] font-[Space_Mono] uppercase text-zinc-300 hover:text-emerald-400 border border-zinc-600/50 hover:border-emerald-500/40 rounded-full px-5 transition-all duration-300"
+              >
+                Login
+              </LinkButton>
+            </div>
           </div>
         </nav>
 
         {/* Hero */}
-        <div className="relative">
+        <div className="relative pt-16">
           <AsciiHalftone />
-        <section className="relative max-w-7xl mx-auto px-8 min-h-[85vh] flex items-center">
+        <section className="relative max-w-7xl mx-auto px-8 min-h-[90vh] flex items-center">
           {/* System tag */}
           <div className="absolute top-8 left-8 text-[11px] tracking-[0.12em] text-zinc-600 font-[Space_Mono] border border-zinc-700/40 px-3 py-1.5 rounded-sm">
             SYSTEM CORE // OFFLINE MODE
@@ -710,6 +723,29 @@ export default function Landing() {
               <ParticleSphere className="w-full h-[70vh] opacity-80" />
             </Suspense>
           </div>
+
+          {/* Scroll Down Chevron */}
+          <button
+            onClick={() => {
+              document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })
+            }}
+            className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 group cursor-pointer z-10"
+            aria-label="Scroll down"
+          >
+            <span className="text-[9px] font-[Space_Mono] tracking-[0.3em] text-zinc-600 uppercase group-hover:text-zinc-400 transition-colors duration-300">
+              Explore
+            </span>
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              className="text-zinc-500 group-hover:text-emerald-400 transition-colors duration-300"
+              style={{ animation: 'chevron-bounce 2s ease-in-out infinite' }}
+            >
+              <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </section>
         </div>
 
@@ -719,6 +755,10 @@ export default function Landing() {
             0% { transform: translate(-50%,-50%) scale(0.5); opacity: 0.3; }
             100% { transform: translate(-50%,-50%) scale(1.5); opacity: 0; }
           }
+          @keyframes chevron-bounce {
+            0%, 100% { transform: translateY(0); opacity: 0.6; }
+            50% { transform: translateY(6px); opacity: 1; }
+          }
         `}</style>
 
         {/* ── Feature Sections ─────────────────────────────────── */}
@@ -727,6 +767,7 @@ export default function Landing() {
           const Graphic = section.graphic
           return (
             <motion.section
+              id={idx === 0 ? 'features' : undefined}
               key={section.title}
               initial={{ opacity: 0 }}
               whileInView={{ opacity: 1 }}
