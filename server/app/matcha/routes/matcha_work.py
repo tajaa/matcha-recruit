@@ -1721,13 +1721,16 @@ async def send_message(
         compliance_result = await build_compliance_context(company_id)
         ctx += "\n\n" + compliance_result.context_text
 
-    # Payer mode — inject payer medical policy context for coverage/prior auth questions
+    # Payer mode — build dedicated medical policy prompt (separate from HR copilot)
+    payer_prompt = None
     if thread.get("payer_mode"):
         try:
             import os as _os
             from ...core.services.embedding_service import EmbeddingService
             from ...core.services.payer_policy_rag import PayerPolicyRAGService
             from ...config import get_settings as _get_settings
+            from ..services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT
+            from datetime import date as _date
 
             user_msg = body.content or ""
             _api_key = _os.getenv("GEMINI_API_KEY") or _get_settings().gemini_api_key
@@ -1737,22 +1740,21 @@ async def send_message(
                 async with get_connection() as _pconn:
                     payer_ctx, _sources = await _rag.get_context_for_query(
                         query=user_msg, conn=_pconn,
-                        company_id=company_id, max_tokens=4000,
+                        company_id=company_id, max_tokens=6000,
                     )
-                if payer_ctx:
-                    ctx += (
-                        "\n\n## Payer Medical Policies\n"
-                        "You have access to payer coverage data below. When the user asks about "
-                        "coverage criteria, prior authorization, clinical criteria, or medical necessity, "
-                        "answer using this data. Cite the policy number and source URL.\n\n"
-                        + payer_ctx
-                    )
+                company_name = profile.get("name", "your company")
+                payer_prompt = PAYER_MODE_SYSTEM_PROMPT.format(
+                    company_name=company_name,
+                    today=_date.today().isoformat(),
+                    payer_context=payer_ctx or "No matching payer policy data found. Answer based on general knowledge but clearly state this is not from verified policy data.",
+                )
         except Exception as _e:
-            logger.warning("Failed to load payer policy context: %s", _e)
+            logger.warning("Failed to build payer policy prompt: %s", _e)
 
     ai_resp = await ai_provider.generate(
         msg_dicts, thread["current_state"], company_context=ctx,
         slide_index=body.slide_index, context_summary=context_summary,
+        payer_mode_prompt=payer_prompt,
     )
     _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
     final_usage = ai_resp.token_usage

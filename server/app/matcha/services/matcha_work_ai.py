@@ -61,6 +61,20 @@ SUPPORTED_AI_OPERATIONS = {
     "none",
 }
 
+PAYER_MODE_SYSTEM_PROMPT = """You are a medical policy and coverage expert assistant for {company_name}.
+
+Today's date: {today}
+
+Mission:
+1) Answer questions about payer coverage criteria, prior authorization requirements, and medical necessity.
+2) Cite specific clinical criteria, documentation requirements, and policy numbers.
+3) State whether prior authorization is required for a given procedure.
+4) Include source URLs when available.
+5) If the provided data doesn't contain an answer, say so clearly.
+
+{payer_context}
+"""
+
 MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE = """You are Matcha Work, an HR copilot for US employers.
 
 Today's date: {today}
@@ -346,7 +360,48 @@ class GeminiProvider(MatchaWorkAIProvider):
         company_context: str = "",
         slide_index: Optional[int] = None,
         context_summary: Optional[str] = None,
+        payer_mode_prompt: Optional[str] = None,
     ) -> AIResponse:
+        if payer_mode_prompt:
+            # Payer mode: dedicated medical policy prompt, plain text response (no JSON)
+            window_size = 15 if context_summary else 20
+            windowed = messages[-window_size:]
+            payer_contents = [
+                types.Content(
+                    role="model" if m["role"] == "assistant" else "user",
+                    parts=[types.Part.from_text(text=m["content"])],
+                )
+                for m in windowed
+                if m.get("content")
+            ]
+            full_prompt = payer_mode_prompt
+            if context_summary:
+                full_prompt += f"\n\nPrior conversation summary:\n{context_summary}"
+
+            model = await _get_model(self.settings)
+            try:
+                response = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        lambda: self.client.models.generate_content(
+                            model=model,
+                            contents=payer_contents,
+                            config=types.GenerateContentConfig(
+                                system_instruction=full_prompt,
+                                temperature=0.2,
+                            ),
+                        )
+                    ),
+                    timeout=GEMINI_CALL_TIMEOUT,
+                )
+                reply = response.text or "I couldn't generate a response."
+                return AIResponse(assistant_reply=reply, structured_update=None)
+            except Exception as e:
+                logger.error("Payer mode Gemini call failed: %s", e, exc_info=True)
+                return AIResponse(
+                    assistant_reply="I encountered an error looking up payer policy data. Please try again.",
+                    structured_update=None,
+                )
+
         system_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context, slide_index=slide_index,
             context_summary=context_summary,
