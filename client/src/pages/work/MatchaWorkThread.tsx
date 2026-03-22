@@ -191,9 +191,9 @@ export default function MatchaWorkThread() {
   }
 
   return (
-    <div className="flex h-[calc(100vh-49px)]">
+    <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`flex flex-col ${pdfUrl ? 'w-1/2' : 'w-full'} border-r border-zinc-800`}>
+      <div className={`flex flex-col ${pdfUrl ? 'w-full md:w-1/2' : 'w-full'} border-r border-zinc-800`}>
         {/* Header */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800">
           <Link to="/work" className="text-zinc-400 hover:text-white transition-colors">
@@ -206,7 +206,7 @@ export default function MatchaWorkThread() {
                 value={titleDraft}
                 onChange={(e) => setTitleDraft(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleTitleSave()}
-                className="bg-zinc-800 text-white text-sm px-2 py-1 rounded border border-zinc-600 flex-1"
+                className="bg-zinc-800 text-white text-sm px-2 py-2 rounded border border-zinc-600 flex-1"
                 autoFocus
               />
               <button onClick={handleTitleSave} className="text-emerald-400 hover:text-emerald-300">
@@ -241,7 +241,7 @@ export default function MatchaWorkThread() {
             onClick={handleNodeToggle}
             disabled={togglingNode}
             title={nodeMode ? 'Node mode ON — AI uses internal company data' : 'Node mode OFF — click to enable internal data search'}
-            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
+            className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               nodeMode
                 ? 'bg-purple-600 text-white hover:bg-purple-500'
                 : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200'
@@ -255,7 +255,7 @@ export default function MatchaWorkThread() {
             onClick={handleComplianceToggle}
             disabled={togglingCompliance}
             title={complianceMode ? 'Compliance mode ON — AI uses jurisdiction requirements' : 'Compliance mode OFF — click to enable compliance context'}
-            className={`shrink-0 flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
+            className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               complianceMode
                 ? 'bg-cyan-600 text-white hover:bg-cyan-500'
                 : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200'
@@ -279,10 +279,10 @@ export default function MatchaWorkThread() {
               className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
+                className={`max-w-[90%] sm:max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
                   m.role === 'user'
                     ? 'bg-zinc-700 text-white whitespace-pre-wrap'
-                    : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none'
+                    : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
                 }`}
               >
                 {m.role === 'assistant' ? (
@@ -324,7 +324,7 @@ export default function MatchaWorkThread() {
         )}
 
         {/* Input */}
-        <div className="px-4 py-3 border-t border-zinc-800">
+        <div className="px-4 py-3 border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
           {isFinalized ? (
             <div className="text-center text-sm text-zinc-500 py-2">
               This thread has been finalized.
@@ -343,12 +343,12 @@ export default function MatchaWorkThread() {
                 placeholder="Type a message..."
                 rows={1}
                 disabled={inputDisabled}
-                className="flex-1 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2.5 border border-zinc-700 focus:border-emerald-600 focus:outline-none resize-none disabled:opacity-50 placeholder-zinc-500"
+                className="flex-1 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2.5 border border-zinc-700 focus:border-emerald-600 focus:outline-none resize-none disabled:opacity-50 placeholder-zinc-500 min-h-[44px]"
               />
               <button
                 onClick={handleSend}
                 disabled={inputDisabled || !input.trim()}
-                className="p-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-emerald-600"
+                className="p-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-emerald-600"
               >
                 {streaming ? (
                   <Loader2 size={16} className="animate-spin" />
@@ -363,7 +363,7 @@ export default function MatchaWorkThread() {
 
       {/* PDF preview panel */}
       {pdfUrl && (
-        <div className="w-1/2 bg-zinc-900">
+        <div className="hidden md:block md:w-1/2 bg-zinc-900">
           <iframe
             src={pdfUrl}
             className="w-full h-full border-0"

@@ -81,7 +81,7 @@ export default function ComplianceReasoningPanel({ locations, aiSteps, reference
                     <button
                       key={loc.location_id}
                       onClick={() => { setSelectedLocation(i); setSelectedCategory(0) }}
-                      className={`flex items-center gap-1 text-[11px] px-2 py-1 rounded transition-colors ${
+                      className={`flex items-center gap-1 text-xs px-2.5 py-1.5 rounded transition-colors ${
                         i === selectedLocation
                           ? 'bg-cyan-900/40 text-cyan-300 border border-cyan-700/50'
                           : 'bg-zinc-800 text-zinc-400 border border-zinc-700/50 hover:text-zinc-300'
@@ -100,7 +100,7 @@ export default function ComplianceReasoningPanel({ locations, aiSteps, reference
                   {currentLocation.activated_profiles.map((p) => (
                     <span
                       key={p.label}
-                      className="text-[10px] bg-violet-900/40 text-violet-300 border border-violet-700/40 px-1.5 py-0.5 rounded"
+                      className="text-[11px] bg-violet-900/40 text-violet-300 border border-violet-700/40 px-1.5 py-0.5 rounded"
                     >
                       {p.label} — {p.categories.length} triggered
                     </span>
@@ -124,7 +124,7 @@ export default function ComplianceReasoningPanel({ locations, aiSteps, reference
                       <button
                         key={cat.category}
                         onClick={() => setSelectedCategory(i)}
-                        className={`text-[11px] px-2 py-1 rounded border transition-colors ${
+                        className={`text-xs px-2.5 py-1.5 rounded border transition-colors ${
                           i === selectedCategory
                             ? `bg-zinc-800 ${precStyle || 'border-zinc-600 text-zinc-200'}`
                             : 'bg-zinc-800/50 border-zinc-700/50 text-zinc-500 hover:text-zinc-400'
@@ -142,7 +142,7 @@ export default function ComplianceReasoningPanel({ locations, aiSteps, reference
 
               {/* Reasoning text */}
               {currentCategory?.reasoning_text && (
-                <div className="text-[11px] text-zinc-400 bg-zinc-800/50 rounded px-2 py-1.5 border border-zinc-700/30">
+                <div className="text-xs text-zinc-400 bg-zinc-800/50 rounded px-2 py-1.5 border border-zinc-700/30">
                   {currentCategory.reasoning_text}
                 </div>
               )}

@@ -29,7 +29,7 @@ const PRECEDENCE_COLORS: Record<string, { bg: string; text: string }> = {
 
 function QuestionNode({ data }: { data: { question: string; answer: string; conclusion: string; sources: string[] } }) {
   return (
-    <div className="bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 min-w-[300px] max-w-[340px]">
+    <div className="bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 min-w-[260px] max-w-[300px] sm:min-w-[300px] sm:max-w-[340px]">
       <Handle type="target" position={Position.Top} className="!bg-zinc-500" />
       <div className="text-xs font-medium text-cyan-400 mb-1">{data.question}</div>
       <div className="text-xs text-zinc-300">{data.answer}</div>
@@ -52,7 +52,7 @@ function QuestionNode({ data }: { data: { question: string; answer: string; conc
 
 function JurisdictionNode({ data }: { data: { level: string; name: string; title: string; value: string | null; citation: string | null; sourceUrl: string | null; isGoverning: boolean } }) {
   return (
-    <div className={`rounded-lg px-3 py-2 min-w-[300px] max-w-[340px] ${
+    <div className={`rounded-lg px-3 py-2 min-w-[260px] max-w-[300px] sm:min-w-[300px] sm:max-w-[340px] ${
       data.isGoverning
         ? 'bg-zinc-800 border-2 border-cyan-600 shadow-lg shadow-cyan-900/20'
         : 'bg-zinc-800/70 border border-zinc-700'
@@ -99,7 +99,7 @@ function JurisdictionNode({ data }: { data: { level: string; name: string; title
 function ConclusionNode({ data }: { data: { text: string; precedenceType: string | null } }) {
   const precStyle = data.precedenceType ? PRECEDENCE_COLORS[data.precedenceType] : null
   return (
-    <div className="bg-zinc-800 border-2 border-emerald-600 rounded-lg px-3 py-2 min-w-[300px] max-w-[340px]">
+    <div className="bg-zinc-800 border-2 border-emerald-600 rounded-lg px-3 py-2 min-w-[260px] max-w-[300px] sm:min-w-[300px] sm:max-w-[340px]">
       <Handle type="target" position={Position.Top} className="!bg-emerald-500" />
       <div className="flex items-center gap-2">
         <span className="text-emerald-400 text-sm">&#9733;</span>
@@ -319,7 +319,7 @@ export default function ComplianceDecisionTree({ category, aiSteps }: Compliance
   }, [])
 
   return (
-    <div style={{ height }} className="w-full rounded-lg overflow-hidden border border-zinc-700/50">
+    <div style={{ height }} className="w-full rounded-lg overflow-hidden overflow-x-auto border border-zinc-700/50">
       <ReactFlow
         nodes={nodes}
         edges={edges}

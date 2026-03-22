@@ -80,7 +80,7 @@ export default function MatchaWorkList() {
   ]
 
   return (
-    <div className="max-w-4xl mx-auto px-6 py-8">
+    <div className="max-w-4xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-white">Matcha Work</h1>
         <button
@@ -94,7 +94,7 @@ export default function MatchaWorkList() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-zinc-800">
+      <div className="flex gap-1 mb-6 border-b border-zinc-800 overflow-x-auto flex-nowrap">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -142,12 +142,12 @@ export default function MatchaWorkList() {
                     </span>
                   )}
                   {t.node_mode && (
-                    <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-purple-700 text-purple-200">
+                    <span className="shrink-0 px-1.5 py-0.5 text-[11px] sm:text-[10px] font-medium rounded-full bg-purple-700 text-purple-200">
                       Node
                     </span>
                   )}
                   {t.compliance_mode && (
-                    <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-cyan-700 text-cyan-200">
+                    <span className="shrink-0 px-1.5 py-0.5 text-[11px] sm:text-[10px] font-medium rounded-full bg-cyan-700 text-cyan-200">
                       Compliance
                     </span>
                   )}
@@ -159,7 +159,7 @@ export default function MatchaWorkList() {
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex items-center gap-1 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                 {t.status !== 'archived' && (
                   <>
                     <button
