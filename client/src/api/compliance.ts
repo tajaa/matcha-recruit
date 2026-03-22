@@ -302,3 +302,81 @@ export function askRegulatoryQuestion(question: string, locationId?: string): Pr
     location_id: locationId,
   })
 }
+
+// ── Payer Medical Policy Navigator ──
+
+export interface PayerPolicySource {
+  policy_id: string
+  payer_name: string
+  policy_title: string | null
+  policy_number: string | null
+  procedure_description: string | null
+  coverage_status: string
+  source_url: string | null
+  source_document: string | null
+  similarity: number
+}
+
+export interface PayerPolicyQAResponse {
+  answer: string
+  sources: PayerPolicySource[]
+  confidence: number
+}
+
+export interface PayerPolicy {
+  id: string
+  payer_name: string
+  payer_type: string | null
+  policy_number: string | null
+  policy_title: string | null
+  procedure_codes: string[]
+  procedure_description: string | null
+  coverage_status: string
+  requires_prior_auth: boolean
+  clinical_criteria: string | null
+  documentation_requirements: string | null
+  medical_necessity_criteria: string | null
+  frequency_limits: string | null
+  source_url: string | null
+  source_document: string | null
+  effective_date: string | null
+  last_reviewed: string | null
+}
+
+export function askPayerPolicyQuestion(
+  question: string,
+  locationId?: string,
+  payerName?: string,
+): Promise<PayerPolicyQAResponse> {
+  return api.post<PayerPolicyQAResponse>('/compliance/payer-policies/ask', {
+    question,
+    location_id: locationId,
+    payer_name: payerName,
+  })
+}
+
+export function fetchPayerPolicies(params: {
+  payer_name?: string
+  procedure_code?: string
+  requires_prior_auth?: boolean
+  coverage_status?: string
+  limit?: number
+  offset?: number
+} = {}): Promise<PayerPolicy[]> {
+  const searchParams = new URLSearchParams()
+  if (params.payer_name) searchParams.set('payer_name', params.payer_name)
+  if (params.procedure_code) searchParams.set('procedure_code', params.procedure_code)
+  if (params.requires_prior_auth !== undefined) searchParams.set('requires_prior_auth', String(params.requires_prior_auth))
+  if (params.coverage_status) searchParams.set('coverage_status', params.coverage_status)
+  if (params.limit) searchParams.set('limit', String(params.limit))
+  if (params.offset) searchParams.set('offset', String(params.offset))
+  const qs = searchParams.toString()
+  return api.get<PayerPolicy[]>(`/compliance/payer-policies${qs ? '?' + qs : ''}`)
+}
+
+export function researchPayerPolicy(payerName: string, procedure: string): Promise<PayerPolicy> {
+  return api.post<PayerPolicy>('/compliance/payer-policies/research', {
+    payer_name: payerName,
+    procedure,
+  })
+}

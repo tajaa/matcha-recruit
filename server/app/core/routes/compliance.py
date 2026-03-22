@@ -1081,6 +1081,275 @@ async def ask_regulatory_question(
     }
 
 
+# ── Payer Medical Policy Navigator ────────────────────────────────────────
+
+
+class PayerPolicyQuestionRequest(BaseModel):
+    question: str
+    location_id: Optional[str] = None
+    payer_name: Optional[str] = None
+
+
+class PayerPolicyResearchRequest(BaseModel):
+    payer_name: str
+    procedure: str
+
+
+@router.post("/payer-policies/ask")
+async def ask_payer_policy_question(
+    data: PayerPolicyQuestionRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Ask a natural language question about payer coverage criteria."""
+    import os
+
+    from ..services.ai_chat import get_ai_chat_service
+    from ..services.embedding_service import EmbeddingService
+    from ..services.payer_policy_rag import PayerPolicyRAGService
+    from ..services.payer_policy_research import research_payer_policy
+    from ...config import get_settings
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+
+    location_id = None
+    if data.location_id:
+        try:
+            location_id = UUID(data.location_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid location ID")
+
+    settings = get_settings()
+    api_key = os.getenv("GEMINI_API_KEY") or settings.gemini_api_key
+
+    context = ""
+    sources: list[dict] = []
+
+    async with get_connection() as conn:
+        # RAG search
+        if api_key:
+            embedding_service = EmbeddingService(api_key=api_key)
+            rag_service = PayerPolicyRAGService(embedding_service)
+            context, sources = await rag_service.get_context_for_query(
+                query=data.question,
+                conn=conn,
+                company_id=company_id,
+                location_id=location_id,
+                payer_name=data.payer_name,
+            )
+
+        # Auto-research if no local data found
+        if not sources and data.payer_name:
+            try:
+                await research_payer_policy(
+                    data.payer_name, data.question, conn
+                )
+                # Re-search after research populated data
+                if api_key:
+                    context, sources = await rag_service.get_context_for_query(
+                        query=data.question,
+                        conn=conn,
+                        company_id=company_id,
+                        location_id=location_id,
+                        payer_name=data.payer_name,
+                    )
+            except Exception as e:
+                print(f"[Payer Policy] Auto-research failed: {e}")
+
+    # Build system prompt
+    system_parts = [
+        "You are a medical policy expert assistant.",
+        "Answer the physician's question about payer coverage criteria using the policy data below.",
+        "",
+        "RULES:",
+        "- Cite specific clinical criteria and documentation requirements.",
+        "- State whether prior authorization is required.",
+        "- Include the payer's policy number and source URL when available.",
+        "- If the data doesn't contain an answer, say so clearly.",
+        "- Be specific about what must be documented for approval.",
+    ]
+    if context:
+        system_parts.append(f"\n## Payer Policy Data\n{context}")
+    else:
+        system_parts.append(
+            "\n## No matching payer policy data found in the local database."
+            "\nAnswer based on general knowledge but clearly indicate this is not from verified policy data."
+        )
+
+    system_prompt = "\n".join(system_parts)
+    messages = [{"role": "user", "content": data.question}]
+
+    service = get_ai_chat_service()
+    answer_parts = []
+    async for token in service.stream_response(messages, system_prompt):
+        answer_parts.append(token)
+
+    answer = "".join(answer_parts)
+    max_similarity = max((s.get("similarity", 0) for s in sources), default=0)
+
+    return {
+        "answer": answer,
+        "sources": sources,
+        "confidence": round(max_similarity, 2) if sources else 0,
+    }
+
+
+@router.get("/payer-policies")
+async def list_payer_policies(
+    payer_name: Optional[str] = Query(None),
+    procedure_code: Optional[str] = Query(None),
+    requires_prior_auth: Optional[bool] = Query(None),
+    coverage_status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List payer medical policies, filtered by company's payer contracts."""
+    from ..models.compliance import PayerPolicyResponse
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+
+    async with get_connection() as conn:
+        # Resolve company's payer contracts
+        payer_rows = await conn.fetch(
+            """SELECT DISTINCT jsonb_array_elements_text(facility_attributes->'payer_contracts') AS payer
+               FROM business_locations
+               WHERE company_id = $1 AND is_active = true
+                 AND facility_attributes IS NOT NULL
+                 AND facility_attributes->'payer_contracts' IS NOT NULL""",
+            company_id,
+        )
+        company_payers = [r["payer"] for r in payer_rows] if payer_rows else []
+
+        # Build query
+        conditions = []
+        params: list = []
+        idx = 1
+
+        if payer_name:
+            conditions.append(f"payer_name ILIKE ${idx}")
+            params.append(f"%{payer_name}%")
+            idx += 1
+        elif company_payers:
+            # Normalize: facility stores "medicare", DB stores "Medicare"
+            normalized = []
+            for p in company_payers:
+                if p.lower() in ("medicare", "medi_cal", "medicaid_other"):
+                    normalized.append("Medicare")
+                else:
+                    normalized.append(p.title())
+            conditions.append(f"payer_name = ANY(${idx}::text[])")
+            params.append(list(set(normalized)))
+            idx += 1
+
+        if procedure_code:
+            conditions.append(f"${idx} = ANY(procedure_codes)")
+            params.append(procedure_code)
+            idx += 1
+
+        if requires_prior_auth is not None:
+            conditions.append(f"requires_prior_auth = ${idx}")
+            params.append(requires_prior_auth)
+            idx += 1
+
+        if coverage_status:
+            conditions.append(f"coverage_status = ${idx}")
+            params.append(coverage_status)
+            idx += 1
+
+        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+        rows = await conn.fetch(
+            f"""SELECT id, payer_name, payer_type, policy_number, policy_title,
+                       procedure_codes, procedure_description, coverage_status,
+                       requires_prior_auth, clinical_criteria,
+                       documentation_requirements, medical_necessity_criteria,
+                       frequency_limits, source_url, source_document,
+                       effective_date, last_reviewed
+                FROM payer_medical_policies
+                {where}
+                ORDER BY payer_name, policy_title
+                LIMIT ${idx} OFFSET ${idx + 1}""",
+            *params, limit, offset,
+        )
+
+    return [
+        PayerPolicyResponse(
+            id=str(r["id"]),
+            payer_name=r["payer_name"],
+            payer_type=r["payer_type"],
+            policy_number=r["policy_number"],
+            policy_title=r["policy_title"],
+            procedure_codes=r["procedure_codes"] or [],
+            procedure_description=r["procedure_description"],
+            coverage_status=r["coverage_status"],
+            requires_prior_auth=r["requires_prior_auth"] or False,
+            clinical_criteria=r["clinical_criteria"],
+            documentation_requirements=r["documentation_requirements"],
+            medical_necessity_criteria=r["medical_necessity_criteria"],
+            frequency_limits=r["frequency_limits"],
+            source_url=r["source_url"],
+            source_document=r["source_document"],
+            effective_date=r["effective_date"].isoformat() if r["effective_date"] else None,
+            last_reviewed=r["last_reviewed"].isoformat() if r["last_reviewed"] else None,
+        )
+        for r in rows
+    ]
+
+
+@router.post("/payer-policies/research")
+async def research_payer_policy_endpoint(
+    data: PayerPolicyResearchRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Trigger Gemini research for a specific payer + procedure."""
+    from ..services.payer_policy_research import research_payer_policy
+    from ..models.compliance import PayerPolicyResponse
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+
+    async with get_connection() as conn:
+        result = await research_payer_policy(data.payer_name, data.procedure, conn)
+
+    if not result:
+        raise HTTPException(status_code=422, detail="Could not research this policy")
+
+    # Re-fetch the full row for the response
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM payer_medical_policies WHERE id = $1",
+            result["id"],
+        )
+
+    if not row:
+        raise HTTPException(status_code=422, detail="Policy was not stored")
+
+    return PayerPolicyResponse(
+        id=str(row["id"]),
+        payer_name=row["payer_name"],
+        payer_type=row["payer_type"],
+        policy_number=row["policy_number"],
+        policy_title=row["policy_title"],
+        procedure_codes=row["procedure_codes"] or [],
+        procedure_description=row["procedure_description"],
+        coverage_status=row["coverage_status"],
+        requires_prior_auth=row["requires_prior_auth"] or False,
+        clinical_criteria=row["clinical_criteria"],
+        documentation_requirements=row["documentation_requirements"],
+        medical_necessity_criteria=row["medical_necessity_criteria"],
+        frequency_limits=row["frequency_limits"],
+        source_url=row["source_url"],
+        source_document=row["source_document"],
+        effective_date=row["effective_date"].isoformat() if row["effective_date"] else None,
+        last_reviewed=row["last_reviewed"].isoformat() if row["last_reviewed"] else None,
+    )
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Protocol Gap Analysis
 # ──────────────────────────────────────────────────────────────────────────────

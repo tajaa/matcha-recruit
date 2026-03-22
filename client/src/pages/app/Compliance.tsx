@@ -15,10 +15,11 @@ import { CompliancePostersTab } from '../../components/compliance/CompliancePost
 import { ComplianceScanProgress } from '../../components/compliance/ComplianceScanProgress'
 import { FacilityProfileBanner } from '../../components/compliance/FacilityProfileBanner'
 import { RegulatoryQuickAsk } from '../../components/compliance/RegulatoryQuickAsk'
+import { PayerPolicyNavigator } from '../../components/compliance/PayerPolicyNavigator'
 import { updateAlertActionPlan } from '../../api/compliance'
 import type { BusinessLocation, LocationCreate, ComplianceActionPlanUpdate } from '../../types/compliance'
 
-type Tab = 'overview' | 'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters'
+type Tab = 'overview' | 'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: 'Overview' },
@@ -27,6 +28,7 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'upcoming', label: 'Upcoming' },
   { value: 'history', label: 'History' },
   { value: 'posters', label: 'Posters' },
+  { value: 'payer-policies', label: 'Payer Policies' },
 ]
 
 export default function Compliance() {
@@ -231,6 +233,12 @@ export default function Compliance() {
                 )}
                 {tab === 'posters' && (
                   <CompliancePostersTab locationId={selectedId!} />
+                )}
+                {tab === 'payer-policies' && (
+                  <PayerPolicyNavigator
+                    locationId={selectedId}
+                    payerContracts={selectedLoc?.facility_attributes?.payer_contracts || []}
+                  />
                 )}
               </div>
             )}

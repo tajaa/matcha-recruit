@@ -253,6 +253,26 @@ class AlertResponse(BaseModel):
     read_at: Optional[str] = None
 
 
+class PayerPolicyResponse(BaseModel):
+    id: str
+    payer_name: str
+    payer_type: Optional[str] = None
+    policy_number: Optional[str] = None
+    policy_title: Optional[str] = None
+    procedure_codes: list[str] = []
+    procedure_description: Optional[str] = None
+    coverage_status: str = "conditional"
+    requires_prior_auth: bool = False
+    clinical_criteria: Optional[str] = None
+    documentation_requirements: Optional[str] = None
+    medical_necessity_criteria: Optional[str] = None
+    frequency_limits: Optional[str] = None
+    source_url: Optional[str] = None
+    source_document: Optional[str] = None
+    effective_date: Optional[str] = None
+    last_reviewed: Optional[str] = None
+
+
 class CheckLogEntry(BaseModel):
     id: str
     location_id: str
