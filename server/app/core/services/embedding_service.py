@@ -12,9 +12,9 @@ from google import genai
 class EmbeddingService:
     """Generate embeddings using Gemini Embeddings API."""
 
-    # Gemini text-embedding-004 produces 768-dimensional vectors
+    # Gemini embedding model produces 768-dimensional vectors
     EMBEDDING_DIMENSION = 768
-    MODEL = "text-embedding-004"
+    MODEL = "gemini-embedding-001"
 
     # Task types for embeddings
     TASK_RETRIEVAL_DOCUMENT = "RETRIEVAL_DOCUMENT"
