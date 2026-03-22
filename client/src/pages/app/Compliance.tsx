@@ -14,6 +14,7 @@ import { ComplianceHistoryTab } from '../../components/compliance/ComplianceHist
 import { CompliancePostersTab } from '../../components/compliance/CompliancePostersTab'
 import { ComplianceScanProgress } from '../../components/compliance/ComplianceScanProgress'
 import { FacilityProfileBanner } from '../../components/compliance/FacilityProfileBanner'
+import { RegulatoryQuickAsk } from '../../components/compliance/RegulatoryQuickAsk'
 import { updateAlertActionPlan } from '../../api/compliance'
 import type { BusinessLocation, LocationCreate, ComplianceActionPlanUpdate } from '../../types/compliance'
 
@@ -120,6 +121,9 @@ export default function Compliance() {
           <p className="mt-1 text-sm text-zinc-500">Jurisdictional requirements, alerts, and location management.</p>
         </div>
       </div>
+
+      {/* Regulatory Q&A */}
+      <RegulatoryQuickAsk locationId={selectedId} />
 
       {/* Tab nav */}
       <div className="flex items-center gap-1 mt-4 mb-5">

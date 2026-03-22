@@ -86,6 +86,13 @@ export function ComplianceAlertsTab({ alerts, loading, onMarkRead, onDismiss, on
                     </div>
                     <p className="text-xs text-zinc-400 mt-1 leading-5">{alert.message}</p>
 
+                    {alert.impact_summary && (
+                      <div className="mt-2 px-3 py-2 bg-indigo-950/30 border border-indigo-800/30 rounded">
+                        <span className="text-[10px] text-indigo-400 uppercase tracking-wide">Impact Summary</span>
+                        <p className="text-xs text-zinc-200 mt-0.5 leading-5">{alert.impact_summary}</p>
+                      </div>
+                    )}
+
                     {alert.action_required && (
                       <div className="mt-2 px-3 py-2 bg-zinc-800/50 border border-zinc-700 rounded">
                         <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Required Action</span>

@@ -2623,6 +2623,10 @@ async def init_db():
             ALTER TABLE compliance_alerts
             ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'
         """)
+        await conn.execute("""
+            ALTER TABLE compliance_alerts
+            ADD COLUMN IF NOT EXISTS impact_summary TEXT
+        """)
 
         # Compliance requirement history (stateful updates)
         await conn.execute("""
@@ -2802,6 +2806,51 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE jurisdiction_requirements
             ADD COLUMN IF NOT EXISTS applicable_industries TEXT[]
+        """)
+
+        # Compliance embeddings — vectorized jurisdiction_requirements for RAG Q&A
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS compliance_embeddings (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                requirement_id UUID NOT NULL REFERENCES jurisdiction_requirements(id) ON DELETE CASCADE,
+                jurisdiction_id UUID NOT NULL REFERENCES jurisdictions(id) ON DELETE CASCADE,
+                content TEXT NOT NULL,
+                embedding vector(768) NOT NULL,
+                category VARCHAR(50),
+                jurisdiction_level VARCHAR(20),
+                jurisdiction_name VARCHAR(100),
+                applicable_industries TEXT[],
+                metadata JSONB DEFAULT '{}',
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW(),
+                UNIQUE(requirement_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_embeddings_jurisdiction
+            ON compliance_embeddings(jurisdiction_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_compliance_embeddings_category
+            ON compliance_embeddings(category)
+        """)
+
+        # Policy change log — granular per-field change tracking
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS policy_change_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                requirement_id UUID NOT NULL REFERENCES jurisdiction_requirements(id) ON DELETE CASCADE,
+                field_changed VARCHAR(100) NOT NULL,
+                old_value TEXT,
+                new_value TEXT,
+                changed_at TIMESTAMP DEFAULT NOW(),
+                change_source VARCHAR(50),
+                change_reason TEXT
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_policy_change_log_requirement
+            ON policy_change_log(requirement_id, changed_at)
         """)
 
         # Jurisdiction legislation — upcoming/pending legislation per jurisdiction
@@ -3128,6 +3177,11 @@ async def init_db():
         await conn.execute("""
             ALTER TABLE ai_messages
             ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'
+        """)
+        # Add conversation_type for regulatory Q&A vs general chat
+        await conn.execute("""
+            ALTER TABLE ai_conversations
+            ADD COLUMN IF NOT EXISTS conversation_type VARCHAR(30) DEFAULT 'general'
         """)
 
         # ===========================================

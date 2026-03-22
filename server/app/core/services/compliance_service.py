@@ -2608,6 +2608,17 @@ async def _sync_requirements_to_location(
             if material_change:
                 previous_value = old_value
                 last_changed_at = datetime.utcnow()
+                # Log granular field changes to policy_change_log
+                if old_value != new_value:
+                    await _log_policy_change(
+                        conn, existing["id"], "current_value",
+                        old_value, new_value,
+                    )
+                if old_num is not None and new_num is not None and abs(float(old_num) - float(new_num)) > 0.001:
+                    await _log_policy_change(
+                        conn, existing["id"], "numeric_value",
+                        str(old_num), str(new_num),
+                    )
 
             await _update_requirement(
                 conn,
@@ -2937,6 +2948,31 @@ async def _complete_check_log(
         alert_count,
         error,
         log_id,
+    )
+
+
+async def _log_policy_change(
+    conn,
+    requirement_id: UUID,
+    field_changed: str,
+    old_value: Optional[str],
+    new_value: Optional[str],
+    change_source: str = "compliance_check",
+    change_reason: Optional[str] = None,
+) -> None:
+    """Record a granular field-level change in the policy_change_log table."""
+    await conn.execute(
+        """
+        INSERT INTO policy_change_log
+            (requirement_id, field_changed, old_value, new_value, change_source, change_reason)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        """,
+        requirement_id,
+        field_changed,
+        str(old_value) if old_value is not None else None,
+        str(new_value) if new_value is not None else None,
+        change_source,
+        change_reason,
     )
 
 
@@ -4705,6 +4741,13 @@ async def run_compliance_check_stream(
             changes_to_verify = sync_result["changes_to_verify"]
             existing_by_key = sync_result["existing_by_key"]
 
+            # Auto-embed new/updated jurisdiction requirements for RAG Q&A
+            try:
+                from .compliance_embedding_pipeline import embed_updated_requirements
+                asyncio.create_task(embed_updated_requirements(conn, jurisdiction_id))
+            except Exception as e:
+                print(f"[Compliance] Embedding update error: {e}")
+
             # Yield per-requirement status events
             new_keys = {_compute_requirement_key(r) for r in requirements}
             for req in requirements:
@@ -4716,6 +4759,9 @@ async def run_compliance_check_stream(
                     yield {"type": "result", "status": "existing", "message": req_title}
                 else:
                     yield {"type": "result", "status": "new", "message": req_title}
+
+            # Collect (alert_id, change_info) for batch impact summary generation
+            alert_changes_for_summary: list[tuple] = []
 
             # Verify material changes with Gemini (skip verification when using cached repository data)
             # Phase 2.3: Use batched verification for efficiency
@@ -4813,6 +4859,7 @@ async def run_compliance_check_stream(
                                 "verification_explanation": verification.explanation
                             },
                         )
+                        alert_changes_for_summary.append((alert_id, change_info))
                         # Log verification outcome for calibration
                         await _log_verification_outcome(
                             conn,
@@ -4849,6 +4896,7 @@ async def run_compliance_check_stream(
                                 "unverified": True,
                             },
                         )
+                        alert_changes_for_summary.append((alert_id, change_info))
                         # Log verification outcome for calibration
                         await _log_verification_outcome(
                             conn,
@@ -4888,7 +4936,7 @@ async def run_compliance_check_stream(
                     if req.get("description"):
                         change_msg += f" {req['description']}"
                     alert_count += 1
-                    await _create_alert(
+                    overflow_alert_id = await _create_alert(
                         conn,
                         location_id,
                         company_id,
@@ -4901,6 +4949,7 @@ async def run_compliance_check_stream(
                         source_name=req.get("source_name"),
                         alert_type="change",
                     )
+                    alert_changes_for_summary.append((overflow_alert_id, change_info))
                     _record_change_notification_item(
                         change_email_items, req, change_info
                     )
@@ -4958,6 +5007,35 @@ async def run_compliance_check_stream(
                     }
             except Exception as e:
                 print(f"[Compliance] Deadline escalation error: {e}")
+
+            # Generate plain-English impact summaries for change alerts
+            if alert_changes_for_summary:
+                yield {
+                    "type": "progress",
+                    "message": f"Generating impact summaries for {len(alert_changes_for_summary)} alert(s)...",
+                }
+                try:
+                    from .impact_summary import batch_generate_impact_summaries
+
+                    loc_dict = {
+                        "id": location_id,
+                        "name": getattr(location, "name", None) or location_name,
+                        "city": location.city,
+                        "state": location.state,
+                    }
+                    company_row = await conn.fetchrow(
+                        "SELECT name, industry FROM companies WHERE id = $1",
+                        company_id,
+                    )
+                    company_ctx = {
+                        "company_name": company_row["name"] if company_row else "",
+                        "industry": company_row["industry"] if company_row else "",
+                    }
+                    await batch_generate_impact_summaries(
+                        alert_changes_for_summary, loc_dict, company_ctx, conn
+                    )
+                except Exception as e:
+                    print(f"[Compliance] Impact summary generation error: {e}")
 
             await conn.execute(
                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",
@@ -5683,6 +5761,7 @@ async def get_company_alerts(
                 if row.get("effective_date")
                 else None,
                 metadata=_parse_jsonb(row.get("metadata")),
+                impact_summary=row.get("impact_summary"),
                 affected_employee_count=location_employee_counts.get(str(row["location_id"])),
                 created_at=row["created_at"].isoformat(),
                 read_at=row["read_at"].isoformat() if row["read_at"] else None,
@@ -7196,6 +7275,9 @@ async def run_compliance_check_background(
             changes_to_verify = sync_result["changes_to_verify"]
             existing_by_key = sync_result["existing_by_key"]
 
+            # Collect (alert_id, change_info) for batch impact summary generation
+            bg_alert_changes: list[tuple] = []
+
             # Verify changes (skip when using cached repository data)
             if not used_repository:
                 for change_info in changes_to_verify[:MAX_VERIFICATIONS_PER_CHECK]:
@@ -7228,7 +7310,7 @@ async def run_compliance_check_background(
 
                     if confidence >= 0.6:
                         alert_count += 1
-                        await _create_alert(
+                        bg_aid = await _create_alert(
                             conn,
                             location_id,
                             company_id,
@@ -7246,12 +7328,13 @@ async def run_compliance_check_background(
                                 "verification_explanation": verification.explanation
                             },
                         )
+                        bg_alert_changes.append((bg_aid, change_info))
                         _record_change_notification_item(
                             change_email_items, req, change_info
                         )
                     elif confidence >= 0.3:
                         alert_count += 1
-                        await _create_alert(
+                        bg_aid = await _create_alert(
                             conn,
                             location_id,
                             company_id,
@@ -7270,6 +7353,7 @@ async def run_compliance_check_background(
                                 "unverified": True,
                             },
                         )
+                        bg_alert_changes.append((bg_aid, change_info))
                         _record_change_notification_item(
                             change_email_items, req, change_info
                         )
@@ -7281,7 +7365,7 @@ async def run_compliance_check_background(
                     if req.get("description"):
                         change_msg += f" {req['description']}"
                     alert_count += 1
-                    await _create_alert(
+                    bg_oid = await _create_alert(
                         conn,
                         location_id,
                         company_id,
@@ -7294,6 +7378,7 @@ async def run_compliance_check_background(
                         source_name=req.get("source_name"),
                         alert_type="change",
                     )
+                    bg_alert_changes.append((bg_oid, change_info))
                     _record_change_notification_item(
                         change_email_items, req, change_info
                     )
@@ -7325,6 +7410,31 @@ async def run_compliance_check_background(
                 await escalate_upcoming_deadlines(conn, company_id)
             except Exception as e:
                 print(f"[Compliance] Background escalation error: {e}")
+
+            # Generate impact summaries for change alerts (background)
+            if bg_alert_changes:
+                try:
+                    from .impact_summary import batch_generate_impact_summaries
+
+                    loc_dict = {
+                        "id": location_id,
+                        "name": getattr(location, "name", None),
+                        "city": location.city,
+                        "state": location.state,
+                    }
+                    company_row = await conn.fetchrow(
+                        "SELECT name, industry FROM companies WHERE id = $1",
+                        company_id,
+                    )
+                    company_ctx = {
+                        "company_name": company_row["name"] if company_row else "",
+                        "industry": company_row["industry"] if company_row else "",
+                    }
+                    await batch_generate_impact_summaries(
+                        bg_alert_changes, loc_dict, company_ctx, conn
+                    )
+                except Exception as e:
+                    print(f"[Compliance] Background impact summary error: {e}")
 
             await conn.execute(
                 "UPDATE business_locations SET last_compliance_check = NOW() WHERE id = $1",

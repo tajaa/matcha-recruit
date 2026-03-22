@@ -112,6 +112,7 @@ export interface ComplianceAlert {
   verification_sources: VerificationSource[] | null
   effective_date: string | null
   metadata: Record<string, unknown> | null
+  impact_summary: string | null
   affected_employee_count: number | null
   created_at: string
   read_at: string | null

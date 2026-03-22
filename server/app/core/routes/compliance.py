@@ -1024,3 +1024,58 @@ async def get_facility_attributes_endpoint(
         raise HTTPException(status_code=404, detail="Location not found")
 
     return {"facility_attributes": result}
+
+
+# ── Regulatory Q&A ────────────────────────────────────────
+
+
+class RegulatoryQuestionRequest(BaseModel):
+    question: str
+    location_id: Optional[str] = None
+
+
+@router.post("/ask")
+async def ask_regulatory_question(
+    data: RegulatoryQuestionRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Ask a natural language question about regulations for the company."""
+    import asyncio
+    import os
+
+    from ..services.ai_chat import get_ai_chat_service
+    from ..services.embedding_service import EmbeddingService
+    from ..services.compliance_rag import ComplianceRAGService
+    from ...config import get_settings
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+
+    location_id = None
+    if data.location_id:
+        try:
+            location_id = UUID(data.location_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid location ID")
+
+    service = get_ai_chat_service()
+    context, sources = await service.build_regulatory_context(
+        company_id, data.question, location_id=location_id,
+    )
+
+    # Generate answer using the chat model
+    messages = [{"role": "user", "content": data.question}]
+
+    answer_parts = []
+    async for token in service.stream_response(messages, context):
+        answer_parts.append(token)
+
+    answer = "".join(answer_parts)
+    max_similarity = max((s.get("similarity", 0) for s in sources), default=0)
+
+    return {
+        "answer": answer,
+        "sources": sources,
+        "confidence": round(max_similarity, 2) if sources else 0,
+    }

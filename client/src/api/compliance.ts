@@ -275,3 +275,30 @@ export function fetchCoverageMatrix(params: {
   const qs = searchParams.toString()
   return api.get<CoverageMatrixResponse>(`/admin/jurisdictions/coverage-matrix${qs ? '?' + qs : ''}`)
 }
+
+// ── Regulatory Q&A ──
+
+export interface RegulatoryQASource {
+  requirement_id: string
+  title: string
+  category: string
+  jurisdiction_name: string
+  jurisdiction_level: string
+  source_url: string | null
+  source_name: string | null
+  statute_citation: string | null
+  similarity: number
+}
+
+export interface RegulatoryQAResponse {
+  answer: string
+  sources: RegulatoryQASource[]
+  confidence: number
+}
+
+export function askRegulatoryQuestion(question: string, locationId?: string): Promise<RegulatoryQAResponse> {
+  return api.post<RegulatoryQAResponse>('/compliance/ask', {
+    question,
+    location_id: locationId,
+  })
+}

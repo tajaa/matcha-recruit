@@ -247,6 +247,7 @@ class AlertResponse(BaseModel):
     alert_type: Optional[str] = None
     effective_date: Optional[str] = None
     metadata: Optional[dict] = None
+    impact_summary: Optional[str] = None
     affected_employee_count: Optional[int] = None
     created_at: str
     read_at: Optional[str] = None

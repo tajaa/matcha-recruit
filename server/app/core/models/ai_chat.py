@@ -7,11 +7,13 @@ from pydantic import BaseModel
 
 class ConversationCreate(BaseModel):
     title: Optional[str] = None
+    conversation_type: Optional[str] = "general"
 
 
 class ConversationResponse(BaseModel):
     id: UUID
     title: Optional[str]
+    conversation_type: Optional[str] = "general"
     created_at: datetime
     updated_at: datetime
 

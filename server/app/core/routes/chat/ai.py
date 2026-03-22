@@ -88,14 +88,16 @@ async def create_conversation(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company found")
 
+    conv_type = data.conversation_type or "general"
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            """INSERT INTO ai_conversations (company_id, user_id, title)
-               VALUES ($1, $2, $3)
-               RETURNING id, title, created_at, updated_at""",
+            """INSERT INTO ai_conversations (company_id, user_id, title, conversation_type)
+               VALUES ($1, $2, $3, $4)
+               RETURNING id, title, conversation_type, created_at, updated_at""",
             company_id,
             current_user.id,
             data.title,
+            conv_type,
         )
     return ConversationResponse(**dict(row))
 
@@ -110,7 +112,7 @@ async def list_conversations(
 
     async with get_connection() as conn:
         rows = await conn.fetch(
-            """SELECT id, title, created_at, updated_at
+            """SELECT id, title, conversation_type, created_at, updated_at
                FROM ai_conversations
                WHERE company_id = $1 AND user_id = $2
                ORDER BY updated_at DESC""",
@@ -248,7 +250,7 @@ async def send_message(
     async with get_connection() as conn:
         # Verify conversation belongs to this user/company
         conv = await conn.fetchrow(
-            """SELECT id FROM ai_conversations
+            """SELECT id, conversation_type FROM ai_conversations
                WHERE id = $1 AND company_id = $2 AND user_id = $3""",
             conversation_id,
             company_id,
@@ -379,7 +381,15 @@ async def send_message(
         else:
             messages.append({"role": role, "content": msg_content})
 
-    company_context = await service.build_company_context(company_id)
+    conv_type = conv.get("conversation_type", "general") if conv else "general"
+    regulatory_sources: list[dict] = []
+
+    if conv_type == "regulatory":
+        company_context, regulatory_sources = await service.build_regulatory_context(
+            company_id, full_text,
+        )
+    else:
+        company_context = await service.build_company_context(company_id)
 
     async def event_stream():
         full_response = []
@@ -391,6 +401,9 @@ async def send_message(
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
         finally:
+            # Emit sources for regulatory conversations before DONE
+            if regulatory_sources:
+                yield f"data: {json.dumps({'sources': regulatory_sources})}\n\n"
             yield "data: [DONE]\n\n"
 
             # Save the assistant's full response
