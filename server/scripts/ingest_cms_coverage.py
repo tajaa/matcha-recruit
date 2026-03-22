@@ -32,9 +32,12 @@ async def main():
     parser.add_argument("--dry-run", action="store_true", help="Count available documents without ingesting")
     args = parser.parse_args()
 
-    from app.database import get_pool, get_connection
+    from app.config import load_settings
+    from app.database import init_pool, get_pool, get_connection
     from app.core.services.cms_coverage_api import CMSCoverageAPI
 
+    settings = load_settings()
+    await init_pool(settings.database_url)
     pool = await get_pool()
     api = CMSCoverageAPI()
 

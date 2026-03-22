@@ -71,9 +71,12 @@ async def main():
             print(f"  {payer}: {proc}")
         return
 
-    from app.database import get_pool, get_connection
+    from app.config import load_settings
+    from app.database import init_pool, get_pool, get_connection
     from app.core.services.payer_policy_research import research_payer_policy
 
+    settings = load_settings()
+    await init_pool(settings.database_url)
     pool = await get_pool()
 
     async with get_connection() as conn:

@@ -31,9 +31,12 @@ async def main():
     parser.add_argument("--dry-run", action="store_true", help="Count requirements without embedding")
     args = parser.parse_args()
 
-    from app.database import get_pool, get_connection
+    from app.config import load_settings
+    from app.database import init_pool, get_pool, get_connection
     from app.core.services.compliance_embedding_pipeline import embed_requirements
 
+    settings = load_settings()
+    await init_pool(settings.database_url)
     pool = await get_pool()
 
     async with get_connection() as conn:
