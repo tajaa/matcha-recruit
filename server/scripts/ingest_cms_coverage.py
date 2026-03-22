@@ -54,21 +54,22 @@ async def main():
         return
 
     async with get_connection() as conn:
-        total = 0
+        all_changes = []
 
         if not args.lcds_only:
             print("\n=== Ingesting NCDs ===")
-            ncd_count = await api.ingest_all_ncds(conn)
-            total += ncd_count
-            print(f"NCDs ingested: {ncd_count}")
+            ncd_summary = await api.ingest_all_ncds(conn)
+            all_changes.extend(ncd_summary.get("changes", []))
 
         if not args.ncds_only:
             print(f"\n=== Ingesting LCDs{' (state: ' + args.state + ')' if args.state else ''} ===")
-            lcd_count = await api.ingest_all_lcds(conn, state=args.state)
-            total += lcd_count
-            print(f"LCDs ingested: {lcd_count}")
+            lcd_summary = await api.ingest_all_lcds(conn, state=args.state)
+            all_changes.extend(lcd_summary.get("changes", []))
 
-        print(f"\nTotal policies ingested: {total}")
+        if all_changes:
+            print(f"\n=== {len(all_changes)} CHANGES DETECTED ===")
+            for ch in all_changes:
+                print(f"  {ch['policy_number']}: {ch['policy_title']} — changed: {', '.join(ch['fields_changed'])}")
 
         if args.embed:
             print("\n=== Embedding policies ===")

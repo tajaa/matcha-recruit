@@ -1350,6 +1350,61 @@ async def research_payer_policy_endpoint(
     )
 
 
+# ── Admin: CMS Policy Ingestion ────────────────────────────────────────
+
+
+class CMSIngestRequest(BaseModel):
+    source: str = "all"  # "ncds", "lcds", "all"
+    state: Optional[str] = None
+    embed: bool = True
+
+
+@router.post("/admin/payer-policies/ingest")
+async def admin_ingest_cms_policies(
+    data: CMSIngestRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Trigger CMS Medicare policy ingestion with change detection. Admin only."""
+    from ..dependencies import require_admin as _check_admin
+    from ..services.cms_coverage_api import CMSCoverageAPI
+
+    # Enforce admin-only (not just client)
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+    api = CMSCoverageAPI()
+    await api.get_license_token()
+
+    response = {
+        "total": 0,
+        "new": 0,
+        "updated": 0,
+        "unchanged": 0,
+        "failed": 0,
+        "changes": [],
+        "embedded": 0,
+    }
+
+    async with get_connection() as conn:
+        if data.source in ("ncds", "all"):
+            ncd_summary = await api.ingest_all_ncds(conn)
+            for k in ("total", "new", "updated", "unchanged", "failed"):
+                response[k] += ncd_summary.get(k, 0)
+            response["changes"].extend(ncd_summary.get("changes", []))
+
+        if data.source in ("lcds", "all"):
+            lcd_summary = await api.ingest_all_lcds(conn, state=data.state)
+            for k in ("total", "new", "updated", "unchanged", "failed"):
+                response[k] += lcd_summary.get(k, 0)
+            response["changes"].extend(lcd_summary.get("changes", []))
+
+        if data.embed and response["total"] > 0:
+            from ..services.payer_policy_embedding_pipeline import embed_policies
+            response["embedded"] = await embed_policies(conn, payer_name="Medicare")
+
+    return response
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Protocol Gap Analysis
 # ──────────────────────────────────────────────────────────────────────────────

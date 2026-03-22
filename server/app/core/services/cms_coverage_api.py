@@ -150,7 +150,8 @@ class CMSCoverageAPI:
     async def ingest_ncd(self, ncd_id: int, version: int, conn) -> Optional[dict]:
         """Fetch an NCD and store it as a payer_medical_policies row.
 
-        Returns the policy dict on success, None on failure.
+        Returns dict with policy data + _ingest_status ("new"/"updated"/"unchanged")
+        and _changes (list of changed field names) on success, None on failure.
         """
         try:
             ncd = await self.get_ncd(ncd_id, version)
@@ -179,6 +180,12 @@ class CMSCoverageAPI:
         effective = _parse_date(ncd.get("effective_date", ""))
         source_url = f"https://www.cms.gov/medicare-coverage-database/view/ncd.aspx?ncdid={ncd_id}&ncdver={version}"
 
+        # Check existing row for change detection
+        existing = await conn.fetchrow(
+            "SELECT clinical_criteria, coverage_status, cms_document_version FROM payer_medical_policies WHERE payer_name = 'Medicare' AND policy_number = $1",
+            policy_number,
+        )
+
         row = await conn.fetchrow(
             """
             INSERT INTO payer_medical_policies
@@ -203,15 +210,15 @@ class CMSCoverageAPI:
                 updated_at = NOW()
             RETURNING id, payer_name, policy_number, policy_title
             """,
-            "Medicare",  # payer_name
-            "government",  # payer_type
+            "Medicare",
+            "government",
             policy_number,
             title,
-            item_description[:500] if item_description else title,  # procedure_description
+            item_description[:500] if item_description else title,
             coverage_status,
             clinical_criteria,
-            None,  # documentation_requirements (NCDs don't typically have these)
-            clinical_criteria[:2000] if clinical_criteria else None,  # medical_necessity_criteria
+            None,
+            clinical_criteria[:2000] if clinical_criteria else None,
             effective,
             source_url,
             f"NCD {display_id}",
@@ -225,12 +232,32 @@ class CMSCoverageAPI:
             }),
         )
 
-        return dict(row) if row else None
+        if not row:
+            return None
+
+        result = dict(row)
+
+        # Detect changes
+        if not existing:
+            result["_ingest_status"] = "new"
+            result["_changes"] = []
+        else:
+            changes = []
+            if (existing["clinical_criteria"] or "") != (clinical_criteria or ""):
+                changes.append("clinical_criteria")
+            if (existing["coverage_status"] or "") != coverage_status:
+                changes.append("coverage_status")
+            if existing["cms_document_version"] != version:
+                changes.append("cms_document_version")
+            result["_ingest_status"] = "updated" if changes else "unchanged"
+            result["_changes"] = changes
+
+        return result
 
     async def ingest_lcd_with_codes(self, lcd_id: int, version: int, conn) -> Optional[dict]:
         """Fetch an LCD, its related articles, CPT/ICD codes, and store as a policy row.
 
-        Returns the policy dict on success, None on failure.
+        Returns dict with policy data + _ingest_status and _changes on success, None on failure.
         """
         try:
             lcd = await self.get_lcd(lcd_id, version)
@@ -292,6 +319,12 @@ class CMSCoverageAPI:
         last_reviewed = _parse_date(lcd.get("last_reviewed_on", ""))
         source_url = f"https://www.cms.gov/medicare-coverage-database/view/lcd.aspx?lcdid={lcd_id}&ver={version}"
 
+        # Check existing row for change detection
+        existing = await conn.fetchrow(
+            "SELECT clinical_criteria, coverage_status, cms_document_version FROM payer_medical_policies WHERE payer_name = 'Medicare' AND policy_number = $1",
+            policy_number,
+        )
+
         row = await conn.fetchrow(
             """
             INSERT INTO payer_medical_policies
@@ -345,34 +378,72 @@ class CMSCoverageAPI:
             }),
         )
 
-        return dict(row) if row else None
+        if not row:
+            return None
 
-    async def ingest_all_ncds(self, conn) -> int:
-        """Ingest all NCDs from CMS API. Returns count of ingested policies."""
+        result = dict(row)
+        if not existing:
+            result["_ingest_status"] = "new"
+            result["_changes"] = []
+        else:
+            changes = []
+            if (existing["clinical_criteria"] or "") != (clinical_criteria or ""):
+                changes.append("clinical_criteria")
+            if (existing["coverage_status"] or "") != coverage_status:
+                changes.append("coverage_status")
+            if existing["cms_document_version"] != version:
+                changes.append("cms_document_version")
+            result["_ingest_status"] = "updated" if changes else "unchanged"
+            result["_changes"] = changes
+
+        return result
+
+    async def ingest_all_ncds(self, conn) -> dict:
+        """Ingest all NCDs from CMS API. Returns summary with change detection."""
         ncds = await self.list_ncds()
-        count = 0
-        for ncd in ncds:
+        summary = {"total": 0, "new": 0, "updated": 0, "unchanged": 0, "failed": 0, "changes": []}
+        for i, ncd in enumerate(ncds):
             result = await self.ingest_ncd(
                 ncd["document_id"], ncd["document_version"], conn
             )
             if result:
-                count += 1
-                if count % 50 == 0:
-                    print(f"[CMS API] Ingested {count}/{len(ncds)} NCDs")
-        print(f"[CMS API] Ingested {count} NCDs total")
-        return count
+                summary["total"] += 1
+                status = result.get("_ingest_status", "new")
+                summary[status] = summary.get(status, 0) + 1
+                if status == "updated":
+                    summary["changes"].append({
+                        "policy_number": result["policy_number"],
+                        "policy_title": result["policy_title"],
+                        "fields_changed": result.get("_changes", []),
+                    })
+                if summary["total"] % 50 == 0:
+                    print(f"[CMS API] Ingested {summary['total']}/{len(ncds)} NCDs")
+            else:
+                summary["failed"] += 1
+        print(f"[CMS API] NCDs: {summary['total']} total ({summary['new']} new, {summary['updated']} updated, {summary['unchanged']} unchanged)")
+        return summary
 
-    async def ingest_all_lcds(self, conn, state: Optional[str] = None) -> int:
-        """Ingest all final LCDs from CMS API. Returns count of ingested policies."""
+    async def ingest_all_lcds(self, conn, state: Optional[str] = None) -> dict:
+        """Ingest all final LCDs from CMS API. Returns summary with change detection."""
         lcds = await self.list_lcds(state=state)
-        count = 0
-        for lcd in lcds:
+        summary = {"total": 0, "new": 0, "updated": 0, "unchanged": 0, "failed": 0, "changes": []}
+        for i, lcd in enumerate(lcds):
             result = await self.ingest_lcd_with_codes(
                 lcd["document_id"], lcd["document_version"], conn
             )
             if result:
-                count += 1
-                if count % 50 == 0:
-                    print(f"[CMS API] Ingested {count}/{len(lcds)} LCDs")
-        print(f"[CMS API] Ingested {count} LCDs total")
-        return count
+                summary["total"] += 1
+                status = result.get("_ingest_status", "new")
+                summary[status] = summary.get(status, 0) + 1
+                if status == "updated":
+                    summary["changes"].append({
+                        "policy_number": result["policy_number"],
+                        "policy_title": result["policy_title"],
+                        "fields_changed": result.get("_changes", []),
+                    })
+                if summary["total"] % 50 == 0:
+                    print(f"[CMS API] Ingested {summary['total']}/{len(lcds)} LCDs")
+            else:
+                summary["failed"] += 1
+        print(f"[CMS API] LCDs: {summary['total']} total ({summary['new']} new, {summary['updated']} updated, {summary['unchanged']} unchanged)")
+        return summary
