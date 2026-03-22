@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import Markdown from 'react-markdown'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
-import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode } from '../../api/matchaWork'
+import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import ComplianceReasoningPanel from '../../components/matcha-work/ComplianceReasoningPanel'
 
 const TASK_LABELS: Record<string, string> = {
@@ -35,6 +35,10 @@ export default function MatchaWorkThread() {
   const [complianceMode, setComplianceModeState] = useState(false)
   const [togglingCompliance, setTogglingCompliance] = useState(false)
 
+  // Payer mode
+  const [payerMode, setPayerModeState] = useState(false)
+  const [togglingPayer, setTogglingPayer] = useState(false)
+
   // Stream status
   const [statusMessage, setStatusMessage] = useState('')
 
@@ -56,6 +60,7 @@ export default function MatchaWorkThread() {
         setMessages(data.messages)
         setNodeModeState(data.node_mode)
         setComplianceModeState(data.compliance_mode)
+        setPayerModeState(data.payer_mode)
         // Check if there's already a PDF-worthy task type
         if (data.task_type === 'offer_letter' || data.task_type === 'presentation') {
           setPdfUrl(getPdfProxyUrl(threadId, data.version))
@@ -167,6 +172,17 @@ export default function MatchaWorkThread() {
     setTogglingCompliance(false)
   }
 
+  async function handlePayerToggle() {
+    if (!threadId || togglingPayer) return
+    const newVal = !payerMode
+    setTogglingPayer(true)
+    try {
+      await setPayerMode(threadId, newVal)
+      setPayerModeState(newVal)
+    } catch {}
+    setTogglingPayer(false)
+  }
+
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -263,6 +279,20 @@ export default function MatchaWorkThread() {
           >
             <Shield size={12} />
             Compliance
+          </button>
+
+          <button
+            onClick={handlePayerToggle}
+            disabled={togglingPayer}
+            title={payerMode ? 'Payer mode ON — AI uses Medicare/payer coverage data' : 'Payer mode OFF — click to enable payer policy context'}
+            className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
+              payerMode
+                ? 'bg-emerald-600 text-white hover:bg-emerald-500'
+                : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200'
+            }`}
+          >
+            <Stethoscope size={12} />
+            Payer
           </button>
         </div>
 

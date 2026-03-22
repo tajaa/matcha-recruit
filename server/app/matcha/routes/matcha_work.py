@@ -38,6 +38,7 @@ from ..models.matcha_work import (
     PinThreadRequest,
     NodeModeRequest,
     ComplianceModeRequest,
+    PayerModeRequest,
     ThreadDetailResponse,
     ThreadListItem,
     OfferLetterDocument,
@@ -1720,32 +1721,32 @@ async def send_message(
         compliance_result = await build_compliance_context(company_id)
         ctx += "\n\n" + compliance_result.context_text
 
-    # Inject payer policy context for healthcare companies
-    if (profile.get("industry") or "").lower() in ("healthcare", "health care"):
+    # Payer mode — inject payer medical policy context for coverage/prior auth questions
+    if thread.get("payer_mode"):
         try:
-            user_msg = body.content or ""
-            if user_msg and len(user_msg) > 10:
-                import os as _os
-                from ...core.services.embedding_service import EmbeddingService
-                from ...core.services.payer_policy_rag import PayerPolicyRAGService
-                from ...config import get_settings as _get_settings
+            import os as _os
+            from ...core.services.embedding_service import EmbeddingService
+            from ...core.services.payer_policy_rag import PayerPolicyRAGService
+            from ...config import get_settings as _get_settings
 
-                _api_key = _os.getenv("GEMINI_API_KEY") or _get_settings().gemini_api_key
-                if _api_key:
-                    _emb = EmbeddingService(api_key=_api_key)
-                    _rag = PayerPolicyRAGService(_emb)
-                    async with get_connection() as _pconn:
-                        payer_ctx, _sources = await _rag.get_context_for_query(
-                            query=user_msg, conn=_pconn,
-                            company_id=company_id, max_tokens=4000,
-                        )
-                    if payer_ctx:
-                        ctx += (
-                            "\n\n## Payer Medical Policies\n"
-                            "Use the following Medicare/payer coverage data when the user asks "
-                            "about coverage criteria, prior authorization, or medical necessity.\n\n"
-                            + payer_ctx
-                        )
+            user_msg = body.content or ""
+            _api_key = _os.getenv("GEMINI_API_KEY") or _get_settings().gemini_api_key
+            if _api_key and user_msg:
+                _emb = EmbeddingService(api_key=_api_key)
+                _rag = PayerPolicyRAGService(_emb)
+                async with get_connection() as _pconn:
+                    payer_ctx, _sources = await _rag.get_context_for_query(
+                        query=user_msg, conn=_pconn,
+                        company_id=company_id, max_tokens=4000,
+                    )
+                if payer_ctx:
+                    ctx += (
+                        "\n\n## Payer Medical Policies\n"
+                        "You have access to payer coverage data below. When the user asks about "
+                        "coverage criteria, prior authorization, clinical criteria, or medical necessity, "
+                        "answer using this data. Cite the policy number and source URL.\n\n"
+                        + payer_ctx
+                    )
         except Exception as _e:
             logger.warning("Failed to load payer policy context: %s", _e)
 
@@ -2611,6 +2612,31 @@ async def set_thread_compliance_mode(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     row = await doc_svc.set_thread_compliance_mode(thread_id, company_id, body.compliance_mode)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row_dict = dict(row)
+    current_state = _json_object(row_dict.pop("current_state", {}))
+    return ThreadListItem(
+        **{
+            **row_dict,
+            "task_type": _infer_skill_from_state(current_state),
+        }
+    )
+
+
+@router.post("/threads/{thread_id}/payer-mode", response_model=ThreadListItem)
+async def set_thread_payer_mode(
+    thread_id: UUID,
+    body: PayerModeRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Enable or disable Payer mode (medical policy coverage data) for a thread."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    row = await doc_svc.set_thread_payer_mode(thread_id, company_id, body.payer_mode)
     if row is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 

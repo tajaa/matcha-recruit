@@ -41,6 +41,10 @@ export function setComplianceMode(id: string, compliance_mode: boolean) {
   return api.post<MWThread>(`/matcha-work/threads/${id}/compliance-mode`, { compliance_mode })
 }
 
+export function setPayerMode(id: string, payer_mode: boolean) {
+  return api.post<MWThread>(`/matcha-work/threads/${id}/payer-mode`, { payer_mode })
+}
+
 export function archiveThread(id: string) {
   return api.delete(`/matcha-work/threads/${id}`)
 }

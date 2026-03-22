@@ -226,6 +226,7 @@ class CreateThreadResponse(BaseModel):
     is_pinned: bool = False
     node_mode: bool = False
     compliance_mode: bool = False
+    payer_mode: bool = False
     created_at: datetime
     assistant_reply: Optional[str] = None
     pdf_url: Optional[str] = None
@@ -274,6 +275,7 @@ class ThreadListItem(BaseModel):
     is_pinned: bool = False
     node_mode: bool = False
     compliance_mode: bool = False
+    payer_mode: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -300,6 +302,7 @@ class ThreadDetailResponse(BaseModel):
     is_pinned: bool = False
     node_mode: bool = False
     compliance_mode: bool = False
+    payer_mode: bool = False
     linked_offer_letter_id: Optional[UUID] = None
     created_at: datetime
     updated_at: datetime
@@ -348,6 +351,10 @@ class NodeModeRequest(BaseModel):
 
 class ComplianceModeRequest(BaseModel):
     compliance_mode: bool = True
+
+
+class PayerModeRequest(BaseModel):
+    payer_mode: bool = True
 
 
 class UsageTotals(BaseModel):

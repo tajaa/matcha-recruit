@@ -16,6 +16,7 @@ export interface MWThread {
   is_pinned: boolean
   node_mode: boolean
   compliance_mode: boolean
+  payer_mode: boolean
   version: number
   created_at: string
   updated_at: string
@@ -112,6 +113,7 @@ export interface MWCreateResponse {
   is_pinned: boolean
   node_mode: boolean
   compliance_mode: boolean
+  payer_mode: boolean
   created_at: string
   assistant_reply: string | null
   pdf_url: string | null

@@ -1054,7 +1054,7 @@ async def set_thread_pinned(
             UPDATE mw_threads
             SET is_pinned=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, payer_mode, created_at, updated_at, current_state
             """,
             is_pinned,
             thread_id,
@@ -1077,7 +1077,7 @@ async def set_thread_node_mode(
             UPDATE mw_threads
             SET node_mode=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, payer_mode, created_at, updated_at, current_state
             """,
             node_mode,
             thread_id,
@@ -1099,9 +1099,31 @@ async def set_thread_compliance_mode(
             UPDATE mw_threads
             SET compliance_mode=$1, updated_at=NOW()
             WHERE id=$2 AND company_id=$3
-            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at, current_state
+            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, payer_mode, created_at, updated_at, current_state
             """,
             compliance_mode,
+            thread_id,
+            company_id,
+        )
+        if row is None:
+            return None
+        return _thread_list_item_from_row(dict(row))
+
+
+async def set_thread_payer_mode(
+    thread_id: UUID,
+    company_id: UUID,
+    payer_mode: bool,
+) -> Optional[dict]:
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE mw_threads
+            SET payer_mode=$1, updated_at=NOW()
+            WHERE id=$2 AND company_id=$3
+            RETURNING id, title, status, version, is_pinned, node_mode, compliance_mode, payer_mode, created_at, updated_at, current_state
+            """,
+            payer_mode,
             thread_id,
             company_id,
         )

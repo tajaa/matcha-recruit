@@ -4363,6 +4363,12 @@ async def init_db():
                 ) THEN
                     ALTER TABLE mw_threads ADD COLUMN compliance_mode BOOLEAN NOT NULL DEFAULT false;
                 END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'mw_threads' AND column_name = 'payer_mode'
+                ) THEN
+                    ALTER TABLE mw_threads ADD COLUMN payer_mode BOOLEAN NOT NULL DEFAULT false;
+                END IF;
             END $$;
         """)
         await conn.execute("""

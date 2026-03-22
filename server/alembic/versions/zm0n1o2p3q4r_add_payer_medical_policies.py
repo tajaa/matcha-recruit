@@ -83,8 +83,14 @@ def upgrade():
         ON payer_policy_embeddings(payer_name)
     """)
 
+    # Payer mode on mw_threads
+    op.execute("""
+        ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS payer_mode BOOLEAN NOT NULL DEFAULT false
+    """)
+
 
 def downgrade():
+    op.execute("ALTER TABLE mw_threads DROP COLUMN IF EXISTS payer_mode")
     op.execute("DROP INDEX IF EXISTS idx_payer_policy_embeddings_payer")
     op.execute("DROP TABLE IF EXISTS payer_policy_embeddings")
     op.execute("DROP INDEX IF EXISTS idx_payer_policies_cms_doc")
