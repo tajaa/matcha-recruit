@@ -559,6 +559,94 @@ async def _refresh_risk_assessment(company_id: UUID) -> None:
         logger.exception("Background risk assessment recommendations failed for company %s (dimensions already saved)", company_id)
 
 
+async def _perform_oig_screening(
+    *,
+    employee_id: UUID,
+    org_id: UUID,
+    first_name: str,
+    last_name: str,
+) -> None:
+    """Background task: screen employee against OIG LEIE exclusion list."""
+    from ...core.services.oig_screening import get_oig_screening_service
+
+    try:
+        svc = get_oig_screening_service()
+        result = await svc.screen_individual(first_name=first_name, last_name=last_name)
+
+        async with get_connection() as conn:
+            # Update credentials table (oig_status + oig_last_checked already exist)
+            await conn.execute(
+                """
+                UPDATE employee_credentials
+                SET oig_status = $1, oig_last_checked = CURRENT_DATE
+                WHERE employee_id = $2 AND org_id = $3
+                """,
+                result.status,
+                employee_id,
+                org_id,
+            )
+            # If no credentials row yet, insert a minimal one
+            if await conn.fetchval(
+                "SELECT 1 FROM employee_credentials WHERE employee_id = $1 AND org_id = $2",
+                employee_id, org_id,
+            ) is None:
+                await conn.execute(
+                    """
+                    INSERT INTO employee_credentials (employee_id, org_id, oig_status, oig_last_checked)
+                    VALUES ($1, $2, $3, CURRENT_DATE)
+                    """,
+                    employee_id, org_id, result.status,
+                )
+
+        if result.matched:
+            name = f"{first_name} {last_name}".strip()
+            logger.warning(
+                "OIG LEIE match for employee %s (%s): confidence=%s, %d matches",
+                employee_id, name, result.confidence, len(result.matches),
+            )
+            # Email alert to company admins
+            try:
+                email_svc = get_email_service()
+                if email_svc.is_configured():
+                    async with get_connection() as conn:
+                        admins = await conn.fetch(
+                            """
+                            SELECT u.email, u.first_name
+                            FROM users u
+                            WHERE u.company_id = $1 AND u.role IN ('client', 'admin')
+                            """,
+                            org_id,
+                        )
+                    for admin in admins:
+                        await email_svc.send_email(
+                            to_email=admin["email"],
+                            to_name=admin["first_name"],
+                            subject=f"OIG Exclusion Alert: {name}",
+                            html_content=f"""
+                            <div style="font-family: system-ui, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+                                <div style="background: #fef2f2; border-left: 4px solid #ef4444; padding: 16px; border-radius: 8px;">
+                                    <h2 style="color: #dc2626; margin-top: 0;">OIG Exclusion Match Detected</h2>
+                                    <p>Employee <strong>{name}</strong> has been flagged during OIG LEIE screening.</p>
+                                    <p><strong>Confidence:</strong> {result.confidence}</p>
+                                    <p><strong>Matches found:</strong> {len(result.matches)}</p>
+                                    <p style="color: #6b7280; font-size: 14px;">
+                                        Please review this match immediately. Employing an excluded individual in a federal
+                                        healthcare program can result in Civil Monetary Penalties of $100,000 per item/service.
+                                    </p>
+                                </div>
+                            </div>
+                            """,
+                            text_content=f"OIG Exclusion Match: {name} — confidence: {result.confidence}, {len(result.matches)} match(es). Review immediately.",
+                        )
+            except Exception:
+                logger.exception("Failed to send OIG alert email for employee %s", employee_id)
+        else:
+            logger.info("OIG LEIE screening cleared for employee %s", employee_id)
+
+    except Exception:
+        logger.exception("OIG screening failed for employee %s", employee_id)
+
+
 async def _run_provisioning_and_notify(
     *,
     company_id: UUID,
@@ -1167,6 +1255,15 @@ async def create_employee(
                     )
             except Exception:
                 logger.exception("Auto-invite check failed for employee %s", row["id"])
+
+        # OIG exclusion screening (healthcare companies)
+        background_tasks.add_task(
+            _perform_oig_screening,
+            employee_id=row["id"],
+            org_id=company_id,
+            first_name=request.first_name,
+            last_name=request.last_name,
+        )
 
         return response
 
@@ -5140,3 +5237,125 @@ async def download_credential_document(
     if not presigned:
         raise HTTPException(status_code=500, detail="Unable to generate download URL")
     return {"url": presigned, "filename": row["filename"]}
+
+
+# ── OIG Exclusion Screening ─────────────────────────────────────────────────
+
+
+@router.get("/oig-summary")
+async def get_oig_summary(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get company-wide OIG screening summary."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE ec.oig_status = 'cleared') AS cleared,
+                COUNT(*) FILTER (WHERE ec.oig_status = 'excluded') AS excluded,
+                COUNT(*) FILTER (WHERE ec.oig_status = 'review_needed') AS review_needed,
+                COUNT(*) FILTER (WHERE ec.oig_status = 'not_checked' OR ec.oig_status IS NULL) AS not_checked,
+                MIN(ec.oig_last_checked) AS oldest_check
+            FROM employees e
+            LEFT JOIN employee_credentials ec ON ec.employee_id = e.id AND ec.org_id = e.org_id
+            WHERE e.org_id = $1 AND e.status != 'terminated'
+            """,
+            company_id,
+        )
+        r = rows[0]
+        return {
+            "total": r["total"],
+            "cleared": r["cleared"],
+            "excluded": r["excluded"],
+            "review_needed": r["review_needed"],
+            "not_checked": r["not_checked"],
+            "oldest_check": r["oldest_check"].isoformat() if r["oldest_check"] else None,
+        }
+
+
+@router.get("/{employee_id}/oig-status")
+async def get_employee_oig_status(
+    employee_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get OIG screening status for a single employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT e.first_name, e.last_name,
+                   COALESCE(ec.oig_status, 'not_checked') AS oig_status,
+                   ec.oig_last_checked
+            FROM employees e
+            LEFT JOIN employee_credentials ec ON ec.employee_id = e.id AND ec.org_id = e.org_id
+            WHERE e.id = $1 AND e.org_id = $2
+            """,
+            employee_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+        return {
+            "employee_id": str(employee_id),
+            "name": f"{row['first_name']} {row['last_name']}".strip(),
+            "oig_status": row["oig_status"],
+            "oig_last_checked": row["oig_last_checked"].isoformat() if row["oig_last_checked"] else None,
+        }
+
+
+@router.post("/{employee_id}/oig-screen")
+async def screen_employee_oig(
+    employee_id: UUID,
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Manually trigger OIG screening for an employee."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT first_name, last_name FROM employees WHERE id = $1 AND org_id = $2",
+            employee_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Employee not found")
+
+    background_tasks.add_task(
+        _perform_oig_screening,
+        employee_id=employee_id,
+        org_id=company_id,
+        first_name=row["first_name"],
+        last_name=row["last_name"],
+    )
+
+    return {"status": "screening_queued", "employee_id": str(employee_id)}
+
+
+@router.post("/oig-batch-screen")
+async def batch_screen_oig(
+    background_tasks: BackgroundTasks,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Re-screen all active employees against OIG LEIE."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        employees = await conn.fetch(
+            "SELECT id, first_name, last_name FROM employees WHERE org_id = $1 AND status != 'terminated'",
+            company_id,
+        )
+
+    for emp in employees:
+        background_tasks.add_task(
+            _perform_oig_screening,
+            employee_id=emp["id"],
+            org_id=company_id,
+            first_name=emp["first_name"],
+            last_name=emp["last_name"],
+        )
+
+    return {"status": "batch_screening_queued", "employee_count": len(employees)}
