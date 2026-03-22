@@ -1267,7 +1267,7 @@ async def list_payer_policies(
                        procedure_codes, procedure_description, coverage_status,
                        requires_prior_auth, clinical_criteria,
                        documentation_requirements, medical_necessity_criteria,
-                       frequency_limits, source_url, source_document,
+                       age_restrictions, frequency_limits, source_url, source_document,
                        effective_date, last_reviewed
                 FROM payer_medical_policies
                 {where}
@@ -1290,6 +1290,7 @@ async def list_payer_policies(
             clinical_criteria=r["clinical_criteria"],
             documentation_requirements=r["documentation_requirements"],
             medical_necessity_criteria=r["medical_necessity_criteria"],
+            age_restrictions=r["age_restrictions"],
             frequency_limits=r["frequency_limits"],
             source_url=r["source_url"],
             source_document=r["source_document"],
@@ -1315,14 +1316,12 @@ async def research_payer_policy_endpoint(
 
     async with get_connection() as conn:
         result = await research_payer_policy(data.payer_name, data.procedure, conn)
+        if not result:
+            raise HTTPException(status_code=422, detail="Could not research this policy")
 
-    if not result:
-        raise HTTPException(status_code=422, detail="Could not research this policy")
-
-    # Re-fetch the full row for the response
-    async with get_connection() as conn:
+        # Fetch the full row within the same connection
         row = await conn.fetchrow(
-            "SELECT * FROM payer_medical_policies WHERE id = $1",
+            """SELECT * FROM payer_medical_policies WHERE id = $1""",
             result["id"],
         )
 
@@ -1342,6 +1341,7 @@ async def research_payer_policy_endpoint(
         clinical_criteria=row["clinical_criteria"],
         documentation_requirements=row["documentation_requirements"],
         medical_necessity_criteria=row["medical_necessity_criteria"],
+        age_restrictions=row["age_restrictions"],
         frequency_limits=row["frequency_limits"],
         source_url=row["source_url"],
         source_document=row["source_document"],

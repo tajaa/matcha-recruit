@@ -336,6 +336,7 @@ export interface PayerPolicy {
   clinical_criteria: string | null
   documentation_requirements: string | null
   medical_necessity_criteria: string | null
+  age_restrictions: string | null
   frequency_limits: string | null
   source_url: string | null
   source_document: string | null

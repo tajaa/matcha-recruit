@@ -266,6 +266,7 @@ class PayerPolicyResponse(BaseModel):
     clinical_criteria: Optional[str] = None
     documentation_requirements: Optional[str] = None
     medical_necessity_criteria: Optional[str] = None
+    age_restrictions: Optional[str] = None
     frequency_limits: Optional[str] = None
     source_url: Optional[str] = None
     source_document: Optional[str] = None
