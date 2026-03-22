@@ -60,7 +60,8 @@ class PayerPolicyRAGService:
             JOIN payer_medical_policies pp ON pe.policy_id = pp.id
             WHERE 1=1
         """
-        params: list = [query_embedding]
+        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        params: list = [embedding_str]
         idx = 2
 
         if payer_names:

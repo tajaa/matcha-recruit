@@ -125,7 +125,7 @@ async def embed_policies(
                 row["id"],
                 row["payer_name"],
                 text,
-                embedding,
+                "[" + ",".join(str(x) for x in embedding) + "]",
                 json.dumps(metadata),
             )
             total += 1
@@ -188,7 +188,7 @@ async def embed_updated_policies(conn: asyncpg.Connection) -> int:
                 row["id"],
                 row["payer_name"],
                 text,
-                embedding,
+                "[" + ",".join(str(x) for x in embedding) + "]",
                 json.dumps(metadata),
             )
             total += 1

@@ -79,7 +79,8 @@ class ComplianceRAGService:
             JOIN jurisdiction_requirements jr ON ce.requirement_id = jr.id
             WHERE 1=1
         """
-        params: list = [query_embedding]
+        embedding_str = "[" + ",".join(str(x) for x in query_embedding) + "]"
+        params: list = [embedding_str]
         idx = 2
 
         if jurisdiction_ids:
