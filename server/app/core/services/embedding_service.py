@@ -68,7 +68,7 @@ class EmbeddingService:
         response = await self.client.aio.models.embed_content(
             model=self.MODEL,
             contents=text,
-            config={"task_type": task_type},
+            config={"task_type": task_type, "output_dimensionality": self.EMBEDDING_DIMENSION},
         )
         return list(response.embeddings[0].values)
 
@@ -97,7 +97,7 @@ class EmbeddingService:
             response = await self.client.aio.models.embed_content(
                 model=self.MODEL,
                 contents=batch,
-                config={"task_type": task_type},
+                config={"task_type": task_type, "output_dimensionality": self.EMBEDDING_DIMENSION},
             )
             batch_embeddings = [list(e.values) for e in response.embeddings]
             all_embeddings.extend(batch_embeddings)
@@ -122,7 +122,7 @@ class EmbeddingService:
         response = self.client.models.embed_content(
             model=self.MODEL,
             contents=text,
-            config={"task_type": task_type},
+            config={"task_type": task_type, "output_dimensionality": self.EMBEDDING_DIMENSION},
         )
         return list(response.embeddings[0].values)
 
@@ -150,7 +150,7 @@ class EmbeddingService:
             response = self.client.models.embed_content(
                 model=self.MODEL,
                 contents=batch,
-                config={"task_type": task_type},
+                config={"task_type": task_type, "output_dimensionality": self.EMBEDDING_DIMENSION},
             )
             batch_embeddings = [list(e.values) for e in response.embeddings]
             all_embeddings.extend(batch_embeddings)
