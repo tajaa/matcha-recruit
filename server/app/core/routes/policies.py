@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form, BackgroundTasks
+from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from ...matcha.dependencies import require_admin_or_client, get_client_company_id
@@ -26,6 +27,81 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/policies", tags=["policies"])
+
+
+# ---------------------------------------------------------------------------
+# Topic-based policy drafting
+# ---------------------------------------------------------------------------
+
+class PolicyDraftFromTopicRequest(BaseModel):
+    topic: str = Field(..., min_length=2, max_length=500, description="Policy topic (e.g., 'Bloodborne Pathogen Exposure Control')")
+    jurisdiction: str = Field(..., min_length=2, max_length=100, description="Target jurisdiction (e.g., 'California', 'CA')")
+    location_id: Optional[UUID] = Field(None, description="Optional business location ID to narrow jurisdiction scope")
+    industry_context: Optional[str] = Field(None, max_length=200, description="Optional industry context (e.g., 'oncology clinic')")
+
+
+class PolicyDraftCitation(BaseModel):
+    requirement_key: str
+    title: str
+    source_url: str
+
+
+class PolicyDraftFromTopicResponse(BaseModel):
+    title: str
+    content: str
+    citations: List[PolicyDraftCitation]
+    applicable_jurisdictions: List[str]
+    category: str
+
+
+@router.post("/draft", response_model=PolicyDraftFromTopicResponse)
+async def draft_policy_from_topic(
+    body: PolicyDraftFromTopicRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Generate a policy draft for a freeform topic and jurisdiction.
+
+    Fetches relevant regulatory requirements from the database and uses
+    Gemini to produce a complete policy document with citations.
+    """
+    from ..services.policy_draft_service import (
+        draft_policy_from_topic as _draft_policy_from_topic,
+        _fetch_requirements_for_topic,
+    )
+
+    try:
+        # Fetch requirements matching the topic + jurisdiction
+        requirements = await _fetch_requirements_for_topic(
+            jurisdiction=body.jurisdiction,
+            topic=body.topic,
+            location_id=str(body.location_id) if body.location_id else None,
+        )
+
+        logger.info(
+            "Policy draft: topic=%r jurisdiction=%r matched %d requirements",
+            body.topic,
+            body.jurisdiction,
+            len(requirements),
+        )
+
+        # Generate the policy draft
+        result = await _draft_policy_from_topic(
+            topic=body.topic,
+            jurisdiction=body.jurisdiction,
+            requirements=requirements,
+            industry=body.industry_context,
+        )
+
+        return PolicyDraftFromTopicResponse(**result)
+
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:
+        logger.error("Policy draft from topic failed: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Policy generation failed: {str(exc)}",
+        )
 
 
 async def send_signature_emails_task(signatures: List[PolicySignatureWithToken], policy: PolicyResponse):

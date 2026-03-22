@@ -410,3 +410,344 @@ async def generate_policy_draft_stream(
             return
 
     yield {"type": "error", "message": "All AI models unavailable. Please try again later."}
+
+
+# ---------------------------------------------------------------------------
+# Topic-based policy drafting (freeform topic + jurisdiction)
+# ---------------------------------------------------------------------------
+
+
+def _match_topic_to_categories(topic: str) -> List[str]:
+    """Match a freeform topic string to known policy type categories.
+
+    Checks each policy type's label and value for a substring match
+    against the topic. Returns the union of matched categories, or an
+    empty list if no policy type matches (meaning we fall back to text
+    search).
+    """
+    topic_lower = topic.lower().strip()
+    matched_categories: List[str] = []
+    for pt in POLICY_TYPES:
+        label_lower = pt["label"].lower()
+        value_lower = pt["value"].lower()
+        # Check if the topic is a substring of the label/value or vice-versa
+        if (
+            topic_lower in label_lower
+            or label_lower in topic_lower
+            or topic_lower in value_lower
+            or value_lower in topic_lower
+        ):
+            matched_categories.extend(pt["categories"])
+    return list(set(matched_categories))
+
+
+async def _fetch_requirements_for_topic(
+    jurisdiction: str,
+    topic: str,
+    location_id: Optional[str] = None,
+) -> List[dict]:
+    """Fetch jurisdiction_requirements rows relevant to a topic + jurisdiction.
+
+    Strategy:
+    1. Find jurisdiction rows matching the jurisdiction name (state match).
+    2. If the topic maps to known policy-type categories, filter by those.
+    3. Otherwise, do ILIKE text search on title/description against the topic.
+    4. Also include federal-level requirements from the same categories.
+    """
+    matched_categories = _match_topic_to_categories(topic)
+
+    async with get_connection() as conn:
+        # Resolve jurisdiction_ids for the given jurisdiction name.
+        # We match state abbreviation OR full jurisdiction_name in the
+        # jurisdiction_requirements table directly (it stores jurisdiction_name).
+        # Also look up via the jurisdictions table for state-level matches.
+        jurisdiction_ids: List = []
+        state_abbr = jurisdiction.strip().upper() if len(jurisdiction.strip()) == 2 else None
+
+        # Try matching via the jurisdictions table
+        if state_abbr:
+            jur_rows = await conn.fetch(
+                "SELECT id FROM jurisdictions WHERE state = $1",
+                state_abbr,
+            )
+        else:
+            # Full state name: look up jurisdiction_requirements by jurisdiction_name
+            # to find the matching jurisdiction_ids, since jurisdictions.state stores
+            # 2-char abbreviations only.
+            jur_name_pattern = f"%{jurisdiction.strip()}%"
+            jur_rows = await conn.fetch(
+                """SELECT DISTINCT jurisdiction_id AS id
+                   FROM jurisdiction_requirements
+                   WHERE jurisdiction_name ILIKE $1
+                   LIMIT 50""",
+                jur_name_pattern,
+            )
+
+        jurisdiction_ids = [r["id"] for r in jur_rows]
+
+        # If a location_id was given, also include that location's jurisdiction
+        if location_id:
+            loc_jur = await conn.fetch(
+                """SELECT j.id FROM jurisdictions j
+                   JOIN business_locations bl ON (
+                       (bl.state = j.state AND (j.city IS NULL OR j.city = ''))
+                       OR (bl.state = j.state AND LOWER(bl.city) = LOWER(j.city))
+                   )
+                   WHERE bl.id = $1""",
+                UUID(location_id),
+            )
+            for r in loc_jur:
+                if r["id"] not in jurisdiction_ids:
+                    jurisdiction_ids.append(r["id"])
+
+        if not jurisdiction_ids:
+            # Fall back: search jurisdiction_requirements by jurisdiction_name directly
+            pattern = f"%{jurisdiction.strip()}%"
+            if matched_categories:
+                rows = await conn.fetch(
+                    """SELECT * FROM jurisdiction_requirements
+                       WHERE jurisdiction_name ILIKE $1
+                         AND category = ANY($2::text[])
+                       ORDER BY category, jurisdiction_level
+                       LIMIT 100""",
+                    pattern,
+                    matched_categories,
+                )
+            else:
+                topic_pattern = f"%{topic.strip()}%"
+                rows = await conn.fetch(
+                    """SELECT * FROM jurisdiction_requirements
+                       WHERE jurisdiction_name ILIKE $1
+                         AND (title ILIKE $2 OR description ILIKE $2 OR category ILIKE $2)
+                       ORDER BY category, jurisdiction_level
+                       LIMIT 100""",
+                    pattern,
+                    topic_pattern,
+                )
+            return [dict(r) for r in rows]
+
+        # Fetch by jurisdiction_ids + category or text search
+        if matched_categories:
+            rows = await conn.fetch(
+                """SELECT * FROM jurisdiction_requirements
+                   WHERE jurisdiction_id = ANY($1::uuid[])
+                     AND category = ANY($2::text[])
+                   ORDER BY category, jurisdiction_level
+                   LIMIT 200""",
+                jurisdiction_ids,
+                matched_categories,
+            )
+            # Also fetch federal-level requirements for the same categories
+            federal_rows = await conn.fetch(
+                """SELECT * FROM jurisdiction_requirements
+                   WHERE jurisdiction_level = 'federal'
+                     AND category = ANY($1::text[])
+                   LIMIT 50""",
+                matched_categories,
+            )
+        else:
+            topic_pattern = f"%{topic.strip()}%"
+            rows = await conn.fetch(
+                """SELECT * FROM jurisdiction_requirements
+                   WHERE jurisdiction_id = ANY($1::uuid[])
+                     AND (title ILIKE $2 OR description ILIKE $2 OR category ILIKE $2)
+                   ORDER BY
+                     CASE WHEN title ILIKE $2 THEN 0
+                          WHEN category ILIKE $2 THEN 1
+                          ELSE 2
+                     END,
+                     category, jurisdiction_level
+                   LIMIT 200""",
+                jurisdiction_ids,
+                topic_pattern,
+            )
+            federal_rows = await conn.fetch(
+                """SELECT * FROM jurisdiction_requirements
+                   WHERE jurisdiction_level = 'federal'
+                     AND (title ILIKE $1 OR description ILIKE $1 OR category ILIKE $1)
+                   LIMIT 50""",
+                topic_pattern,
+            )
+
+        # Merge and deduplicate by requirement id
+        seen_ids = set()
+        results = []
+        for r in list(rows) + list(federal_rows):
+            rid = r["id"]
+            if rid not in seen_ids:
+                seen_ids.add(rid)
+                results.append(dict(r))
+        return results
+
+
+def _build_requirement_context_block(requirements: List[dict]) -> str:
+    """Format a list of requirement dicts into a prompt context block."""
+    if not requirements:
+        return ""
+    block = (
+        "\n\n## Regulatory Requirements from Database\n"
+        "The following requirements are from our verified compliance database. "
+        "Use these as authoritative source material and cite them in the policy:\n\n"
+    )
+    for req in requirements:
+        block += f"- **{req.get('jurisdiction_name', 'Unknown')}** ({req.get('jurisdiction_level', '')}) -- {req.get('category', '')}: "
+        block += f"{req.get('title', '')}"
+        if req.get("current_value"):
+            block += f" -- Current value: {req['current_value']}"
+        if req.get("description"):
+            block += f"\n  Detail: {req['description']}"
+        if req.get("source_url"):
+            block += f"\n  Source: {req['source_url']}"
+        eff = req.get("effective_date")
+        if eff:
+            block += f"\n  Effective: {eff.isoformat() if hasattr(eff, 'isoformat') else eff}"
+        block += "\n"
+    return block
+
+
+async def draft_policy_from_topic(
+    topic: str,
+    jurisdiction: str,
+    requirements: List[dict],
+    industry: Optional[str] = None,
+) -> dict:
+    """Generate a policy draft for a freeform topic and jurisdiction.
+
+    Args:
+        topic: The policy topic (e.g., "Bloodborne Pathogen Exposure Control").
+        jurisdiction: Target jurisdiction (e.g., "California", "CA").
+        requirements: Pre-fetched requirement dicts from the database.
+        industry: Optional industry context string.
+
+    Returns:
+        dict with keys: title, content, citations, applicable_jurisdictions, category.
+    """
+    # Determine industry context
+    canonical_industry = _resolve_industry(industry) if industry else ""
+    industry_prompt_context = _INDUSTRY_POLICY_CONTEXT.get(canonical_industry, "")
+
+    # Build the requirements context block
+    requirements_context = _build_requirement_context_block(requirements)
+
+    # Build citations reference for the prompt — only requirements with source_url
+    citable_requirements = [
+        r for r in requirements if r.get("source_url")
+    ]
+
+    # Collect unique jurisdictions from requirements
+    applicable_jurisdictions = sorted(set(
+        r.get("jurisdiction_name", "") for r in requirements if r.get("jurisdiction_name")
+    ))
+    if jurisdiction not in applicable_jurisdictions:
+        applicable_jurisdictions.insert(0, jurisdiction)
+
+    # Infer category from the matched requirements
+    category_counts: Dict[str, int] = {}
+    for r in requirements:
+        cat = r.get("category", "")
+        if cat:
+            category_counts[cat] = category_counts.get(cat, 0) + 1
+    primary_category = max(category_counts, key=category_counts.get) if category_counts else "general"
+
+    industry_block = ""
+    if industry:
+        industry_block = f"\n\n## Industry Context\nThis policy is for a **{industry}** organization.\n"
+    industry_block += industry_prompt_context
+
+    citations_instruction = ""
+    if citable_requirements:
+        citations_instruction = (
+            "\n\nWhen you cite a requirement, use this exact format in the text: "
+            "[Citation: requirement_key] where requirement_key matches one of the keys below.\n"
+            "Available citation keys:\n"
+        )
+        for r in citable_requirements:
+            citations_instruction += f"  - key=\"{r.get('requirement_key', r.get('title', ''))}\" title=\"{r.get('title', '')}\" source=\"{r.get('source_url', '')}\"\n"
+
+    prompt = f"""You are an employment law attorney and HR policy writer. Draft a complete, professional policy document for the following topic.
+
+## Topic
+{topic}
+
+## Jurisdiction
+{jurisdiction}
+{requirements_context}{industry_block}{citations_instruction}
+
+## Required Sections
+Write the policy in Markdown format with ALL of the following sections:
+
+1. **Purpose** — Why this policy exists
+2. **Scope** — Who and what it applies to
+3. **Definitions** — Key terms used in the policy
+4. **Policy Statement** — The core policy rules and commitments
+5. **Procedures** — Step-by-step implementation procedures
+6. **Responsibilities** — Who is responsible for what (management, employees, HR, etc.)
+7. **Citations & Legal References** — List every regulatory requirement referenced, with source URLs
+8. **Review Schedule** — When and how the policy should be reviewed/updated
+
+## Instructions
+- Write a complete, production-ready policy document.
+- Include jurisdiction-specific details: reference the specific state name, statute numbers, and regulatory codes.
+- When referencing requirements from the database above, cite the source URL in parentheses.
+- Use [COMPANY NAME] as a placeholder for the organization name.
+- Use [BRACKETS] for any company-specific values that need to be filled in.
+- Keep the tone professional but readable.
+- Use Google Search to supplement any gaps in the provided regulatory data.
+
+Return ONLY the policy document in Markdown format. Do not include any JSON wrapping or meta-commentary."""
+
+    client = _get_client()
+    models_to_try = [DEFAULT_MODEL, FALLBACK_MODEL]
+    generated_content = ""
+
+    for model_name in models_to_try:
+        try:
+            response = await client.aio.models.generate_content(
+                model=model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    temperature=0.3,
+                ),
+            )
+            generated_content = response.text or ""
+            break
+        except Exception as exc:
+            error_msg = str(exc).lower()
+            is_model_error = any(
+                s in error_msg
+                for s in ("not found", "unknown model", "invalid model", "unsupported")
+            )
+            if is_model_error and model_name != models_to_try[-1]:
+                logger.warning("Model %s unavailable, falling back: %s", model_name, exc)
+                continue
+            logger.error("Topic-based policy draft failed: %s", exc)
+            raise
+
+    if not generated_content:
+        raise RuntimeError("All AI models failed to generate policy content")
+
+    # Extract a title from the generated content (first H1 or H2 heading)
+    title = topic
+    for line in generated_content.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("# ") or stripped.startswith("## "):
+            title = stripped.lstrip("# ").strip()
+            break
+
+    # Build citations from the requirements that have source URLs
+    citations = []
+    for r in citable_requirements:
+        citations.append({
+            "requirement_key": r.get("requirement_key", ""),
+            "title": r.get("title", ""),
+            "source_url": r.get("source_url", ""),
+        })
+
+    return {
+        "title": title,
+        "content": generated_content,
+        "citations": citations,
+        "applicable_jurisdictions": applicable_jurisdictions,
+        "category": primary_category,
+    }

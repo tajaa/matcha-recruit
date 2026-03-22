@@ -1079,3 +1079,126 @@ async def ask_regulatory_question(
         "sources": sources,
         "confidence": round(max_similarity, 2) if sources else 0,
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Protocol Gap Analysis
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class ProtocolAnalysisRequest(BaseModel):
+    protocol_text: str
+    location_id: Optional[str] = None
+    categories: Optional[List[str]] = None
+
+
+@router.post("/protocol-analysis")
+async def protocol_analysis(
+    data: ProtocolAnalysisRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Analyze a protocol document against regulatory requirements.
+
+    Compares the provided protocol text against the company's compliance
+    requirements and returns a gap analysis: which requirements are
+    covered, partially covered, or missing from the protocol.
+    """
+    from ..services.protocol_analysis_service import analyze_protocol
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company found")
+
+    # Resolve optional location_id
+    location_id = None
+    if data.location_id:
+        try:
+            location_id = UUID(data.location_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid location_id")
+
+    # Fetch requirements — scoped to location if provided, otherwise all company requirements
+    if location_id:
+        # Use existing function for location-scoped requirements (returns RequirementResponse models)
+        req_rows = await get_location_requirements(location_id, company_id)
+        requirements = [
+            {
+                "requirement_key": r.id,
+                "title": r.title or "",
+                "description": r.description or "",
+                "category": r.category or "",
+                "current_value": r.current_value or "",
+                "jurisdiction_level": r.jurisdiction_level or "",
+                "jurisdiction_name": r.jurisdiction_name or "",
+            }
+            for r in req_rows
+        ]
+    else:
+        async with get_connection() as conn:
+            # Fetch all requirements across all company locations
+            query = """
+                SELECT cr.id, cr.category, cr.title, cr.description,
+                       cr.current_value, cr.jurisdiction_level,
+                       cr.jurisdiction_name, cr.source_url
+                FROM compliance_requirements cr
+                JOIN business_locations bl ON cr.location_id = bl.id
+                WHERE bl.company_id = $1
+                ORDER BY cr.category, cr.jurisdiction_level
+            """
+            rows = await conn.fetch(query, company_id)
+            requirements = [
+                {
+                    "requirement_key": str(row["id"]),
+                    "title": row["title"] or "",
+                    "description": row["description"] or "",
+                    "category": row["category"] or "",
+                    "current_value": row["current_value"] or "",
+                    "jurisdiction_level": row["jurisdiction_level"] or "",
+                    "jurisdiction_name": row["jurisdiction_name"] or "",
+                }
+                for row in rows
+            ]
+
+    # Filter by categories if specified
+    if data.categories:
+        categories_lower = [c.lower() for c in data.categories]
+        requirements = [
+            r for r in requirements
+            if (r.get("category") or "").lower() in categories_lower
+        ]
+
+    if not requirements:
+        return {
+            "covered": [],
+            "gaps": [],
+            "partial": [],
+            "summary": "No applicable requirements found for this company/location.",
+            "requirements_analyzed": 0,
+        }
+
+    # Build optional company context
+    company_context = None
+    async with get_connection() as conn:
+        company = await conn.fetchrow(
+            "SELECT name, industry FROM companies WHERE id = $1", company_id
+        )
+        if company:
+            parts = []
+            if company["name"]:
+                parts.append(f"Company: {company['name']}")
+            if company["industry"]:
+                parts.append(f"Industry: {company['industry']}")
+            if parts:
+                company_context = ". ".join(parts)
+
+    try:
+        result = await analyze_protocol(
+            protocol_text=data.protocol_text,
+            requirements=requirements,
+            company_context=company_context,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
