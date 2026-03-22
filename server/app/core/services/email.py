@@ -1164,20 +1164,6 @@ If you weren't expecting this invitation, please contact your HR administrator.
                         <p class="feature-desc">Report workplace incidents or safety concerns quickly and confidentially.</p>
                     </div>
                 </div>
-                <div class="feature-row">
-                    <div class="feature-icon">⭐</div>
-                    <div>
-                        <div class="feature-title">Performance reviews</div>
-                        <p class="feature-desc">Complete self-assessments and view feedback from your manager.</p>
-                    </div>
-                </div>
-                <div class="feature-row">
-                    <div class="feature-icon">💬</div>
-                    <div>
-                        <div class="feature-title">Share feedback</div>
-                        <p class="feature-desc">Participate in vibe checks and eNPS surveys — your voice matters.</p>
-                    </div>
-                </div>
             </div>
 
             <hr class="divider">
@@ -1208,8 +1194,6 @@ What you can do in Matcha:
 - Request time off and track your PTO balance
 - View and acknowledge company policies
 - Submit incident reports
-- Complete performance reviews
-- Share feedback via vibe checks and eNPS surveys
 
 Questions? Contact your HR administrator.
 
@@ -1622,139 +1606,6 @@ Open onboarding dashboard: {portal_url}
             logger.exception("Error sending manager onboarding summary to %s", to_email)
             return False
 
-
-    async def send_enps_survey_email(
-        self,
-        to_email: str,
-        to_name: str,
-        company_name: str,
-        survey_title: str,
-        survey_description: Optional[str] = None,
-        portal_url: Optional[str] = None,
-    ) -> bool:
-        """Send an eNPS survey invitation email to an employee.
-
-        Returns True if sent successfully, False otherwise.
-        """
-        if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
-            return False
-
-        app_base_url = self.settings.app_base_url
-        survey_url = portal_url or f"{app_base_url}/app/portal/enps"
-
-        description_section = f"<p style='color: #6b7280;'>{survey_description}</p>" if survey_description else ""
-
-        html_content = f"""
-<!DOCTYPE html>
-<html>
-<head>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
-        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
-        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
-        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
-        .content {{ padding: 30px 0; }}
-        .survey-card {{ background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%); border-radius: 12px; padding: 30px; margin: 20px 0; text-align: center; }}
-        .survey-title {{ font-size: 24px; font-weight: 700; color: #111; margin-bottom: 8px; }}
-        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 20px 0; font-size: 16px; }}
-        .btn:hover {{ background: #16a34a; }}
-        .highlight {{ background: #f0f9ff; border-left: 4px solid #3b82f6; padding: 15px; margin: 20px 0; border-radius: 0 8px 8px 0; }}
-        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <div class="logo">MATCHA</div>
-        </div>
-        <div class="content">
-            <p>Hi {to_name},</p>
-
-            <p>{company_name} values your feedback! You've been invited to participate in our Employee Net Promoter Score (eNPS) survey.</p>
-
-            <div class="survey-card">
-                <div class="survey-title">{survey_title}</div>
-                {description_section}
-            </div>
-
-            <div class="highlight">
-                <strong>Why participate?</strong><br>
-                Your honest feedback helps us understand what we're doing well and where we can improve. The survey is quick (about 2 minutes) and your responses help shape our workplace culture.
-            </div>
-
-            <p style="text-align: center;">
-                <a href="{survey_url}" class="btn">Take the Survey</a>
-            </p>
-
-            <p style="color: #6b7280; font-size: 14px; text-align: center;">
-                Thank you for helping us build a better workplace!
-            </p>
-        </div>
-        <div class="footer">
-            <p>Sent via Matcha Recruit</p>
-        </div>
-    </div>
-</body>
-</html>
-"""
-
-        text_content = f"""
-Hi {to_name},
-
-{company_name} values your feedback! You've been invited to participate in our Employee Net Promoter Score (eNPS) survey.
-
-Survey: {survey_title}
-{survey_description or ''}
-
-Why participate?
-Your honest feedback helps us understand what we're doing well and where we can improve. The survey is quick (about 2 minutes) and your responses help shape our workplace culture.
-
-Take the survey here: {survey_url}
-
-Thank you for helping us build a better workplace!
-
-- Matcha Recruit
-"""
-
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": f"{company_name}: {survey_title} - Your Feedback Matters",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent eNPS survey invite to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
 
     async def send_compliance_change_notification_email(
         self,

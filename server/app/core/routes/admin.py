@@ -206,7 +206,6 @@ KNOWN_FEATURES = {
     "er_copilot", "incidents", "time_off", "accommodations", "interview_prep",
     "matcha_work", "risk_assessment",
     "training", "i9", "cobra", "separation_agreements",
-    "vibe_checks", "enps", "performance_reviews",
 }
 
 
