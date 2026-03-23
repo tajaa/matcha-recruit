@@ -3657,6 +3657,36 @@ _LABOR_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
 }
 EXPECTED_REGULATION_KEYS.update(_LABOR_REGULATION_KEYS)
 
+# Oncology categories — these previously had ZERO expected keys.
+# Now defined to enable gap detection and key-level coverage tracking.
+_ONCOLOGY_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
+    "radiation_safety": frozenset([
+        "state_radiation_control_programs", "radiation_safety_officer",
+        "linear_accelerator_qa", "brachytherapy_safety",
+        "radiation_oncology_safety_team", "radioactive_materials_license",
+    ]),
+    "chemotherapy_handling": frozenset([
+        "usp_compounding_standards", "closed_system_transfer",
+        "hazardous_drug_assessment", "spill_management",
+        "hazardous_waste_disposal",
+    ]),
+    "tumor_registry": frozenset([
+        "cancer_registry_reporting", "reporting_timelines",
+        "electronic_reporting_format", "registry_data_quality",
+    ]),
+    "oncology_clinical_trials": frozenset([
+        "clinical_trial_coverage_mandates", "right_to_try",
+        "protocol_deviation_reporting", "adverse_event_reporting",
+        "investigational_drug_access",
+    ]),
+    "oncology_patient_rights": frozenset([
+        "patient_rights_declarations", "hospice_palliative_care",
+        "advance_directives", "fertility_preservation_counseling",
+        "cancer_treatment_consent",
+    ]),
+}
+EXPECTED_REGULATION_KEYS.update(_ONCOLOGY_REGULATION_KEYS)
+
 
 # ---------------------------------------------------------------------------
 # Trigger profiles — drive targeted Gemini research passes
