@@ -336,7 +336,13 @@ Query `jurisdiction_requirements` LEFT JOIN `regulation_key_definitions` — ret
 | `nurse_staffing_ratios` | 180 | 365 | Changes rarely |
 | `state_radiation_control_programs` | 365 | 730 | NRC reviews every 4 years |
 
-### Enforcement: Celery periodic task (weekly)
+### Enforcement: Admin-triggered endpoint (manual)
+
+No scheduler — the staleness scan runs on demand via an admin endpoint:
+```
+POST /admin/jurisdictions/run-staleness-check
+```
+Triggered manually from the master-admin UI (e.g., a "Run Integrity Check" button on the Jurisdiction Data page). At current scale this completes in milliseconds. Add scheduling later when the jurisdiction count warrants it.
 
 ### Alert destination: `repository_alerts` (new table)
 
