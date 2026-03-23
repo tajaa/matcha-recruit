@@ -164,10 +164,10 @@ CREATE TABLE regulation_key_definitions (
     staleness_expired_days INTEGER DEFAULT 365,
 
     -- DEPENDENCIES
-    -- Key groups are the primary mechanism for related-key detection.
-    -- co_required_keys dropped — storing key names as TEXT[] silently breaks
-    -- on key renames. Group-based completeness ("wage_rates 2/5") is cleaner
-    -- and more expressive than pairwise co-requirements.
+    -- key_group is a flat VARCHAR for now. When biotech clients need specific
+    -- key combinations to constitute a valid compliance posture, promote to a
+    -- key_groups table with min_required_count and completeness_threshold.
+    -- See "Future: key_groups table" section below.
     key_group VARCHAR(100),
 
     -- AUDIT
@@ -192,6 +192,22 @@ CREATE TABLE regulation_key_definition_history (
 );
 CREATE INDEX idx_rkdh_key_def ON regulation_key_definition_history(key_definition_id, changed_at);
 ```
+
+### History write mechanism
+
+History rows are written by **application-level logic in the admin CRUD endpoint**, not a Postgres trigger. Rationale:
+- We need `changed_by` (the admin user UUID) which isn't available in a trigger context
+- We need `change_reason` which comes from the request payload
+- The admin update endpoint diffs old vs new values, writes one `regulation_key_definition_history` row per changed field, then performs the UPDATE — same pattern as `policy_change_log` writes in `compliance_service.py`
+
+### Read cache invalidation
+
+The Python registry (`compliance_registry.py`) becomes a read cache loaded from `regulation_key_definitions` at startup. Invalidation strategy:
+- **In-memory cache with TTL**: 5-minute TTL via `functools.lru_cache` with timestamp check. Acceptable staleness for key definitions (they change rarely).
+- **Immediate invalidation on admin write**: The admin CRUD endpoint calls `invalidate_key_definition_cache()` after any insert/update/delete, clearing the in-memory cache so the next read reloads from DB.
+- **No cross-process signaling needed**: Each uvicorn worker reloads within 5 minutes. For immediate consistency after admin changes, the admin endpoint returns fresh data directly from the DB write response.
+
+This avoids "works in dev but not prod" since workers don't need Redis pub/sub or webhooks — the TTL handles it.
 
 ### Seed migration
 
@@ -337,6 +353,11 @@ A key seeded in `regulation_key_definitions` with zero matching `jurisdiction_re
 9. Keys with zero matches → create `compliance_alerts` with severity "missing" (distinct from "stale")
 10. Surface these as "NO DATA" in the UI — more urgent than any staleness level
 
+**Scaling note:** The never-verified check is a cross-product (~355 keys × N jurisdictions). At current scale (~50 jurisdictions) this is trivial. As we scale to 500+ jurisdictions and 500+ keys:
+- **Smart join strategy**: Only check jurisdictions that have *some* requirements in a category but are missing specific keys (not the full cross-product). This filters out jurisdictions with zero data entirely (those are already known gaps).
+- **Materialized view**: If the weekly query exceeds 5s, materialize `jurisdiction_key_coverage` as a view refreshed by the Celery task, storing (jurisdiction_id, key_definition_id, status, days_stale).
+- **For now**: The naive LEFT JOIN is fine. Add `EXPLAIN ANALYZE` monitoring to the Celery task so we see when it starts to slow down.
+
 ---
 
 ## Phase 5: Contextual Weights
@@ -432,3 +453,31 @@ Phase 4 (staleness SLAs)   →  Phase 5 (contextual weights)  →  Phase 6 (API)
 9. `resolve_weight()` for oncology center + radiation key → 2.5; dental office → 0.5 (max ratio ~5:1)
 10. Missing key query returns results for labor AND oncology (not just healthcare)
 11. UI: heatmap `n/m`, drawer shows enforcing agency + staleness + group completeness
+
+---
+
+## Future: `key_groups` Table
+
+Not in scope for initial implementation, but documented here for when biotech/manufacturing clients need specific key combinations to constitute a valid compliance posture.
+
+The flat `key_group VARCHAR(100)` gets you 90% of the value — group completeness is derived from `SELECT key_group, count(*) GROUP BY key_group`. But the threshold for "partial coverage is unreliable" lives in application logic with no admin visibility or per-group customization.
+
+When needed, promote to:
+
+```sql
+CREATE TABLE key_groups (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug VARCHAR(100) NOT NULL UNIQUE,        -- "wage_rates"
+    name VARCHAR(200) NOT NULL,               -- "Wage Rate Requirements"
+    description TEXT,
+    min_required_count INTEGER,               -- Minimum keys for "reliable" coverage
+    completeness_threshold NUMERIC(3,2),      -- e.g., 0.80 = 80% of keys required
+    applicable_industries TEXT[],             -- Which industries care about this group
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+```
+
+Then `regulation_key_definitions.key_group` becomes a FK: `key_group_id UUID REFERENCES key_groups(id)`. Gap analysis changes from hardcoded thresholds to `WHERE present_count < kg.min_required_count`.
+
+**Trigger**: When a client asks "what does it mean for us to be 60% covered on radiation safety — is that enough?" and the answer needs to vary by client.
