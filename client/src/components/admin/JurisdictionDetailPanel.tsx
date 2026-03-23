@@ -93,6 +93,7 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
   const [scanMessages, setScanMessages] = useState<string[]>([])
   const [viewMode, setViewMode] = useState<ViewMode>('requirements')
   const [specialtyFilter, setSpecialtyFilter] = useState<SpecialtyFilter>('all')
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState({ title: '', description: '', current_value: '', effective_date: '', source_url: '', source_name: '' })
   const [saving, setSaving] = useState(false)
@@ -334,16 +335,34 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     return reqs
   }, [detail, specialtyFilter, selectedProfile])
 
+  // Available categories with counts
+  const availableCategories = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const r of filteredReqs) {
+      const cat = r.category || 'other'
+      counts[cat] = (counts[cat] || 0) + 1
+    }
+    return Object.entries(counts)
+      .map(([cat, count]) => ({ cat, count, label: getCategoryLabel(cat) }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [filteredReqs])
+
+  // Apply category filter
+  const categoryFilteredReqs = useMemo(() => {
+    if (!categoryFilter) return filteredReqs
+    return filteredReqs.filter(r => r.category === categoryFilter)
+  }, [filteredReqs, categoryFilter])
+
   // Group by category
   const groupedByCategory = useMemo(() => {
     const map: Record<string, JurisdictionReq[]> = {}
-    for (const r of filteredReqs) {
+    for (const r of categoryFilteredReqs) {
       const cat = r.category || 'other'
       if (!map[cat]) map[cat] = []
       map[cat].push(r)
     }
     return map
-  }, [filteredReqs])
+  }, [categoryFilteredReqs])
 
   // Hierarchy view: category → jurisdiction_level → requirements
   const hierarchyGrouped = useMemo(() => {
@@ -420,6 +439,9 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
             <p className="text-[11px] text-zinc-500 mt-0.5 line-clamp-2">{req.description}</p>
           )}
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700/50 text-zinc-400">
+              {getCategoryLabel(req.category)}
+            </span>
             <span className={`text-[10px] px-1.5 py-0.5 rounded ${LEVEL_COLORS[req.jurisdiction_level] || 'text-zinc-400 bg-zinc-500/10'}`}>
               {req.jurisdiction_level}
             </span>
@@ -600,9 +622,34 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
         <p className="text-sm text-zinc-600">Failed to load detail.</p>
       ) : (
         <>
+          {/* ── Category filter strip ── */}
+          {filteredReqs.length > 0 && (viewMode === 'requirements' || viewMode === 'hierarchy') && (
+            <div className="flex flex-wrap gap-1 mb-3">
+              <button
+                onClick={() => setCategoryFilter(null)}
+                className={`text-[10px] px-2 py-1 rounded transition-colors ${
+                  !categoryFilter ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                All ({filteredReqs.length})
+              </button>
+              {availableCategories.map(({ cat, count, label }) => (
+                <button
+                  key={cat}
+                  onClick={() => setCategoryFilter(categoryFilter === cat ? null : cat)}
+                  className={`text-[10px] px-2 py-1 rounded transition-colors ${
+                    categoryFilter === cat ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {label} ({count})
+                </button>
+              ))}
+            </div>
+          )}
+
           {/* ── Requirements view ── */}
           {viewMode === 'requirements' && (
-            filteredReqs.length === 0 ? (
+            categoryFilteredReqs.length === 0 ? (
               <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center space-y-2">
                 <p className="text-sm text-zinc-600">
                   No city-level requirements{specialtyFilter !== 'all' ? ' for this specialty' : ''}.
