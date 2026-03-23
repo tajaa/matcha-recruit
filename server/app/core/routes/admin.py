@@ -3173,12 +3173,19 @@ async def jurisdiction_data_overview(bust: bool = False):
     now_dt = dt.now(timezone.utc).replace(tzinfo=None)
 
     for row in rows:
-        state = row["state"]
-        if state not in states_map:
-            states_map[state] = {"state": state, "cities": []}
+        state = row["state"] or ""
+        country_code = row.get("country_code", "US") or "US"
+        # Group international jurisdictions by country_code to avoid mixing with US states
+        state_group_key = f"{state}:{country_code}" if country_code != "US" else state
+        if state_group_key not in states_map:
+            states_map[state_group_key] = {"state": state, "country_code": country_code, "cities": []}
 
         direct_cats = set(c for c in (row["categories"] or []) if c in req_cats)
-        inherited = (federal_categories | state_categories.get(state, set())) & req_cats
+        # Only inherit from federal/state for US jurisdictions
+        if country_code == "US":
+            inherited = (federal_categories | state_categories.get(state, set())) & req_cats
+        else:
+            inherited = set()
         cats_present = sorted(direct_cats | inherited)
         cats_missing = sorted(req_cats - set(cats_present))
         req_list = json.loads(row["req_details"]) if isinstance(row["req_details"], str) else row["req_details"]
@@ -3225,7 +3232,7 @@ async def jurisdiction_data_overview(bust: bool = False):
             "last_verified_at": last_v.isoformat() if last_v else None,
             "is_stale": is_stale,
         }
-        states_map[state]["cities"].append(city_data)
+        states_map[state_group_key]["cities"].append(city_data)
         total_cities += 1
 
     # Enrich state entries

@@ -607,20 +607,29 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
                 <p className="text-sm text-zinc-600">
                   No city-level requirements{specialtyFilter !== 'all' ? ' for this specialty' : ''}.
                 </p>
-                {detail.parent_id && (
+                {detail.state && (
                   <div className="text-sm">
                     <p className="text-zinc-500">
-                      This city inherits policies from its state jurisdiction ({detail.state}).
+                      {detail.parent_id
+                        ? `This city inherits policies from its state jurisdiction (${detail.state}).`
+                        : `City-specific data has not been researched yet. State-level ${detail.state} policies may apply.`
+                      }
                     </p>
-                    <button
-                      onClick={() => onNavigate?.(detail.parent_id!)}
-                      className="mt-1 text-blue-400 hover:text-blue-300 underline underline-offset-2"
-                    >
-                      View {detail.state} state policies
-                    </button>
+                    {detail.parent_id ? (
+                      <button
+                        onClick={() => onNavigate?.(detail.parent_id!)}
+                        className="mt-1 text-blue-400 hover:text-blue-300 underline underline-offset-2"
+                      >
+                        View {detail.state} state policies
+                      </button>
+                    ) : (
+                      <p className="text-xs text-zinc-500 mt-1">
+                        Run a compliance check or use /research-jurisdiction to populate.
+                      </p>
+                    )}
                   </div>
                 )}
-                {!detail.parent_id && (
+                {!detail.state && (
                   <p className="text-xs text-zinc-600">Run a check to populate.</p>
                 )}
               </div>

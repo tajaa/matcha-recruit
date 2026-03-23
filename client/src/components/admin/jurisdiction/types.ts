@@ -15,6 +15,7 @@ export type CityEntry = {
 
 export type StateEntry = {
   state: string
+  country_code?: string
   city_count: number
   coverage_pct: number
   cities: CityEntry[]

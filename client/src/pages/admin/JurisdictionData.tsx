@@ -185,6 +185,7 @@ export default function JurisdictionData() {
         const total = present.length + missing.length
         rows.push({
           ...city,
+          country_code: city.country_code || st.country_code || 'US',
           stateName: st.state,
           coveragePct: total > 0 ? Math.round((present.length / total) * 100) : 0,
           gapCount: missing.length,
