@@ -36,18 +36,31 @@ def parse_research_md(filepath: str) -> List[Dict]:
     for line in content.split("\n"):
         line = line.rstrip()
 
-        # Category header: ### minimum_wage or ## minimum_wage
+        # Category header formats:
+        #   ### minimum_wage              (Claude research format)
+        #   ## 1. `minimum_wage` — Label  (Gemini bootstrap format)
         cat_match = re.match(r'^#{2,3}\s+(\w+)\s*$', line)
+        if not cat_match:
+            cat_match2 = re.match(r'^#{2,3}\s+\d+\.\s+`(\w+)`', line)
+            if cat_match2:
+                cat_match = cat_match2
         if cat_match:
             candidate = cat_match.group(1)
-            # Only treat as category if it looks like a slug (lowercase, underscores)
             if candidate == candidate.lower() and '_' in candidate:
                 current_category = candidate
                 continue
 
-        # Requirement header: #### Title
-        req_match = re.match(r'^#{4}\s+(.+)$', line)
+        # Requirement header formats:
+        #   #### Title        (Claude research format - h4)
+        #   ### Title         (Gemini bootstrap format - h3, but only if we already have a category)
+        req_match = re.match(r'^#{3,4}\s+(.+)$', line)
         if req_match and current_category:
+            title = req_match.group(1).strip()
+            # Skip if this looks like a category header we already parsed
+            if re.match(r'^\d+\.\s+`\w+`', title):
+                continue
+            if title == title.lower() and '_' in title and ' ' not in title:
+                continue
             if current_req and current_req.get("regulation_key"):
                 requirements.append(current_req)
             current_req = {
@@ -56,8 +69,8 @@ def parse_research_md(filepath: str) -> List[Dict]:
             }
             continue
 
-        # Field: - **field_name**: value
-        field_match = re.match(r'^-\s+\*\*(\w[\w\s]*)\*\*:\s*(.+)$', line)
+        # Field: - **field_name**: value  OR  - **Field Name**: value
+        field_match = re.match(r'^-\s+\*\*([^*]+)\*\*:\s*(.+)$', line)
         if field_match and current_req is not None:
             field = field_match.group(1).strip().lower().replace(" ", "_")
             value = field_match.group(2).strip()
