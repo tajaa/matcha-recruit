@@ -603,8 +603,26 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
           {/* ── Requirements view ── */}
           {viewMode === 'requirements' && (
             filteredReqs.length === 0 ? (
-              <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">
-                <p className="text-sm text-zinc-600">No requirements {specialtyFilter !== 'all' ? 'for this specialty' : '— run a check to populate'}.</p>
+              <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center space-y-2">
+                <p className="text-sm text-zinc-600">
+                  No city-level requirements{specialtyFilter !== 'all' ? ' for this specialty' : ''}.
+                </p>
+                {detail.parent_id && (
+                  <div className="text-sm">
+                    <p className="text-zinc-500">
+                      This city inherits policies from its state jurisdiction ({detail.state}).
+                    </p>
+                    <button
+                      onClick={() => onNavigate?.(detail.parent_id!)}
+                      className="mt-1 text-blue-400 hover:text-blue-300 underline underline-offset-2"
+                    >
+                      View {detail.state} state policies
+                    </button>
+                  </div>
+                )}
+                {!detail.parent_id && (
+                  <p className="text-xs text-zinc-600">Run a check to populate.</p>
+                )}
               </div>
             ) : (
               <div className="border border-zinc-800 rounded-lg max-h-[55vh] overflow-y-auto">

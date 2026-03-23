@@ -349,6 +349,17 @@ export default function JurisdictionData() {
                 preemptionRules={overview.preemption_rules}
                 selectedProfile={selectedProfile}
                 onCheckComplete={fetchOverview}
+                onNavigate={(targetId) => {
+                  // Navigate to the target jurisdiction (e.g., state-level parent)
+                  const flat = allCities.find((c) => c.id === targetId)
+                  if (flat) {
+                    openCity(flat)
+                  } else {
+                    // Target might be a state-level row not in allCities — open it directly
+                    setSelectedCityId(targetId)
+                    setSelectedCityMeta({ city: '', state: selectedCityMeta.state, missing: [] })
+                  }
+                }}
               />
             </div>
           )}
