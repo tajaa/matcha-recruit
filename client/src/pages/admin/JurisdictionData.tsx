@@ -92,9 +92,10 @@ export default function JurisdictionData() {
   const { profiles, create: createProfile, update: updateProfile, remove: removeProfile } = useIndustryProfiles()
   const selectedProfile = profiles.find((p) => p.id === selectedProfileId) ?? null
 
-  const fetchOverview = useCallback(async () => {
+  const fetchOverview = useCallback(async (bust = false) => {
     setLoadingOverview(true)
-    try { setOverview(await api.get<DataOverview>('/admin/jurisdictions/data-overview')) }
+    const qs = bust ? '?bust=true' : ''
+    try { setOverview(await api.get<DataOverview>(`/admin/jurisdictions/data-overview${qs}`)) }
     catch { setOverview(null) }
     finally { setLoadingOverview(false) }
   }, [])
@@ -274,7 +275,7 @@ export default function JurisdictionData() {
           <Button variant="secondary" size="sm" disabled={metroScanning} onClick={startMetroCheck}>
             {metroScanning ? 'Running Top 15...' : 'Run Top 15 Metros'}
           </Button>
-          <Button variant="ghost" size="sm" onClick={fetchOverview}>Refresh</Button>
+          <Button variant="ghost" size="sm" onClick={() => fetchOverview(true)}>Refresh</Button>
         </div>
       </div>
 
