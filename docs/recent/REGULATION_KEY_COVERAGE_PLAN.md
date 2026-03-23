@@ -338,20 +338,59 @@ Query `jurisdiction_requirements` LEFT JOIN `regulation_key_definitions` — ret
 
 ### Enforcement: Celery periodic task (weekly)
 
+### Alert destination: `repository_alerts` (new table)
+
+The existing `compliance_alerts` table is **company-scoped** — requires `location_id` + `company_id` NOT NULL. It's for alerting a business that their compliance posture changed. Staleness alerts are **system-level** — they're about the jurisdiction data repository itself, not any company's posture.
+
+```sql
+CREATE TABLE repository_alerts (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    -- What
+    alert_type VARCHAR(30) NOT NULL,         -- 'stale_warning' | 'stale_critical' | 'stale_expired' | 'missing_data'
+    severity VARCHAR(20) NOT NULL,           -- 'warning' | 'critical' | 'expired' | 'missing'
+    -- Where
+    jurisdiction_id UUID REFERENCES jurisdictions(id) ON DELETE CASCADE,
+    key_definition_id UUID REFERENCES regulation_key_definitions(id) ON DELETE CASCADE,
+    requirement_id UUID REFERENCES jurisdiction_requirements(id) ON DELETE SET NULL,
+    -- Context
+    category VARCHAR(50),
+    regulation_key VARCHAR(100),
+    message TEXT NOT NULL,                    -- "state_minimum_wage for Charlotte, NC is 45 days past verification"
+    days_overdue INTEGER,                    -- How far past the threshold
+    -- Lifecycle
+    status VARCHAR(20) NOT NULL DEFAULT 'open',  -- 'open' | 'acknowledged' | 'resolved'
+    created_at TIMESTAMP DEFAULT NOW(),
+    acknowledged_at TIMESTAMP,
+    acknowledged_by UUID REFERENCES users(id),
+    resolved_at TIMESTAMP,
+    resolved_by UUID REFERENCES users(id),
+    resolution_note TEXT
+);
+CREATE INDEX idx_repo_alerts_status ON repository_alerts(status);
+CREATE INDEX idx_repo_alerts_jurisdiction ON repository_alerts(jurisdiction_id);
+CREATE INDEX idx_repo_alerts_severity ON repository_alerts(severity);
+-- Prevent duplicate open alerts for the same key+jurisdiction
+CREATE UNIQUE INDEX idx_repo_alerts_dedup
+    ON repository_alerts(jurisdiction_id, key_definition_id, alert_type)
+    WHERE status = 'open';
+```
+
 **Stale data detection:**
 1. Join `jurisdiction_requirements` with `regulation_key_definitions`
 2. Compute `days_since_verified = NOW() - last_verified_at`
 3. Compare against per-key thresholds
-4. Warning → create `compliance_alerts` row
-5. Critical → flag for admin review
-6. Expired → mark in metadata, surface prominently
+4. Warning → upsert `repository_alerts` row (dedup index prevents duplicates)
+5. Critical → same, with severity escalation if warning already exists
+6. Expired → same, mark requirement metadata as unreliable
 
 **Never-verified / zero-data detection:**
 A key seeded in `regulation_key_definitions` with zero matching `jurisdiction_requirements` rows for a jurisdiction where it should apply is **worse than stale** — it's an acknowledged gap with zero data. The task must also:
 7. Query `regulation_key_definitions` LEFT JOIN `jurisdiction_requirements` for each active jurisdiction
 8. Filter by applicability scope (`applies_to_levels`, `applicable_industries`, `applicable_entity_types`)
-9. Keys with zero matches → create `compliance_alerts` with severity "missing" (distinct from "stale")
+9. Keys with zero matches → upsert `repository_alerts` with alert_type `missing_data`
 10. Surface these as "NO DATA" in the UI — more urgent than any staleness level
+
+**Auto-resolution:** When the Celery task runs and a previously-alerting key is now verified/present, it sets `status = 'resolved'` and `resolved_at = NOW()` on the open alert.
 
 **Scaling note:** The never-verified check is a cross-product (~355 keys × N jurisdictions). At current scale (~50 jurisdictions) this is trivial. As we scale to 500+ jurisdictions and 500+ keys:
 - **Smart join strategy**: Only check jurisdictions that have *some* requirements in a category but are missing specific keys (not the full cross-product). This filters out jurisdictions with zero data entirely (those are already known gaps).
@@ -436,6 +475,7 @@ Phase 4 (staleness SLAs)   →  Phase 5 (contextual weights)  →  Phase 6 (API)
 |--------|------|----------|
 | `regulation_key_definitions` | New table | `DROP TABLE` |
 | `regulation_key_definition_history` | New table | `DROP TABLE` |
+| `repository_alerts` | New table | `DROP TABLE` |
 | `jurisdiction_requirements.regulation_key` | New column + backfill | `DROP COLUMN` (re-derivable) |
 | `jurisdiction_requirements.key_definition_id` | New FK column + backfill | `DROP COLUMN` |
 | Seed ~355 key definitions | Data migration | `TRUNCATE regulation_key_definitions` |
