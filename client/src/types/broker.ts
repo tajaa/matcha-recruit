@@ -1,0 +1,89 @@
+// --- Portfolio reporting ---
+
+export interface BrokerPortfolioSummary {
+  total_linked_companies: number
+  active_link_count: number
+  pending_setup_count: number
+  expired_setup_count: number
+  healthy_companies: number
+  at_risk_companies: number
+  average_policy_compliance_rate: number
+  open_action_item_total: number
+  total_pre_term_checks?: number
+  avg_portfolio_override_rate?: number
+}
+
+export interface BrokerCompanyMetric {
+  company_id: string
+  company_name: string
+  link_status: string
+  setup_status: string
+  policy_compliance_rate: number
+  open_action_items: number
+  active_employee_count: number
+  risk_signal: 'healthy' | 'at_risk' | 'watch'
+  pre_term_checks?: number
+  avg_separation_risk?: number
+  separation_override_rate?: number
+}
+
+export interface BrokerPortfolioResponse {
+  summary: BrokerPortfolioSummary
+  setup_status_counts: Record<string, number>
+  companies: BrokerCompanyMetric[]
+}
+
+// --- Referred clients ---
+
+export interface BrokerReferredClient {
+  company_id: string
+  company_name: string
+  industry: string
+  company_size: string
+  company_status: string
+  link_status: string
+  linked_at: string
+  activated_at?: string
+  active_employee_count: number
+  enabled_feature_count: number
+}
+
+export interface BrokerReferredClientsResponse {
+  broker_slug: string
+  total: number
+  clients: BrokerReferredClient[]
+}
+
+// --- Handbook coverage ---
+
+export interface BrokerHandbookCoverage {
+  handbook_id: string
+  handbook_title: string
+  company_id: string
+  company_name: string
+  strength_score: number
+  strength_label: 'Strong' | 'Moderate' | 'Weak'
+  total_sections: number
+  state_count: number
+  missing_section_count: number
+}
+
+// --- Client setups ---
+
+export interface BrokerClientSetup {
+  id: string
+  company_name: string
+  status: 'draft' | 'invited' | 'activated' | 'expired' | 'cancelled'
+  contact_name: string
+  contact_email: string
+  headcount_hint: number
+  invited_at?: string
+  activated_at?: string
+  created_at: string
+}
+
+export interface BrokerClientSetupsResponse {
+  setups: BrokerClientSetup[]
+  total: number
+  expired_count: number
+}

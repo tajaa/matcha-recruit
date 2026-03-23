@@ -38,7 +38,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav }: SidebarShellPro
       {/* Navigation */}
       <nav className="flex-1 px-2.5 pt-3 space-y-0.5 overflow-y-auto">
         {nav.map((item) => {
-          const isExact = item.to === '/app' || item.to === '/admin'
+          const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
           const isActive = isExact
             ? location.pathname === item.to
             : location.pathname.startsWith(item.to)

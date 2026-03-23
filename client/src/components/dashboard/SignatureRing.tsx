@@ -3,9 +3,12 @@ import { Card } from '../ui'
 interface SignatureRingProps {
   rate: number
   hasPolicies: boolean
+  title?: string
+  label?: string
+  emptyLabel?: string
 }
 
-export function SignatureRing({ rate, hasPolicies }: SignatureRingProps) {
+export function SignatureRing({ rate, hasPolicies, title = 'Policy Signatures', label = 'Signed', emptyLabel = 'No data' }: SignatureRingProps) {
   const radius = 50
   const stroke = 8
   const circumference = 2 * Math.PI * radius
@@ -16,7 +19,7 @@ export function SignatureRing({ rate, hasPolicies }: SignatureRingProps) {
 
   return (
     <Card className="p-5 flex flex-col items-center">
-      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4 self-start">Policy Signatures</h3>
+      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4 self-start">{title}</h3>
 
       <div className="relative w-32 h-32">
         <svg viewBox="0 0 120 120" className="w-full h-full -rotate-90">
@@ -41,7 +44,7 @@ export function SignatureRing({ rate, hasPolicies }: SignatureRingProps) {
             {hasPolicies ? `${Math.round(rate)}%` : '--'}
           </span>
           <span className="text-[10px] text-zinc-500">
-            {hasPolicies ? 'Signed' : 'No data'}
+            {hasPolicies ? label : emptyLabel}
           </span>
         </div>
       </div>

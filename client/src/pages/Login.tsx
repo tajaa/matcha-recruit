@@ -15,6 +15,7 @@ const roleRoutes: Record<string, string> = {
   client: '/app',
   employee: '/portal',
   candidate: '/candidate',
+  broker: '/broker',
 }
 
 function GrayInput({ label, id, ...props }: React.ComponentProps<'input'> & { label: string }) {

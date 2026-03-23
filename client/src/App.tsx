@@ -26,6 +26,8 @@ import HandbookForm from './pages/app/HandbookForm'
 import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
 import CompanySettings from './pages/app/CompanySettings'
+import BrokerSidebar from './components/BrokerSidebar'
+import BrokerDashboard from './pages/broker/BrokerDashboard'
 import ERExportDownload from './pages/shared/ERExportDownload'
 import SSOCallback from './pages/SSOCallback'
 import WorkLayout from './layouts/WorkLayout'
@@ -52,6 +54,9 @@ export default function App() {
         <Route path="jurisdictions" element={<Jurisdictions />} />
         <Route path="industry-requirements" element={<IndustryRequirements />} />
         <Route path="specialization-research" element={<SpecializationResearch />} />
+      </Route>
+      <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
+        <Route index element={<BrokerDashboard />} />
       </Route>
       <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
         <Route index element={<Dashboard />} />
