@@ -80,15 +80,42 @@ New group `"manufacturing"` with 6 categories:
 
 Add `MANUFACTURING_CATEGORIES` frozenset.
 
-### 2C. Add international regulation keys
-**File**: `server/app/core/compliance_registry.py`
+### 2C. Add international regulation keys to `regulation_key_definitions`
 
-Add `_INTERNATIONAL_LABOR_REGULATION_KEYS` dict with keys like:
-- `national_minimum_wage`, `sectoral_minimum_wage`
-- `annual_leave_entitlement`, `statutory_maternity_leave`, `statutory_paternity_leave`
-- `statutory_sick_leave`, `statutory_notice_period_employer`
-- `severance_pay`, `redundancy_pay`, `probation_period`
-- Country-specific: `sg_cpf_contribution`, `mx_aguinaldo`, `gb_national_living_wage`
+**NOTE**: As of the First-Class Regulation Key System (March 2026), key definitions live in the `regulation_key_definitions` **database table**, not in Python code. International keys are added via:
+
+1. **Alembic seed migration** — INSERT rows into `regulation_key_definitions` for international keys
+2. **Admin CRUD** — new keys can be added at runtime without code deploys
+
+International keys to seed:
+
+**Universal international labor keys** (apply to all non-US jurisdictions):
+- `national_minimum_wage`, `sectoral_minimum_wage` — key_group: `intl_wage_rates`
+- `annual_leave_entitlement`, `statutory_maternity_leave`, `statutory_paternity_leave` — key_group: `intl_leave_programs`
+- `statutory_sick_leave`, `statutory_notice_period_employer`, `statutory_notice_period_employee` — key_group: `intl_termination`
+- `severance_pay`, `redundancy_pay`, `probation_period` — key_group: `intl_termination`
+- `social_insurance_employer`, `social_insurance_employee` — key_group: `intl_social_insurance`
+- `thirteenth_month_pay`, `mandatory_bonus` — key_group: `intl_compensation`
+
+**Country-specific keys** (scoped via `applicable_industries` or `applicable_entity_types`):
+- `sg_cpf_contribution` — applies_to: Singapore only
+- `mx_aguinaldo` — applies_to: Mexico only
+- `gb_national_living_wage` — applies_to: UK only
+
+**Manufacturing keys** (new category group):
+- `environmental_impact_assessment`, `emissions_permits`, `waste_management_license` — key_group: `manufacturing_environmental`
+- `hazardous_materials_handling`, `chemical_inventory_reporting` — key_group: `manufacturing_chemical`
+- `import_license`, `export_controls`, `customs_compliance` — key_group: `manufacturing_trade`
+
+Each key gets:
+- `enforcing_agency` — the country's relevant ministry/agency
+- `staleness_warning_days` — typically longer for international (180-365) since laws change less frequently in many jurisdictions
+- `applicable_industries` — manufacturing keys scoped to `["manufacturing"]`
+- `applies_to_levels` — `'{national,province}'` instead of `'{state,city}'`
+
+The Python registry (`_LABOR_REGULATION_KEYS`, `_ONCOLOGY_REGULATION_KEYS`) remains as a **read cache** — it's loaded from the DB at startup. No Python code changes needed for new international keys.
+
+The `key-coverage` API and `integrity-check` endpoint automatically pick up international keys since they query `regulation_key_definitions` directly. The `KeyCoverageDrawer` UI shows them alongside US keys with no changes needed.
 
 ### 2D. Update Gemini compliance service
 **File**: `server/app/core/services/gemini_compliance.py`
@@ -209,3 +236,25 @@ Steps 1-5 can ship as one PR. Step 1 requires explicit user approval before runn
 3. **DB check**: `SELECT city, state, country_code FROM jurisdictions` — existing rows should all have `country_code='US'`
 4. **Manufacturing**: Run `/research-jurisdiction-intl --categories manufacturing "Mexico City" MX --state CDMX` — should include manufacturing categories
 5. **Gemini pipeline**: Run `/bootstrap-jurisdiction --country SG Singapore` — should work with country-aware prompts
+6. **Key definitions**: `SELECT count(*) FROM regulation_key_definitions WHERE applies_to_levels @> '{national}'` — should return international key count
+7. **Integrity check**: `GET /admin/jurisdictions/integrity-check?jurisdiction_id=<singapore_id>` — should show international keys as expected, not US-only keys
+8. **Key coverage**: `GET /admin/jurisdictions/key-coverage?jurisdiction_id=<singapore_id>` — should show intl_wage_rates, intl_leave_programs groups
+9. **Staleness SLAs**: International keys should have longer thresholds (180-365 days warning) than US wage keys (30 days)
+
+---
+
+## Interaction with First-Class Regulation Key System
+
+The international expansion builds directly on the `regulation_key_definitions` table (implemented March 2026). Key integration points:
+
+| System Component | How International Uses It |
+|-----------------|--------------------------|
+| `regulation_key_definitions` | International keys seeded with `applies_to_levels = '{national,province}'` and country-specific `applicable_industries` |
+| `key_group` | New groups: `intl_wage_rates`, `intl_leave_programs`, `intl_termination`, `intl_social_insurance`, `manufacturing_*` |
+| `staleness_warning_days` | International defaults: 180 (vs 30-90 for US wage keys) — laws change less frequently in many jurisdictions |
+| `resolve_weight()` | Manufacturing keys get high weight for manufacturing companies, low weight for healthcare — contextual scoring works automatically |
+| `repository_alerts` | Staleness check covers international jurisdictions — `POST /admin/jurisdictions/run-staleness-check` works for all country codes |
+| `KeyCoverageDrawer` | UI shows international keys alongside US keys with no changes — groups display as `intl_wage_rates 3/5` |
+| `integrity-check` | Bidirectional check respects `applies_to_levels` — won't flag US-only keys as missing for Singapore |
+
+No new tables needed — the existing `regulation_key_definitions` + `repository_alerts` infrastructure handles international keys as first-class citizens.
