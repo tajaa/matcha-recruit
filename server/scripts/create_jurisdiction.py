@@ -5,6 +5,8 @@ Create a jurisdiction row in the database (no compliance research).
 Usage:
     python scripts/create_jurisdiction.py "Indianapolis" "IN"
     python scripts/create_jurisdiction.py "Indianapolis" "IN" --county "Marion"
+    python scripts/create_jurisdiction.py "Singapore" --country SG
+    python scripts/create_jurisdiction.py "Mexico City" "CDMX" --country MX
     python scripts/create_jurisdiction.py "Indianapolis" "IN" --dry-run
 
 Prints the jurisdiction ID on success. Use with /research-jurisdiction skill
@@ -34,18 +36,40 @@ US_STATE_CODES = {
 async def main():
     parser = argparse.ArgumentParser(description="Create a jurisdiction row")
     parser.add_argument("city", help="City name")
-    parser.add_argument("state", help="Two-letter state code")
+    parser.add_argument("state", nargs="?", default=None, help="State/province code (optional for city-states)")
     parser.add_argument("--county", help="County name")
+    parser.add_argument("--country", default="US", help="ISO 3166-1 alpha-2 country code (default: US)")
     parser.add_argument("--dry-run", action="store_true", help="Don't actually insert")
     args = parser.parse_args()
 
     city = args.city.strip().title()
-    state = args.state.strip().upper()
+    state = args.state.strip().upper() if args.state else None
     county = args.county.strip().title() if args.county else None
+    country = args.country.strip().upper()
 
-    if state not in US_STATE_CODES:
-        print(f"ERROR: '{state}' is not a valid US state code.")
+    if len(country) != 2:
+        print(f"ERROR: Country code must be 2 letters (ISO 3166-1), got '{country}'.")
         sys.exit(1)
+
+    # Validate state only for US jurisdictions
+    if country == "US":
+        if not state:
+            print("ERROR: US jurisdictions require a state code.")
+            sys.exit(1)
+        if state not in US_STATE_CODES:
+            print(f"ERROR: '{state}' is not a valid US state code.")
+            sys.exit(1)
+
+    # Determine jurisdiction level and display name
+    if country == "US":
+        level = "city"
+        display_name = f"{city}, {state}"
+    else:
+        level = "city"
+        if state:
+            display_name = f"{city}, {state}, {country}"
+        else:
+            display_name = f"{city}, {country}"
 
     from app.config import load_settings
     from app.database import init_pool, close_pool, get_pool
@@ -58,27 +82,26 @@ async def main():
         async with pool.acquire() as conn:
             existing = await conn.fetchrow(
                 "SELECT id, city, state, county FROM jurisdictions "
-                "WHERE LOWER(city) = LOWER($1) AND state = $2",
-                city, state,
+                "WHERE LOWER(city) = LOWER($1) AND COALESCE(state, '') = COALESCE($2, '') AND country_code = $3",
+                city, state or '', country,
             )
             if existing:
-                print(f"EXISTING:{existing['id']}:{existing['city']}:{existing['state']}:{existing['county'] or ''}")
+                print(f"EXISTING:{existing['id']}:{existing['city']}:{existing['state'] or ''}:{existing['county'] or ''}")
                 return
 
             jurisdiction_id = uuid.uuid4()
-            display_name = f"{city}, {state}"
 
             if args.dry_run:
-                print(f"DRY_RUN:{jurisdiction_id}:{city}:{state}:{county or ''}")
+                print(f"DRY_RUN:{jurisdiction_id}:{city}:{state or ''}:{county or ''}:{country}")
             else:
                 await conn.execute(
                     """
-                    INSERT INTO jurisdictions (id, city, state, county, display_name, level, authority_type)
-                    VALUES ($1, $2, $3, $4, $5, 'city', 'geographic')
+                    INSERT INTO jurisdictions (id, city, state, county, country_code, display_name, level, authority_type)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, 'geographic')
                     """,
-                    jurisdiction_id, city, state, county, display_name,
+                    jurisdiction_id, city, state, county, country, display_name, level,
                 )
-                print(f"CREATED:{jurisdiction_id}:{city}:{state}:{county or ''}")
+                print(f"CREATED:{jurisdiction_id}:{city}:{state or ''}:{county or ''}:{country}")
     finally:
         await close_pool()
 

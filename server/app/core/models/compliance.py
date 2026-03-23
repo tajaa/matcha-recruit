@@ -64,6 +64,10 @@ class JurisdictionLevel(str, Enum):
     city = "city"
     special_district = "special_district"
     regulatory_body = "regulatory_body"
+    # International levels
+    national = "national"       # Country-level law
+    province = "province"       # Subnational division (international)
+    region = "region"           # UK constituent countries, etc.
 
 
 class AlertSeverity(str, Enum):
@@ -102,9 +106,10 @@ class BusinessLocation(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
     city: str
-    state: str
+    state: Optional[str] = None
     county: Optional[str] = None
-    zipcode: str
+    zipcode: Optional[str] = None
+    country_code: str = "US"
     is_active: bool = True
     auto_check_enabled: bool = True
     auto_check_interval_days: int = 7
@@ -175,9 +180,10 @@ class LocationCreate(BaseModel):
     name: Optional[str] = None
     address: Optional[str] = None
     city: str
-    state: str
+    state: Optional[str] = None
     county: Optional[str] = None
     zipcode: Optional[str] = None
+    country_code: str = "US"
     facility_attributes: Optional[dict] = None
 
 

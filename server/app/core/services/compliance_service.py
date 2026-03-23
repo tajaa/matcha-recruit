@@ -49,7 +49,11 @@ MATERIAL_CHANGE_THRESHOLDS = {
     "default": 0.10,
 }
 
-JURISDICTION_PRIORITY = {"city": 1, "county": 2, "state": 3, "federal": 4}
+JURISDICTION_PRIORITY = {
+    "city": 1, "county": 2,
+    "state": 3, "province": 3, "region": 3,
+    "federal": 4, "national": 4,
+}
 
 VALID_LEGISLATION_STATUSES = {
     "proposed",

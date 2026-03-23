@@ -36,7 +36,7 @@ DEFAULT_HEAVY_FALLBACK_MODEL = "gemini-2.5-pro"
 # Healthcare and oncology categories are researched via dedicated specialty
 # research functions, so they should NOT be included in the default sweep.
 
-VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal"}
+VALID_JURISDICTION_LEVELS = {"state", "county", "city", "federal", "national", "province", "region"}
 VALID_RATE_TYPES = {
     "general",
     "tipped",
@@ -54,7 +54,8 @@ _JURISDICTION_LEVEL_ALIASES = {
     "citywide": "city",
     "countywide": "county",
     "statewide": "state",
-    "national": "federal",
+    # "national" is NO LONGER aliased to "federal" — it's a first-class level
+    # for international jurisdictions. US federal stays "federal".
 }
 
 _RATE_TYPE_ALIASES = {
@@ -401,7 +402,7 @@ Respond with JSON:
       "category": "{category}",
       "regulation_key": "stable_snake_case_key",
       "rate_type": <for minimum_wage only: "general" | "tipped" | "exempt_salary" | "hotel" | "fast_food" | "healthcare" | "large_employer" | "small_employer"; else null>,
-      "jurisdiction_level": "state" | "county" | "city",
+      "jurisdiction_level": "state" | "county" | "city" | "national" | "province" | "region",
       "jurisdiction_name": "Name",
       "title": "Short title",
       "description": "Detailed explanation",
@@ -454,7 +455,7 @@ Respond with JSON:
     {{
       "category": "{category}",
       "regulation_key": "stable_snake_case_key",
-      "jurisdiction_level": "federal" | "state" | "county" | "city",
+      "jurisdiction_level": "federal" | "state" | "county" | "city" | "national" | "province" | "region",
       "jurisdiction_name": "Name",
       "title": "Short title",
       "description": "Detailed explanation of this {trigger_label}-specific requirement",
