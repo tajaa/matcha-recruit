@@ -131,7 +131,12 @@ CREATE TABLE regulation_key_definitions (
     key VARCHAR(100) NOT NULL,
     category_slug VARCHAR(50) NOT NULL,
     category_id UUID NOT NULL REFERENCES compliance_categories(id),
-    domain VARCHAR(30) NOT NULL,
+    -- NOTE: "domain" removed — regulatory_domain is already captured by
+    -- compliance_categories.group (labor/healthcare/oncology/medical_compliance)
+    -- and industry scope is captured by applicable_industries TEXT[].
+    -- A single "domain" column conflates regulatory domain with industry vertical
+    -- (e.g., OSHA spans healthcare AND manufacturing). Use the category's group
+    -- for regulatory partitioning and applicable_industries for vertical filtering.
     UNIQUE(category_slug, key),
 
     -- DISPLAY
@@ -159,8 +164,11 @@ CREATE TABLE regulation_key_definitions (
     staleness_expired_days INTEGER DEFAULT 365,
 
     -- DEPENDENCIES
+    -- Key groups are the primary mechanism for related-key detection.
+    -- co_required_keys dropped — storing key names as TEXT[] silently breaks
+    -- on key renames. Group-based completeness ("wage_rates 2/5") is cleaner
+    -- and more expressive than pairwise co-requirements.
     key_group VARCHAR(100),
-    co_required_keys TEXT[],
 
     -- AUDIT
     created_at TIMESTAMP DEFAULT NOW(),
@@ -168,6 +176,21 @@ CREATE TABLE regulation_key_definitions (
     created_by UUID REFERENCES users(id),
     notes TEXT
 );
+
+-- Change tracking for key definitions themselves.
+-- If someone changes staleness_critical_days from 180 to 60, we need a record
+-- since these thresholds directly affect compliance officer alerts.
+CREATE TABLE regulation_key_definition_history (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    key_definition_id UUID NOT NULL REFERENCES regulation_key_definitions(id) ON DELETE CASCADE,
+    field_changed VARCHAR(100) NOT NULL,
+    old_value TEXT,
+    new_value TEXT,
+    changed_at TIMESTAMP DEFAULT NOW(),
+    changed_by UUID REFERENCES users(id),
+    change_reason TEXT
+);
+CREATE INDEX idx_rkdh_key_def ON regulation_key_definition_history(key_definition_id, changed_at);
 ```
 
 ### Seed migration
@@ -194,10 +217,13 @@ Gap analysis: "wage_rates group is 40% complete — partial coverage is unreliab
 ## Phase 2: Split `requirement_key` Into Two Indexed Columns
 
 ```sql
+-- Step 1: Add columns
 ALTER TABLE jurisdiction_requirements
     ADD COLUMN IF NOT EXISTS regulation_key VARCHAR(100);
+ALTER TABLE jurisdiction_requirements
+    ADD COLUMN IF NOT EXISTS key_definition_id UUID REFERENCES regulation_key_definitions(id);
 
--- Backfill from existing composite
+-- Step 2: Backfill regulation_key from existing composite requirement_key
 UPDATE jurisdiction_requirements
 SET regulation_key = CASE
     WHEN position(':' in requirement_key) > 0
@@ -206,15 +232,47 @@ SET regulation_key = CASE
 END
 WHERE regulation_key IS NULL;
 
+-- Step 3: Verification — assert row counts match before and after
+-- (migration should fail if any rows lost or duplicated)
+DO $$
+DECLARE
+    total_before INTEGER;
+    total_after INTEGER;
+BEGIN
+    SELECT count(*) INTO total_before FROM jurisdiction_requirements;
+    SELECT count(*) INTO total_after FROM jurisdiction_requirements WHERE regulation_key IS NOT NULL;
+    IF total_before != total_after THEN
+        RAISE EXCEPTION 'Backfill mismatch: % rows total but only % got regulation_key',
+            total_before, total_after;
+    END IF;
+END $$;
+
+-- Step 4: Backfill key_definition_id by linking to regulation_key_definitions
+-- This MUST happen in the same migration as the column add — otherwise Phase 3's
+-- integrity check will report thousands of false "orphans" that are just unlinked.
+UPDATE jurisdiction_requirements jr
+SET key_definition_id = rkd.id
+FROM regulation_key_definitions rkd
+WHERE jr.category = rkd.category_slug
+  AND jr.regulation_key = rkd.key
+  AND jr.key_definition_id IS NULL;
+
+-- Step 5: Indexes
 CREATE INDEX idx_jr_regulation_key ON jurisdiction_requirements(regulation_key);
 CREATE INDEX idx_jr_category_regulation_key ON jurisdiction_requirements(category, regulation_key);
-
--- Soft FK to key definitions (nullable — orphans get flagged, not blocked)
-ALTER TABLE jurisdiction_requirements
-    ADD COLUMN IF NOT EXISTS key_definition_id UUID REFERENCES regulation_key_definitions(id);
+CREATE INDEX idx_jr_key_definition_id ON jurisdiction_requirements(key_definition_id);
 ```
 
-Old composite `requirement_key` stays for backward compat but is no longer parsed at runtime.
+Old composite `requirement_key` stays for backward compat but is no longer parsed at runtime. Rows where `key_definition_id IS NULL` after backfill are genuine orphans (Gemini-invented keys that don't match any definition).
+
+### Rollback plan
+
+If seed migration has bad data or backfill has edge cases:
+- `regulation_key_definitions` → `DROP TABLE` (clean, no downstream deps yet)
+- `regulation_key` column → `ALTER TABLE DROP COLUMN` (derived data, re-derivable)
+- `key_definition_id` column → `ALTER TABLE DROP COLUMN` (soft FK, nullable)
+
+All three changes are independently reversible. The backfill is non-destructive (adds columns, doesn't modify existing data).
 
 ---
 
@@ -264,12 +322,20 @@ Query `jurisdiction_requirements` LEFT JOIN `regulation_key_definitions` — ret
 
 ### Enforcement: Celery periodic task (weekly)
 
+**Stale data detection:**
 1. Join `jurisdiction_requirements` with `regulation_key_definitions`
 2. Compute `days_since_verified = NOW() - last_verified_at`
 3. Compare against per-key thresholds
 4. Warning → create `compliance_alerts` row
 5. Critical → flag for admin review
 6. Expired → mark in metadata, surface prominently
+
+**Never-verified / zero-data detection:**
+A key seeded in `regulation_key_definitions` with zero matching `jurisdiction_requirements` rows for a jurisdiction where it should apply is **worse than stale** — it's an acknowledged gap with zero data. The task must also:
+7. Query `regulation_key_definitions` LEFT JOIN `jurisdiction_requirements` for each active jurisdiction
+8. Filter by applicability scope (`applies_to_levels`, `applicable_industries`, `applicable_entity_types`)
+9. Keys with zero matches → create `compliance_alerts` with severity "missing" (distinct from "stale")
+10. Surface these as "NO DATA" in the UI — more urgent than any staleness level
 
 ---
 
@@ -279,22 +345,32 @@ Query `jurisdiction_requirements` LEFT JOIN `regulation_key_definitions` — ret
 
 ```python
 def resolve_weight(key_def, company_profile) -> float:
+    """Compute contextual weight. Uses additive adjustments with a floor
+    to avoid extreme ratios that distort mixed-use facility scores."""
     weight = key_def.base_weight
+    adjustment = 0.0
+
     if key_def.applicable_industries:
         if company_profile.industry in key_def.applicable_industries:
-            weight *= 1.5
+            adjustment += 0.5   # Directly relevant
         else:
-            weight *= 0.3
+            adjustment -= 0.5   # Not this company's vertical
+
     if key_def.applicable_entity_types:
         if company_profile.entity_type in key_def.applicable_entity_types:
-            weight *= 1.5
+            adjustment += 0.5
         else:
-            weight *= 0.3
-    return weight
+            adjustment -= 0.5
+
+    # Floor at 0.2 × base_weight — even irrelevant keys have SOME baseline value
+    # (a dental office should still know radiation regs exist, just not prioritize them)
+    return max(weight + adjustment, weight * 0.2)
 ```
 
-- Oncology center: radiation_safety keys weight 1.5 × 1.5 = 2.25
-- Dental office: radiation_safety keys weight 1.5 × 0.3 = 0.45
+- Oncology center + radiation key: base 1.5 + 0.5 + 0.5 = **2.5**
+- Dental office + radiation key: base 1.5 - 0.5 - 0.5 = **0.5** (floor = 0.3, so 0.5)
+- Mixed-use facility: adjustments partially cancel, scores stay reasonable
+- Max ratio between best/worst: ~5:1 (not 25:1 with multiplicative stacking)
 - Admin/global view: uses `base_weight` for universal index
 
 ---
@@ -333,12 +409,26 @@ Phase 4 (staleness SLAs)   →  Phase 5 (contextual weights)  →  Phase 6 (API)
 - `scripts/generate_compliance_ts.py` — query DB instead of Python constants
 - `client/src/components/admin/jurisdiction/` — heatmap, drawer, overview UI
 
+## DB Schema Changes Summary
+
+| Change | Type | Rollback |
+|--------|------|----------|
+| `regulation_key_definitions` | New table | `DROP TABLE` |
+| `regulation_key_definition_history` | New table | `DROP TABLE` |
+| `jurisdiction_requirements.regulation_key` | New column + backfill | `DROP COLUMN` (re-derivable) |
+| `jurisdiction_requirements.key_definition_id` | New FK column + backfill | `DROP COLUMN` |
+| Seed ~355 key definitions | Data migration | `TRUNCATE regulation_key_definitions` |
+
 ## Verification
 
 1. `SELECT count(*) FROM regulation_key_definitions` → ~355 rows
-2. `GET /admin/jurisdictions/integrity-check` → 0 orphaned, 0 missing for seeded jurisdictions
-3. `SELECT * FROM regulation_key_definitions WHERE staleness_warning_days < 90` → min wage keys show 30-day threshold
-4. `SELECT key_group, count(*) FROM regulation_key_definitions GROUP BY key_group` → wage_rates=5, leave_programs=4
-5. Missing key query returns results for labor AND oncology (not just healthcare)
-6. Coverage score for oncology center heavily weights radiation_safety; dental office barely counts it
-7. UI: heatmap `n/m`, drawer shows enforcing agency + staleness + group completeness
+2. `SELECT count(*) FROM jurisdiction_requirements WHERE key_definition_id IS NOT NULL` → majority linked (remainder are genuine orphans)
+3. `SELECT count(*) FROM jurisdiction_requirements WHERE regulation_key IS NULL` → 0 (backfill complete)
+4. `GET /admin/jurisdictions/integrity-check` → orphaned count matches unlinked rows, missing keys respect applicability scope
+5. `SELECT * FROM regulation_key_definitions WHERE staleness_warning_days < 90` → min wage keys show 30-day threshold
+6. `SELECT key_group, count(*) FROM regulation_key_definitions GROUP BY key_group` → wage_rates=5, leave_programs=4
+7. Update a key definition's `staleness_critical_days` → row appears in `regulation_key_definition_history`
+8. Staleness task detects never-verified keys (zero `jurisdiction_requirements` matches) as "missing" alerts
+9. `resolve_weight()` for oncology center + radiation key → 2.5; dental office → 0.5 (max ratio ~5:1)
+10. Missing key query returns results for labor AND oncology (not just healthcare)
+11. UI: heatmap `n/m`, drawer shows enforcing agency + staleness + group completeness
