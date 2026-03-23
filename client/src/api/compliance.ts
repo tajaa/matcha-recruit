@@ -442,3 +442,133 @@ export function draftPolicy(
     industry_context: industryContext,
   })
 }
+
+// ── Key Coverage & Integrity (Admin) ──
+
+export interface RegulationKeyCoverage {
+  key: string
+  name: string
+  enforcing_agency: string | null
+  base_weight: number
+  state_variance: string
+  key_group: string | null
+  status: 'present' | 'missing'
+  jurisdiction_count: number
+  best_tier: number
+  days_since_verified: number | null
+  staleness_level: 'fresh' | 'warning' | 'critical' | 'expired' | 'no_data'
+  newest_value: string | null
+}
+
+export interface PartialGroup {
+  group: string
+  present: number
+  expected: number
+  missing: string[]
+}
+
+export interface CategoryKeyCoverage {
+  category: string
+  group: string
+  label: string
+  expected: number
+  present: number
+  coverage_pct: number
+  weighted_score: number
+  keys: RegulationKeyCoverage[]
+  partial_groups: PartialGroup[]
+}
+
+export interface KeyCoverageResponse {
+  summary: {
+    total_defined_keys: number
+    total_present: number
+    key_coverage_pct: number
+    weighted_score: number
+    categories_fully_covered: number
+    categories_with_gaps: number
+    stale_warning: number
+    stale_critical: number
+  }
+  by_category: CategoryKeyCoverage[]
+}
+
+export interface IntegrityCheckResponse {
+  missing_keys: Array<{
+    jurisdiction_id: string
+    city: string
+    state: string
+    key: string
+    category: string
+    key_name: string
+    key_group: string | null
+    weight: number
+  }>
+  missing_count: number
+  orphaned_records: Array<{
+    id: string
+    jurisdiction_id: string
+    city: string
+    state: string
+    category: string
+    regulation_key: string
+    title: string
+    source_tier: string
+  }>
+  orphaned_count: number
+  stale_keys: Array<{
+    id: string
+    city: string
+    state: string
+    category: string
+    regulation_key: string
+    key_name: string
+    days_since_verified: number
+    staleness_level: 'warning' | 'critical' | 'expired'
+  }>
+  stale_count: number
+  partial_groups: PartialGroup[]
+  partial_group_count: number
+  total_defined_keys: number
+  total_db_records: number
+  linked_records: number
+  integrity_score: number
+}
+
+export function fetchKeyCoverage(params?: {
+  jurisdiction_id?: string
+  category?: string
+  state?: string
+  gaps_only?: boolean
+}) {
+  const parts: string[] = []
+  if (params?.jurisdiction_id) parts.push(`jurisdiction_id=${params.jurisdiction_id}`)
+  if (params?.category) parts.push(`category=${encodeURIComponent(params.category)}`)
+  if (params?.state) parts.push(`state=${encodeURIComponent(params.state)}`)
+  if (params?.gaps_only) parts.push('gaps_only=true')
+  const qs = parts.length ? `?${parts.join('&')}` : ''
+  return api.get<KeyCoverageResponse>(`/admin/jurisdictions/key-coverage${qs}`)
+}
+
+export function fetchIntegrityCheck(params?: {
+  jurisdiction_id?: string
+  state?: string
+}) {
+  const parts: string[] = []
+  if (params?.jurisdiction_id) parts.push(`jurisdiction_id=${params.jurisdiction_id}`)
+  if (params?.state) parts.push(`state=${encodeURIComponent(params.state)}`)
+  const qs = parts.length ? `?${parts.join('&')}` : ''
+  return api.get<IntegrityCheckResponse>(`/admin/jurisdictions/integrity-check${qs}`)
+}
+
+export function runStalenessCheck(params?: {
+  jurisdiction_id?: string
+  state?: string
+}) {
+  return api.post<{
+    alerts_created: number
+    alerts_resolved: number
+    stale_found: number
+    missing_found: number
+  }>('/admin/jurisdictions/run-staleness-check', params || {})
+}

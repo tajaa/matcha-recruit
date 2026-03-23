@@ -11,6 +11,7 @@ import PolicyBrowserTab from '../../components/admin/jurisdiction/PolicyBrowserT
 import CoverageHeatmap from '../../components/admin/jurisdiction/CoverageHeatmap'
 import RequirementAuditTable from '../../components/admin/jurisdiction/RequirementAuditTable'
 import GapIntelligencePanel from '../../components/admin/jurisdiction/GapIntelligencePanel'
+import KeyCoverageDrawer from '../../components/admin/jurisdiction/KeyCoverageDrawer'
 import ProfileEditorModal from '../../components/admin/jurisdiction/ProfileEditorModal'
 import SpecialtyFilterSelect from '../../components/admin/jurisdiction/SpecialtyFilterSelect'
 import { useIndustryProfiles } from '../../components/admin/jurisdiction/useIndustryProfiles'
@@ -67,6 +68,9 @@ function getShortLabel(cat: string) {
 export default function JurisdictionData() {
   const [tab, setTab] = useState<Tab>('explorer')
   const [qualityView, setQualityView] = useState<'heatmap' | 'table' | 'gaps'>('heatmap')
+  const [keyCoverageDrawer, setKeyCoverageDrawer] = useState<{
+    jurisdictionId?: string; category?: string
+  } | null>(null)
   const [overview, setOverview] = useState<DataOverview | null>(null)
   const [loadingOverview, setLoadingOverview] = useState(true)
   const [selectedCityId, setSelectedCityId] = useState<string | null>(null)
@@ -366,20 +370,30 @@ export default function JurisdictionData() {
                 {v.label}
               </Button>
             ))}
+            <div className="ml-auto">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setKeyCoverageDrawer({})}
+              >
+                Key Coverage
+              </Button>
+            </div>
           </div>
 
           {qualityView === 'heatmap' && (
             <CoverageHeatmap
               onCellClick={(jurisdictionId, category) => {
-                // Navigate to explorer and open the jurisdiction detail panel
-                const flat = allCities.find((c) => c.id === jurisdictionId)
-                if (flat) {
-                  openCity(flat)
-                  setTab('explorer')
-                } else {
-                  console.log('[Quality] Cell clicked:', { jurisdictionId, category })
-                }
+                setKeyCoverageDrawer({ jurisdictionId, category })
               }}
+            />
+          )}
+
+          {keyCoverageDrawer && (
+            <KeyCoverageDrawer
+              jurisdictionId={keyCoverageDrawer.jurisdictionId}
+              category={keyCoverageDrawer.category}
+              onClose={() => setKeyCoverageDrawer(null)}
             />
           )}
 
