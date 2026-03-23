@@ -1,7 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Button, Input } from '../../ui'
-import { CATEGORY_SHORT_LABELS } from '../../../generated/complianceCategories'
-import type { FlatCity, CatCoverage, PolicyOverview, PolicyDomainSummary } from './types'
+import type { FlatCity } from './types'
 import { fmtDate } from './utils'
 
 type SortKey = 'state' | 'city' | 'requirements' | 'gapCount' | 'lastVerified'
@@ -11,22 +10,20 @@ type RegionFilter = 'us' | 'international' | 'all'
 
 type Props = {
   allCities: FlatCity[]
-  categoryCoverage: CatCoverage[]
+  categoryCoverage?: unknown
   stateOptions: string[]
   onSelectCity: (city: FlatCity) => void
   selectedCityId: string | null
-  onDelete: (id: string) => Promise<void>
+  onDelete?: (id: string) => Promise<void>
 }
 
 const PAGE_SIZE = 50
 
 export default function ExplorerTab({
   allCities,
-  categoryCoverage,
   stateOptions,
   onSelectCity,
   selectedCityId,
-  onDelete,
 }: Props) {
   const [search, setSearch] = useState('')
   const [filterState, setFilterState] = useState('')
