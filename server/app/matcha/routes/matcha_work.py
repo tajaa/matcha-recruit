@@ -1723,6 +1723,7 @@ async def send_message(
 
     # Payer mode — build dedicated medical policy prompt (separate from HR copilot)
     payer_prompt = None
+    payer_sources: list[dict] = []
     if thread.get("payer_mode"):
         try:
             import os as _os
@@ -1738,7 +1739,7 @@ async def send_message(
                 _emb = EmbeddingService(api_key=_api_key)
                 _rag = PayerPolicyRAGService(_emb)
                 async with get_connection() as _pconn:
-                    payer_ctx, _sources = await _rag.get_context_for_query(
+                    payer_ctx, payer_sources = await _rag.get_context_for_query(
                         query=user_msg, conn=_pconn,
                         company_id=company_id, max_tokens=6000,
                     )
@@ -1776,8 +1777,12 @@ async def send_message(
         current_user_id=current_user.id,
     )
 
-    # Build metadata from compliance reasoning chains
+    # Build metadata from compliance reasoning chains + payer sources
     msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
+    if payer_sources:
+        if msg_metadata is None:
+            msg_metadata = {}
+        msg_metadata["payer_sources"] = payer_sources
 
     # Save assistant message
     assistant_msg = await doc_svc.add_message(
@@ -1943,6 +1948,39 @@ async def send_message_stream(
                     yield _sse_data({"type": "status", "message": "No compliance data found — will suggest running a check..."})
                 ctx += "\n\n" + compliance_ctx
 
+            # Payer mode — build payer prompt inside stream for status events
+            stream_payer_prompt = None
+            stream_payer_sources: list[dict] = []
+            if thread.get("payer_mode"):
+                yield _sse_data({"type": "status", "message": "Searching payer coverage data..."})
+                try:
+                    import os as _os2
+                    from ...core.services.embedding_service import EmbeddingService as _ES2
+                    from ...core.services.payer_policy_rag import PayerPolicyRAGService as _PRAG2
+                    from ...config import get_settings as _gs2
+                    from ..services.matcha_work_ai import PAYER_MODE_SYSTEM_PROMPT as _PMSP
+                    from datetime import date as _d2
+
+                    _ak2 = _os2.getenv("GEMINI_API_KEY") or _gs2().gemini_api_key
+                    if _ak2 and body.content:
+                        _e2 = _ES2(api_key=_ak2)
+                        _r2 = _PRAG2(_e2)
+                        async with get_connection() as _pc2:
+                            _pctx, stream_payer_sources = await _r2.get_context_for_query(
+                                query=body.content, conn=_pc2,
+                                company_id=company_id, max_tokens=6000,
+                            )
+                        cn2 = profile.get("name", "your company")
+                        stream_payer_prompt = _PMSP.format(
+                            company_name=cn2,
+                            today=_d2.today().isoformat(),
+                            payer_context=_pctx or "No matching payer policy data found.",
+                        )
+                        if stream_payer_sources:
+                            yield _sse_data({"type": "status", "message": f"Found {len(stream_payer_sources)} relevant payer policies"})
+                except Exception as _pe:
+                    logger.warning("Stream payer context failed: %s", _pe)
+
             estimated_usage = await ai_provider.estimate_usage(msg_dicts, thread["current_state"], company_context=ctx, slide_index=body.slide_index)
             yield _sse_data(
                 {
@@ -1958,6 +1996,7 @@ async def send_message_stream(
             ai_resp = await ai_provider.generate(
                 msg_dicts, thread["current_state"], company_context=ctx,
                 slide_index=body.slide_index, context_summary=context_summary,
+                payer_mode_prompt=stream_payer_prompt,
             )
             _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 
@@ -1978,8 +2017,12 @@ async def send_message_stream(
                 current_user_id=current_user.id,
             )
 
-            # Build metadata from compliance reasoning chains
+            # Build metadata from compliance reasoning chains + payer sources
             msg_metadata = _build_compliance_metadata(compliance_result, ai_resp)
+            if stream_payer_sources:
+                if msg_metadata is None:
+                    msg_metadata = {}
+                msg_metadata["payer_sources"] = stream_payer_sources
 
             # Save assistant message
             assistant_msg = await doc_svc.add_message(

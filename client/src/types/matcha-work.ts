@@ -61,11 +61,20 @@ export interface ComplianceReasoningLocation {
   categories: ComplianceReasoningCategory[]
 }
 
+export interface PayerPolicySource {
+  payer_name: string
+  policy_title: string | null
+  policy_number: string | null
+  source_url: string | null
+  similarity: number
+}
+
 export interface MWMessageMetadata {
   compliance_reasoning?: ComplianceReasoningLocation[]
   ai_reasoning_steps?: AIReasoningStep[]
   referenced_categories?: string[]
   referenced_locations?: string[]
+  payer_sources?: PayerPolicySource[]
 }
 
 export interface MWMessage {
