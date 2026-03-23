@@ -6,25 +6,31 @@ from datetime import date
 from weasyprint import HTML
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals", "behavioral")
-VERSION = "v1"
+VERSION = "v3"
 OUTPUT_PATH = os.path.join(OUTPUT_DIR, f"Matcha_360Behavioral_Proposal_{VERSION}.pdf")
 
 # ── Config ──────────────────────────────────────────────────────────────────
 CLIENT_NAME = "360 Behavioral Life Sciences"
-EMPLOYEE_COUNT = 2600
+TOTAL_HEADCOUNT = 2600
 FT_COUNT = 600
 PT_COUNT = 2000
+# FTE conversion: 2 part-time employees = 1 FTE for billing
+BILLABLE_FTE = FT_COUNT + (PT_COUNT // 2)  # 600 + 1000 = 1,600
+
+# Pricing
 LIST_PEPM = 14.00
-PEPM = 11.00
-DISCOUNT_AMT = LIST_PEPM - PEPM
-PARTNER_PEPM = 9.50
-IMPL_FEE = 20_000
-MONTHLY = PEPM * EMPLOYEE_COUNT
+PARTNER_DISCOUNT = 0.13  # 13% partner program discount
+PARTNER_PEPM = LIST_PEPM * (1 - PARTNER_DISCOUNT)
+VOLUME_DISCOUNT = 0.10  # 10% automatic for 500+ employees
+PEPM = LIST_PEPM * (1 - VOLUME_DISCOUNT) if BILLABLE_FTE >= 500 else LIST_PEPM
+PLATFORM_FEE = 15_000  # annual, Enterprise tier (includes federal + 1 jurisdiction)
+JURISDICTION_FEE = 10_000  # per additional jurisdiction/year, Enterprise tier
+IMPL_FEE = 25_000
+
+MONTHLY = PEPM * BILLABLE_FTE
 ANNUAL = MONTHLY * 12
-YEAR1_TCV = ANNUAL + IMPL_FEE
-PARTNER_MONTHLY = PARTNER_PEPM * EMPLOYEE_COUNT
-PARTNER_ANNUAL = PARTNER_MONTHLY * 12
-PARTNER_YEAR1_TCV = PARTNER_ANNUAL + IMPL_FEE
+ANNUAL_RECURRING = ANNUAL + PLATFORM_FEE
+YEAR1_TCV = ANNUAL_RECURRING + IMPL_FEE
 TODAY = date.today().strftime("%B %d, %Y")
 
 # ROI numbers
@@ -33,8 +39,8 @@ RISK_REDUCTION = 100_000
 TOTAL_VALUE = HARD_SAVINGS + RISK_REDUCTION
 NET_Y1 = TOTAL_VALUE - YEAR1_TCV
 ROI_MULTIPLE = TOTAL_VALUE / YEAR1_TCV
-YEAR2_NET = TOTAL_VALUE - ANNUAL
-THREE_YEAR_INVEST = YEAR1_TCV + (ANNUAL * 2)
+YEAR2_NET = TOTAL_VALUE - ANNUAL_RECURRING
+THREE_YEAR_INVEST = YEAR1_TCV + (ANNUAL_RECURRING * 2)
 THREE_YEAR_VALUE = TOTAL_VALUE * 3
 THREE_YEAR_NET = THREE_YEAR_VALUE - THREE_YEAR_INVEST
 
@@ -460,7 +466,7 @@ HTML_CONTENT = f"""
     <div style="font-size: 10pt; font-style: italic; opacity: 0.75; margin-bottom: 18px; letter-spacing: 0.2px;">&ldquo;Manage your risk or your risk will manage you.&rdquo;</div>
     <div class="cover-meta">
       Prepared for <strong>{CLIENT_NAME}</strong><br>
-      {EMPLOYEE_COUNT:,} Employees &middot; Full Platform Access<br>
+      {TOTAL_HEADCOUNT:,} Employees &middot; Full Platform Access<br>
       {TODAY}
     </div>
   </div>
@@ -486,7 +492,8 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="workforce-note">
-    <strong>Workforce composition:</strong> {FT_COUNT} benefit-eligible full-time employees + {PT_COUNT:,} part-time employees = {EMPLOYEE_COUNT:,} total &middot; Pricing applies uniformly across all active employees at the flat PEPM rate.
+    <strong>Workforce composition:</strong> {FT_COUNT} full-time employees + {PT_COUNT:,} part-time employees = {TOTAL_HEADCOUNT:,} total headcount.<br>
+    <strong>FTE billing:</strong> Part-time employees are counted at 2:1 (two part-time = one FTE). Billable FTE: {FT_COUNT} + {PT_COUNT//2:,} = <strong>{BILLABLE_FTE:,} FTE</strong>.
   </div>
 
   <h1>Investment Summary</h1>
@@ -496,54 +503,147 @@ HTML_CONTENT = f"""
       <thead>
         <tr>
           <th>Line Item</th>
-          <th style="text-align:right; color:#9ca3af; font-weight:500; font-size:11px;">Channel Rate</th>
-          <th style="text-align:right; color:#9ca3af; font-weight:500; font-size:11px;">Partner Rate</th>
+          <th style="text-align:right">Annual</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>List Rate (Per Employee Per Month)</td>
-          <td class="amount">${LIST_PEPM:.2f}</td>
-          <td class="amount">${LIST_PEPM:.2f}</td>
-        </tr>
-        <tr>
-          <td>Discount</td>
-          <td class="amount">&ndash;${DISCOUNT_AMT:.2f} (21%)</td>
-          <td class="amount">&ndash;${LIST_PEPM - PARTNER_PEPM:.2f} (32%)</td>
-        </tr>
-        <tr>
-          <td><strong>Discounted PEPM &times; {EMPLOYEE_COUNT:,} employees</strong></td>
-          <td class="amount"><strong>${PEPM:.2f}</strong></td>
-          <td class="amount"><strong>${PARTNER_PEPM:.2f}</strong></td>
-        </tr>
-        <tr>
-          <td>Monthly Platform Cost</td>
-          <td class="amount">${MONTHLY:,.2f}</td>
-          <td class="amount">${PARTNER_MONTHLY:,.2f}</td>
-        </tr>
-        <tr>
-          <td>Annual Platform Cost (12 months)</td>
+          <td>PEPM Rate: ${PEPM:.2f} &times; {BILLABLE_FTE:,} FTE &times; 12 months</td>
           <td class="amount">${ANNUAL:,.2f}</td>
-          <td class="amount">${PARTNER_ANNUAL:,.2f}</td>
         </tr>
         <tr>
-          <td>One-Time Implementation &amp; Onboarding</td>
-          <td class="amount">${IMPL_FEE:,.2f}</td>
+          <td>Platform Fee (includes federal compliance + 1 jurisdiction)</td>
+          <td class="amount">${PLATFORM_FEE:,.2f}</td>
+        </tr>
+        <tr style="background:#f5f5f7;">
+          <td><strong>Annual Recurring</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING:,.2f}</strong></td>
+        </tr>
+        <tr>
+          <td>Implementation &amp; Configuration (one-time, Year 1 only)</td>
           <td class="amount">${IMPL_FEE:,.2f}</td>
         </tr>
         <tr class="total-row">
-          <td>Year 1 Total Contract Value</td>
+          <td>Year 1 Total (before additional jurisdictions)</td>
           <td class="amount">${YEAR1_TCV:,.2f}</td>
-          <td class="amount">${PARTNER_YEAR1_TCV:,.2f}</td>
+        </tr>
+        <tr class="total-row" style="border-top: 1px solid #d1d5db;">
+          <td>Year 2+ Annual (recurring only)</td>
+          <td class="amount">${ANNUAL_RECURRING:,.2f}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="pricing-note" style="margin-top:6px; margin-bottom:0;">
+    Implementation &amp; Configuration is a one-time fee. Subsequent years require only the annual recurring cost. Professional onboarding services for new locations, jurisdictions, or organizational changes are available on a fee-for-service basis&mdash;a schedule will be provided upon request.
+  </p>
+
+  <h2>Partner Program Pricing (13% off)</h2>
+
+  <div class="pricing-box">
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th style="text-align:right">Standard</th>
+          <th style="text-align:right">Partner</th>
+          <th style="text-align:right">You Save</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>PEPM Rate</td>
+          <td class="amount">${PEPM:.2f}</td>
+          <td class="amount">${LIST_PEPM * 0.87:.2f}</td>
+          <td class="amount">${PEPM - (LIST_PEPM * 0.87):.2f}/FTE/mo</td>
+        </tr>
+        <tr>
+          <td>Annual FTE Cost ({BILLABLE_FTE:,} FTE)</td>
+          <td class="amount">${ANNUAL:,.0f}</td>
+          <td class="amount">${LIST_PEPM * 0.87 * BILLABLE_FTE * 12:,.0f}</td>
+          <td class="amount">${ANNUAL - (LIST_PEPM * 0.87 * BILLABLE_FTE * 12):,.0f}</td>
+        </tr>
+        <tr>
+          <td>Platform Fee</td>
+          <td class="amount">${PLATFORM_FEE:,.0f}</td>
+          <td class="amount">${PLATFORM_FEE * 0.87:,.0f}</td>
+          <td class="amount">${PLATFORM_FEE * 0.13:,.0f}</td>
+        </tr>
+        <tr>
+          <td>Per Additional Jurisdiction</td>
+          <td class="amount">${JURISDICTION_FEE:,.0f}</td>
+          <td class="amount">${JURISDICTION_FEE * 0.87:,.0f}</td>
+          <td class="amount">${JURISDICTION_FEE * 0.13:,.0f}</td>
+        </tr>
+        <tr style="background:#f5f5f7;">
+          <td><strong>Annual Recurring</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
+          <td class="amount"><strong>${(LIST_PEPM * 0.87 * BILLABLE_FTE * 12) + (PLATFORM_FEE * 0.87):,.0f}</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING - ((LIST_PEPM * 0.87 * BILLABLE_FTE * 12) + (PLATFORM_FEE * 0.87)):,.0f}</strong></td>
+        </tr>
+        <tr>
+          <td>Implementation &amp; Configuration</td>
+          <td class="amount">${IMPL_FEE:,.0f}</td>
+          <td class="amount">${IMPL_FEE * 0.87:,.0f}</td>
+          <td class="amount">${IMPL_FEE * 0.13:,.0f}</td>
+        </tr>
+        <tr class="total-row">
+          <td>Year 1 Total</td>
+          <td class="amount">${YEAR1_TCV:,.0f}</td>
+          <td class="amount">${(LIST_PEPM * 0.87 * BILLABLE_FTE * 12) + (PLATFORM_FEE * 0.87) + (IMPL_FEE * 0.87):,.0f}</td>
+          <td class="amount"><strong>${YEAR1_TCV - ((LIST_PEPM * 0.87 * BILLABLE_FTE * 12) + (PLATFORM_FEE * 0.87) + (IMPL_FEE * 0.87)):,.0f}</strong></td>
+        </tr>
+        <tr class="total-row" style="border-top: 1px solid #d1d5db;">
+          <td>Year 2+ Annual</td>
+          <td class="amount">${ANNUAL_RECURRING:,.0f}</td>
+          <td class="amount">${(LIST_PEPM * 0.87 * BILLABLE_FTE * 12) + (PLATFORM_FEE * 0.87):,.0f}</td>
+          <td class="amount"><strong>${ANNUAL_RECURRING - ((LIST_PEPM * 0.87 * BILLABLE_FTE * 12) + (PLATFORM_FEE * 0.87)):,.0f}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="pricing-note" style="margin-top:8px;">
+    Partner Program requires: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.
+  </p>
+
+  <h2>Jurisdiction Fee Schedule</h2>
+
+  <div class="pricing-box">
+    <table>
+      <thead>
+        <tr>
+          <th>Client Tier</th>
+          <th>Headcount</th>
+          <th style="text-align:right">Per Additional Jurisdiction / Year</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Growth</td>
+          <td>1&ndash;249</td>
+          <td class="amount">$4,000</td>
+        </tr>
+        <tr>
+          <td>Business</td>
+          <td>250&ndash;999</td>
+          <td class="amount">$7,500</td>
+        </tr>
+        <tr>
+          <td><strong>Enterprise</strong></td>
+          <td>1,000+</td>
+          <td class="amount">$10,000</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <p class="pricing-note">
-    <strong>Channel Rate ($11.00 PEPM)</strong> — standard broker-introduced pricing, all features included, no module upsells.<br>
-    <strong>Partner Rate ($9.50 PEPM)</strong> — available for organizations that commit to: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.<br>
-    Price locked for the 12-month initial term. Employee count subject to quarterly true-up.
+    First jurisdiction included in Platform Fee. Federal compliance (OSHA, FLSA, FMLA, ADA, EEOC) included at no additional charge. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Industry-specific regulatory bodies (e.g., state behavioral health licensing agencies, Medicaid credentialing bodies) requiring distinct compliance configuration are each treated as an additional Jurisdiction and scoped during implementation.<br><br>
+    <strong>FTE Billing</strong> &mdash; Part-time employees are billed at a 2:1 ratio (two part-time employees count as one FTE). This reduces the effective per-head cost for organizations with large part-time clinical workforces.<br>
+    <strong>Volume Discount</strong> &mdash; 10% PEPM discount applied automatically for 500+ billable FTE.<br>
+    Price locked for the 12-month initial term. FTE count subject to quarterly true-up.
   </p>
 
 </div>
@@ -564,11 +664,11 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Agentic policy documents tailored to behavioral health environments and applicable jurisdictions. Covers HIPAA workforce policies, patient safety and rights, mandated reporter obligations, crisis intervention protocols, and employment policies for mixed full-time and part-time workforces. Electronic signature collection with audit trails. In a behavioral health setting where staff routinely handle Protected Health Information across multiple care settings, the electronic acknowledgment trail creates the documented HIPAA workforce training record that HHS Office for Civil Rights auditors expect during a HIPAA investigation — without HR chasing down paper sign-off sheets. Because Medicaid accreditation surveys often require demonstration of written crisis intervention policies acknowledged by all clinical staff, the platform's bulk acknowledgment workflow ensures no one falls through the cracks when a policy is updated.</p>
+    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; AI-powered policy documents tailored to behavioral health environments and applicable jurisdictions. Covers HIPAA workforce policies, patient safety and rights, mandated reporter obligations, crisis intervention protocols, and employment policies for mixed full-time and part-time workforces. Electronic signature collection with audit trails. In a behavioral health setting where staff routinely handle Protected Health Information across multiple care settings, the electronic acknowledgment trail creates the documented HIPAA workforce training record that HHS Office for Civil Rights auditors expect during a HIPAA investigation — without HR chasing down paper sign-off sheets. Because Medicaid accreditation surveys often require demonstration of written crisis intervention policies acknowledged by all clinical staff, the platform's bulk acknowledgment workflow ensures no one falls through the cracks when a policy is updated.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Legislative Tracker</span> &mdash; Agentic monitoring of regulatory changes across jurisdictions including state behavioral health licensing updates, Medicaid reimbursement policy changes, and employment law developments with pattern detection for coordinated legislative activity. For a behavioral health organization operating in multiple states, this means automatic alerts when states update supervision hour requirements for licensure-track clinicians or when Medicaid managed care contracts revise credentialing timelines — changes that directly affect who can be billed for services and at what rate. Pattern detection also flags when multiple states simultaneously introduce legislation expanding mental health parity enforcement or telehealth prescribing authority, giving clinical operations teams lead time to adapt staffing models before the laws take effect.</p>
+    <p><span class="feature-name">Legislative Tracker</span> &mdash; Intelligent monitoring of regulatory changes across jurisdictions including state behavioral health licensing updates, Medicaid reimbursement policy changes, and employment law developments with pattern detection for coordinated legislative activity. For a behavioral health organization operating in multiple states, this means automatic alerts when states update supervision hour requirements for licensure-track clinicians or when Medicaid managed care contracts revise credentialing timelines — changes that directly affect who can be billed for services and at what rate. Pattern detection also flags when multiple states simultaneously introduce legislation expanding mental health parity enforcement or telehealth prescribing authority, giving clinical operations teams lead time to adapt staffing models before the laws take effect.</p>
   </div>
 
   <div class="feature-block">
@@ -578,19 +678,19 @@ HTML_CONTENT = f"""
   <h2>Investigations &amp; Risk</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting covering patient-on-worker violence, workplace injuries, HIPAA breaches, and behavioral incidents. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across care sites — critical for organizations where worker injury rates from patient aggression exceed general industry averages. The intake workflow includes OSHA 300 recordability determination at the point of report, so staff and supervisors do not need to interpret the standard themselves — a particularly important safeguard when the reporting employee is a licensed clinician who is excellent at patient care documentation but unfamiliar with OSHA's first-aid versus medical treatment distinction. Trend analytics can also surface whether patient aggression incidents cluster by program type, shift, or individual worker — enabling proactive de-escalation training interventions rather than responding incident by incident.</p>
+    <p><span class="feature-name">Incident Reports</span> &mdash; Intelligent safety and behavioral incident reporting covering patient-on-worker violence, workplace injuries, HIPAA breaches, and behavioral incidents. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Trend analytics and pattern detection across care sites — critical for organizations where worker injury rates from patient aggression exceed general industry averages. The intake workflow includes OSHA 300 recordability determination at the point of report, so staff and supervisors do not need to interpret the standard themselves — a particularly important safeguard when the reporting employee is a licensed clinician who is excellent at patient care documentation but unfamiliar with OSHA's first-aid versus medical treatment distinction. Trend analytics can also surface whether patient aggression incidents cluster by program type, shift, or individual worker — enabling proactive de-escalation training interventions rather than responding incident by incident.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel. Designed for high-volume ER environments driven by elevated turnover and the emotionally complex nature of behavioral health work. In behavioral health, ER cases frequently involve clinical staff accused of boundary violations or therapeutic misconduct — matters where the documentary record must be both thorough and legally privileged, making the encrypted case workspace and counsel export link particularly critical. The timeline construction feature is especially valuable in these cases because it surfaces gaps and inconsistencies in supervisor documentation before those gaps appear in a state licensing board complaint or plaintiff's attorney deposition.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with AI-driven document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel. Designed for high-volume ER environments driven by elevated turnover and the emotionally complex nature of behavioral health work. In behavioral health, ER cases frequently involve clinical staff accused of boundary violations or therapeutic misconduct — matters where the documentary record must be both thorough and legally privileged, making the encrypted case workspace and counsel export link particularly critical. The timeline construction feature is especially valuable in these cases because it surfaces gaps and inconsistencies in supervisor documentation before those gaps appear in a state licensing board complaint or plaintiff's attorney deposition.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with agentic accommodation suggestions, undue hardship assessment, and job function analysis. Particularly relevant in behavioral health where accommodation requests from staff intersect with patient care requirements. A clinician requesting an accommodation for their own mental health condition creates a fact pattern that is both legally sensitive and operationally complex — the platform guides the interactive process without exposing confidential medical information to supervisors who have no need to know the underlying diagnosis. When accommodation is denied because it would require eliminating an essential patient-facing function, the undue hardship documentation provides the specific, role-based rationale that the EEOC requires, rather than a vague reference to "operational needs."</p>
+    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with intelligent accommodation suggestions, undue hardship assessment, and job function analysis. Particularly relevant in behavioral health where accommodation requests from staff intersect with patient care requirements. A clinician requesting an accommodation for their own mental health condition creates a fact pattern that is both legally sensitive and operationally complex — the platform guides the interactive process without exposing confidential medical information to supervisors who have no need to know the underlying diagnosis. When accommodation is denied because it would require eliminating an essential patient-facing function, the undue hardship documentation provides the specific, role-based rationale that the EEOC requires, rather than a vague reference to "operational needs."</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Agentic-generated narrative memo suitable for counsel review. Essential for high-turnover environments where separation volume amplifies the probability of a poorly-documented termination becoming a claim. In behavioral health, the system flags when a proposed termination involves an employee who has filed a patient safety complaint with a state licensing board or reported a HIPAA concern — both protected activities that can support a retaliation claim under state whistleblower statutes or the HIPAA enforcement framework. At scale, this check on every separation decision is the difference between a defensible termination record and a pattern of retaliation claims that a plaintiff's attorney uses to support a class action.</p>
+    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. AI-generated narrative memo suitable for counsel review. Essential for high-turnover environments where separation volume amplifies the probability of a poorly-documented termination becoming a claim. In behavioral health, the system flags when a proposed termination involves an employee who has filed a patient safety complaint with a state licensing board or reported a HIPAA concern — both protected activities that can support a retaliation claim under state whistleblower statutes or the HIPAA enforcement framework. At scale, this check on every separation decision is the difference between a defensible termination record and a pattern of retaliation claims that a plaintiff's attorney uses to support a class action.</p>
   </div>
 
   <div class="feature-block">
@@ -600,19 +700,19 @@ HTML_CONTENT = f"""
   <h2>Workforce Management</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Employee Directory &amp; Bulk Import</span> &mdash; Centralized employee records supporting large mixed workforces with CSV bulk upload, batch creation, and Google Workspace and Slack account provisioning for new hires. Built to handle the high-volume onboarding and offboarding cycles typical of behavioral health organizations. In a sector where annual turnover rates routinely exceed 30%, a system that can process a cohort of 20 new clinicians in a single bulk import — triggering role-specific onboarding workflows, credential collection tasks, and HIPAA training assignments automatically — is the difference between a functioning HR team and one that is permanently behind on manual data entry. The centralized directory also creates the audit-ready employee record that Medicaid managed care accreditation surveys require when reviewers ask to see documentation of workforce credentialing and supervision status.</p>
+    <p><span class="feature-name">Employee Directory &amp; Bulk Import</span> &mdash; Centralized employee records with CSV bulk upload, batch creation, Google Workspace and Slack account provisioning for new hires.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by role and employment type. Supports role-specific workflows for licensed clinicians (LCSW, LPC, LMFT, BCBA, psychologist), case managers, crisis counselors, administrative staff, and part-time clinicians. Credential and license expiration tracking built in. Progress analytics with funnel metrics and completion tracking across all sites. The credential expiration tracking layer is particularly valuable in behavioral health, where a lapsed LCSW license or expired CPR certification can create both patient safety liability and Medicaid billing compliance exposure — the platform proactively surfaces renewal deadlines 90, 60, and 30 days in advance rather than discovering expirations during a payer audit. When a crisis counselor's mandated reporter certification lapses and a reportable event occurs during that window, the gap in the training record becomes a liability; this system closes that gap before it opens.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by role and employment type. Supports role-specific workflows for licensed clinicians, case managers, crisis counselors, and administrative staff. Credential and license expiration tracking built in. Progress analytics with funnel metrics and completion tracking across all sites.</p>
   </div>
 
   <h2>Agentic Document Workspace (Matcha Work)</h2>
 
   <div class="feature-block">
-    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode. Supports ER case memos, HIPAA policy drafting, onboarding plans, handbooks, separation documentation, and compliance research for complex multi-state behavioral health regulatory questions.</p>
-    <p><span class="feature-name">Chat with Your Data</span> &mdash; Ask questions directly against your employee records, incident logs, compliance requirements, and ER cases. Surface patterns, pull ad-hoc reports, and get answers without exporting to spreadsheets. A compliance officer can ask "which staff members have patient-aggression incidents in the last 12 months and are also currently in an open ADA accommodation case" and receive an immediately actionable cross-reference — the kind of data correlation that reveals whether aggression-related injuries are concentrated among workers with accommodation needs who may require a different intervention approach. Clinical operations leaders can query onboarding completion status across all sites to identify which programs are most at risk of a Medicaid audit finding due to incomplete training records.</p>
-    <p><span class="feature-name">Chain of Reasoning Compliance Querying</span> &mdash; Multi-step compliance analysis that walks through regulatory logic step by step&mdash;citing sources, applying preemption rules, and surfacing gaps&mdash;before returning a final answer. Designed for complex federal/state interactions where a single lookup is not enough. For a multi-state behavioral health organization, this means asking whether a proposed supervision structure for unlicensed mental health practitioners in a new state satisfies both the state's scope-of-practice statute and the applicable Medicaid managed care credentialing standard — and receiving a cited, step-by-step analysis rather than a general answer that leaves the compliance team uncertain. <strong>Monthly usage credits included.</strong></p>
+    <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode. Supports ER case memos, HIPAA policy drafting, onboarding plans, handbooks, separation documentation, and compliance research.</p>
+    <p><span class="feature-name">Chat with Your Data</span> &mdash; Query your employee records, incident logs, compliance requirements, and ER cases directly. Surface patterns and pull ad-hoc reports without exporting to spreadsheets.</p>
+    <p><span class="feature-name">Chain of Reasoning Compliance Querying</span> &mdash; Multi-step compliance analysis that walks through regulatory logic step by step&mdash;citing sources, applying preemption rules, and surfacing gaps&mdash;before returning a final answer. <strong>Monthly usage credits included.</strong></p>
   </div>
 
 </div>
@@ -653,7 +753,7 @@ HTML_CONTENT = f"""
         <td class="phase">Data Migration &amp; Manual Run</td>
         <td>Weeks 5&ndash;6</td>
         <td class="cost">$4,500</td>
-        <td>Full employee data import for {EMPLOYEE_COUNT:,} employees across both full-time and part-time classifications, historical records migration, policy document ingestion, run first onboarding cohort manually across multiple role types to validate completeness and regulatory alignment</td>
+        <td>Full employee data import for {TOTAL_HEADCOUNT:,} employees across both full-time and part-time classifications, historical records migration, policy document ingestion, run first onboarding cohort manually across multiple role types to validate completeness and regulatory alignment</td>
       </tr>
       <tr>
         <td class="phase">UAT &amp; Automation</td>
@@ -670,16 +770,29 @@ HTML_CONTENT = f"""
     </tbody>
   </table>
 
+  <h2>Security &amp; Infrastructure</h2>
+
+  <ul class="terms-list">
+    <li><span class="term-label">SSO / SAML 2.0</span> Enterprise single sign-on via SAML 2.0. Compatible with Okta, Azure AD, OneLogin, and any SAML-compliant identity provider. Per-company configuration with auto-provisioning.</li>
+    <li><span class="term-label">Role-Based Access</span> Granular role-based access controls across admin, HR, supervisor, and employee roles. Department and location-scoped visibility for multi-site organizations.</li>
+    <li><span class="term-label">Uptime</span> 99.5% target platform availability with automated health monitoring and incident alerting.</li>
+    <li><span class="term-label">Data Security</span> All data encrypted in transit (TLS 1.2+) and at rest (AES-256). Infrastructure hosted on AWS with US-based data residency.</li>
+
+    <li><span class="term-label">Data Retention</span> Full data export available at any time. Data deleted within 30 days of contract termination upon written request.</li>
+  </ul>
+
   <h1>Contract Terms</h1>
 
   <ul class="terms-list">
     <li><span class="term-label">Initial Term</span> 12 months from go-live date</li>
-    <li><span class="term-label">Price Lock</span> PEPM rate of $11.00 locked for the initial 12-month term</li>
-    <li><span class="term-label">Partner Rate</span> $9.50 PEPM available with quarterly video insights, anonymized case study &amp; data sharing, logo rights, public review within 90 days, and annual prepayment or 2-year term</li>
-    <li><span class="term-label">Data Security</span> HIPAA-compliant infrastructure with executed BAAs (AWS and Google Cloud); encrypted in transit (TLS/SSL enforced) and at rest</li>
+    <li><span class="term-label">Price Lock</span> PEPM rate of ${PEPM:.2f}, Platform Fee of ${PLATFORM_FEE:,.2f}, and Jurisdiction Fee of ${JURISDICTION_FEE:,.2f} locked for the initial 12-month term</li>
+    <li><span class="term-label">Platform Fee</span> ${PLATFORM_FEE:,.2f}/year includes federal compliance monitoring and one jurisdiction</li>
+    <li><span class="term-label">Jurisdiction Fees</span> ${JURISDICTION_FEE:,.2f} per additional jurisdiction per year, scoped during implementation</li>
+    <li><span class="term-label">FTE Billing</span> Part-time employees billed at 2:1 ratio (two PT = one FTE). Quarterly true-up based on active FTE count</li>
+    <li><span class="term-label">Partner Program</span> 13% discount (${PARTNER_PEPM:.2f} PEPM) with quarterly video insights, anonymized case study &amp; data sharing, logo rights, public review within 90 days, and annual prepayment or 2-year term</li>
+    <li><span class="term-label">Volume Discount</span> 10% PEPM discount applied automatically for 500+ billable FTE</li>
     <li><span class="term-label">Auto-Renewal</span> Automatic 12-month renewal periods</li>
     <li><span class="term-label">Opt-Out Notice</span> 60-day written notice required before any renewal period</li>
-    <li><span class="term-label">Employee True-Up</span> Quarterly adjustment based on active employee headcount across all employment types</li>
     <li><span class="term-label">Matcha Work Credits</span> Monthly credits included</li>
     <li><span class="term-label">Dedicated CSM</span> Assigned at contract signing through go-live and beyond</li>
     <li><span class="term-label">Value Validation</span> 90-day post-go-live review to confirm platform adoption and ROI</li>
@@ -760,11 +873,11 @@ HTML_CONTENT = f"""
     </thead>
     <tbody>
       <tr>
-        <td>Platform cost</td>
-        <td style="text-align:right">${ANNUAL:,.0f}</td>
-        <td style="text-align:right">${ANNUAL:,.0f}</td>
-        <td style="text-align:right">${ANNUAL:,.0f}</td>
-        <td style="text-align:right">${ANNUAL*3:,.0f}</td>
+        <td>Annual recurring (PEPM + platform fee)</td>
+        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING*3:,.0f}</td>
       </tr>
       <tr>
         <td>Implementation</td>
@@ -776,8 +889,8 @@ HTML_CONTENT = f"""
       <tr>
         <td><strong>Total investment</strong></td>
         <td style="text-align:right"><strong>${YEAR1_TCV:,.0f}</strong></td>
-        <td style="text-align:right"><strong>${ANNUAL:,.0f}</strong></td>
-        <td style="text-align:right"><strong>${ANNUAL:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
         <td style="text-align:right"><strong>${THREE_YEAR_INVEST:,.0f}</strong></td>
       </tr>
       <tr>
@@ -850,7 +963,8 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="footer-note">
-    This proposal is valid for 30 days from {TODAY}. Pricing is based on the employee count provided and subject to quarterly true-up.
+    This proposal is valid for 30 days from {TODAY}. Pricing is based on the employee count provided and subject to quarterly true-up.<br><br>
+    <em>Matcha is a compliance research and workforce risk intelligence platform. It is not a substitute for legal counsel, and does not constitute legal advice, medical guidance, or regulatory certification. All compliance data is sourced from public regulatory databases and provided for informational purposes.</em>
   </div>
 
 </div>

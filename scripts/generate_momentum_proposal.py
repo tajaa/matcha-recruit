@@ -6,23 +6,28 @@ from datetime import date
 from weasyprint import HTML
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals", "momentum")
-VERSION = "v1"
+VERSION = "v3"
 OUTPUT_PATH = os.path.join(OUTPUT_DIR, f"Matcha_Momentum_Proposal_{VERSION}.pdf")
 
 # ── Config ──────────────────────────────────────────────────────────────────
 CLIENT_NAME = "Momentum Life Sciences"
 EMPLOYEE_COUNT = 200
-LIST_PEPM = 14.00
-PEPM = 11.00
-DISCOUNT_AMT = LIST_PEPM - PEPM
-PARTNER_PEPM = 9.50
+
+# Pricing
+LIST_PEPM = 15.00
+PARTNER_DISCOUNT = 0.13  # 13% partner program discount
+PARTNER_PEPM = LIST_PEPM * (1 - PARTNER_DISCOUNT)
+PARTNER_MULT = 1 - PARTNER_DISCOUNT
+VOLUME_DISCOUNT = 0.10  # 10% automatic for 500+ employees
+PEPM = LIST_PEPM * (1 - VOLUME_DISCOUNT) if EMPLOYEE_COUNT >= 500 else LIST_PEPM
+PLATFORM_FEE = 5_000  # annual, Growth tier (includes federal + 1 jurisdiction)
+JURISDICTION_FEE = 4_000  # per additional jurisdiction/year, Growth tier
 IMPL_FEE = 8_000
+
 MONTHLY = PEPM * EMPLOYEE_COUNT
 ANNUAL = MONTHLY * 12
-YEAR1_TCV = ANNUAL + IMPL_FEE
-PARTNER_MONTHLY = PARTNER_PEPM * EMPLOYEE_COUNT
-PARTNER_ANNUAL = PARTNER_MONTHLY * 12
-PARTNER_YEAR1_TCV = PARTNER_ANNUAL + IMPL_FEE
+ANNUAL_RECURRING = ANNUAL + PLATFORM_FEE  # before additional jurisdictions
+YEAR1_TCV = ANNUAL_RECURRING + IMPL_FEE
 TODAY = date.today().strftime("%B %d, %Y")
 
 # ROI numbers
@@ -31,8 +36,8 @@ RISK_REDUCTION = 55_000
 TOTAL_VALUE = HARD_SAVINGS + RISK_REDUCTION
 NET_Y1 = TOTAL_VALUE - YEAR1_TCV
 ROI_MULTIPLE = TOTAL_VALUE / YEAR1_TCV
-YEAR2_NET = TOTAL_VALUE - ANNUAL
-THREE_YEAR_INVEST = YEAR1_TCV + (ANNUAL * 2)
+YEAR2_NET = TOTAL_VALUE - ANNUAL_RECURRING
+THREE_YEAR_INVEST = YEAR1_TCV + (ANNUAL_RECURRING * 2)
 THREE_YEAR_VALUE = TOTAL_VALUE * 3
 THREE_YEAR_NET = THREE_YEAR_VALUE - THREE_YEAR_INVEST
 
@@ -506,53 +511,146 @@ HTML_CONTENT = f"""
       <thead>
         <tr>
           <th>Line Item</th>
-          <th style="text-align:right; color:#9ca3af; font-weight:500; font-size:11px;">Channel Rate</th>
-          <th style="text-align:right; color:#9ca3af; font-weight:500; font-size:11px;">Partner Rate</th>
+          <th style="text-align:right">Annual</th>
         </tr>
       </thead>
       <tbody>
         <tr>
-          <td>List Rate (Per Employee Per Month)</td>
-          <td class="amount">${LIST_PEPM:.2f}</td>
-          <td class="amount">${LIST_PEPM:.2f}</td>
-        </tr>
-        <tr>
-          <td>Discount</td>
-          <td class="amount">&ndash;${DISCOUNT_AMT:.2f} (21%)</td>
-          <td class="amount">&ndash;${LIST_PEPM - PARTNER_PEPM:.2f} (32%)</td>
-        </tr>
-        <tr>
-          <td><strong>Discounted PEPM &times; {EMPLOYEE_COUNT} employees</strong></td>
-          <td class="amount"><strong>${PEPM:.2f}</strong></td>
-          <td class="amount"><strong>${PARTNER_PEPM:.2f}</strong></td>
-        </tr>
-        <tr>
-          <td>Monthly Platform Cost</td>
-          <td class="amount">${MONTHLY:,.2f}</td>
-          <td class="amount">${PARTNER_MONTHLY:,.2f}</td>
-        </tr>
-        <tr>
-          <td>Annual Platform Cost (12 months)</td>
+          <td>PEPM Rate: ${PEPM:.2f} &times; {EMPLOYEE_COUNT} employees &times; 12 months</td>
           <td class="amount">${ANNUAL:,.2f}</td>
-          <td class="amount">${PARTNER_ANNUAL:,.2f}</td>
         </tr>
         <tr>
-          <td>One-Time Implementation &amp; Onboarding</td>
-          <td class="amount">${IMPL_FEE:,.2f}</td>
+          <td>Platform Fee (includes federal compliance + 1 jurisdiction)</td>
+          <td class="amount">${PLATFORM_FEE:,.2f}</td>
+        </tr>
+        <tr style="background:#f5f5f7;">
+          <td><strong>Annual Recurring</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING:,.2f}</strong></td>
+        </tr>
+        <tr>
+          <td>Implementation &amp; Configuration (one-time, Year 1 only)</td>
           <td class="amount">${IMPL_FEE:,.2f}</td>
         </tr>
         <tr class="total-row">
-          <td>Year 1 Total Contract Value</td>
+          <td>Year 1 Total (before additional jurisdictions)</td>
           <td class="amount">${YEAR1_TCV:,.2f}</td>
-          <td class="amount">${PARTNER_YEAR1_TCV:,.2f}</td>
+        </tr>
+        <tr class="total-row" style="border-top: 1px solid #d1d5db;">
+          <td>Year 2+ Annual (recurring only)</td>
+          <td class="amount">${ANNUAL_RECURRING:,.2f}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="pricing-note" style="margin-top:6px; margin-bottom:0;">
+    Implementation &amp; Configuration is a one-time fee. Subsequent years require only the annual recurring cost. Professional onboarding services for new locations, jurisdictions, or organizational changes are available on a fee-for-service basis&mdash;a schedule will be provided upon request.
+  </p>
+
+  <h2>Partner Program Pricing ({PARTNER_DISCOUNT:.0%} off)</h2>
+
+  <div class="pricing-box">
+    <table>
+      <thead>
+        <tr>
+          <th></th>
+          <th style="text-align:right">Standard</th>
+          <th style="text-align:right">Partner</th>
+          <th style="text-align:right">You Save</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>PEPM Rate</td>
+          <td class="amount">${PEPM:.2f}</td>
+          <td class="amount">${PEPM * PARTNER_MULT:.2f}</td>
+          <td class="amount">${PEPM * PARTNER_DISCOUNT:.2f}/ee/mo</td>
+        </tr>
+        <tr>
+          <td>Annual Employee Cost ({EMPLOYEE_COUNT} ee)</td>
+          <td class="amount">${ANNUAL:,.0f}</td>
+          <td class="amount">${ANNUAL * PARTNER_MULT:,.0f}</td>
+          <td class="amount">${ANNUAL * PARTNER_DISCOUNT:,.0f}</td>
+        </tr>
+        <tr>
+          <td>Platform Fee</td>
+          <td class="amount">${PLATFORM_FEE:,.0f}</td>
+          <td class="amount">${PLATFORM_FEE * PARTNER_MULT:,.0f}</td>
+          <td class="amount">${PLATFORM_FEE * PARTNER_DISCOUNT:,.0f}</td>
+        </tr>
+        <tr>
+          <td>Per Additional Jurisdiction</td>
+          <td class="amount">${JURISDICTION_FEE:,.0f}</td>
+          <td class="amount">${JURISDICTION_FEE * PARTNER_MULT:,.0f}</td>
+          <td class="amount">${JURISDICTION_FEE * PARTNER_DISCOUNT:,.0f}</td>
+        </tr>
+        <tr style="background:#f5f5f7;">
+          <td><strong>Annual Recurring</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING * PARTNER_MULT:,.0f}</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING * PARTNER_DISCOUNT:,.0f}</strong></td>
+        </tr>
+        <tr>
+          <td>Implementation &amp; Configuration</td>
+          <td class="amount">${IMPL_FEE:,.0f}</td>
+          <td class="amount">${IMPL_FEE * PARTNER_MULT:,.0f}</td>
+          <td class="amount">${IMPL_FEE * PARTNER_DISCOUNT:,.0f}</td>
+        </tr>
+        <tr class="total-row">
+          <td>Year 1 Total</td>
+          <td class="amount">${YEAR1_TCV:,.0f}</td>
+          <td class="amount">${YEAR1_TCV * PARTNER_MULT:,.0f}</td>
+          <td class="amount"><strong>${YEAR1_TCV * PARTNER_DISCOUNT:,.0f}</strong></td>
+        </tr>
+        <tr class="total-row" style="border-top: 1px solid #d1d5db;">
+          <td>Year 2+ Annual</td>
+          <td class="amount">${ANNUAL_RECURRING:,.0f}</td>
+          <td class="amount">${ANNUAL_RECURRING * PARTNER_MULT:,.0f}</td>
+          <td class="amount"><strong>${ANNUAL_RECURRING * PARTNER_DISCOUNT:,.0f}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="pricing-note" style="margin-top:8px;">
+    Partner Program requires: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.
+  </p>
+
+  <h2>Jurisdiction Fee Schedule</h2>
+
+  <div class="pricing-box">
+    <table>
+      <thead>
+        <tr>
+          <th>Client Tier</th>
+          <th>Headcount</th>
+          <th style="text-align:right">Per Additional Jurisdiction / Year</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Growth</strong></td>
+          <td>1&ndash;249</td>
+          <td class="amount">$4,000</td>
+        </tr>
+        <tr>
+          <td>Business</td>
+          <td>250&ndash;999</td>
+          <td class="amount">$7,500</td>
+        </tr>
+        <tr>
+          <td>Enterprise</td>
+          <td>1,000+</td>
+          <td class="amount">$10,000</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <p class="pricing-note">
-    <strong>Channel Rate ($11.00 PEPM)</strong> — standard broker-introduced pricing, all features included, no module upsells.<br>
-    <strong>Partner Rate ($9.50 PEPM)</strong> — available for organizations that commit to: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.<br>
+    First jurisdiction included in Platform Fee. Federal compliance (OSHA, FLSA, FMLA, ADA, EEOC) included at no additional charge. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Industry-specific regulatory bodies (e.g., state medical boards, DEA registration sites) requiring distinct compliance configuration are each treated as an additional Jurisdiction and scoped during implementation.<br><br>
+    <strong>Partner Program (${PARTNER_PEPM:.2f} PEPM)</strong> &mdash; {PARTNER_DISCOUNT:.0%} discount available for organizations that commit to: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.<br>
+    <strong>Volume Discount</strong> &mdash; 10% PEPM discount applied automatically for organizations with 500 or more employees.<br>
     Price locked for the 12-month initial term. Employee count subject to quarterly true-up.
   </p>
 
@@ -576,11 +674,11 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Agentic policy documents tailored to specific jurisdictions and research environments. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation. In a life sciences environment, this includes GCP/GLP training acknowledgment policies, lab safety protocols, conflict of interest and IP assignment policies, and applicable export control awareness policies — all generated from the jurisdiction and industry profile rather than drafted from scratch by legal. When a new state laboratory location comes online or the FDA updates its clinical investigator guidance, the handbook auto-updates the affected sections and triggers bulk re-acknowledgment for impacted employees, keeping the training record current without a manual policy revision cycle.</p>
+    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; AI-powered policy documents tailored to specific jurisdictions and research environments. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation. In a life sciences environment, this includes GCP/GLP training acknowledgment policies, lab safety protocols, conflict of interest and IP assignment policies, and applicable export control awareness policies — all generated from the jurisdiction and industry profile rather than drafted from scratch by legal. When a new state laboratory location comes online or the FDA updates its clinical investigator guidance, the handbook auto-updates the affected sections and triggers bulk re-acknowledgment for impacted employees, keeping the training record current without a manual policy revision cycle.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Legislative Tracker</span> &mdash; Agentic monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity. Covers FDA guidance updates, state biotech regulations, and employment law changes. For Momentum Life Sciences, this means automatic alerts when the FDA publishes new draft guidance on clinical investigator qualification standards or when a state enacts changes to its bioresearch facility permitting requirements — changes that directly affect workforce training obligations and cannot be caught by monitoring a single federal register feed. Pattern detection also flags when multiple states simultaneously advance legislation on trade secret protections, non-compete enforceability, or laboratory worker safety standards, giving HR and legal teams coordinated visibility rather than discovering the laws state by state after they pass.</p>
+    <p><span class="feature-name">Legislative Tracker</span> &mdash; Intelligent monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity. Covers FDA guidance updates, state biotech regulations, and employment law changes. For Momentum Life Sciences, this means automatic alerts when the FDA publishes new draft guidance on clinical investigator qualification standards or when a state enacts changes to its bioresearch facility permitting requirements — changes that directly affect workforce training obligations and cannot be caught by monitoring a single federal register feed. Pattern detection also flags when multiple states simultaneously advance legislation on trade secret protections, non-compete enforceability, or laboratory worker safety standards, giving HR and legal teams coordinated visibility rather than discovering the laws state by state after they pass.</p>
   </div>
 
   <div class="feature-block">
@@ -590,41 +688,50 @@ HTML_CONTENT = f"""
   <h2>Investigations &amp; Risk</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Incident Reports</span> &mdash; Agentic safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Covers biosafety incidents, lab accidents, chemical exposure events, and behavioral incidents. Trend analytics and pattern detection across sites. In a life sciences setting, the system tracks BSL-2/BSL-3 exposure events, chemical spills, needlestick and sharps injuries, and near-miss events in a single incident record that automatically evaluates OSHA 300 recordability — eliminating the risk of a recordkeeping citation when OSHA conducts a programmed laboratory inspection. Trend analytics can surface whether chemical exposure incidents cluster around a specific reagent, protocol, or shift, enabling targeted engineering control or SOP improvements before an incident escalates to a workers' comp claim or OSHA complaint.</p>
+    <p><span class="feature-name">Incident Reports</span> &mdash; Intelligent safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Covers biosafety incidents, lab accidents, chemical exposure events, and behavioral incidents. Trend analytics and pattern detection across sites. In a life sciences setting, the system tracks BSL-2/BSL-3 exposure events, chemical spills, needlestick and sharps injuries, and near-miss events in a single incident record that automatically evaluates OSHA 300 recordability — eliminating the risk of a recordkeeping citation when OSHA conducts a programmed laboratory inspection. Trend analytics can surface whether chemical exposure incidents cluster around a specific reagent, protocol, or shift, enabling targeted engineering control or SOP improvements before an incident escalates to a workers' comp claim or OSHA complaint.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel. In a research-intensive company where IP ownership and confidentiality are core employment terms, ER Copilot centralizes the case record for disputes involving alleged IP misappropriation, competitive activity, or research misconduct — matters where the documentary timeline is as important to the outcome as the underlying facts. When a case requires outside employment counsel or litigation hold coordination, the encrypted PDF export delivers a complete, date-stamped record in a form attorneys can immediately use, compressing weeks of document collection into hours.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management that acts as an active guide and a &ldquo;second set of eyes&rdquo; throughout complex investigations. Powered by AI-driven document analysis, it walks you through the case, automatically constructing timelines and flagging discrepancies. It eliminates manual cross-referencing by instantly identifying specific policy violations&mdash;no more digging through the employee handbook; the system finds it for you, while simultaneously surfacing any relevant jurisdictional laws.</p>
+    <p>In a research-intensive company where IP ownership and confidentiality are core employment terms, ER Copilot centralizes the case record for disputes involving alleged IP misappropriation, competitive activity, or research misconduct&mdash;matters where the documentary timeline is as important to the outcome as the underlying facts. When a case requires outside employment counsel or litigation hold coordination, secure, encrypted PDF export links deliver a complete, date-stamped record in a form attorneys can immediately use, compressing weeks of document collection into hours.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with agentic accommodation suggestions, undue hardship assessment, and job function analysis. In a life sciences environment, accommodation requests often involve laboratory workers seeking modifications to chemical exposure tasks or physical safety requirements — situations where the essential functions analysis must be grounded in the specific biosafety and regulatory context of the role, not a generic job description. The platform's job function analysis integrates the specific physical and environmental requirements of laboratory positions, including biosafety level constraints and personal protective equipment mandates, to identify feasible modifications that do not create a direct threat — producing documentation that satisfies both EEOC and OSHA standards simultaneously.</p>
+    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with intelligent accommodation suggestions, undue hardship assessment, and job function analysis. In a life sciences environment, accommodation requests often involve laboratory workers seeking modifications to chemical exposure tasks or physical safety requirements — situations where the essential functions analysis must be grounded in the specific biosafety and regulatory context of the role, not a generic job description. The platform's job function analysis integrates the specific physical and environmental requirements of laboratory positions, including biosafety level constraints and personal protective equipment mandates, to identify feasible modifications that do not create a direct threat — producing documentation that satisfies both EEOC and OSHA standards simultaneously.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. Agentic-generated narrative memo suitable for counsel review. For a life sciences company, the system flags when a proposed termination involves an employee who recently raised a research integrity concern, filed an OSHA laboratory safety complaint, or requested accommodation — categories that trigger retaliation protection under OSHA Section 11(c), FDA whistleblower regulations, and applicable state statutes. At a company where a single high-profile retaliation claim could affect investor sentiment, regulatory relationships, or IND credibility, this pre-decisional check is the highest-leverage risk control available.</p>
+    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. AI-generated narrative memo suitable for counsel review. For a life sciences company, the system flags when a proposed termination involves an employee who recently raised a research integrity concern, filed an OSHA laboratory safety complaint, or requested accommodation — categories that trigger retaliation protection under OSHA Section 11(c), FDA whistleblower regulations, and applicable state statutes. At a company where a single high-profile retaliation claim could affect investor sentiment, regulatory relationships, or IND credibility, this pre-decisional check is the highest-leverage risk control available.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support. In a life sciences company, separation agreements routinely include IP assignment confirmations, non-solicitation provisions, and COBRA election materials — documents that are frequently assembled manually from multiple templates under time pressure when a departure is unexpected. The platform generates a complete, jurisdiction-compliant separation package from a single workflow, with the OWBPA disclosures, consideration period tracking, and revocation window built in so nothing is inadvertently omitted.</p>
+    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support. In a life sciences company, separation agreements routinely include IP assignment confirmations and non-solicitation provisions — documents that are frequently assembled manually from multiple templates under time pressure when a departure is unexpected. The platform generates a complete, jurisdiction-compliant separation package from a single workflow, with the OWBPA disclosures, consideration period tracking, and revocation window built in so nothing is inadvertently omitted.</p>
   </div>
 
   <h2>Workforce Management</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Employee Directory &amp; Bulk Import</span> &mdash; Centralized employee records with CSV bulk upload, batch creation, Google Workspace and Slack account provisioning for new hires. For a growing life sciences company that regularly adds headcount in research, clinical operations, and commercial functions, the bulk import and automated provisioning workflow eliminates the multi-day manual onboarding process that consumes IT and HR bandwidth every time a new cohort of scientists or CRAs joins. The centralized directory also serves as the single source of truth for FDA inspection readiness — when an investigator asks to see the training record for a specific clinical research associate, the record is available in seconds rather than assembled from multiple systems.</p>
+    <p><span class="feature-name">Employee Directory &amp; Bulk Import</span> &mdash; Centralized employee records with CSV bulk upload, batch creation, Google Workspace and Slack account provisioning for new hires.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by category. Supports role-specific workflows for research scientists, lab technicians, clinical staff, and QA. Progress analytics with funnel metrics, bottleneck identification, and completion tracking across the organization. For a life sciences company subject to FDA GxP requirements, the onboarding template for research and clinical roles includes GCP/GLP training completion, conflict of interest disclosure, IP assignment acknowledgment, and biosafety training — all gated and tracked in a single workflow that produces the training record FDA investigators expect to see during an inspection. Completion analytics allow the quality team to certify at any moment that all study-facing staff have completed the required pre-study training, replacing a manual roster check with a real-time dashboard view.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by category. Supports role-specific workflows for research scientists, lab technicians, clinical staff, and QA. Progress analytics with funnel metrics, bottleneck identification, and completion tracking.</p>
+  </div>
+
+  <div class="feature-block">
+    <p><span class="feature-name">Compliance &amp; Operations Dashboard</span> &mdash; In a fast-paced biotech environment, missing a regulatory shift or a scheduling detail isn&rsquo;t just an administrative error&mdash;it&rsquo;s a compliance risk that can disrupt critical research. The dashboard acts as your operational command center, giving you a centralized, real-time view of your team&rsquo;s status. At a glance, you can monitor upcoming regulatory changes, track exactly when an employee&rsquo;s leave of absence (LOA) is coming to an end, and review outstanding incident reports or ER Copilot action items. To ensure nothing slips through the cracks, the system features a dual-alert system, pushing proactive notifications directly to your dashboard and sending them straight to your email.</p>
+  </div>
+
+  <div class="feature-block">
+    <p><span class="feature-name">Automated License &amp; Training Tracking</span> &mdash; Managing the specialized credentials required for clinical and laboratory work shouldn&rsquo;t rely on manual spreadsheets. As your comprehensive HR platform, Matcha features a dedicated tracking engine for all employee licenses, certifications, and mandatory compliance training. Matcha automatically monitors every expiry date and acts as an intelligent early warning system. When a credential is approaching its expiration, the platform automatically emails both the employee and their manager with a reminder. This alert includes a secure, direct link for the employee to easily upload their renewed document straight into the platform. As the deadline gets closer, it sends automated follow-ups to ensure action is being taken. If a credential actually expires, Matcha immediately alerts the designated compliance personnel, ensuring your research teams remain fully certified, safe, and audit-ready without the manual oversight.</p>
   </div>
 
   <h2>Agentic Document Workspace (Matcha Work)</h2>
 
   <div class="feature-block">
     <p>Chat-driven document creation with threading, iterative drafts, and internal data search mode for cross-referencing organizational information. Supports performance reviews, workbooks, onboarding plans, presentations, handbooks, and policies.</p>
-    <p><span class="feature-name">Chat with Your Data</span> &mdash; Ask questions directly against your employee records, incident logs, compliance requirements, and ER cases. Surface patterns, pull ad-hoc reports, and get answers without exporting to spreadsheets. A quality or regulatory affairs team member can ask "which employees working on Study 1234 have not completed their GCP refresher training in the past 12 months" and get a precise, audit-ready list in seconds — the kind of inspection readiness query that currently requires manually cross-referencing the clinical team roster against training records from a separate LMS. HR business partners can query ER case and separation data to determine whether attrition is concentrated in a specific function or manager, enabling targeted retention interventions before the company loses critical institutional knowledge during a pivotal clinical phase.</p>
-    <p><span class="feature-name">Chain of Reasoning Compliance Querying</span> &mdash; Multi-step compliance analysis that walks through regulatory logic step by step&mdash;citing sources, applying preemption rules, and surfacing gaps&mdash;before returning a final answer. Designed for complex federal/state interactions where a single lookup is not enough. For Momentum Life Sciences, this means asking whether a proposed remote work arrangement for a GCP-trained clinical research associate triggers any FDA sponsor oversight obligations or state laboratory licensing requirements, and receiving a step-by-step analysis that cites the applicable 21 CFR Part 312 provisions and state statutes — rather than a general answer that leaves compliance uncertain. <strong>Monthly usage credits included.</strong></p>
+    <p><span class="feature-name">Chat with Your Data</span> &mdash; Query your employee records, incident logs, compliance requirements, and ER cases directly. Surface patterns and pull ad-hoc reports without exporting to spreadsheets.</p>
+    <p><span class="feature-name">Chain of Reasoning Compliance Querying</span> &mdash; Multi-step compliance analysis that walks through regulatory logic step by step&mdash;citing sources, applying preemption rules, and surfacing gaps&mdash;before returning a final answer. <strong>Monthly usage credits included.</strong></p>
   </div>
 
 </div>
@@ -661,13 +768,13 @@ HTML_CONTENT = f"""
         <td class="phase">Configuration &amp; Templating</td>
         <td>Weeks 3&ndash;4</td>
         <td class="cost">$4,500</td>
-        <td>Location/jurisdiction setup, compliance baseline scan, build role-specific onboarding templates (research scientist, lab tech, clinical staff, QA/regulatory affairs), credential and certification expiration workflows, FDA training record workflows, handbook ingestion</td>
+        <td>Location/jurisdiction setup, compliance baseline scan, build role-specific onboarding templates (research scientist, lab tech, clinical staff, QA/regulatory affairs), credential and certification expiration workflows, FDA training record workflows, handbook and policy document ingestion</td>
       </tr>
       <tr>
         <td class="phase">Data Migration &amp; Manual Run</td>
         <td>Weeks 5&ndash;6</td>
         <td class="cost">$3,000</td>
-        <td>Employee data import, training record migration, policy document ingestion, run first onboarding cohort manually using templates to validate completeness and regulatory alignment</td>
+        <td>Employee data import, training record migration, run first onboarding cohort manually using templates to validate completeness and regulatory alignment</td>
       </tr>
       <tr>
         <td class="phase">UAT &amp; Automation</td>
@@ -684,13 +791,26 @@ HTML_CONTENT = f"""
     </tbody>
   </table>
 
+  <h2>Security &amp; Infrastructure</h2>
+
+  <ul class="terms-list">
+    <li><span class="term-label">SSO / SAML 2.0</span> Enterprise single sign-on via SAML 2.0. Compatible with Okta, Azure AD, OneLogin, and any SAML-compliant identity provider. Per-company configuration with auto-provisioning.</li>
+    <li><span class="term-label">Role-Based Access</span> Granular role-based access controls across admin, HR, supervisor, and employee roles. Department and location-scoped visibility for multi-site organizations.</li>
+    <li><span class="term-label">Uptime</span> 99.5% target platform availability with automated health monitoring and incident alerting.</li>
+    <li><span class="term-label">Data Security</span> All data encrypted in transit (TLS 1.2+) and at rest (AES-256). Infrastructure hosted on AWS with US-based data residency.</li>
+
+    <li><span class="term-label">Data Retention</span> Full data export available at any time. Data deleted within 30 days of contract termination upon written request.</li>
+  </ul>
+
   <h1>Contract Terms</h1>
 
   <ul class="terms-list">
     <li><span class="term-label">Initial Term</span> 12 months from go-live date</li>
-    <li><span class="term-label">Price Lock</span> PEPM rate of $11.00 locked for the initial 12-month term</li>
-    <li><span class="term-label">Partner Rate</span> $9.50 PEPM available with quarterly video insights, anonymized case study &amp; data sharing, logo rights, public review within 90 days, and annual prepayment or 2-year term</li>
-    <li><span class="term-label">Data Security</span> HIPAA-compliant infrastructure with executed BAAs (AWS and Google Cloud); encrypted in transit (TLS/SSL enforced) and at rest</li>
+    <li><span class="term-label">Price Lock</span> PEPM rate of ${PEPM:.2f}, Platform Fee of ${PLATFORM_FEE:,.2f}, and Jurisdiction Fee of ${JURISDICTION_FEE:,.2f} locked for the initial 12-month term</li>
+    <li><span class="term-label">Platform Fee</span> ${PLATFORM_FEE:,.2f}/year includes federal compliance monitoring and one jurisdiction</li>
+    <li><span class="term-label">Jurisdiction Fees</span> ${JURISDICTION_FEE:,.2f} per additional jurisdiction per year, scoped during implementation</li>
+    <li><span class="term-label">Partner Program</span> {PARTNER_DISCOUNT:.0%} discount (${PARTNER_PEPM:.2f} PEPM) with quarterly video insights, anonymized case study &amp; data sharing, logo rights, public review within 90 days, and annual prepayment or 2-year term</li>
+    <li><span class="term-label">Volume Discount</span> 10% PEPM discount applied automatically for 500+ employees</li>
     <li><span class="term-label">Auto-Renewal</span> Automatic 12-month renewal periods</li>
     <li><span class="term-label">Opt-Out Notice</span> 60-day written notice required before any renewal period</li>
     <li><span class="term-label">Employee True-Up</span> Quarterly adjustment based on active employee headcount</li>
@@ -776,11 +896,11 @@ HTML_CONTENT = f"""
     </thead>
     <tbody>
       <tr>
-        <td>Platform cost</td>
-        <td style="text-align:right">${ANNUAL:,.0f}</td>
-        <td style="text-align:right">${ANNUAL:,.0f}</td>
-        <td style="text-align:right">${ANNUAL:,.0f}</td>
-        <td style="text-align:right">${ANNUAL*3:,.0f}</td>
+        <td>Annual recurring (PEPM + platform fee)</td>
+        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING*3:,.0f}</td>
       </tr>
       <tr>
         <td>Implementation</td>
@@ -792,8 +912,8 @@ HTML_CONTENT = f"""
       <tr>
         <td><strong>Total investment</strong></td>
         <td style="text-align:right"><strong>${YEAR1_TCV:,.0f}</strong></td>
-        <td style="text-align:right"><strong>${ANNUAL:,.0f}</strong></td>
-        <td style="text-align:right"><strong>${ANNUAL:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
         <td style="text-align:right"><strong>${THREE_YEAR_INVEST:,.0f}</strong></td>
       </tr>
       <tr>
@@ -866,7 +986,8 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="footer-note">
-    This proposal is valid for 30 days from {TODAY}. Pricing is based on the employee count provided and subject to quarterly true-up.
+    This proposal is valid for 30 days from {TODAY}. Pricing is based on the employee count provided and subject to quarterly true-up.<br><br>
+    <em>Matcha is a compliance research and workforce risk intelligence platform. It is not a substitute for legal counsel, and does not constitute legal advice, medical guidance, or regulatory certification. All compliance data is sourced from public regulatory databases and provided for informational purposes.</em>
   </div>
 
 </div>
