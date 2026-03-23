@@ -3815,6 +3815,37 @@ def get_missing_regulations(
     return [REGULATION_MAP[k] for k in sorted(missing_keys) if k in REGULATION_MAP]
 
 
+def resolve_weight(
+    base_weight: float,
+    applicable_industries: Optional[List[str]],
+    applicable_entity_types: Optional[List[str]],
+    company_industry: Optional[str] = None,
+    company_entity_type: Optional[str] = None,
+) -> float:
+    """Compute contextual weight for a key given a company's profile.
+
+    Uses additive adjustments with a floor to avoid extreme ratios
+    that distort mixed-use facility scores. Max ratio ~5:1.
+    """
+    weight = base_weight
+    adjustment = 0.0
+
+    if applicable_industries:
+        if company_industry and company_industry in applicable_industries:
+            adjustment += 0.5
+        elif company_industry:
+            adjustment -= 0.5
+
+    if applicable_entity_types:
+        if company_entity_type and company_entity_type in applicable_entity_types:
+            adjustment += 0.5
+        elif company_entity_type:
+            adjustment -= 0.5
+
+    # Floor at 0.2 × base_weight
+    return max(weight + adjustment, weight * 0.2)
+
+
 # ---------------------------------------------------------------------------
 # CATEGORY_FEDERAL_REGISTER_AGENCIES — maps categories to Federal Register
 # agency slugs, CFR titles, and keywords for direct API fetching

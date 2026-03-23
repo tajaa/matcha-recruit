@@ -4210,6 +4210,220 @@ async def run_staleness_check(
     }
 
 
+@router.get("/jurisdictions/key-coverage", dependencies=[Depends(require_admin)])
+async def jurisdiction_key_coverage(
+    jurisdiction_id: Optional[UUID] = None,
+    category: Optional[str] = None,
+    state: Optional[str] = None,
+    gaps_only: bool = False,
+):
+    """Key-level coverage: per-category breakdown of present/missing regulation keys."""
+    from ..compliance_registry import resolve_weight, CATEGORY_MAP
+
+    async with get_connection() as conn:
+        # ── 1. All key definitions ──
+        def_params: list = []
+        def_filter = ""
+        if category:
+            def_params.append(category)
+            def_filter = f"WHERE rkd.category_slug = ${len(def_params)}"
+
+        all_defs = await conn.fetch(f"""
+            SELECT rkd.id, rkd.key, rkd.category_slug, rkd.name,
+                   rkd.enforcing_agency, rkd.state_variance, rkd.base_weight,
+                   rkd.key_group, rkd.staleness_warning_days,
+                   rkd.applicable_industries, rkd.applicable_entity_types,
+                   cc."group" AS domain_group
+            FROM regulation_key_definitions rkd
+            JOIN compliance_categories cc ON cc.id = rkd.category_id
+            {def_filter}
+            ORDER BY rkd.category_slug, rkd.key
+        """, *def_params)
+
+        # ── 2. Present keys per jurisdiction ──
+        jr_params: list = []
+        jr_filter_parts = ["jr.status = 'active'"]
+        if jurisdiction_id:
+            jr_params.append(jurisdiction_id)
+            jr_filter_parts.append(f"jr.jurisdiction_id = ${len(jr_params)}")
+        elif state:
+            jr_params.append(state.upper())
+            jr_filter_parts.append(f"j.state = ${len(jr_params)}")
+        if category:
+            jr_params.append(category)
+            jr_filter_parts.append(f"jr.category = ${len(jr_params)}")
+
+        jr_filter = " AND ".join(jr_filter_parts)
+
+        present_rows = await conn.fetch(f"""
+            SELECT
+                jr.category,
+                jr.regulation_key,
+                COUNT(DISTINCT jr.jurisdiction_id) AS jurisdiction_count,
+                MAX(CASE jr.source_tier::text
+                    WHEN 'tier_1_government' THEN 3
+                    WHEN 'tier_2_official_secondary' THEN 2
+                    WHEN 'tier_3_aggregator' THEN 1
+                    ELSE 0 END) AS best_tier,
+                MAX(EXTRACT(DAY FROM NOW() - jr.last_verified_at))::int AS max_staleness_days,
+                MAX(jr.current_value) AS newest_value
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE {jr_filter}
+            GROUP BY jr.category, jr.regulation_key
+        """, *jr_params)
+
+        present_set: Dict[str, dict] = {}
+        for r in present_rows:
+            k = f"{r['category']}:{r['regulation_key']}"
+            present_set[k] = {
+                "jurisdiction_count": r["jurisdiction_count"],
+                "best_tier": r["best_tier"],
+                "days_since_verified": r["max_staleness_days"],
+                "newest_value": r["newest_value"],
+            }
+
+        # ── 3. Build per-category response ──
+        categories_data: Dict[str, dict] = {}
+        total_expected = 0
+        total_present = 0
+        total_weight_expected = 0.0
+        total_weight_present = 0.0
+
+        for d in all_defs:
+            cat = d["category_slug"]
+            if cat not in categories_data:
+                cat_def = CATEGORY_MAP.get(cat)
+                categories_data[cat] = {
+                    "category": cat,
+                    "group": d["domain_group"],
+                    "label": cat_def.label if cat_def else cat,
+                    "expected": 0,
+                    "present": 0,
+                    "coverage_pct": 0,
+                    "weighted_score": 0,
+                    "keys": [],
+                    "partial_groups": {},
+                }
+
+            lookup_key = f"{cat}:{d['key']}"
+            is_present = lookup_key in present_set
+            presence = present_set.get(lookup_key, {})
+            weight = float(d["base_weight"])
+
+            staleness_days = presence.get("days_since_verified")
+            if staleness_days is not None and is_present:
+                warn = d["staleness_warning_days"] or 90
+                if staleness_days >= (d.get("staleness_expired_days") or 365):
+                    staleness_level = "expired"
+                elif staleness_days >= (d.get("staleness_critical_days") or 180):
+                    staleness_level = "critical"
+                elif staleness_days >= warn:
+                    staleness_level = "warning"
+                else:
+                    staleness_level = "fresh"
+            else:
+                staleness_level = "no_data" if not is_present else "fresh"
+
+            key_entry = {
+                "key": d["key"],
+                "name": d["name"],
+                "enforcing_agency": d["enforcing_agency"],
+                "base_weight": weight,
+                "state_variance": d["state_variance"],
+                "key_group": d["key_group"],
+                "status": "present" if is_present else "missing",
+                "jurisdiction_count": presence.get("jurisdiction_count", 0),
+                "best_tier": presence.get("best_tier", 0),
+                "days_since_verified": staleness_days,
+                "staleness_level": staleness_level,
+                "newest_value": presence.get("newest_value"),
+            }
+
+            if not gaps_only or not is_present:
+                categories_data[cat]["keys"].append(key_entry)
+
+            categories_data[cat]["expected"] += 1
+            total_expected += 1
+            total_weight_expected += weight
+
+            if is_present:
+                categories_data[cat]["present"] += 1
+                total_present += 1
+                total_weight_present += weight
+
+            # Track group completeness
+            grp = d["key_group"]
+            if grp:
+                pg = categories_data[cat]["partial_groups"]
+                if grp not in pg:
+                    pg[grp] = {"present": 0, "expected": 0, "missing": []}
+                pg[grp]["expected"] += 1
+                if is_present:
+                    pg[grp]["present"] += 1
+                else:
+                    pg[grp]["missing"].append(d["key"])
+
+        # ── 4. Finalize categories ──
+        by_category = []
+        cats_fully_covered = 0
+        cats_with_gaps = 0
+
+        for cat_data in categories_data.values():
+            exp = cat_data["expected"]
+            pres = cat_data["present"]
+            cat_data["coverage_pct"] = round(pres / exp * 100, 1) if exp > 0 else 0
+
+            # Convert partial_groups to list, only include incomplete ones
+            pg_list = []
+            for grp_name, grp_data in cat_data["partial_groups"].items():
+                if 0 < grp_data["present"] < grp_data["expected"]:
+                    pg_list.append({
+                        "group": grp_name,
+                        "present": grp_data["present"],
+                        "expected": grp_data["expected"],
+                        "missing": grp_data["missing"],
+                    })
+            cat_data["partial_groups"] = pg_list
+
+            if pres == exp and exp > 0:
+                cats_fully_covered += 1
+            elif pres < exp:
+                cats_with_gaps += 1
+
+            if not gaps_only or pres < exp:
+                by_category.append(cat_data)
+
+        # Sort: most gaps first
+        by_category.sort(key=lambda c: c["coverage_pct"])
+
+        # ── 5. Stale/alert counts ──
+        stale_warning = sum(
+            1 for c in by_category
+            for k in c["keys"]
+            if k["staleness_level"] == "warning"
+        )
+        stale_critical = sum(
+            1 for c in by_category
+            for k in c["keys"]
+            if k["staleness_level"] in ("critical", "expired")
+        )
+
+    return {
+        "summary": {
+            "total_defined_keys": total_expected,
+            "total_present": total_present,
+            "key_coverage_pct": round(total_present / total_expected * 100, 1) if total_expected > 0 else 0,
+            "weighted_score": round(total_weight_present / total_weight_expected * 100, 1) if total_weight_expected > 0 else 0,
+            "categories_fully_covered": cats_fully_covered,
+            "categories_with_gaps": cats_with_gaps,
+            "stale_warning": stale_warning,
+            "stale_critical": stale_critical,
+        },
+        "by_category": by_category,
+    }
+
+
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
 async def get_jurisdiction_detail(jurisdiction_id: UUID):
     """Get full detail for a jurisdiction: requirements, legislation, linked locations."""
