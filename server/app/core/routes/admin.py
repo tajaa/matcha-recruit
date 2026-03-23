@@ -3844,6 +3844,372 @@ async def get_coverage_matrix(
     return result
 
 
+# ── Regulation Key Integrity & Staleness ─────────────────────────────────
+
+
+@router.get("/jurisdictions/integrity-check", dependencies=[Depends(require_admin)])
+async def jurisdiction_integrity_check(
+    jurisdiction_id: Optional[UUID] = None,
+    state: Optional[str] = None,
+):
+    """Bidirectional integrity check: missing keys, orphaned records, stale data, partial groups."""
+    async with get_connection() as conn:
+        # ── 1. Missing keys: defined in registry but absent from DB ──
+        jur_filter = ""
+        params: list = []
+        if jurisdiction_id:
+            params.append(jurisdiction_id)
+            jur_filter = f"AND j.id = ${len(params)}"
+        elif state:
+            params.append(state.upper())
+            jur_filter = f"AND j.state = ${len(params)}"
+
+        missing_rows = await conn.fetch(f"""
+            SELECT
+                j.id AS jurisdiction_id, j.city, j.state,
+                rkd.key, rkd.category_slug, rkd.name AS key_name,
+                rkd.key_group, rkd.base_weight
+            FROM regulation_key_definitions rkd
+            CROSS JOIN jurisdictions j
+            LEFT JOIN jurisdiction_requirements jr
+                ON jr.jurisdiction_id = j.id
+                AND jr.category = rkd.category_slug
+                AND jr.regulation_key = rkd.key
+            WHERE jr.id IS NULL
+              AND j.level != 'federal'
+              {jur_filter}
+            ORDER BY j.state, j.city, rkd.category_slug, rkd.key
+            LIMIT 500
+        """, *params)
+
+        missing_keys = [
+            {
+                "jurisdiction_id": str(r["jurisdiction_id"]),
+                "city": r["city"],
+                "state": r["state"],
+                "key": r["key"],
+                "category": r["category_slug"],
+                "key_name": r["key_name"],
+                "key_group": r["key_group"],
+                "weight": float(r["base_weight"]),
+            }
+            for r in missing_rows
+        ]
+
+        # ── 2. Orphaned records: in DB but not matching any key definition ──
+        orphan_params: list = []
+        orphan_filter = ""
+        if jurisdiction_id:
+            orphan_params.append(jurisdiction_id)
+            orphan_filter = f"AND jr.jurisdiction_id = ${len(orphan_params)}"
+        elif state:
+            orphan_params.append(state.upper())
+            orphan_filter = f"AND j.state = ${len(orphan_params)}"
+
+        orphan_rows = await conn.fetch(f"""
+            SELECT
+                jr.id, jr.jurisdiction_id, j.city, j.state,
+                jr.category, jr.regulation_key, jr.title,
+                jr.source_tier::text AS source_tier
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            LEFT JOIN regulation_key_definitions rkd
+                ON jr.category = rkd.category_slug
+                AND jr.regulation_key = rkd.key
+            WHERE rkd.id IS NULL
+              AND jr.status = 'active'
+              {orphan_filter}
+            ORDER BY j.state, j.city, jr.category
+            LIMIT 500
+        """, *orphan_params)
+
+        orphaned_records = [
+            {
+                "id": str(r["id"]),
+                "jurisdiction_id": str(r["jurisdiction_id"]),
+                "city": r["city"],
+                "state": r["state"],
+                "category": r["category"],
+                "regulation_key": r["regulation_key"],
+                "title": r["title"],
+                "source_tier": r["source_tier"],
+            }
+            for r in orphan_rows
+        ]
+
+        # ── 3. Stale keys: past staleness thresholds ──
+        stale_params: list = []
+        stale_filter = ""
+        if jurisdiction_id:
+            stale_params.append(jurisdiction_id)
+            stale_filter = f"AND jr.jurisdiction_id = ${len(stale_params)}"
+        elif state:
+            stale_params.append(state.upper())
+            stale_filter = f"AND j.state = ${len(stale_params)}"
+
+        stale_rows = await conn.fetch(f"""
+            SELECT
+                jr.id, j.city, j.state,
+                jr.category, jr.regulation_key, jr.title,
+                EXTRACT(DAY FROM NOW() - jr.last_verified_at)::int AS days_since_verified,
+                rkd.staleness_warning_days,
+                rkd.staleness_critical_days,
+                rkd.staleness_expired_days,
+                rkd.name AS key_name
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            JOIN regulation_key_definitions rkd
+                ON jr.category = rkd.category_slug
+                AND jr.regulation_key = rkd.key
+            WHERE jr.status = 'active'
+              AND EXTRACT(DAY FROM NOW() - jr.last_verified_at) > rkd.staleness_warning_days
+              {stale_filter}
+            ORDER BY EXTRACT(DAY FROM NOW() - jr.last_verified_at) DESC
+            LIMIT 200
+        """, *stale_params)
+
+        stale_keys = []
+        for r in stale_rows:
+            days = r["days_since_verified"] or 0
+            if days >= (r["staleness_expired_days"] or 365):
+                level = "expired"
+            elif days >= (r["staleness_critical_days"] or 180):
+                level = "critical"
+            else:
+                level = "warning"
+            stale_keys.append({
+                "id": str(r["id"]),
+                "city": r["city"],
+                "state": r["state"],
+                "category": r["category"],
+                "regulation_key": r["regulation_key"],
+                "key_name": r["key_name"],
+                "days_since_verified": days,
+                "staleness_level": level,
+            })
+
+        # ── 4. Partial groups: key groups with incomplete coverage ──
+        group_params: list = []
+        group_filter = ""
+        if jurisdiction_id:
+            group_params.append(jurisdiction_id)
+            group_filter = f"AND j.id = ${len(group_params)}"
+        elif state:
+            group_params.append(state.upper())
+            group_filter = f"AND j.state = ${len(group_params)}"
+
+        group_rows = await conn.fetch(f"""
+            WITH expected AS (
+                SELECT rkd.key_group, rkd.category_slug, count(*) AS expected_count
+                FROM regulation_key_definitions rkd
+                WHERE rkd.key_group IS NOT NULL
+                GROUP BY rkd.key_group, rkd.category_slug
+            ),
+            present AS (
+                SELECT rkd.key_group, rkd.category_slug, j.id AS jurisdiction_id, j.city, j.state,
+                       count(DISTINCT jr.regulation_key) AS present_count
+                FROM regulation_key_definitions rkd
+                CROSS JOIN jurisdictions j
+                LEFT JOIN jurisdiction_requirements jr
+                    ON jr.jurisdiction_id = j.id
+                    AND jr.category = rkd.category_slug
+                    AND jr.regulation_key = rkd.key
+                    AND jr.status = 'active'
+                WHERE rkd.key_group IS NOT NULL
+                  AND j.level != 'federal'
+                  {group_filter}
+                GROUP BY rkd.key_group, rkd.category_slug, j.id, j.city, j.state
+            )
+            SELECT p.key_group, p.category_slug, p.city, p.state,
+                   p.present_count, e.expected_count
+            FROM present p
+            JOIN expected e ON e.key_group = p.key_group AND e.category_slug = p.category_slug
+            WHERE p.present_count > 0 AND p.present_count < e.expected_count
+            ORDER BY (p.present_count::float / e.expected_count), p.key_group
+            LIMIT 200
+        """, *group_params)
+
+        partial_groups = [
+            {
+                "key_group": r["key_group"],
+                "category": r["category_slug"],
+                "city": r["city"],
+                "state": r["state"],
+                "present": r["present_count"],
+                "expected": r["expected_count"],
+                "coverage_pct": round(r["present_count"] / r["expected_count"] * 100, 1),
+            }
+            for r in group_rows
+        ]
+
+        # ── 5. Summary counts ──
+        total_defined = await conn.fetchval("SELECT count(*) FROM regulation_key_definitions")
+        total_records = await conn.fetchval(
+            "SELECT count(*) FROM jurisdiction_requirements WHERE status = 'active'"
+        )
+        linked_count = await conn.fetchval(
+            "SELECT count(*) FROM jurisdiction_requirements WHERE key_definition_id IS NOT NULL AND status = 'active'"
+        )
+
+    return {
+        "missing_keys": missing_keys,
+        "missing_count": len(missing_rows),
+        "orphaned_records": orphaned_records,
+        "orphaned_count": len(orphan_rows),
+        "stale_keys": stale_keys,
+        "stale_count": len(stale_keys),
+        "partial_groups": partial_groups,
+        "partial_group_count": len(partial_groups),
+        "total_defined_keys": total_defined,
+        "total_db_records": total_records,
+        "linked_records": linked_count,
+        "integrity_score": round(
+            (linked_count / total_records * 100) if total_records > 0 else 0, 1
+        ),
+    }
+
+
+@router.post("/jurisdictions/run-staleness-check", dependencies=[Depends(require_admin)])
+async def run_staleness_check(
+    jurisdiction_id: Optional[UUID] = Body(None),
+    state: Optional[str] = Body(None),
+):
+    """Run staleness scan and upsert repository_alerts. Admin-triggered, not scheduled."""
+    created = 0
+    resolved = 0
+
+    async with get_connection() as conn:
+        params: list = []
+        jur_filter = ""
+        if jurisdiction_id:
+            params.append(jurisdiction_id)
+            jur_filter = f"AND jr.jurisdiction_id = ${len(params)}"
+        elif state:
+            params.append(state.upper())
+            jur_filter = f"AND j.state = ${len(params)}"
+
+        # ── 1. Stale data detection ──
+        stale_rows = await conn.fetch(f"""
+            SELECT
+                jr.id AS requirement_id, jr.jurisdiction_id,
+                jr.category, jr.regulation_key,
+                EXTRACT(DAY FROM NOW() - jr.last_verified_at)::int AS days_since_verified,
+                rkd.id AS key_definition_id,
+                rkd.staleness_warning_days, rkd.staleness_critical_days, rkd.staleness_expired_days,
+                rkd.name AS key_name,
+                j.city, j.state
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            JOIN regulation_key_definitions rkd
+                ON jr.category = rkd.category_slug AND jr.regulation_key = rkd.key
+            WHERE jr.status = 'active'
+              AND EXTRACT(DAY FROM NOW() - jr.last_verified_at) > rkd.staleness_warning_days
+              {jur_filter}
+        """, *params)
+
+        for r in stale_rows:
+            days = r["days_since_verified"] or 0
+            if days >= (r["staleness_expired_days"] or 365):
+                alert_type, severity = "stale_expired", "expired"
+            elif days >= (r["staleness_critical_days"] or 180):
+                alert_type, severity = "stale_critical", "critical"
+            else:
+                alert_type, severity = "stale_warning", "warning"
+
+            message = f"{r['key_name']} for {r['city']}, {r['state']} is {days} days past verification"
+            result = await conn.execute("""
+                INSERT INTO repository_alerts
+                    (alert_type, severity, jurisdiction_id, key_definition_id, requirement_id,
+                     category, regulation_key, message, days_overdue)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                ON CONFLICT (jurisdiction_id, key_definition_id, alert_type)
+                    WHERE status = 'open'
+                DO UPDATE SET
+                    severity = EXCLUDED.severity,
+                    message = EXCLUDED.message,
+                    days_overdue = EXCLUDED.days_overdue
+            """, alert_type, severity, r["jurisdiction_id"], r["key_definition_id"],
+                r["requirement_id"], r["category"], r["regulation_key"], message,
+                days - (r["staleness_warning_days"] or 90))
+            if "INSERT" in result:
+                created += 1
+
+        # ── 2. Never-verified / missing data detection ──
+        missing_params: list = []
+        missing_filter = ""
+        if jurisdiction_id:
+            missing_params.append(jurisdiction_id)
+            missing_filter = f"AND j.id = ${len(missing_params)}"
+        elif state:
+            missing_params.append(state.upper())
+            missing_filter = f"AND j.state = ${len(missing_params)}"
+
+        missing_rows = await conn.fetch(f"""
+            SELECT
+                j.id AS jurisdiction_id, j.city, j.state,
+                rkd.id AS key_definition_id,
+                rkd.key, rkd.category_slug, rkd.name AS key_name
+            FROM regulation_key_definitions rkd
+            CROSS JOIN (
+                SELECT DISTINCT j2.id, j2.city, j2.state
+                FROM jurisdictions j2
+                JOIN jurisdiction_requirements jr2 ON jr2.jurisdiction_id = j2.id
+                WHERE j2.level != 'federal'
+                {missing_filter}
+            ) j
+            LEFT JOIN jurisdiction_requirements jr
+                ON jr.jurisdiction_id = j.id
+                AND jr.category = rkd.category_slug
+                AND jr.regulation_key = rkd.key
+            WHERE jr.id IS NULL
+        """, *missing_params)
+
+        for r in missing_rows:
+            message = f"{r['key_name']} has no data for {r['city']}, {r['state']}"
+            result = await conn.execute("""
+                INSERT INTO repository_alerts
+                    (alert_type, severity, jurisdiction_id, key_definition_id,
+                     category, regulation_key, message)
+                VALUES ('missing_data', 'missing', $1, $2, $3, $4, $5)
+                ON CONFLICT (jurisdiction_id, key_definition_id, alert_type)
+                    WHERE status = 'open'
+                DO NOTHING
+            """, r["jurisdiction_id"], r["key_definition_id"],
+                r["category_slug"], r["key"], message)
+            if "INSERT" in result:
+                created += 1
+
+        # ── 3. Auto-resolve: keys that are now verified/present ──
+        resolved_count = await conn.fetchval(f"""
+            WITH resolvable AS (
+                SELECT ra.id
+                FROM repository_alerts ra
+                JOIN jurisdiction_requirements jr
+                    ON jr.jurisdiction_id = ra.jurisdiction_id
+                    AND jr.category = ra.category
+                    AND jr.regulation_key = ra.regulation_key
+                    AND jr.status = 'active'
+                JOIN regulation_key_definitions rkd
+                    ON rkd.id = ra.key_definition_id
+                WHERE ra.status = 'open'
+                  AND ra.alert_type IN ('stale_warning', 'stale_critical', 'stale_expired')
+                  AND EXTRACT(DAY FROM NOW() - jr.last_verified_at) <= rkd.staleness_warning_days
+            )
+            UPDATE repository_alerts
+            SET status = 'resolved', resolved_at = NOW()
+            WHERE id IN (SELECT id FROM resolvable)
+            RETURNING id
+        """) or 0
+        resolved = resolved_count if isinstance(resolved_count, int) else 0
+
+    return {
+        "alerts_created": created,
+        "alerts_resolved": resolved,
+        "stale_found": len(stale_rows),
+        "missing_found": len(missing_rows),
+    }
+
+
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
 async def get_jurisdiction_detail(jurisdiction_id: UUID):
     """Get full detail for a jurisdiction: requirements, legislation, linked locations."""
