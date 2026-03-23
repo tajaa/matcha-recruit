@@ -381,3 +381,64 @@ export function researchPayerPolicy(payerName: string, procedure: string): Promi
     procedure,
   })
 }
+
+// ── Protocol Gap Analysis ──
+
+export interface ProtocolAnalysisItem {
+  requirement_key: string
+  title: string
+  status: 'covered' | 'gap' | 'partial'
+  evidence?: string
+  guidance?: string
+  missing?: string
+}
+
+export interface ProtocolAnalysisResult {
+  covered: ProtocolAnalysisItem[]
+  gaps: ProtocolAnalysisItem[]
+  partial: ProtocolAnalysisItem[]
+  summary: string
+  requirements_analyzed: number
+}
+
+export function analyzeProtocol(
+  protocolText: string,
+  locationId?: string,
+  categories?: string[],
+): Promise<ProtocolAnalysisResult> {
+  return api.post<ProtocolAnalysisResult>('/compliance/protocol-analysis', {
+    protocol_text: protocolText,
+    location_id: locationId,
+    categories,
+  })
+}
+
+// ── Policy Drafting ──
+
+export interface PolicyDraftCitation {
+  requirement_key: string
+  title: string
+  source_url: string
+}
+
+export interface PolicyDraftResult {
+  title: string
+  content: string
+  citations: PolicyDraftCitation[]
+  applicable_jurisdictions: string[]
+  category: string
+}
+
+export function draftPolicy(
+  topic: string,
+  jurisdiction: string,
+  locationId?: string,
+  industryContext?: string,
+): Promise<PolicyDraftResult> {
+  return api.post<PolicyDraftResult>('/policies/draft', {
+    topic,
+    jurisdiction,
+    location_id: locationId,
+    industry_context: industryContext,
+  })
+}

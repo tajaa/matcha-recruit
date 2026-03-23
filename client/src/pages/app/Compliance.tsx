@@ -16,10 +16,12 @@ import { ComplianceScanProgress } from '../../components/compliance/ComplianceSc
 import { FacilityProfileBanner } from '../../components/compliance/FacilityProfileBanner'
 import { RegulatoryQuickAsk } from '../../components/compliance/RegulatoryQuickAsk'
 import { PayerPolicyNavigator } from '../../components/compliance/PayerPolicyNavigator'
+import { ProtocolAnalysis } from '../../components/compliance/ProtocolAnalysis'
+import { PolicyDrafter } from '../../components/compliance/PolicyDrafter'
 import { updateAlertActionPlan } from '../../api/compliance'
 import type { BusinessLocation, LocationCreate, ComplianceActionPlanUpdate } from '../../types/compliance'
 
-type Tab = 'overview' | 'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies'
+type Tab = 'overview' | 'requirements' | 'alerts' | 'upcoming' | 'history' | 'posters' | 'payer-policies' | 'protocol-analysis' | 'policy-drafting'
 
 const TABS: { value: Tab; label: string }[] = [
   { value: 'overview', label: 'Overview' },
@@ -29,6 +31,8 @@ const TABS: { value: Tab; label: string }[] = [
   { value: 'history', label: 'History' },
   { value: 'posters', label: 'Posters' },
   { value: 'payer-policies', label: 'Payer Policies' },
+  { value: 'protocol-analysis', label: 'Protocol Analysis' },
+  { value: 'policy-drafting', label: 'Policy Drafting' },
 ]
 
 export default function Compliance() {
@@ -239,6 +243,12 @@ export default function Compliance() {
                     locationId={selectedId}
                     payerContracts={selectedLoc?.facility_attributes?.payer_contracts || []}
                   />
+                )}
+                {tab === 'protocol-analysis' && (
+                  <ProtocolAnalysis locationId={selectedId} />
+                )}
+                {tab === 'policy-drafting' && (
+                  <PolicyDrafter locationId={selectedId} />
                 )}
               </div>
             )}
