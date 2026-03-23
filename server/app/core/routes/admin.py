@@ -3095,7 +3095,7 @@ async def jurisdiction_data_overview(bust: bool = False):
         # ── 1. All jurisdictions with their requirements ──
         rows = await conn.fetch("""
             SELECT
-                j.id, j.city, j.state, j.last_verified_at,
+                j.id, j.city, j.state, j.country_code, j.last_verified_at,
                 COALESCE(
                     array_agg(DISTINCT jr.category) FILTER (WHERE jr.category IS NOT NULL),
                     '{}'
@@ -3112,7 +3112,7 @@ async def jurisdiction_data_overview(bust: bool = False):
             LEFT JOIN jurisdiction_requirements jr ON jr.jurisdiction_id = j.id
             WHERE (j.city IS NULL OR (j.city NOT LIKE '_county_%' AND j.city <> ''))
               AND j.level != 'federal'
-            GROUP BY j.id, j.city, j.state, j.last_verified_at
+            GROUP BY j.id, j.city, j.state, j.country_code, j.last_verified_at
             ORDER BY j.state, j.city
         """)
 
@@ -3218,6 +3218,7 @@ async def jurisdiction_data_overview(bust: bool = False):
         city_data = {
             "id": str(row["id"]),
             "city": row["city"],
+            "country_code": row.get("country_code", "US"),
             "categories_present": sorted(cats_present),
             "categories_missing": cats_missing,
             "tier_breakdown": city_tier_counts,

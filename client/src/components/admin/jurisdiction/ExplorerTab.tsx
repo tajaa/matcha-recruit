@@ -7,6 +7,7 @@ import { fmtDate } from './utils'
 type SortKey = 'state' | 'city' | 'requirements' | 'gapCount' | 'lastVerified'
 type SortDir = 'asc' | 'desc'
 type ViewMode = 'cities' | 'states'
+type RegionFilter = 'us' | 'international' | 'all'
 
 type Props = {
   allCities: FlatCity[]
@@ -34,6 +35,20 @@ export default function ExplorerTab({
   const [sortDir, setSortDir] = useState<SortDir>('desc')
   const [page, setPage] = useState(0)
   const [viewMode, setViewMode] = useState<ViewMode>('states')
+  const [regionFilter, setRegionFilter] = useState<RegionFilter>('us')
+
+  // Count international jurisdictions for badge
+  const intlCount = useMemo(() =>
+    allCities.filter(c => c.country_code && c.country_code !== 'US').length,
+    [allCities]
+  )
+
+  // Filter by region first
+  const regionFiltered = useMemo(() => {
+    if (regionFilter === 'us') return allCities.filter(c => !c.country_code || c.country_code === 'US')
+    if (regionFilter === 'international') return allCities.filter(c => c.country_code && c.country_code !== 'US')
+    return allCities
+  }, [allCities, regionFilter])
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -50,6 +65,7 @@ export default function ExplorerTab({
   const stateAgg = useMemo(() => {
     const map: Record<string, {
       state: string
+      countryCode: string
       cities: FlatCity[]
       totalReqs: number
       cityWithData: number
@@ -59,10 +75,12 @@ export default function ExplorerTab({
       catMissing: Set<string>
     }> = {}
 
-    for (const c of allCities) {
-      if (!map[c.stateName]) {
-        map[c.stateName] = {
-          state: c.stateName,
+    for (const c of regionFiltered) {
+      const groupKey = regionFilter === 'international' ? `${c.stateName || ''}:${c.country_code || ''}` : c.stateName
+      if (!map[groupKey]) {
+        map[groupKey] = {
+          state: c.stateName || c.country_code || '',
+          countryCode: c.country_code || 'US',
           cities: [],
           totalReqs: 0,
           cityWithData: 0,
@@ -72,7 +90,7 @@ export default function ExplorerTab({
           catMissing: new Set(),
         }
       }
-      const s = map[c.stateName]
+      const s = map[groupKey]
       s.cities.push(c)
       s.totalReqs += c.presentCount
       if (c.presentCount > 0) s.cityWithData++
@@ -84,11 +102,11 @@ export default function ExplorerTab({
       for (const cat of c.categories_missing) s.catMissing.add(cat)
     }
     return Object.values(map)
-  }, [allCities])
+  }, [regionFiltered, regionFilter])
 
   // ── Filtered & sorted (cities view) ──
   const filtered = useMemo(() => {
-    let rows = allCities
+    let rows = regionFiltered
     if (search) {
       const q = search.toLowerCase()
       rows = rows.filter(
@@ -98,7 +116,7 @@ export default function ExplorerTab({
     if (filterState) rows = rows.filter((r) => r.stateName === filterState)
     if (filterStaleOnly) rows = rows.filter((r) => r.is_stale)
     return rows
-  }, [allCities, search, filterState, filterStaleOnly])
+  }, [regionFiltered, search, filterState, filterStaleOnly])
 
   const sorted = useMemo(() => {
     const arr = [...filtered]
@@ -136,6 +154,19 @@ export default function ExplorerTab({
       {/* Filter bar */}
       <div className="px-3 py-2 border border-zinc-800 rounded-t-lg flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1 mr-2">
+          <button
+            onClick={() => { setRegionFilter('us'); setFilterState(''); setPage(0) }}
+            className={`text-xs px-2 py-1 rounded ${regionFilter === 'us' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            US
+          </button>
+          <button
+            onClick={() => { setRegionFilter('international'); setFilterState(''); setPage(0) }}
+            className={`text-xs px-2 py-1 rounded ${regionFilter === 'international' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+          >
+            Intl{intlCount > 0 && <span className="ml-1 text-[10px] text-zinc-400">({intlCount})</span>}
+          </button>
+          <span className="text-zinc-700 mx-0.5">|</span>
           <button
             onClick={() => { setViewMode('states'); setPage(0) }}
             className={`text-xs px-2 py-1 rounded ${viewMode === 'states' ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
@@ -239,7 +270,12 @@ export default function ExplorerTab({
                       className={`cursor-pointer transition-colors ${selectedCityId === city.id ? 'bg-zinc-800/60' : 'hover:bg-zinc-800/30'}`}
                       onClick={() => onSelectCity(city)}
                     >
-                      <td className="py-2 px-3 font-mono font-bold text-zinc-200 w-16">{city.stateName}</td>
+                      <td className="py-2 px-3 font-mono font-bold text-zinc-200 w-16">
+                        {city.stateName}
+                        {city.country_code && city.country_code !== 'US' && (
+                          <span className="text-zinc-500 ml-1 text-[10px]">{city.country_code}</span>
+                        )}
+                      </td>
                       <td className={`py-2 px-3 ${hasData ? 'text-zinc-200' : 'text-zinc-500 italic'}`}>
                         {city.city || <span className="text-zinc-600">(state level)</span>}
                         {!hasData && city.city && <span className="text-zinc-600 ml-1 text-[10px]">inherits</span>}
@@ -285,6 +321,7 @@ function StateRow({
 }: {
   state: {
     state: string
+    countryCode: string
     cities: FlatCity[]
     totalReqs: number
     cityWithData: number
@@ -307,7 +344,10 @@ function StateRow({
         onClick={() => setExpanded(!expanded)}
       >
         <td className="py-2.5 px-3">
-          <span className="font-mono font-bold text-zinc-200">{state.state}</span>
+          <span className="font-mono font-bold text-zinc-200">
+            {state.state}
+            {state.countryCode !== 'US' && <span className="text-zinc-500 ml-1 text-[10px]">{state.countryCode}</span>}
+          </span>
           <span className="text-zinc-600 ml-1">{expanded ? '▾' : '▸'}</span>
         </td>
         <td className="py-2.5 px-3 text-zinc-400 text-xs">

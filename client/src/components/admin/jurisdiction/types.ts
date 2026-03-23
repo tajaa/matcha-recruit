@@ -5,6 +5,7 @@ export type SpecialtyFilter = string
 export type CityEntry = {
   id: string
   city: string
+  country_code?: string
   categories_present: string[]
   categories_missing: string[]
   tier_breakdown: Record<string, number>
