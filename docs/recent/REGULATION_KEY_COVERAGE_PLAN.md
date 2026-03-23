@@ -396,12 +396,12 @@ A key seeded in `regulation_key_definitions` with zero matching `jurisdiction_re
 9. Keys with zero matches → upsert `repository_alerts` with alert_type `missing_data`
 10. Surface these as "NO DATA" in the UI — more urgent than any staleness level
 
-**Auto-resolution:** When the Celery task runs and a previously-alerting key is now verified/present, it sets `status = 'resolved'` and `resolved_at = NOW()` on the open alert.
+**Auto-resolution:** When the staleness check runs and a previously-alerting key is now verified/present, it sets `status = 'resolved'` and `resolved_at = NOW()` on the open alert.
 
 **Scaling note:** The never-verified check is a cross-product (~355 keys × N jurisdictions). At current scale (~50 jurisdictions) this is trivial. As we scale to 500+ jurisdictions and 500+ keys:
 - **Smart join strategy**: Only check jurisdictions that have *some* requirements in a category but are missing specific keys (not the full cross-product). This filters out jurisdictions with zero data entirely (those are already known gaps).
-- **Materialized view**: If the weekly query exceeds 5s, materialize `jurisdiction_key_coverage` as a view refreshed by the Celery task, storing (jurisdiction_id, key_definition_id, status, days_stale).
-- **For now**: The naive LEFT JOIN is fine. Add `EXPLAIN ANALYZE` monitoring to the Celery task so we see when it starts to slow down.
+- **Materialized view**: If the weekly query exceeds 5s, materialize `jurisdiction_key_coverage` as a view refreshed by the staleness check, storing (jurisdiction_id, key_definition_id, status, days_stale).
+- **For now**: The naive LEFT JOIN is fine. Add `EXPLAIN ANALYZE` monitoring to the staleness check so we see when it starts to slow down.
 
 ---
 
