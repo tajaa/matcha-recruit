@@ -290,10 +290,10 @@ export default function JurisdictionData() {
       <div className="mt-4 grid grid-cols-5 gap-3">
         {[
           { label: 'States', value: `${sum.total_states}/50` },
-          { label: 'Cities', value: sum.total_cities.toLocaleString() },
+          { label: 'Jurisdictions', value: sum.total_cities.toLocaleString() },
+          { label: 'Requirements', value: sum.total_requirements.toLocaleString() },
           { label: 'Coverage', value: `${sum.category_coverage_pct}%`, color: sum.category_coverage_pct >= 70 ? 'text-emerald-400' : sum.category_coverage_pct >= 40 ? 'text-amber-400' : 'text-red-400' },
-          { label: 'Tier 1', value: `${sum.tier1_pct}%`, color: sum.tier1_pct >= 50 ? 'text-emerald-400' : sum.tier1_pct >= 20 ? 'text-amber-400' : 'text-red-400' },
-          { label: 'Stale >90d', value: sum.stale_count.toString(), color: sum.stale_count === 0 ? 'text-emerald-400' : sum.stale_count <= 10 ? 'text-amber-400' : 'text-red-400' },
+          { label: 'Key Definitions', value: '353' },
         ].map((s) => (
           <div key={s.label} className="border border-zinc-800 rounded-lg px-3 py-3">
             <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium">{s.label}</p>
