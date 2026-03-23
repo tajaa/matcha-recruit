@@ -12,6 +12,8 @@ import CoverageHeatmap from '../../components/admin/jurisdiction/CoverageHeatmap
 import RequirementAuditTable from '../../components/admin/jurisdiction/RequirementAuditTable'
 import GapIntelligencePanel from '../../components/admin/jurisdiction/GapIntelligencePanel'
 import KeyCoverageDrawer from '../../components/admin/jurisdiction/KeyCoverageDrawer'
+import KeyIndexTab from '../../components/admin/jurisdiction/KeyIndexTab'
+import IntegrityTab from '../../components/admin/jurisdiction/IntegrityTab'
 import ProfileEditorModal from '../../components/admin/jurisdiction/ProfileEditorModal'
 import SpecialtyFilterSelect from '../../components/admin/jurisdiction/SpecialtyFilterSelect'
 import { useIndustryProfiles } from '../../components/admin/jurisdiction/useIndustryProfiles'
@@ -20,7 +22,7 @@ import type { DataOverview, BookmarkedReq, FlatCity, CatCoverage, SpecialtyFilte
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type Tab = 'explorer' | 'policies' | 'quality' | 'preemption' | 'bookmarks' | 'api-sources'
+type Tab = 'explorer' | 'policies' | 'quality' | 'key-index' | 'integrity' | 'preemption' | 'bookmarks' | 'api-sources'
 
 type SourceCount = {
   research_source: string
@@ -306,6 +308,8 @@ export default function JurisdictionData() {
           { id: 'explorer' as Tab, label: 'Explorer' },
           { id: 'policies' as Tab, label: 'Policies' },
           { id: 'quality' as Tab, label: 'Data Quality' },
+          { id: 'key-index' as Tab, label: 'Key Index' },
+          { id: 'integrity' as Tab, label: 'Integrity' },
           { id: 'preemption' as Tab, label: 'Preemption' },
           { id: 'api-sources' as Tab, label: 'API Sources' },
           { id: 'bookmarks' as Tab, label: 'Bookmarks' },
@@ -410,6 +414,12 @@ export default function JurisdictionData() {
           {qualityView === 'gaps' && <GapIntelligencePanel />}
         </div>
       )}
+
+      {/* ── Key Index Tab ── */}
+      {tab === 'key-index' && <KeyIndexTab />}
+
+      {/* ── Integrity Tab ── */}
+      {tab === 'integrity' && <IntegrityTab />}
 
       {/* ── Preemption Rules Tab — Matrix ── */}
       {tab === 'preemption' && (

@@ -527,7 +527,16 @@ export interface IntegrityCheckResponse {
     staleness_level: 'warning' | 'critical' | 'expired'
   }>
   stale_count: number
-  partial_groups: PartialGroup[]
+  partial_groups: Array<{
+    key_group: string
+    category: string
+    city: string
+    state: string
+    present: number
+    expected: number
+    coverage_pct: number
+    missing: string[]
+  }>
   partial_group_count: number
   total_defined_keys: number
   total_db_records: number
