@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
+import { fetchLocations } from '../../api/compliance'
+import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 
 const TASK_LABELS: Record<string, string> = {
@@ -31,6 +33,18 @@ export default function MatchaWorkThread() {
   const nodeMode = thread?.node_mode ?? false
   const complianceMode = thread?.compliance_mode ?? false
   const payerMode = thread?.payer_mode ?? false
+
+  // Compliance locations — loaded when compliance mode is on
+  const [locations, setLocations] = useState<BusinessLocation[]>([])
+  const [locationsLoaded, setLocationsLoaded] = useState(false)
+
+  useEffect(() => {
+    if (complianceMode && !locationsLoaded) {
+      fetchLocations()
+        .then((locs) => { setLocations(locs); setLocationsLoaded(true) })
+        .catch(() => setLocationsLoaded(true))
+    }
+  }, [complianceMode, locationsLoaded])
 
   // Stream status
   const [statusMessage, setStatusMessage] = useState('')
@@ -268,6 +282,24 @@ export default function MatchaWorkThread() {
             Payer
           </button>
         </div>
+
+        {/* Jurisdiction bar — shows when compliance mode is on */}
+        {complianceMode && locations.length > 0 && (
+          <div className="px-4 py-2 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2 overflow-x-auto">
+            <MapPin size={12} className="text-cyan-500 shrink-0" />
+            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium shrink-0">Your jurisdictions:</span>
+            <div className="flex gap-1.5 flex-wrap">
+              {locations.map((loc) => (
+                <span
+                  key={loc.id}
+                  className="text-[11px] bg-cyan-950/40 text-cyan-300 border border-cyan-800/40 px-2 py-0.5 rounded whitespace-nowrap"
+                >
+                  {loc.city}, {loc.state}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
