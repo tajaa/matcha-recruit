@@ -1,11 +1,12 @@
-import { useState } from 'react'
+import React, { useState, Suspense } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Shield, ChevronDown, MapPin } from 'lucide-react'
+import { Shield, ChevronDown, MapPin, Loader2 } from 'lucide-react'
 import type {
   AIReasoningStep,
   ComplianceReasoningLocation,
 } from '../../types/matcha-work'
-import ComplianceDecisionTree from './ComplianceDecisionTree'
+
+const ComplianceDecisionTree = React.lazy(() => import('./ComplianceDecisionTree'))
 
 interface ComplianceReasoningPanelProps {
   locations: ComplianceReasoningLocation[]
@@ -147,12 +148,21 @@ export default function ComplianceReasoningPanel({ locations, aiSteps, reference
                 </div>
               )}
 
-              {/* Decision tree */}
+              {/* Decision tree — lazy loaded so it doesn't block the answer */}
               {currentCategory && (
-                <ComplianceDecisionTree
-                  category={currentCategory}
-                  aiSteps={aiSteps}
-                />
+                <Suspense
+                  fallback={
+                    <div className="flex items-center gap-2 py-4 justify-center text-xs text-zinc-500">
+                      <Loader2 size={12} className="animate-spin" />
+                      Building diagram...
+                    </div>
+                  }
+                >
+                  <ComplianceDecisionTree
+                    category={currentCategory}
+                    aiSteps={aiSteps}
+                  />
+                </Suspense>
               )}
             </div>
           </motion.div>
