@@ -32,6 +32,7 @@ type MatrixResponse = {
 
 const INDUSTRIES = [
   { value: 'healthcare', label: 'Healthcare' },
+  { value: 'biotech', label: 'Biotech / Life Sciences' },
   { value: 'restaurant_hospitality', label: 'Restaurant / Hospitality' },
   { value: 'retail', label: 'Retail' },
   { value: 'tech_professional', label: 'Tech / Professional Services' },
@@ -71,7 +72,7 @@ const SOURCE_BADGE: Record<string, { bg: string; text: string; border: string }>
   focused: { bg: 'bg-zinc-800', text: 'text-zinc-400', border: 'border-zinc-700' },
 }
 
-const GROUP_ORDER = ['Core Labor', 'Supplementary', 'Healthcare', 'Oncology', 'Medical Compliance']
+const GROUP_ORDER = ['Core Labor', 'Supplementary', 'Healthcare', 'Oncology', 'Medical Compliance', 'Life Sciences']
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
