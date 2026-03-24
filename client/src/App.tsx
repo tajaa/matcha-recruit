@@ -12,6 +12,7 @@ import PayerData from './pages/admin/PayerData'
 import Jurisdictions from './pages/admin/Jurisdictions'
 import IndustryRequirements from './pages/admin/IndustryRequirements'
 import SpecializationResearch from './pages/admin/SpecializationResearch'
+import Brokers from './pages/admin/Brokers'
 import Dashboard from './pages/app/Dashboard'
 import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="jurisdictions" element={<Jurisdictions />} />
         <Route path="industry-requirements" element={<IndustryRequirements />} />
         <Route path="specialization-research" element={<SpecializationResearch />} />
+        <Route path="brokers" element={<Brokers />} />
       </Route>
       <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
         <Route index element={<BrokerDashboard />} />
