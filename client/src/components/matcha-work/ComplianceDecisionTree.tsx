@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useState } from 'react'
 import {
   ReactFlow,
   Background,
@@ -32,15 +32,34 @@ const ARROW_GREEN = { type: MarkerType.ArrowClosed, color: '#059669', width: 16,
 
 // --- Node components ---
 
-function QuestionNode({ data }: { data: { question: string; answer: string; conclusion: string; step: number } }) {
+function QuestionNode({ data }: { data: { question: string; answer: string; conclusion: string; step: number; sources: string[] } }) {
+  const [open, setOpen] = useState(false)
   return (
-    <div className="bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 w-[280px]">
+    <div
+      className="bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 w-[280px] cursor-pointer hover:border-zinc-500 transition-colors"
+      onClick={() => setOpen(!open)}
+    >
       <Handle type="target" position={Position.Top} className="!bg-zinc-500 !w-2 !h-2" />
       <div className="flex items-start gap-2">
         <span className="shrink-0 text-[10px] font-mono text-cyan-500 bg-cyan-950/50 px-1.5 py-0.5 rounded">Q{data.step}</span>
         <div className="min-w-0">
           <div className="text-[11px] font-medium text-cyan-400 leading-snug">{data.question}</div>
-          <div className="text-[11px] text-zinc-400 leading-snug mt-1">{data.answer}</div>
+          {!open && <div className="text-[10px] text-zinc-500 mt-0.5">click to expand</div>}
+          {open && (
+            <>
+              <div className="text-[11px] text-zinc-300 leading-snug mt-1">{data.answer}</div>
+              {data.conclusion && (
+                <div className="text-[11px] text-zinc-400 italic mt-1">{data.conclusion}</div>
+              )}
+              {data.sources?.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {data.sources.map((s, i) => (
+                    <span key={i} className="text-[9px] text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded">{s}</span>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </div>
       </div>
       <Handle type="source" position={Position.Bottom} className="!bg-zinc-500 !w-2 !h-2" />
@@ -50,12 +69,16 @@ function QuestionNode({ data }: { data: { question: string; answer: string; conc
 }
 
 function JurisdictionNode({ data }: { data: { level: string; name: string; title: string; value: string | null; citation: string | null; sourceUrl: string | null; isGoverning: boolean } }) {
+  const [open, setOpen] = useState(false)
   return (
-    <div className={`rounded-lg px-3 py-2 w-[280px] ${
-      data.isGoverning
-        ? 'bg-zinc-800 border-2 border-cyan-600 shadow-lg shadow-cyan-900/20'
-        : 'bg-zinc-800/70 border border-zinc-700'
-    }`}>
+    <div
+      className={`rounded-lg px-3 py-2 w-[280px] cursor-pointer transition-colors ${
+        data.isGoverning
+          ? 'bg-zinc-800 border-2 border-cyan-600 shadow-lg shadow-cyan-900/20 hover:border-cyan-500'
+          : 'bg-zinc-800/70 border border-zinc-700 hover:border-zinc-500'
+      }`}
+      onClick={() => setOpen(!open)}
+    >
       <Handle type="target" position={Position.Left} className="!bg-zinc-600 !w-1.5 !h-1.5" />
       <Handle type="target" position={Position.Top} id="top" className="!bg-zinc-500 !w-2 !h-2" />
       <div className="flex items-center gap-2 mb-1">
@@ -66,16 +89,32 @@ function JurisdictionNode({ data }: { data: { level: string; name: string; title
         )}
       </div>
       <div className="text-[11px] font-medium text-zinc-200 leading-snug">{data.title}</div>
-      {data.value && <div className="text-[11px] text-zinc-400 leading-snug mt-0.5">{data.value}</div>}
-      {(data.citation || data.sourceUrl) && (
-        <div className="flex items-center gap-2 mt-1">
-          {data.citation && <span className="text-[10px] text-zinc-500">{data.citation}</span>}
+      {!open && <div className="text-[10px] text-zinc-500 mt-0.5">click for details</div>}
+      {open && (
+        <>
+          {data.value && (
+            <div className="text-[11px] text-zinc-300 leading-snug mt-1.5 bg-zinc-900/50 rounded px-2 py-1.5 border border-zinc-700/50">
+              {data.value}
+            </div>
+          )}
+          {data.citation && (
+            <div className="text-[10px] text-zinc-500 mt-1.5">
+              <span className="text-zinc-400 font-medium">Citation:</span> {data.citation}
+            </div>
+          )}
           {data.sourceUrl && (
-            <a href={data.sourceUrl} target="_blank" rel="noopener noreferrer" className="text-zinc-500 hover:text-cyan-400 shrink-0" onClick={(e) => e.stopPropagation()}>
+            <a
+              href={data.sourceUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-[10px] text-cyan-500 hover:text-cyan-400 mt-1"
+              onClick={(e) => e.stopPropagation()}
+            >
               <ExternalLink size={10} />
+              View source
             </a>
           )}
-        </div>
+        </>
       )}
       <Handle type="source" position={Position.Bottom} className="!bg-zinc-500 !w-2 !h-2" />
     </div>
@@ -163,7 +202,7 @@ function buildGraph(
         id,
         type: 'question',
         position: { x: 0, y: 0 },
-        data: { question: s.question, answer: s.answer, conclusion: s.conclusion, step: i + 1 },
+        data: { question: s.question, answer: s.answer, conclusion: s.conclusion, step: i + 1, sources: s.sources || [] },
       })
       if (lastSpine) solidEdge(lastSpine, id)
       lastSpine = id

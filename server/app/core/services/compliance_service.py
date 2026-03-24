@@ -736,6 +736,100 @@ def _normalize_title_key(title: Optional[str]) -> str:
     return s
 
 
+# Maps category → list of (keywords_set, canonical_key).
+# Order matters — first match wins, so more specific patterns come first.
+_TITLE_CANONICAL_MAP: dict[str, list[tuple[frozenset[str], str]]] = {
+    "meal_breaks": [
+        (frozenset({"healthcare", "waiver"}), "healthcare_meal_waiver"),
+        (frozenset({"healthcare", "exception"}), "healthcare_meal_waiver"),
+        (frozenset({"healthcare", "meal"}), "healthcare_meal_waiver"),
+        (frozenset({"missed", "break", "penalty"}), "missed_break_penalty"),
+        (frozenset({"missed", "penalty"}), "missed_break_penalty"),
+        (frozenset({"lactation"}), "lactation_break"),
+        (frozenset({"on", "duty", "meal"}), "on_duty_meal_agreement"),
+        (frozenset({"on", "duty", "agreement"}), "on_duty_meal_agreement"),
+        # "meal" + anything → meal_break (must come BEFORE rest_break to win ties)
+        (frozenset({"meal", "rest"}), "meal_break"),
+        (frozenset({"meal", "break", "waiver"}), "meal_break"),
+        (frozenset({"meal", "waiver"}), "meal_break"),
+        (frozenset({"meal", "break"}), "meal_break"),
+        (frozenset({"meal", "period"}), "meal_break"),
+        # rest-only → rest_break
+        (frozenset({"rest", "break"}), "rest_break"),
+        (frozenset({"rest", "period"}), "rest_break"),
+    ],
+    "overtime": [
+        (frozenset({"daily", "weekly"}), "daily_weekly_overtime"),
+        (frozenset({"double", "time"}), "double_time"),
+        (frozenset({"seventh", "day"}), "seventh_day_overtime"),
+        (frozenset({"alternative", "workweek"}), "alternative_workweek"),
+        (frozenset({"healthcare", "overtime"}), "healthcare_overtime"),
+        (frozenset({"mandatory", "overtime"}), "mandatory_overtime_restrictions"),
+        (frozenset({"comp", "time"}), "comp_time"),
+        (frozenset({"exempt", "salary"}), "exempt_salary_threshold"),
+    ],
+    "sick_leave": [
+        (frozenset({"accrual", "cap"}), "accrual_and_usage_caps"),
+        (frozenset({"accrual", "usage"}), "accrual_and_usage_caps"),
+        (frozenset({"local", "sick"}), "local_sick_leave"),
+        (frozenset({"paid", "sick"}), "state_paid_sick_leave"),
+        (frozenset({"sick", "leave"}), "state_paid_sick_leave"),
+    ],
+    "leave": [
+        (frozenset({"family", "medical", "leave"}), "fmla"),
+        (frozenset({"fmla"}), "fmla"),
+        (frozenset({"paid", "family"}), "state_paid_family_leave"),
+        (frozenset({"family", "leave"}), "state_family_leave"),
+        (frozenset({"disability", "insurance"}), "state_disability_insurance"),
+        (frozenset({"disability", "benefits"}), "state_disability_insurance"),
+        (frozenset({"pregnancy", "disability"}), "pregnancy_disability_leave"),
+        (frozenset({"paid", "sick", "leave"}), "paid_sick_leave"),
+        (frozenset({"sick", "leave"}), "paid_sick_leave"),
+        (frozenset({"bereavement"}), "bereavement_leave"),
+        (frozenset({"domestic", "violence"}), "domestic_violence_leave"),
+        (frozenset({"jury", "duty"}), "jury_duty_leave"),
+        (frozenset({"military", "leave"}), "military_leave"),
+        (frozenset({"voting", "leave"}), "voting_leave"),
+        (frozenset({"school", "activity"}), "school_activity_leave"),
+        (frozenset({"reproductive", "loss"}), "reproductive_loss_leave"),
+        (frozenset({"bone", "marrow"}), "bone_marrow_donor_leave"),
+        (frozenset({"organ", "donor"}), "organ_donor_leave"),
+    ],
+    "pay_frequency": [
+        (frozenset({"final", "pay", "termination"}), "final_pay_termination"),
+        (frozenset({"final", "pay", "resignation"}), "final_pay_resignation"),
+        (frozenset({"exempt", "monthly"}), "exempt_monthly_pay"),
+        (frozenset({"payday", "posting"}), "payday_posting"),
+        (frozenset({"wage", "notice"}), "wage_notice"),
+        (frozenset({"pay", "frequency"}), "standard_pay_frequency"),
+        (frozenset({"pay", "schedule"}), "standard_pay_frequency"),
+    ],
+    "final_pay": [
+        (frozenset({"termination"}), "final_pay_termination"),
+        (frozenset({"resignation"}), "final_pay_resignation"),
+        (frozenset({"layoff"}), "final_pay_layoff"),
+        (frozenset({"waiting", "time", "penalty"}), "waiting_time_penalty"),
+    ],
+}
+
+
+def _match_title_to_canonical_key(normalized_title: str, category: str) -> Optional[str]:
+    """Map a normalized title to a canonical regulation key via keyword matching.
+
+    Bridges the gap when Gemini doesn't provide a regulation_key: instead of
+    using the raw title as the dedup key (which causes semantic duplicates),
+    match the title's words against known patterns for the category.
+    """
+    patterns = _TITLE_CANONICAL_MAP.get(category)
+    if not patterns:
+        return None
+    title_words = set(normalized_title.split())
+    for keywords, canonical in patterns:
+        if keywords <= title_words:
+            return canonical
+    return None
+
+
 def _extract_numeric_value(value: Optional[str]) -> Optional[float]:
     if not value:
         return None
@@ -2931,15 +3025,20 @@ def _compute_requirement_key(req) -> str:
                 return f"{aet[0]}:{cat_key}:{resolved}"
             return f"{cat_key}:{resolved}"
 
-    # Fallback: title-based key computation
+    # Fallback: try to match title keywords to a canonical regulation key
     base_title = _base_title(title or "", jname)
     base_key = _normalize_title_key(base_title)
-
-    # Prefix triggered requirements to avoid collision with baseline keys
     aet = req.get("applicable_entity_types") if isinstance(req, dict) else getattr(req, "applicable_entity_types", None)
+
+    canonical = _match_title_to_canonical_key(base_key, cat_key)
+    if canonical:
+        if aet and isinstance(aet, list) and len(aet) > 0:
+            return f"{aet[0]}:{cat_key}:{canonical}"
+        return f"{cat_key}:{canonical}"
+
+    # Final fallback: raw normalized title (no canonical match)
     if aet and isinstance(aet, list) and len(aet) > 0:
-        prefix = aet[0]
-        return f"{prefix}:{cat_key}:{base_key}"
+        return f"{aet[0]}:{cat_key}:{base_key}"
 
     return f"{cat_key}:{base_key}"
 
