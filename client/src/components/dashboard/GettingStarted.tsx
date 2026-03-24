@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Card } from '../ui'
 import {
-  Building2, Shield, Users, FileText, Mail, Plug, Check, X,
+  Building2, Shield, Users, FileText, Plug, Check, X,
 } from 'lucide-react'
 
 interface GettingStartedProps {
@@ -16,7 +16,6 @@ const ALL_ITEMS = [
   { key: 'compliance', label: 'Add business locations', icon: Shield, href: '/app/compliance', feature: 'compliance' },
   { key: 'employees', label: 'Import employees', icon: Users, href: '/app/employees', feature: 'employees' },
   { key: 'policies', label: 'Create your first policy', icon: FileText, href: '/app/handbooks', feature: 'policies' },
-  { key: 'offer_letters', label: 'Set up offer letters', icon: Mail, href: '/app/offer-letters', feature: 'offer_letters' },
   { key: 'integrations', label: 'Connect integrations', icon: Plug, href: '/app/settings', feature: 'onboarding' },
 ] as const
 
