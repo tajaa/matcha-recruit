@@ -6,7 +6,7 @@ from datetime import date
 from weasyprint import HTML
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals", "momentum")
-VERSION = "v3"
+VERSION = "v5"
 OUTPUT_PATH = os.path.join(OUTPUT_DIR, f"Matcha_Momentum_Proposal_{VERSION}.pdf")
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -31,8 +31,8 @@ YEAR1_TCV = ANNUAL_RECURRING + IMPL_FEE
 TODAY = date.today().strftime("%B %d, %Y")
 
 # ROI numbers
-HARD_SAVINGS = 173_500
-RISK_REDUCTION = 55_000
+HARD_SAVINGS = 224_000
+RISK_REDUCTION = 75_000
 TOTAL_VALUE = HARD_SAVINGS + RISK_REDUCTION
 NET_Y1 = TOTAL_VALUE - YEAR1_TCV
 ROI_MULTIPLE = TOTAL_VALUE / YEAR1_TCV
@@ -501,7 +501,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha is an agentic workforce risk management platform built for life sciences organizations navigating complex, multi-layered regulatory environments. From FDA-regulated compliance monitoring and credentialing management to pre-termination risk scoring and employment relations investigations, Matcha consolidates fragmented HR operations into a single platform&mdash;reducing regulatory exposure, eliminating manual tracking, and delivering real-time risk visibility across every site and research facility. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
+    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For Momentum Life Sciences, that means U.S. federal and state jurisdiction-level compliance monitoring, multi-state licensure and Scope of Practice tracking, HIPAA and patient privacy compliance, employment law across every operating state, and employment relations case management. For teams with international operations or sponsor relationships, Matcha extends the same coverage to applicable international regulatory frameworks. From compliance tracking and sponsor audit readiness to ER investigations, pre-termination risk scoring, and intelligent policy documents, Matcha consolidates fragmented HR operations into a single platform &mdash; reducing regulatory exposure, eliminating manual tracking, and giving your HR team real-time visibility across every clinical engagement site and field operations team. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
   </div>
 
   <h1>Investment Summary</h1>
@@ -648,7 +648,7 @@ HTML_CONTENT = f"""
   </div>
 
   <p class="pricing-note">
-    First jurisdiction included in Platform Fee. Federal compliance (OSHA, FLSA, FMLA, ADA, EEOC) included at no additional charge. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Industry-specific regulatory bodies (e.g., state medical boards, DEA registration sites) requiring distinct compliance configuration are each treated as an additional Jurisdiction and scoped during implementation.<br><br>
+    First jurisdiction included in Platform Fee. Federal compliance (OSHA, FLSA, FMLA, ADA, EEOC) included at no additional charge. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. State nursing board and telehealth regulatory frameworks requiring distinct compliance configuration are each treated as an additional Jurisdiction and scoped during implementation.<br><br>
     <strong>Partner Program (${PARTNER_PEPM:.2f} PEPM)</strong> &mdash; {PARTNER_DISCOUNT:.0%} discount available for organizations that commit to: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.<br>
     <strong>Volume Discount</strong> &mdash; 10% PEPM discount applied automatically for organizations with 500 or more employees.<br>
     Price locked for the 12-month initial term. Employee count subject to quarterly true-up.
@@ -670,42 +670,42 @@ HTML_CONTENT = f"""
   <h2>Compliance &amp; Legal</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Compliance Engine</span> &mdash; Agentic jurisdiction research across federal, state, and local levels. Multi-location and multi-site support with preemption rule analysis. Tiered data approach: structured requirements, curated repository, and agentic research for emerging regulations including FDA workforce mandates, state biotech licensing, and export control updates. For a life sciences company operating across research, clinical, and commercial functions, this means continuous monitoring of FDA GxP workforce training requirements, state occupational health and safety standards for laboratory environments, and applicable ITAR/EAR workforce compliance obligations — in a single dashboard rather than siloed across safety, legal, and HR teams. When the FDA updates its guidance on GCP training requirements for clinical research staff or a state modifies biosafety cabinet certification intervals, the engine surfaces the change mapped to the affected team before the next regulatory inspection or sponsor audit.</p>
+    <p><span class="feature-name">Compliance Engine</span> &mdash; Agentic jurisdiction research across federal, state, and local levels. Multi-location and multi-site support with preemption rule analysis. Tiered data approach: structured requirements, curated repository, and agentic research for emerging regulations. For Momentum Life Sciences &mdash; whose HR and compliance team is responsible for managing workforce compliance across a national clinical field operation spanning all 50 states &mdash; this means <strong>automated tracking of state-specific nursing board Scope of Practice changes and multi-state licensure renewals</strong>, continuous monitoring of HIPAA patient privacy obligations, GxP compliance requirements for sponsor program operations, and applicable employment law across every operating state. When a state nursing board updates the permissible scope for RN-level patient coaching or a sponsor adjusts clinical protocol standards, the engine surfaces the change mapped to the affected employee population before the next sponsor audit or FDA program review &mdash; all in a single dashboard rather than siloed across compliance, legal, and field operations teams.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; AI-powered policy documents tailored to specific jurisdictions and research environments. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation. In a life sciences environment, this includes GCP/GLP training acknowledgment policies, lab safety protocols, conflict of interest and IP assignment policies, and applicable export control awareness policies — all generated from the jurisdiction and industry profile rather than drafted from scratch by legal. When a new state laboratory location comes online or the FDA updates its clinical investigator guidance, the handbook auto-updates the affected sections and triggers bulk re-acknowledgment for impacted employees, keeping the training record current without a manual policy revision cycle.</p>
+    <p><span class="feature-name">Policies &amp; Handbooks</span> &mdash; Intelligent policy documents tailored to specific jurisdictions and clinical engagement environments. Electronic signature collection with audit trails. Auto-research fills jurisdiction-specific topics during handbook creation. For Momentum, this includes HIPAA and patient privacy acknowledgment policies, clinical protocol and specialty medication handling guidelines, conflict of interest and sponsor relationship policies, and applicable patient data use policies &mdash; all generated from the jurisdiction and program profile rather than drafted from scratch by legal. When a new operating state comes online or a sponsor updates its program requirements, the handbook auto-updates the affected sections and triggers bulk re-acknowledgment for impacted employees, keeping the training record current without a manual policy revision cycle.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Legislative Tracker</span> &mdash; Intelligent monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity. Covers FDA guidance updates, state biotech regulations, and employment law changes. For Momentum Life Sciences, this means automatic alerts when the FDA publishes new draft guidance on clinical investigator qualification standards or when a state enacts changes to its bioresearch facility permitting requirements — changes that directly affect workforce training obligations and cannot be caught by monitoring a single federal register feed. Pattern detection also flags when multiple states simultaneously advance legislation on trade secret protections, non-compete enforceability, or laboratory worker safety standards, giving HR and legal teams coordinated visibility rather than discovering the laws state by state after they pass.</p>
+    <p><span class="feature-name">Legislative Tracker</span> &mdash; Intelligent monitoring of regulatory changes across jurisdictions with pattern detection for coordinated legislative activity. For Momentum Life Sciences, the tracker is focused on <strong>telehealth and employment law</strong> &mdash; delivering <strong>real-time alerts on changes to state telehealth regulations and Nursing Licensure Compact (NLC) state requirements</strong>. When a state enacts new rules governing remote patient coaching sessions or modifies its NLC participation, Momentum&rsquo;s HR and compliance teams receive an immediate alert mapped to the affected workforce &mdash; enabling rapid operational decisions without waiting for manual legal review. Pattern detection also flags when multiple states simultaneously advance legislation on telehealth reimbursement, non-compete enforceability for healthcare workers, or patient privacy standards, giving HR and legal teams coordinated visibility rather than discovering the changes state by state after they pass.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, locations, and tenure. For a 200-person life sciences company where a single EEOC charge or FDA Form 483 workforce-related observation can affect investor confidence and IND/NDA timelines, the board-ready risk report translates operational HR data into the language that audit committees and Series B/C investors expect to see in a risk register. Monte Carlo outputs provide a defensible loss-probability range for employment practices liability insurance renewal discussions and allow the CFO to set litigation reserves based on statistical modeling rather than gut instinct.</p>
+    <p><span class="feature-name">Risk Assessment</span> &mdash; Multi-method organizational risk modeling: 5-dimension live risk scoring (compliance, incidents, ER cases, workforce, legislative), Monte Carlo simulation across 10,000 iterations to produce probability distributions of annual loss exposure, statistical anomaly detection using rolling mean and standard deviation on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW. Executive-ready reports with cohort heat maps across departments, locations, and tenure. For a 200-person home-office organization whose compliance surface scales with the complexity of a national clinical field operation &mdash; not just headcount &mdash; a single EEOC charge or sponsor audit finding on workforce practices can affect biopharma contract renewals and client relationships. The board-ready risk report translates operational HR data into the language that audit committees and executive leadership expect to see in a risk register. Monte Carlo outputs provide a defensible loss-probability range for employment practices liability insurance renewal discussions and allow the CFO to set litigation reserves based on statistical modeling rather than gut instinct.</p>
   </div>
 
   <h2>Investigations &amp; Risk</h2>
 
   <div class="feature-block">
-    <p><span class="feature-name">Incident Reports</span> &mdash; Intelligent safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Covers biosafety incidents, lab accidents, chemical exposure events, and behavioral incidents. Trend analytics and pattern detection across sites. In a life sciences setting, the system tracks BSL-2/BSL-3 exposure events, chemical spills, needlestick and sharps injuries, and near-miss events in a single incident record that automatically evaluates OSHA 300 recordability — eliminating the risk of a recordkeeping citation when OSHA conducts a programmed laboratory inspection. Trend analytics can surface whether chemical exposure incidents cluster around a specific reagent, protocol, or shift, enabling targeted engineering control or SOP improvements before an incident escalates to a workers' comp claim or OSHA complaint.</p>
+    <p><span class="feature-name">Incident Reports</span> &mdash; Intelligent safety and behavioral incident reporting. OSHA 300 and 300A log generation with CSV export. Anonymous reporting support. Covers patient safety events, field safety incidents, Adverse Event (AE) reporting obligations, clinical protocol deviations, and behavioral incidents. Trend analytics and pattern detection across clinical engagement sites and field operations. As the W-2 employer of its field professionals, Momentum holds OSHA 300 recordkeeping responsibility for incidents across its entire workforce &mdash; that recordkeeping function lives with the home-office compliance and HR team. In a clinical services setting, the system tracks Adverse Event (AE) reporting timelines required under sponsor agreements, clinical protocol deviations during in-home patient visits, and patient education errors related to the self-administration of specialty medications &mdash; all in a single incident record that automatically evaluates OSHA 300 recordability. Trend analytics can surface whether incidents cluster around a specific specialty medication protocol, patient population, or geographic deployment &mdash; enabling targeted SOP improvements before an incident escalates to a sponsor audit finding or regulatory complaint.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management that acts as an active guide and a &ldquo;second set of eyes&rdquo; throughout complex investigations. Powered by AI-driven document analysis, it walks you through the case, automatically constructing timelines and flagging discrepancies. It eliminates manual cross-referencing by instantly identifying specific policy violations&mdash;no more digging through the employee handbook; the system finds it for you, while simultaneously surfacing any relevant jurisdictional laws.</p>
-    <p>In a research-intensive company where IP ownership and confidentiality are core employment terms, ER Copilot centralizes the case record for disputes involving alleged IP misappropriation, competitive activity, or research misconduct&mdash;matters where the documentary timeline is as important to the outcome as the underlying facts. When a case requires outside employment counsel or litigation hold coordination, secure, encrypted PDF export links deliver a complete, date-stamped record in a form attorneys can immediately use, compressing weeks of document collection into hours.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management that <strong>acts as an active guide and a &ldquo;second set of eyes&rdquo; throughout complex investigations</strong>. Powered by AI-driven document analysis, it <strong>walks you through the case, automatically constructing timelines and flagging discrepancies</strong>. It eliminates manual cross-referencing by <strong>instantly identifying specific policy violations</strong>&mdash;no more digging through the employee handbook; the system finds it for you, while simultaneously surfacing any relevant jurisdictional laws.</p>
+    <p>In a field-based organization where program managers and account executives operate across state lines managing sponsor relationships and patient programs, ER Copilot centralizes the case record for disputes involving alleged patient privacy violations, sponsor relationship misconduct, or field compliance failures &mdash; matters where the documentary timeline is as important to the outcome as the underlying facts. When a case requires outside employment counsel or litigation hold coordination, secure, encrypted PDF export links deliver a complete, date-stamped record in a form attorneys can immediately use, compressing weeks of document collection into hours.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with intelligent accommodation suggestions, undue hardship assessment, and job function analysis. In a life sciences environment, accommodation requests often involve laboratory workers seeking modifications to chemical exposure tasks or physical safety requirements — situations where the essential functions analysis must be grounded in the specific biosafety and regulatory context of the role, not a generic job description. The platform's job function analysis integrates the specific physical and environmental requirements of laboratory positions, including biosafety level constraints and personal protective equipment mandates, to identify feasible modifications that do not create a direct threat — producing documentation that satisfies both EEOC and OSHA standards simultaneously.</p>
+    <p><span class="feature-name">ADA Accommodations</span> &mdash; Interactive process workflow management with intelligent accommodation suggestions, undue hardship assessment, and job function analysis. For Momentum, accommodation requests often involve program managers, account executives, and clinical program directors whose roles carry travel obligations, client site responsibilities, and multi-state operational demands. The essential functions analysis must be grounded in the specific sponsor program context and operational requirements of the role &mdash; not a generic job description. The platform&rsquo;s job function analysis integrates the specific responsibilities and requirements of each position to identify feasible modifications &mdash; producing documentation that satisfies both EEOC and applicable state standards simultaneously.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. AI-generated narrative memo suitable for counsel review. For a life sciences company, the system flags when a proposed termination involves an employee who recently raised a research integrity concern, filed an OSHA laboratory safety complaint, or requested accommodation — categories that trigger retaliation protection under OSHA Section 11(c), FDA whistleblower regulations, and applicable state statutes. At a company where a single high-profile retaliation claim could affect investor sentiment, regulatory relationships, or IND credibility, this pre-decisional check is the highest-leverage risk control available.</p>
+    <p><span class="feature-name">Pre-Termination Intelligence</span> &mdash; 9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before separation decisions. AI-generated narrative memo suitable for counsel review. For Momentum, the system flags when a proposed termination involves a program manager, account executive, or clinical director who recently raised a HIPAA concern, flagged a sponsor compliance issue, or reported a patient safety concern internally &mdash; categories that trigger retaliation protection under OSHA Section 11(c), applicable state whistleblower statutes, and patient safety reporting protections. At a company where a single high-profile retaliation claim could affect sponsor confidence or biopharma client relationships, this pre-decisional check is the highest-leverage risk control available.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support. In a life sciences company, separation agreements routinely include IP assignment confirmations and non-solicitation provisions — documents that are frequently assembled manually from multiple templates under time pressure when a departure is unexpected. The platform generates a complete, jurisdiction-compliant separation package from a single workflow, with the OWBPA disclosures, consideration period tracking, and revocation window built in so nothing is inadvertently omitted.</p>
+    <p><span class="feature-name">Separation Agreements</span> &mdash; OWBPA-compliant agreement generation with proper consideration periods (21/45 day) and revocation window tracking. Group layoff disclosure support. For Momentum, separation agreements routinely include sponsor confidentiality confirmations and non-solicitation provisions &mdash; documents that are frequently assembled manually from multiple templates under time pressure when a departure is unexpected. The platform generates a complete, jurisdiction-compliant separation package from a single workflow, with the OWBPA disclosures, consideration period tracking, and revocation window built in so nothing is inadvertently omitted.</p>
   </div>
 
   <h2>Workforce Management</h2>
@@ -715,15 +715,15 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by category. Supports role-specific workflows for research scientists, lab technicians, clinical staff, and QA. Progress analytics with funnel metrics, bottleneck identification, and completion tracking.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Custom onboarding templates built during implementation and tailored to Momentum&rsquo;s specific roles and compliance requirements. Matcha handles the initial onboarding build-out, then hands off the template system to your admin team &mdash; giving you full control to create, modify, and run future onboarding cohorts independently. Supports role-specific workflows with progress analytics, funnel metrics, bottleneck identification, and completion tracking.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Compliance &amp; Operations Dashboard</span> &mdash; In a fast-paced biotech environment, missing a regulatory shift or a scheduling detail isn&rsquo;t just an administrative error&mdash;it&rsquo;s a compliance risk that can disrupt critical research. The dashboard acts as your operational command center, giving you a centralized, real-time view of your team&rsquo;s status. At a glance, you can monitor upcoming regulatory changes, track exactly when an employee&rsquo;s leave of absence (LOA) is coming to an end, and review outstanding incident reports or ER Copilot action items. To ensure nothing slips through the cracks, the system features a dual-alert system, pushing proactive notifications directly to your dashboard and sending them straight to your email.</p>
+    <p><span class="feature-name">Compliance &amp; Operations Dashboard</span> &mdash; In a fast-paced clinical engagement environment, missing a regulatory shift, a license renewal, or a mandated drug-safety training update isn&rsquo;t just an administrative error&mdash;it&rsquo;s a compliance risk that can disrupt active patient programs and trigger sponsor audit findings. The dashboard acts as your operational command center, giving you a centralized, real-time view of your team&rsquo;s status. At a glance, you can monitor upcoming regulatory changes, track exactly when an employee&rsquo;s leave of absence (LOA) is coming to an end, and review outstanding incident reports or ER Copilot action items. To ensure nothing slips through the cracks, the system features a dual-alert system, pushing proactive notifications directly to your dashboard and sending them straight to your email.</p>
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Automated License &amp; Training Tracking</span> &mdash; Managing the specialized credentials required for clinical and laboratory work shouldn&rsquo;t rely on manual spreadsheets. As your comprehensive HR platform, Matcha features a dedicated tracking engine for all employee licenses, certifications, and mandatory compliance training. Matcha automatically monitors every expiry date and acts as an intelligent early warning system. When a credential is approaching its expiration, the platform automatically emails both the employee and their manager with a reminder. This alert includes a secure, direct link for the employee to easily upload their renewed document straight into the platform. As the deadline gets closer, it sends automated follow-ups to ensure action is being taken. If a credential actually expires, Matcha immediately alerts the designated compliance personnel, ensuring your research teams remain fully certified, safe, and audit-ready without the manual oversight.</p>
+    <p><span class="feature-name">Automated License &amp; Training Tracking</span> &mdash; Managing credentials across a clinical engagement organization shouldn&rsquo;t rely on manual spreadsheets. Some of Momentum&rsquo;s home-office staff hold clinical credentials of their own &mdash; clinical program directors, medical directors &mdash; with multi-state licensure requirements. All 200 employees require HIPAA certification and OIG anti-kickback compliance training mandated by sponsors. Matcha features a dedicated tracking engine for all employee licenses, certifications, and mandatory compliance training. It automatically monitors every expiry date and acts as an intelligent early warning system &mdash; emailing both the employee and their manager when a credential is approaching expiration, with a secure direct link to upload the renewed document. Automated follow-ups escalate as deadlines approach. If a credential expires, Matcha immediately alerts designated compliance personnel, ensuring your team remains fully certified and sponsor audit-ready without manual oversight.</p>
   </div>
 
   <h2>Agentic Document Workspace (Matcha Work)</h2>
@@ -762,13 +762,13 @@ HTML_CONTENT = f"""
         <td class="phase">Discovery &amp; Gap Analysis</td>
         <td>Weeks 1&ndash;2</td>
         <td class="cost">$5,000</td>
-        <td>Organizational mapping, HRIS audit, site inventory, regulatory gap analysis &mdash; audit FDA compliance programs (GCP/GLP/GMP), IRB protocols and training records, DEA registrations, biosafety committee requirements, export control classifications (ITAR/EAR), state biotech licensing</td>
+        <td>Organizational mapping, HRIS audit, clinical engagement site inventory, regulatory gap analysis &mdash; audit HIPAA compliance programs, sponsor agreement obligations, state nursing board licensure coverage, NLC compact participation map, GxP training records, telehealth deployment footprint</td>
       </tr>
       <tr>
         <td class="phase">Configuration &amp; Templating</td>
         <td>Weeks 3&ndash;4</td>
         <td class="cost">$4,500</td>
-        <td>Location/jurisdiction setup, compliance baseline scan, build role-specific onboarding templates (research scientist, lab tech, clinical staff, QA/regulatory affairs), credential and certification expiration workflows, FDA training record workflows, handbook and policy document ingestion</td>
+        <td>Location/jurisdiction setup, compliance baseline scan, build role-specific onboarding templates (program director, account executive, clinical program manager, operations staff, HR and compliance personnel), credential and nursing license expiration workflows, HIPAA training record workflows, handbook and policy document ingestion</td>
       </tr>
       <tr>
         <td class="phase">Data Migration &amp; Manual Run</td>
@@ -794,6 +794,7 @@ HTML_CONTENT = f"""
   <h2>Security &amp; Infrastructure</h2>
 
   <ul class="terms-list">
+    <li><span class="term-label">HIPAA Compliance</span> Platform infrastructure and data handling practices are designed to support HIPAA compliance. BAA available upon request. PHI is encrypted in transit and at rest and never used for model training or third-party sharing.</li>
     <li><span class="term-label">SSO / SAML 2.0</span> Enterprise single sign-on via SAML 2.0. Compatible with Okta, Azure AD, OneLogin, and any SAML-compliant identity provider. Per-company configuration with auto-provisioning.</li>
     <li><span class="term-label">Role-Based Access</span> Granular role-based access controls across admin, HR, supervisor, and employee roles. Department and location-scoped visibility for multi-site organizations.</li>
     <li><span class="term-label">Uptime</span> 99.5% target platform availability with automated health monitoring and incident alerting.</li>
@@ -833,46 +834,46 @@ HTML_CONTENT = f"""
 
   <h1>Return on Investment</h1>
 
-  <p style="margin-bottom: 14px;">Life sciences employers carry a disproportionately high compliance burden relative to their headcount. FDA-regulated workforce requirements, multi-state licensure, IRB training mandates, and DEA registrations intersect with standard employment law&mdash;creating a compliance surface that scales with regulatory complexity, not just headcount. EEOC charges in research and development have increased as the sector has expanded, and the DOL has prioritized wage and hour enforcement in biotech and pharma as shift work and contractor classifications have come under scrutiny.</p>
+  <p style="margin-bottom: 14px;">Patient support and HCP engagement organizations carry a disproportionately high compliance burden relative to their headcount. Operating across multiple states with sponsor-driven program obligations means navigating HIPAA requirements, Nursing Licensure Compact (NLC) participation rules, state-specific Scope of Practice variations, and multi-jurisdiction employment law &mdash; all managed by a home-office HR team rather than a large legal department. EEOC charges in healthcare services have increased as the sector has expanded, and the DOL has prioritized wage and hour enforcement in healthcare services organizations where contractor classifications and multi-state operations have come under scrutiny.</p>
 
   <table class="roi-table">
     <thead>
       <tr>
-        <th>What You Spend Today</th>
-        <th style="text-align:right">Current Cost</th>
-        <th style="text-align:right">You Save</th>
+        <th>Estimated Annual Cost</th>
+        <th style="text-align:right">Industry Estimate</th>
+        <th style="text-align:right">Estimated Savings</th>
       </tr>
     </thead>
     <tbody>
       <tr>
         <td>Outside employment counsel</td>
-        <td style="text-align:right">$65,000/yr</td>
-        <td style="text-align:right"><strong>$42,000</strong></td>
+        <td style="text-align:right">$95,000/yr</td>
+        <td style="text-align:right"><strong>$52,000</strong></td>
       </tr>
       <tr>
-        <td>ER cases sent to outside counsel (2/yr)</td>
-        <td style="text-align:right">$36,000/yr</td>
-        <td style="text-align:right"><strong>$26,000</strong></td>
+        <td>ER cases sent to outside counsel (2&ndash;3/yr)</td>
+        <td style="text-align:right">$50,000/yr</td>
+        <td style="text-align:right"><strong>$35,000</strong></td>
       </tr>
       <tr>
         <td>HR staff time on compliance tasks</td>
-        <td style="text-align:right">$120,000/yr</td>
-        <td style="text-align:right"><strong>$66,000</strong></td>
+        <td style="text-align:right">$160,000/yr</td>
+        <td style="text-align:right"><strong>$85,000</strong></td>
       </tr>
       <tr>
         <td>Handbook &amp; policy legal review</td>
-        <td style="text-align:right">$12,000/yr</td>
-        <td style="text-align:right"><strong>$10,500</strong></td>
-      </tr>
-      <tr>
-        <td>OSHA &amp; biosafety incident admin</td>
         <td style="text-align:right">$18,000/yr</td>
         <td style="text-align:right"><strong>$14,000</strong></td>
       </tr>
       <tr>
-        <td>Compliance training &amp; certification tracking</td>
-        <td style="text-align:right">$20,000/yr</td>
-        <td style="text-align:right"><strong>$15,000</strong></td>
+        <td>Adverse event &amp; field incident recordkeeping</td>
+        <td style="text-align:right">$28,000/yr</td>
+        <td style="text-align:right"><strong>$18,000</strong></td>
+      </tr>
+      <tr>
+        <td>Nursing license &amp; compliance training tracking</td>
+        <td style="text-align:right">$28,000/yr</td>
+        <td style="text-align:right"><strong>$20,000</strong></td>
       </tr>
       <tr style="background:#f5f5f7;">
         <td><strong>Annual hard savings</strong></td>
@@ -882,7 +883,8 @@ HTML_CONTENT = f"""
     </tbody>
   </table>
 
-  <p style="font-size:9pt; color:#6b7280; margin-top:8px;">Savings driven by ER Copilot handling investigations internally, the Compliance Engine automating FDA and jurisdiction monitoring, and Pre-Termination Intelligence reducing matters requiring attorney involvement. HR compliance staff time savings reflect automation of GxP training tracking, credential expiration workflows, and multi-jurisdiction regulatory monitoring.</p>
+  <p style="font-size:9pt; color:#6b7280; margin-top:8px;">Savings driven by ER Copilot handling investigations internally, the Compliance Engine automating nursing board and jurisdiction monitoring, and Pre-Termination Intelligence reducing matters requiring attorney involvement. HR compliance staff time savings reflect automation of nursing license tracking, HIPAA compliance verification workflows, and multi-state regulatory monitoring.</p>
+  <p style="font-size:8.5pt; color:#9ca3af; margin-top:6px; font-style:italic;">Cost estimates are modeled from industry benchmarks for healthcare services organizations of comparable size and regulatory complexity. Actual costs may vary based on your current vendor relationships, internal staffing, and operational model.</p>
 
   <table class="roi-table" style="margin-top: 20px;">
     <thead>

@@ -489,7 +489,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha is an agentic workforce risk management platform built for multi-location healthcare organizations. From jurisdiction-level compliance monitoring and incident investigations to pre-termination risk scoring, Matcha consolidates fragmented HR operations into a single platform&mdash;reducing legal exposure, eliminating manual tracking, and delivering real-time risk visibility across every facility. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
+    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For multi-location healthcare organizations, that means jurisdiction-level compliance monitoring, incident investigations, and pre-termination risk scoring &mdash; all consolidated into one system that reduces legal exposure, eliminates manual tracking, and delivers real-time risk visibility across every facility. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
   </div>
 
   <h1>Investment Summary</h1>
@@ -680,7 +680,7 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management that acts as an active guide and a &ldquo;second set of eyes&rdquo; throughout complex investigations. Powered by AI-driven document analysis, it walks you through the case, automatically constructing timelines and flagging discrepancies. It eliminates manual cross-referencing by instantly identifying specific policy violations&mdash;no more digging through the employee handbook; the system finds it for you, while simultaneously surfacing any relevant jurisdictional laws.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management that <strong>acts as an active guide and a &ldquo;second set of eyes&rdquo; throughout complex investigations</strong>. Powered by AI-driven document analysis, it <strong>walks you through the case, automatically constructing timelines and flagging discrepancies</strong>. It eliminates manual cross-referencing by <strong>instantly identifying specific policy violations</strong>&mdash;no more digging through the employee handbook; the system finds it for you, while simultaneously surfacing any relevant jurisdictional laws.</p>
     <p>In a clinical setting, ER Copilot handles the documentation-heavy investigations that arise from patient complaint-triggered HR cases, license-based discipline matters, and FMLA interference claims. These categories are elevated in healthcare due to the emotional intensity of clinical work and the complexity of FMLA interactions with shift-based schedules. When a case does reach outside employment counsel, secure, encrypted PDF export links deliver a complete, chronological record in a form attorneys can immediately use, drastically cutting preliminary review time and the associated billable hours.</p>
   </div>
 
@@ -703,7 +703,7 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by category. Supports credential and license verification gates, HIPAA workforce training, and role-specific workflows. Progress analytics with funnel metrics, bottleneck identification, and completion tracking.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Custom onboarding templates built during implementation and tailored to your organization&rsquo;s specific roles, credential requirements, and compliance workflows. Matcha handles the initial onboarding build-out, then hands off the template system to your admin team &mdash; giving you full control to create, modify, and run future onboarding cohorts independently. Supports credential and license verification gates, HIPAA workforce training, and role-specific workflows with progress analytics, funnel metrics, bottleneck identification, and completion tracking.</p>
   </div>
 
   <h2>Agentic Document Workspace (Matcha Work)</h2>

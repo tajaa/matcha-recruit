@@ -483,7 +483,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha is an agentic workforce risk management platform built for manufacturing organizations operating at the intersection of heavy OSHA compliance, active labor relations, and multi-department workforce management. For Giti Tire, that means jurisdiction-level compliance monitoring across federal and multi-state OSHA requirements, incident tracking across a large production floor, proactive employment relations case management, and pre-termination risk intelligence&mdash;all in a single platform. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps your team can act on with confidence.
+    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For Giti Tire, that means jurisdiction-level compliance monitoring across federal and multi-state OSHA requirements, incident tracking across a large production floor, proactive employment relations case management, and pre-termination risk intelligence &mdash; all in a single system. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps your team can act on with confidence.
   </div>
 
   <h1>Investment Summary</h1>
@@ -610,7 +610,7 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management that acts as an active guide and a &ldquo;second set of eyes&rdquo; throughout complex investigations. Powered by AI-driven document analysis, it walks you through the case, automatically constructing timelines and flagging discrepancies. It eliminates manual cross-referencing by instantly identifying specific policy violations&mdash;no more digging through the employee handbook; the system finds it for you, while simultaneously surfacing any relevant jurisdictional laws.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management that <strong>acts as an active guide and a &ldquo;second set of eyes&rdquo; throughout complex investigations</strong>. Powered by AI-driven document analysis, it <strong>walks you through the case, automatically constructing timelines and flagging discrepancies</strong>. It eliminates manual cross-referencing by <strong>instantly identifying specific policy violations</strong>&mdash;no more digging through the employee handbook; the system finds it for you, while simultaneously surfacing any relevant jurisdictional laws.</p>
     <p>In a manufacturing setting with shift supervisors making real-time discipline decisions across multiple lines and shifts, ER Copilot creates a centralized, searchable case record that prevents inconsistent treatment claims&mdash;the most common gateway to NLRA and Title VII exposure. When a grievance escalates to arbitration or an NLRB charge, secure, encrypted PDF export links deliver a complete, timestamped record in a form attorneys can immediately use, compressing weeks of document collection into minutes.</p>
   </div>
 
@@ -633,7 +633,7 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by role and shift. Supports OSHA-mandated pre-floor training workflows (HazCom, LOTO, PPE, machine-specific orientation) as well as office and supervisory onboarding. Progress analytics with funnel metrics, bottleneck identification, and completion tracking.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Custom onboarding templates built during implementation and tailored to Giti&rsquo;s specific roles, shift structures, and safety requirements. Matcha handles the initial onboarding build-out, then hands off the template system to your admin team &mdash; giving you full control to create, modify, and run future onboarding cohorts independently. Supports OSHA-mandated pre-floor training workflows (HazCom, LOTO, PPE, machine-specific orientation) as well as office and supervisory onboarding with progress analytics, funnel metrics, bottleneck identification, and completion tracking.</p>
   </div>
 
   <div class="feature-block">
