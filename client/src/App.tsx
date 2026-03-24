@@ -8,6 +8,7 @@ import Companies from './pages/admin/Companies'
 import Features from './pages/admin/Features'
 import Settings from './pages/admin/Settings'
 import JurisdictionData from './pages/admin/JurisdictionData'
+import PayerData from './pages/admin/PayerData'
 import Jurisdictions from './pages/admin/Jurisdictions'
 import IndustryRequirements from './pages/admin/IndustryRequirements'
 import SpecializationResearch from './pages/admin/SpecializationResearch'
@@ -51,6 +52,7 @@ export default function App() {
         <Route path="features" element={<Features />} />
         <Route path="settings" element={<Settings />} />
         <Route path="jurisdiction-data" element={<JurisdictionData />} />
+        <Route path="payer-data" element={<PayerData />} />
         <Route path="jurisdictions" element={<Jurisdictions />} />
         <Route path="industry-requirements" element={<IndustryRequirements />} />
         <Route path="specialization-research" element={<SpecializationResearch />} />

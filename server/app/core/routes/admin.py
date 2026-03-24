@@ -8296,3 +8296,252 @@ async def clear_error_logs():
     async with get_connection() as conn:
         count = await conn.fetchval("DELETE FROM error_logs RETURNING COUNT(*)")
     return {"deleted": count or 0}
+
+
+# ── Payer Policy Data Management ─────────────────────────────────────────────
+
+
+@router.get("/payer-policies/overview", dependencies=[Depends(require_admin)])
+async def payer_policies_overview():
+    """Aggregated view of payer policy data: counts, staleness, field completeness."""
+    async with get_connection() as conn:
+        summary = await conn.fetchrow("""
+            SELECT
+                count(*) AS total,
+                count(DISTINCT payer_name) AS payer_count,
+                count(CASE WHEN coverage_status = 'covered' THEN 1 END) AS covered,
+                count(CASE WHEN coverage_status = 'conditional' THEN 1 END) AS conditional,
+                count(CASE WHEN coverage_status = 'not_covered' THEN 1 END) AS not_covered,
+                count(CASE WHEN research_source = 'cms_api' THEN 1 END) AS from_cms,
+                count(CASE WHEN research_source = 'gemini' THEN 1 END) AS from_gemini,
+                count(CASE WHEN clinical_criteria IS NOT NULL AND clinical_criteria != '' THEN 1 END) AS has_criteria,
+                count(CASE WHEN procedure_codes IS NOT NULL AND array_length(procedure_codes, 1) > 0 THEN 1 END) AS has_codes,
+                count(CASE WHEN source_url IS NOT NULL AND source_url != '' THEN 1 END) AS has_source_url,
+                max(last_verified_at) AS last_ingest,
+                count(CASE WHEN last_verified_at IS NOT NULL
+                    AND EXTRACT(DAY FROM NOW() - last_verified_at) > staleness_warning_days THEN 1 END) AS stale_warning,
+                count(CASE WHEN last_verified_at IS NOT NULL
+                    AND EXTRACT(DAY FROM NOW() - last_verified_at) > staleness_critical_days THEN 1 END) AS stale_critical
+            FROM payer_medical_policies
+        """)
+
+        by_payer = await conn.fetch("""
+            SELECT payer_name, count(*) AS count,
+                   count(CASE WHEN coverage_status = 'covered' THEN 1 END) AS covered,
+                   count(CASE WHEN coverage_status = 'conditional' THEN 1 END) AS conditional
+            FROM payer_medical_policies
+            GROUP BY payer_name ORDER BY count(*) DESC
+        """)
+
+    s = dict(summary)
+    total = s["total"] or 1
+    return {
+        "total": s["total"],
+        "payer_count": s["payer_count"],
+        "coverage": {
+            "covered": s["covered"],
+            "conditional": s["conditional"],
+            "not_covered": s["not_covered"],
+        },
+        "sources": {
+            "cms": s["from_cms"],
+            "gemini": s["from_gemini"],
+        },
+        "field_completeness": {
+            "clinical_criteria_pct": round(s["has_criteria"] / total * 100, 1),
+            "procedure_codes_pct": round(s["has_codes"] / total * 100, 1),
+            "source_url_pct": round(s["has_source_url"] / total * 100, 1),
+        },
+        "staleness": {
+            "warning": s["stale_warning"],
+            "critical": s["stale_critical"],
+        },
+        "last_ingest": s["last_ingest"].isoformat() if s["last_ingest"] else None,
+        "by_payer": [{"payer": r["payer_name"], "count": r["count"], "covered": r["covered"], "conditional": r["conditional"]} for r in by_payer],
+    }
+
+
+@router.get("/payer-policies/integrity-check", dependencies=[Depends(require_admin)])
+async def payer_policies_integrity_check():
+    """Integrity check: stale policies, missing fields, low confidence, recent changes."""
+    async with get_connection() as conn:
+        # Stale policies
+        stale = await conn.fetch("""
+            SELECT id, payer_name, policy_number, policy_title, coverage_status,
+                   EXTRACT(DAY FROM NOW() - last_verified_at)::int AS days_since_verified,
+                   staleness_warning_days, staleness_critical_days
+            FROM payer_medical_policies
+            WHERE last_verified_at IS NOT NULL
+              AND EXTRACT(DAY FROM NOW() - last_verified_at) > staleness_warning_days
+            ORDER BY EXTRACT(DAY FROM NOW() - last_verified_at) DESC
+            LIMIT 200
+        """)
+
+        stale_list = []
+        for r in stale:
+            days = r["days_since_verified"] or 0
+            level = "critical" if days >= (r["staleness_critical_days"] or 180) else "warning"
+            stale_list.append({
+                "id": str(r["id"]),
+                "payer": r["payer_name"],
+                "policy_number": r["policy_number"],
+                "title": r["policy_title"],
+                "coverage_status": r["coverage_status"],
+                "days_since_verified": days,
+                "level": level,
+            })
+
+        # Missing fields
+        missing_fields = await conn.fetch("""
+            SELECT id, payer_name, policy_number, policy_title,
+                   CASE WHEN clinical_criteria IS NULL OR clinical_criteria = '' THEN true ELSE false END AS missing_criteria,
+                   CASE WHEN procedure_codes IS NULL OR array_length(procedure_codes, 1) IS NULL THEN true ELSE false END AS missing_codes,
+                   CASE WHEN source_url IS NULL OR source_url = '' THEN true ELSE false END AS missing_source
+            FROM payer_medical_policies
+            WHERE (clinical_criteria IS NULL OR clinical_criteria = '')
+               OR (procedure_codes IS NULL OR array_length(procedure_codes, 1) IS NULL)
+               OR (source_url IS NULL OR source_url = '')
+            ORDER BY payer_name, policy_number
+            LIMIT 200
+        """)
+
+        missing_list = [
+            {
+                "id": str(r["id"]),
+                "payer": r["payer_name"],
+                "policy_number": r["policy_number"],
+                "title": r["policy_title"],
+                "missing": [f for f, col in [
+                    ("clinical_criteria", "missing_criteria"),
+                    ("procedure_codes", "missing_codes"),
+                    ("source_url", "missing_source"),
+                ] if r[col]],
+            }
+            for r in missing_fields
+        ]
+
+        # Low confidence (Gemini research)
+        low_conf = await conn.fetch("""
+            SELECT id, payer_name, policy_number, policy_title,
+                   (metadata->>'confidence')::float AS confidence
+            FROM payer_medical_policies
+            WHERE research_source = 'gemini'
+              AND metadata->>'confidence' IS NOT NULL
+              AND (metadata->>'confidence')::float < 0.5
+            ORDER BY (metadata->>'confidence')::float
+            LIMIT 100
+        """)
+
+        low_conf_list = [
+            {
+                "id": str(r["id"]),
+                "payer": r["payer_name"],
+                "policy_number": r["policy_number"],
+                "title": r["policy_title"],
+                "confidence": r["confidence"],
+            }
+            for r in low_conf
+        ]
+
+        # Recent changes
+        changes = await conn.fetch("""
+            SELECT cl.id, cl.policy_id, cl.field_changed, cl.old_value, cl.new_value,
+                   cl.change_source, cl.changed_at,
+                   p.payer_name, p.policy_number, p.policy_title
+            FROM payer_policy_change_log cl
+            JOIN payer_medical_policies p ON p.id = cl.policy_id
+            WHERE cl.changed_at > NOW() - INTERVAL '30 days'
+            ORDER BY cl.changed_at DESC
+            LIMIT 100
+        """)
+
+        changes_list = [
+            {
+                "id": str(r["id"]),
+                "payer": r["payer_name"],
+                "policy_number": r["policy_number"],
+                "title": r["policy_title"],
+                "field": r["field_changed"],
+                "old_value": r["old_value"],
+                "new_value": r["new_value"],
+                "source": r["change_source"],
+                "changed_at": r["changed_at"].isoformat() if r["changed_at"] else None,
+            }
+            for r in changes
+        ]
+
+    return {
+        "stale_policies": stale_list,
+        "stale_count": len(stale_list),
+        "missing_fields": missing_list,
+        "missing_fields_count": len(missing_list),
+        "low_confidence": low_conf_list,
+        "low_confidence_count": len(low_conf_list),
+        "recent_changes": changes_list,
+        "recent_changes_count": len(changes_list),
+    }
+
+
+@router.post("/payer-policies/run-staleness-check", dependencies=[Depends(require_admin)])
+async def payer_run_staleness_check():
+    """Scan payer policies for staleness and upsert repository_alerts."""
+    created = 0
+    resolved = 0
+
+    async with get_connection() as conn:
+        stale_rows = await conn.fetch("""
+            SELECT id, payer_name, policy_number, policy_title,
+                   EXTRACT(DAY FROM NOW() - last_verified_at)::int AS days_since_verified,
+                   staleness_warning_days, staleness_critical_days
+            FROM payer_medical_policies
+            WHERE last_verified_at IS NOT NULL
+              AND EXTRACT(DAY FROM NOW() - last_verified_at) > staleness_warning_days
+        """)
+
+        for r in stale_rows:
+            days = r["days_since_verified"] or 0
+            if days >= (r["staleness_critical_days"] or 180):
+                alert_type, severity = "payer_stale_critical", "critical"
+            else:
+                alert_type, severity = "payer_stale_warning", "warning"
+
+            message = f"{r['policy_title'] or r['policy_number']} ({r['payer_name']}) is {days} days past verification"
+            # Check if open alert already exists for this policy
+            existing_alert = await conn.fetchval(
+                "SELECT id FROM repository_alerts WHERE requirement_id = $1 AND alert_type = $2 AND status = 'open'",
+                r["id"], alert_type,
+            )
+            if existing_alert:
+                await conn.execute(
+                    "UPDATE repository_alerts SET severity = $1, message = $2, days_overdue = $3 WHERE id = $4",
+                    severity, message, days - (r["staleness_warning_days"] or 90), existing_alert,
+                )
+            else:
+                await conn.execute("""
+                    INSERT INTO repository_alerts
+                        (alert_type, severity, requirement_id, category, message, days_overdue, regulation_key)
+                    VALUES ($1, $2, $3, 'payer_policy', $4, $5, $6)
+                """, alert_type, severity, r["id"], message,
+                    days - (r["staleness_warning_days"] or 90), r["policy_number"])
+                created += 1
+            if "INSERT" in result:
+                created += 1
+
+        # Auto-resolve
+        resolved = await conn.fetchval("""
+            UPDATE repository_alerts
+            SET status = 'resolved', resolved_at = NOW()
+            WHERE status = 'open'
+              AND alert_type IN ('payer_stale_warning', 'payer_stale_critical')
+              AND requirement_id NOT IN (
+                  SELECT id FROM payer_medical_policies
+                  WHERE EXTRACT(DAY FROM NOW() - last_verified_at) > staleness_warning_days
+              )
+            RETURNING id
+        """) or 0
+
+    return {
+        "alerts_created": created,
+        "alerts_resolved": resolved if isinstance(resolved, int) else 0,
+        "stale_found": len(stale_rows),
+    }

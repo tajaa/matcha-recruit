@@ -581,3 +581,49 @@ export function runStalenessCheck(params?: {
     missing_found: number
   }>('/admin/jurisdictions/run-staleness-check', params || {})
 }
+
+// ── Payer Policy Admin ──
+
+export interface PayerOverviewResponse {
+  total: number
+  payer_count: number
+  coverage: { covered: number; conditional: number; not_covered: number }
+  sources: { cms: number; gemini: number }
+  field_completeness: { clinical_criteria_pct: number; procedure_codes_pct: number; source_url_pct: number }
+  staleness: { warning: number; critical: number }
+  last_ingest: string | null
+  by_payer: Array<{ payer: string; count: number; covered: number; conditional: number }>
+}
+
+export interface PayerIntegrityResponse {
+  stale_policies: Array<{ id: string; payer: string; policy_number: string; title: string; coverage_status: string; days_since_verified: number; level: string }>
+  stale_count: number
+  missing_fields: Array<{ id: string; payer: string; policy_number: string; title: string; missing: string[] }>
+  missing_fields_count: number
+  low_confidence: Array<{ id: string; payer: string; policy_number: string; title: string; confidence: number }>
+  low_confidence_count: number
+  recent_changes: Array<{ id: string; payer: string; policy_number: string; title: string; field: string; old_value: string | null; new_value: string | null; source: string; changed_at: string | null }>
+  recent_changes_count: number
+}
+
+export function fetchPayerOverview() {
+  return api.get<PayerOverviewResponse>('/admin/payer-policies/overview')
+}
+
+export function fetchPayerIntegrity() {
+  return api.get<PayerIntegrityResponse>('/admin/payer-policies/integrity-check')
+}
+
+export function runPayerStalenessCheck() {
+  return api.post<{ alerts_created: number; alerts_resolved: number; stale_found: number }>(
+    '/admin/payer-policies/run-staleness-check', {}
+  )
+}
+
+export function runCmsIngest(options?: { ncds?: boolean; lcds?: boolean; embed?: boolean }) {
+  return api.post('/admin/payer-policies/ingest', {
+    ncds: options?.ncds ?? true,
+    lcds: options?.lcds ?? true,
+    embed: options?.embed ?? true,
+  })
+}

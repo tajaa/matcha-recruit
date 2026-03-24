@@ -16,6 +16,17 @@ from uuid import UUID
 
 import httpx
 
+
+async def _log_payer_changes(conn, policy_id, existing: dict, changes: list, source: str = "cms_ingest"):
+    """Log field-level changes to payer_policy_change_log."""
+    for field in changes:
+        old_val = str(existing.get(field, "")) if existing.get(field) is not None else None
+        await conn.execute(
+            """INSERT INTO payer_policy_change_log (policy_id, field_changed, old_value, new_value, change_source)
+               VALUES ($1, $2, $3, NULL, $4)""",
+            policy_id, field, old_val, source,
+        )
+
 BASE_URL = "https://api.coverage.cms.gov"
 REQUEST_TIMEOUT = 30.0
 
@@ -207,7 +218,8 @@ class CMSCoverageAPI:
                 source_url = EXCLUDED.source_url,
                 cms_document_version = EXCLUDED.cms_document_version,
                 metadata = EXCLUDED.metadata,
-                updated_at = NOW()
+                updated_at = NOW(),
+                last_verified_at = NOW()
             RETURNING id, payer_name, policy_number, policy_title
             """,
             "Medicare",
@@ -251,6 +263,8 @@ class CMSCoverageAPI:
                 changes.append("cms_document_version")
             result["_ingest_status"] = "updated" if changes else "unchanged"
             result["_changes"] = changes
+            if changes:
+                await _log_payer_changes(conn, result["id"], existing, changes, "cms_ingest")
 
         return result
 
@@ -349,7 +363,8 @@ class CMSCoverageAPI:
                 source_url = EXCLUDED.source_url,
                 cms_document_version = EXCLUDED.cms_document_version,
                 metadata = EXCLUDED.metadata,
-                updated_at = NOW()
+                updated_at = NOW(),
+                last_verified_at = NOW()
             RETURNING id, payer_name, policy_number, policy_title
             """,
             "Medicare",
@@ -395,6 +410,8 @@ class CMSCoverageAPI:
                 changes.append("cms_document_version")
             result["_ingest_status"] = "updated" if changes else "unchanged"
             result["_changes"] = changes
+            if changes:
+                await _log_payer_changes(conn, result["id"], existing, changes, "cms_ingest")
 
         return result
 
