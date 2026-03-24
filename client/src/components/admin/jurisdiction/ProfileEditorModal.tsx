@@ -27,6 +27,7 @@ const GROUP_LABELS: Record<CategoryGroup | 'supplementary', string> = {
   healthcare: 'Healthcare',
   oncology: 'Oncology',
   medical_compliance: 'Medical Compliance',
+  life_sciences: 'Life Sciences',
   supplementary: 'Supplementary',
 }
 
