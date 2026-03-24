@@ -30,6 +30,27 @@ function _logout() {
   window.location.href = '/login'
 }
 
+/** Proactively refresh token if it expires within 60s. Use before SSE/WebSocket where 401 retry isn't possible. */
+export async function ensureFreshToken(): Promise<string | null> {
+  const token = localStorage.getItem('matcha_access_token')
+  if (!token) return null
+
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')))
+    const expiresIn = payload.exp - Date.now() / 1000
+    if (expiresIn < 60) {
+      if (!_refreshing) {
+        _refreshing = _tryRefresh().finally(() => { _refreshing = null })
+      }
+      const ok = await _refreshing
+      if (!ok) { _logout(); return null }
+      return localStorage.getItem('matcha_access_token')
+    }
+  } catch { /* malformed token, proceed */ }
+
+  return token
+}
+
 function _buildHeaders(init?: RequestInit, token?: string | null): HeadersInit {
   const isFormData = init?.body instanceof FormData
   return {

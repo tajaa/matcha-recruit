@@ -1,4 +1,4 @@
-import { api } from './client'
+import { api, ensureFreshToken } from './client'
 import type {
   MWThread,
   MWThreadDetail,
@@ -79,68 +79,86 @@ export function sendMessageStream(
   },
 ): AbortController {
   const ctrl = new AbortController()
-  const token = localStorage.getItem('matcha_access_token')
+  const timeout = setTimeout(() => ctrl.abort('timeout'), 90_000)
 
-  fetch(`${BASE}/matcha-work/threads/${threadId}/messages/stream`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify({ content }),
-    signal: ctrl.signal,
-  })
-    .then(async (res) => {
-      if (!res.ok) {
-        const text = await res.text().catch(() => res.statusText)
-        callbacks.onError(`${res.status}: ${text}`)
-        return
-      }
+  ;(async () => {
+    const token = await ensureFreshToken()
 
-      const reader = res.body?.getReader()
-      if (!reader) {
-        callbacks.onError('No response body')
-        return
-      }
+    fetch(`${BASE}/matcha-work/threads/${threadId}/messages/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ content }),
+      signal: ctrl.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          clearTimeout(timeout)
+          const text = await res.text().catch(() => res.statusText)
+          callbacks.onError(`${res.status}: ${text}`)
+          return
+        }
 
-      const decoder = new TextDecoder()
-      let buf = ''
+        const reader = res.body?.getReader()
+        if (!reader) {
+          clearTimeout(timeout)
+          callbacks.onError('No response body')
+          return
+        }
 
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buf += decoder.decode(value, { stream: true })
+        const decoder = new TextDecoder()
+        let buf = ''
 
-        const lines = buf.split('\n')
-        buf = lines.pop() ?? ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
 
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const raw = line.slice(6).trim()
-          if (raw === '[DONE]') return
+          const lines = buf.split('\n')
+          buf = lines.pop() ?? ''
 
-          try {
-            const event: MWStreamEvent = JSON.parse(raw)
-            callbacks.onEvent(event)
-            if (event.type === 'complete') {
-              callbacks.onComplete(event.data)
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const raw = line.slice(6).trim()
+            if (raw === '[DONE]') {
+              clearTimeout(timeout)
               return
             }
-            if (event.type === 'error') {
-              callbacks.onError(event.message)
-              return
+
+            try {
+              const event: MWStreamEvent = JSON.parse(raw)
+              callbacks.onEvent(event)
+              if (event.type === 'complete') {
+                clearTimeout(timeout)
+                callbacks.onComplete(event.data)
+                return
+              }
+              if (event.type === 'error') {
+                clearTimeout(timeout)
+                callbacks.onError(event.message)
+                return
+              }
+            } catch {
+              /* skip malformed */
             }
-          } catch {
-            /* skip malformed */
           }
         }
-      }
-    })
-    .catch((e) => {
-      if (e.name !== 'AbortError') {
-        callbacks.onError(e instanceof Error ? e.message : 'Stream failed')
-      }
-    })
+        clearTimeout(timeout)
+      })
+      .catch((e) => {
+        clearTimeout(timeout)
+        if (ctrl.signal.aborted) {
+          if (ctrl.signal.reason === 'timeout') {
+            callbacks.onError('Request timed out. Please try again.')
+          }
+          // else: user-initiated abort (navigated away), do nothing
+        } else {
+          callbacks.onError(e instanceof Error ? e.message : 'Stream failed')
+        }
+      })
+  })()
 
   return ctrl
 }

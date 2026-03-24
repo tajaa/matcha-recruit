@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import Markdown from 'react-markdown'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
-import ComplianceReasoningPanel from '../../components/matcha-work/ComplianceReasoningPanel'
+import MessageBubble from '../../components/matcha-work/MessageBubble'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -27,17 +26,11 @@ export default function MatchaWorkThread() {
   const [error, setError] = useState('')
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
 
-  // Node mode
-  const [nodeMode, setNodeModeState] = useState(false)
-  const [togglingNode, setTogglingNode] = useState(false)
-
-  // Compliance mode
-  const [complianceMode, setComplianceModeState] = useState(false)
-  const [togglingCompliance, setTogglingCompliance] = useState(false)
-
-  // Payer mode
-  const [payerMode, setPayerModeState] = useState(false)
-  const [togglingPayer, setTogglingPayer] = useState(false)
+  // Mode toggles — derived from thread, only toggling state is local
+  const [togglingMode, setTogglingMode] = useState<'node' | 'compliance' | 'payer' | null>(null)
+  const nodeMode = thread?.node_mode ?? false
+  const complianceMode = thread?.compliance_mode ?? false
+  const payerMode = thread?.payer_mode ?? false
 
   // Stream status
   const [statusMessage, setStatusMessage] = useState('')
@@ -58,9 +51,6 @@ export default function MatchaWorkThread() {
       .then((data) => {
         setThread(data)
         setMessages(data.messages)
-        setNodeModeState(data.node_mode)
-        setComplianceModeState(data.compliance_mode)
-        setPayerModeState(data.payer_mode)
         // Check if there's already a PDF-worthy task type
         if (data.task_type === 'offer_letter' || data.task_type === 'presentation') {
           setPdfUrl(getPdfProxyUrl(threadId, data.version))
@@ -72,9 +62,13 @@ export default function MatchaWorkThread() {
     return () => { abortRef.current?.abort() }
   }, [threadId])
 
+  const prevLenRef = useRef(0)
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+    if (messages.length > prevLenRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+    prevLenRef.current = messages.length
+  }, [messages.length])
 
   function handleSend() {
     if (!threadId || !input.trim() || streaming) return
@@ -150,37 +144,16 @@ export default function MatchaWorkThread() {
     } catch {}
   }
 
-  async function handleNodeToggle() {
-    if (!threadId || togglingNode) return
-    const newVal = !nodeMode
-    setTogglingNode(true)
+  async function handleModeToggle(mode: 'node' | 'compliance' | 'payer') {
+    if (!threadId || togglingMode) return
+    const apiFn = { node: setNodeMode, compliance: setComplianceMode, payer: setPayerMode }[mode]
+    const current = { node: nodeMode, compliance: complianceMode, payer: payerMode }[mode]
+    setTogglingMode(mode)
     try {
-      await setNodeMode(threadId, newVal)
-      setNodeModeState(newVal)
+      await apiFn(threadId, !current)
+      setThread((prev) => prev ? { ...prev, [`${mode}_mode`]: !current } : prev)
     } catch {}
-    setTogglingNode(false)
-  }
-
-  async function handleComplianceToggle() {
-    if (!threadId || togglingCompliance) return
-    const newVal = !complianceMode
-    setTogglingCompliance(true)
-    try {
-      await setComplianceMode(threadId, newVal)
-      setComplianceModeState(newVal)
-    } catch {}
-    setTogglingCompliance(false)
-  }
-
-  async function handlePayerToggle() {
-    if (!threadId || togglingPayer) return
-    const newVal = !payerMode
-    setTogglingPayer(true)
-    try {
-      await setPayerMode(threadId, newVal)
-      setPayerModeState(newVal)
-    } catch {}
-    setTogglingPayer(false)
+    setTogglingMode(null)
   }
 
   const isFinalized = thread?.status === 'finalized'
@@ -254,8 +227,8 @@ export default function MatchaWorkThread() {
           )}
 
           <button
-            onClick={handleNodeToggle}
-            disabled={togglingNode}
+            onClick={() => handleModeToggle('node')}
+            disabled={togglingMode === 'node'}
             title={nodeMode ? 'Node mode ON — AI uses internal company data' : 'Node mode OFF — click to enable internal data search'}
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               nodeMode
@@ -268,8 +241,8 @@ export default function MatchaWorkThread() {
           </button>
 
           <button
-            onClick={handleComplianceToggle}
-            disabled={togglingCompliance}
+            onClick={() => handleModeToggle('compliance')}
+            disabled={togglingMode === 'compliance'}
             title={complianceMode ? 'Compliance mode ON — AI uses jurisdiction requirements' : 'Compliance mode OFF — click to enable compliance context'}
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               complianceMode
@@ -282,8 +255,8 @@ export default function MatchaWorkThread() {
           </button>
 
           <button
-            onClick={handlePayerToggle}
-            disabled={togglingPayer}
+            onClick={() => handleModeToggle('payer')}
+            disabled={togglingMode === 'payer'}
             title={payerMode ? 'Payer mode ON — AI uses Medicare/payer coverage data' : 'Payer mode OFF — click to enable payer policy context'}
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               payerMode
@@ -304,53 +277,7 @@ export default function MatchaWorkThread() {
             </div>
           )}
           {messages.map((m) => (
-            <div
-              key={m.id}
-              className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-[90%] sm:max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
-                  m.role === 'user'
-                    ? 'bg-zinc-700 text-white whitespace-pre-wrap'
-                    : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
-                }`}
-              >
-                {m.role === 'assistant' ? (
-                  <>
-                    <Markdown>{m.content}</Markdown>
-                    {m.metadata?.compliance_reasoning && (
-                      <ComplianceReasoningPanel
-                        locations={m.metadata.compliance_reasoning}
-                        aiSteps={m.metadata.ai_reasoning_steps}
-                        referencedCategories={m.metadata.referenced_categories}
-                        referencedLocations={m.metadata.referenced_locations}
-                      />
-                    )}
-                    {m.metadata?.payer_sources && m.metadata.payer_sources.length > 0 && (
-                      <div className="mt-2 pt-2 border-t border-zinc-800">
-                        <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Sources ({m.metadata.payer_sources.length})</span>
-                        <div className="mt-1 flex flex-wrap gap-1.5">
-                          {m.metadata.payer_sources.map((s, si) => (
-                            <span key={si} className="inline-flex items-center gap-1 text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
-                              <span className="text-emerald-400">{s.payer_name}</span>
-                              {s.policy_number && <span className="text-zinc-600">|</span>}
-                              {s.policy_number && <span>{s.policy_number}</span>}
-                              {s.source_url && (
-                                <a href={s.source_url} target="_blank" rel="noopener noreferrer" className="text-emerald-500 hover:text-emerald-400 ml-0.5">
-                                  view
-                                </a>
-                              )}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  m.content
-                )}
-              </div>
-            </div>
+            <MessageBubble key={m.id} message={m} />
           ))}
 
           {streaming && (
@@ -367,8 +294,11 @@ export default function MatchaWorkThread() {
 
         {/* Error */}
         {error && (
-          <div className="mx-4 mb-2 p-2 bg-red-900/30 border border-red-800 rounded text-red-300 text-xs">
-            {error}
+          <div className="mx-4 mb-2 p-2 bg-red-900/30 border border-red-800 rounded text-red-300 text-xs flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError('')} className="text-red-200 hover:text-white text-xs underline ml-2 shrink-0">
+              Dismiss
+            </button>
           </div>
         )}
 
