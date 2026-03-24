@@ -6309,6 +6309,102 @@ async def check_jurisdiction_medical_compliance(jurisdiction_id: UUID):
     )
 
 
+@router.post("/jurisdictions/{jurisdiction_id}/check-life-sciences", dependencies=[Depends(require_admin)])
+async def check_jurisdiction_life_sciences(jurisdiction_id: UUID):
+    """Run life sciences research (6 categories) for a jurisdiction. Returns SSE stream."""
+    from ..services.compliance_service import (
+        _research_life_sciences_requirements_for_jurisdiction,
+        _jurisdiction_row_to_dict,
+        _filter_requirements_for_company,
+        _filter_city_level_requirements,
+        _filter_with_preemption,
+        _normalize_requirement_categories,
+        _sync_requirements_to_location,
+        _lookup_has_local_ordinance,
+    )
+
+    async with get_connection() as conn:
+        j = await conn.fetchrow("SELECT id, city, state FROM jurisdictions WHERE id = $1", jurisdiction_id)
+        if not j:
+            raise HTTPException(status_code=404, detail="Jurisdiction not found")
+        location_label = f"{_format_city_label(j['city'])}, {j['state']}"
+
+    async def event_stream():
+        try:
+            async with get_connection() as conn:
+                yield _to_sse({"type": "started", "location": location_label})
+
+                yield _to_sse({
+                    "type": "researching",
+                    "message": f"Researching life sciences compliance for {location_label}...",
+                })
+                try:
+                    ls_result = await _research_life_sciences_requirements_for_jurisdiction(
+                        conn, jurisdiction_id
+                    )
+                    ls_new = ls_result.get("new", 0)
+                    ls_failed = ls_result.get("failed", [])
+                    yield _to_sse({
+                        "type": "repository_refresh",
+                        "message": f"Life Sciences: +{ls_new} requirement(s) added."
+                            + (f" Failed: {', '.join(ls_failed)}" if ls_failed else ""),
+                    })
+                except Exception as exc:
+                    logger.warning("Life sciences research failed: %s", exc)
+                    yield _to_sse({"type": "warning", "message": f"Life sciences research failed: {exc}"})
+
+                # Sync to linked locations
+                linked = await conn.fetch(
+                    """SELECT bl.id, bl.company_id
+                       FROM business_locations bl
+                       JOIN jurisdictions j ON LOWER(bl.city) = LOWER(j.city)
+                           AND UPPER(bl.state) = UPPER(j.state)
+                       WHERE j.id = $1""",
+                    jurisdiction_id,
+                )
+                if linked:
+                    yield _to_sse({
+                        "type": "syncing",
+                        "message": f"Syncing life sciences updates to {len(linked)} location(s)...",
+                    })
+                    rows = await conn.fetch(
+                        "SELECT * FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+                        jurisdiction_id,
+                    )
+                    requirements = [_jurisdiction_row_to_dict(dict(r)) for r in rows]
+                    state = j["state"]
+                    has_local = await _lookup_has_local_ordinance(conn, j["city"], state)
+                    if has_local is False:
+                        requirements = _filter_city_level_requirements(requirements, state)
+                    _normalize_requirement_categories(requirements)
+                    requirements = await _filter_with_preemption(conn, requirements, state)
+                    total_synced = 0
+                    for loc in linked:
+                        loc_reqs = await _filter_requirements_for_company(
+                            conn, loc["company_id"], requirements,
+                        )
+                        sync_result = await _sync_requirements_to_location(
+                            conn, loc["id"], loc["company_id"], loc_reqs, create_alerts=True,
+                        )
+                        total_synced += sync_result.get("updated", 0)
+                    yield _to_sse({
+                        "type": "syncing",
+                        "message": f"Synced to {len(linked)} location(s), {total_synced} update(s).",
+                    })
+
+                yield _to_sse({"type": "completed", "message": "Life sciences research complete."})
+        except Exception:
+            logger.error("Life sciences check failed for %s", jurisdiction_id, exc_info=True)
+            yield _to_sse({"type": "error", "message": "Life sciences research failed"})
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/jurisdictions/{jurisdiction_id}/check-federal-sources", dependencies=[Depends(require_admin)])
 async def check_jurisdiction_federal_sources(jurisdiction_id: UUID):
     """Fetch compliance data from government APIs (Federal Register, CMS, Congress.gov). Returns SSE stream."""

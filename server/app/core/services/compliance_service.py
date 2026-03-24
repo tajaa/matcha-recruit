@@ -69,6 +69,7 @@ from ..compliance_registry import (
     HEALTHCARE_CATEGORIES,
     ONCOLOGY_CATEGORIES,
     MEDICAL_COMPLIANCE_CATEGORIES,
+    LIFE_SCIENCES_CATEGORIES,
     INDUSTRY_TAGS as MEDICAL_COMPLIANCE_INDUSTRY_TAGS,
 )
 
@@ -1907,6 +1908,130 @@ async def _research_oncology_requirements_for_jurisdiction(
     if failed_categories and total_new == 0:
         raise RuntimeError(
             f"All oncology categories failed for {location_name}: "
+            f"{', '.join(failed_categories)}"
+        )
+
+    return {
+        "new": total_new,
+        "location": location_name,
+        "categories": missing,
+        "failed": failed_categories,
+        "requirements": added_requirements,
+    }
+
+
+async def _research_life_sciences_requirements_for_jurisdiction(
+    conn,
+    jurisdiction_id: UUID,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+) -> Dict[str, Any]:
+    """Research missing life-sciences-only categories for a jurisdiction."""
+    from .gemini_compliance import get_gemini_compliance_service
+    from .jurisdiction_context import get_known_sources, build_context_prompt, get_global_authority_sources
+
+    j = await conn.fetchrow(
+        "SELECT id, city, state, county FROM jurisdictions WHERE id = $1",
+        jurisdiction_id,
+    )
+    if not j:
+        return {"error": "Jurisdiction not found", "new": 0, "categories": [], "failed": []}
+
+    city = j["city"]
+    state = j["state"]
+    county = j.get("county")
+    location_name = f"{city}, {state}"
+
+    has_local_ordinance = await _lookup_has_local_ordinance(conn, city, state)
+    known_sources = await get_known_sources(conn, jurisdiction_id)
+    source_context = build_context_prompt(known_sources)
+    source_context += get_global_authority_sources(list(LIFE_SCIENCES_CATEGORIES))
+    corrections = await get_recent_corrections(jurisdiction_id)
+    corrections_context = format_corrections_for_prompt(corrections)
+
+    try:
+        preemption_rows = await conn.fetch(
+            "SELECT category, allows_local_override FROM state_preemption_rules WHERE state = $1",
+            state.upper(),
+        )
+        preemption_rules = {
+            row["category"]: row["allows_local_override"] for row in preemption_rows
+        }
+    except Exception:
+        preemption_rules = {}
+
+    existing = await conn.fetch(
+        "SELECT DISTINCT category FROM jurisdiction_requirements WHERE jurisdiction_id = $1",
+        jurisdiction_id,
+    )
+    existing_cats = {r["category"] for r in existing}
+    missing = sorted(cat for cat in LIFE_SCIENCES_CATEGORIES if cat not in existing_cats)
+
+    if not missing:
+        print(f"[Life Sciences Research] All life sciences categories already present for {location_name}")
+        return {
+            "new": 0,
+            "location": location_name,
+            "categories": [],
+            "failed": [],
+            "requirements": [],
+            "skipped": True,
+        }
+
+    print(
+        f"[Life Sciences Research] Researching {len(missing)} life sciences categories "
+        f"for {location_name}: {', '.join(missing)}"
+    )
+
+    service = get_gemini_compliance_service()
+    total_new = 0
+    failed_categories: List[str] = []
+    added_requirements: List[Dict[str, Any]] = []
+
+    if progress_callback:
+        progress_callback(1, 1, f"Researching {len(missing)} life sciences categories for {location_name}...")
+
+    try:
+        reqs = await service.research_location_compliance(
+            city=city,
+            state=state,
+            county=county,
+            categories=missing,
+            source_context=source_context,
+            corrections_context=corrections_context,
+            preemption_rules=preemption_rules,
+            has_local_ordinance=has_local_ordinance,
+        )
+        reqs = reqs or []
+
+        for req in reqs:
+            _clamp_varchar_fields(req)
+            if not req.get("applicable_industries"):
+                req["applicable_industries"] = ["biotech"]
+
+        if reqs:
+            await _upsert_requirements_additive(conn, jurisdiction_id, reqs, research_source="gemini")
+            total_new = len(reqs)
+            added_requirements.extend(reqs)
+            by_cat: Dict[str, int] = {}
+            for r in reqs:
+                by_cat[r.get("category", "unknown")] = by_cat.get(r.get("category", "unknown"), 0) + 1
+            for cat, count in sorted(by_cat.items()):
+                print(f"[Life Sciences Research]   -> {count} requirements saved for {cat}")
+        else:
+            print(f"[Life Sciences Research]   -> No results returned")
+            failed_categories = list(missing)
+    except Exception as e:
+        failed_categories = list(missing)
+        print(f"[Life Sciences Research]   -> Error: {e}")
+
+    print(
+        f"[Life Sciences Research] Complete for {location_name}: {total_new} new, "
+        f"{len(failed_categories)} failed"
+    )
+
+    if failed_categories and total_new == 0:
+        raise RuntimeError(
+            f"All life sciences categories failed for {location_name}: "
             f"{', '.join(failed_categories)}"
         )
 
