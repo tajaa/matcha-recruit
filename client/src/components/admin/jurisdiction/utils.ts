@@ -14,7 +14,8 @@ export function matchesSpecialty(cat: string, filter: SpecialtyFilter): boolean 
   if (filter === 'healthcare') return group === 'healthcare' || group === 'oncology'
   if (filter === 'oncology') return group === 'oncology'
   if (filter === 'medical') return group === 'medical_compliance'
-  if (filter === 'general') return group !== 'healthcare' && group !== 'oncology' && group !== 'medical_compliance'
+  if (filter === 'life_sciences') return group === 'life_sciences'
+  if (filter === 'general') return group !== 'healthcare' && group !== 'oncology' && group !== 'medical_compliance' && group !== 'life_sciences'
   // Individual category key
   return cat === filter
 }

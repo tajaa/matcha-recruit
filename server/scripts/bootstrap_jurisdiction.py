@@ -53,7 +53,7 @@ async def main():
         "--categories",
         action="append",
         default=[],
-        help="Category groups: general, healthcare, oncology, medical_compliance, all (default: all)",
+        help="Category groups: general, healthcare, oncology, medical_compliance, life_sciences, all (default: all)",
     )
     parser.add_argument(
         "--dry-run",
@@ -91,6 +91,7 @@ async def main():
         HEALTHCARE_CATEGORIES,
         ONCOLOGY_CATEGORIES,
         MEDICAL_COMPLIANCE_CATEGORIES,
+        LIFE_SCIENCES_CATEGORIES,
         CATEGORY_LABELS,
     )
 
@@ -98,7 +99,7 @@ async def main():
     target_keys: Set[str] = set()
     for g in groups:
         if g == "all":
-            target_keys |= LABOR_CATEGORIES | HEALTHCARE_CATEGORIES | ONCOLOGY_CATEGORIES
+            target_keys |= LABOR_CATEGORIES | HEALTHCARE_CATEGORIES | ONCOLOGY_CATEGORIES | LIFE_SCIENCES_CATEGORIES
         elif g == "general":
             target_keys |= LABOR_CATEGORIES
         elif g == "healthcare":
@@ -107,6 +108,8 @@ async def main():
             target_keys |= ONCOLOGY_CATEGORIES
         elif g == "medical_compliance":
             target_keys |= MEDICAL_COMPLIANCE_CATEGORIES
+        elif g == "life_sciences":
+            target_keys |= LIFE_SCIENCES_CATEGORIES
         else:
             target_keys.add(g)
 

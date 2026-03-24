@@ -15,6 +15,7 @@ const OPTGROUP_CONFIGS: { label: string; group: string }[] = [
   { label: 'Healthcare', group: 'healthcare' },
   { label: 'Oncology', group: 'oncology' },
   { label: 'Medical Compliance', group: 'medical_compliance' },
+  { label: 'Life Sciences', group: 'life_sciences' },
 ]
 
 export default function SpecialtyFilterSelect({ value, onChange, className }: Props) {
@@ -29,6 +30,7 @@ export default function SpecialtyFilterSelect({ value, onChange, className }: Pr
       <option value="healthcare">Healthcare (all)</option>
       <option value="oncology">Oncology (all)</option>
       <option value="medical">Medical Compliance (all)</option>
+      <option value="life_sciences">Life Sciences (all)</option>
       {OPTGROUP_CONFIGS.map(({ label, group }) => (
         <optgroup key={group} label={label}>
           {ALL_CATEGORY_KEYS
