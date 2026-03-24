@@ -104,6 +104,13 @@ _INDUSTRY_ALIASES: Dict[str, str] = {
     "consulting": "technology",
     "fast food": "fast food",
     "fast_food": "fast food",
+    "biotech": "biotech",
+    "pharma": "biotech",
+    "pharmaceutical": "biotech",
+    "pharmaceuticals": "biotech",
+    "life_sciences": "biotech",
+    "life sciences": "biotech",
+    "biopharma": "biotech",
 }
 
 
@@ -153,6 +160,8 @@ async def _get_company_industry_tags(conn, company_id: UUID) -> set:
     if canonical == "healthcare" and row["healthcare_specialties"]:
         for spec in row["healthcare_specialties"]:
             tags.add(f"healthcare:{spec}")
+    if canonical == "biotech":
+        tags.add("healthcare")  # Biotech inherits applicable healthcare categories
     return tags
 
 

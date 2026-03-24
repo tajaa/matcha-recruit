@@ -36,6 +36,7 @@ try:
         HEALTHCARE_CATEGORIES,
         ONCOLOGY_CATEGORIES,
         MEDICAL_COMPLIANCE_CATEGORIES,
+        LIFE_SCIENCES_CATEGORIES,
     )
 except ImportError as exc:
     print(
@@ -114,6 +115,7 @@ def generate() -> str:
     _emit_set("HEALTHCARE_CATEGORIES", HEALTHCARE_CATEGORIES)
     _emit_set("ONCOLOGY_CATEGORIES", ONCOLOGY_CATEGORIES)
     _emit_set("MEDICAL_COMPLIANCE_CATEGORIES", MEDICAL_COMPLIANCE_CATEGORIES)
+    _emit_set("LIFE_SCIENCES_CATEGORIES", LIFE_SCIENCES_CATEGORIES)
 
     # Supplementary — anything not in the other groups
     supplementary_keys = {

@@ -55,6 +55,13 @@ class ComplianceCategory(str, Enum):
     records_retention = "records_retention"
     marketing_comms = "marketing_comms"
     emerging_regulatory = "emerging_regulatory"
+    # Life Sciences
+    gmp_manufacturing = "gmp_manufacturing"
+    glp_nonclinical = "glp_nonclinical"
+    clinical_trials_gcp = "clinical_trials_gcp"
+    drug_supply_chain = "drug_supply_chain"
+    sunshine_open_payments = "sunshine_open_payments"
+    biosafety_lab = "biosafety_lab"
 
 
 class JurisdictionLevel(str, Enum):

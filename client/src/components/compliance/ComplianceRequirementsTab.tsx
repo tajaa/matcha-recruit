@@ -15,6 +15,7 @@ const GROUP_OPTIONS = [
   { value: 'healthcare', label: 'Healthcare' },
   { value: 'oncology', label: 'Oncology' },
   { value: 'medical_compliance', label: 'Medical Compliance' },
+  { value: 'life_sciences', label: 'Life Sciences' },
 ]
 
 type Props = {

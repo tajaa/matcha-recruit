@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Button, Card, Input, Select, Badge } from '../../components/ui'
+import { INDUSTRY_OPTIONS } from '../../data/industryConstants'
 import { api } from '../../api/client'
 import { fetchLocations, createLocation, updateLocation, deleteLocation, fetchJurisdictions } from '../../api/compliance'
 import { ComplianceLocationList } from '../../components/compliance/ComplianceLocationList'
@@ -321,7 +322,7 @@ export default function CompanySettings() {
               <h3 className="text-sm font-medium text-zinc-300 mb-4">Company Information</h3>
               <dl className="space-y-1">
                 <EditableField label="Company Name" value={company.name} onSave={(v) => updateField('name', v)} />
-                <EditableField label="Industry" value={company.industry} onSave={(v) => updateField('industry', v)} />
+                <EditableSelect label="Industry" value={company.industry} options={INDUSTRY_OPTIONS} onSave={(v) => updateField('industry', v)} />
                 <EditableSelect label="Company Size" value={company.size} options={SIZE_OPTIONS} onSave={(v) => updateField('size', v)} />
                 <EditableField label="HQ City" value={company.headquarters_city} onSave={(v) => updateField('headquarters_city', v)} />
                 <EditableField label="HQ State" value={company.headquarters_state} onSave={(v) => updateField('headquarters_state', v)} />

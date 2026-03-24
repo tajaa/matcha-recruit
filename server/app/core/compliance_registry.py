@@ -232,6 +232,32 @@ CATEGORIES: List[ComplianceCategoryDef] = [
         key="emerging_regulatory", label="Emerging Regulatory", short_label="Emerging",
         group="medical_compliance", industry_tag="healthcare", research_mode="health_specs", docx_section=25,
     ),
+
+    # ── Life Sciences (6) ────────────────────────────────────────────────
+    ComplianceCategoryDef(
+        key="gmp_manufacturing", label="GMP Manufacturing", short_label="GMP",
+        group="life_sciences", industry_tag="biotech", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="glp_nonclinical", label="Good Laboratory Practice", short_label="GLP",
+        group="life_sciences", industry_tag="biotech", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="clinical_trials_gcp", label="Clinical Trials & GCP", short_label="GCP Trials",
+        group="life_sciences", industry_tag="biotech", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="drug_supply_chain", label="Drug Supply Chain (DSCSA)", short_label="DSCSA",
+        group="life_sciences", industry_tag="biotech", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="sunshine_open_payments", label="Sunshine Act / Open Payments", short_label="Sunshine Act",
+        group="life_sciences", industry_tag="biotech", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="biosafety_lab", label="Biosafety & Lab Safety", short_label="Biosafety",
+        group="life_sciences", industry_tag="biotech", research_mode="specialty", docx_section=None,
+    ),
 ]
 
 
@@ -268,6 +294,10 @@ CATEGORY_DOMAIN_MAP: Dict[str, str] = {
     "tax_exempt": "billing", "language_access": "clinical",
     "records_retention": "clinical", "marketing_comms": "corporate_integrity",
     "emerging_regulatory": "safety",
+    # Life Sciences
+    "gmp_manufacturing": "safety", "glp_nonclinical": "safety",
+    "clinical_trials_gcp": "clinical", "drug_supply_chain": "safety",
+    "sunshine_open_payments": "corporate_integrity", "biosafety_lab": "safety",
 }
 
 
@@ -2970,6 +3000,502 @@ REGULATIONS: List[RegulationDef] = [
             {"domain": "jointcommission.org", "name": "jointcommission.org"},
         ),
     ),
+
+    # ── Life Sciences: GMP Manufacturing (7) ─────────────────────────────
+    RegulationDef(
+        key="cgmp_drugs_21cfr210_211",
+        category="gmp_manufacturing",
+        name="21 CFR Parts 210 & 211 (cGMP for Finished Pharmaceuticals)",
+        description="Current Good Manufacturing Practice for manufacturing, processing, packing, and holding of drugs; covers personnel, buildings, equipment, production controls, lab controls, records",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Rarely amended; FDA guidance documents updated periodically",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Parts 210-211"},
+            {"domain": "fda.gov/drugs/pharmaceutical-quality-resources", "name": "FDA Pharmaceutical Quality Resources"},
+        ),
+    ),
+    RegulationDef(
+        key="cgmp_devices_21cfr820",
+        category="gmp_manufacturing",
+        name="21 CFR Part 820 (Quality System Regulation for Medical Devices)",
+        description="Quality system requirements for device manufacturers: design controls, production controls, CAPA, management responsibility, document controls",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Major revision underway (QMSR alignment with ISO 13485); guidance updated periodically",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Part 820"},
+            {"domain": "fda.gov/medical-devices/quality-system-qs-regulationmedical-device-good-manufacturing-practices", "name": "FDA Device QSR"},
+        ),
+    ),
+    RegulationDef(
+        key="process_validation",
+        category="gmp_manufacturing",
+        name="FDA Process Validation Guidance (2011)",
+        description="Three-stage lifecycle approach to process validation: process design, process qualification (IQ/OQ/PQ), continued process verification",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Guidance updated infrequently; 2011 guidance remains current",
+        authority_sources=(
+            {"domain": "fda.gov/regulatory-information/search-fda-guidance-documents", "name": "FDA Guidance Documents"},
+        ),
+    ),
+    RegulationDef(
+        key="fda_facility_registration",
+        category="gmp_manufacturing",
+        name="FDA Facility Registration (21 CFR Part 207)",
+        description="Drug establishment registration and drug listing; annual registration requirement for manufacturers, repackers, relabelers, and drug listing updates",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Annual renewal required; electronic submission via FDA FURLS",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Part 207"},
+            {"domain": "fda.gov/drugs/drug-approvals-and-databases/drug-establishments-current-registration-site", "name": "FDA Drug Establishment Registration"},
+        ),
+    ),
+    RegulationDef(
+        key="annual_product_review",
+        category="gmp_manufacturing",
+        name="Annual Product Quality Review (21 CFR 211.180(e))",
+        description="Annual evaluation of drug product quality standards including batch analysis, deviations, CAPA trends, stability data, complaints, returned goods, and process changes",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Required annually per product; ICH Q7 provides additional guidance",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR 211.180(e)"},
+            {"domain": "ich.org", "name": "ICH Q7 (API GMP)"},
+        ),
+    ),
+    RegulationDef(
+        key="supplier_qualification",
+        category="gmp_manufacturing",
+        name="Supplier Qualification & Incoming Material Testing",
+        description="Qualification and ongoing evaluation of raw material, excipient, and component suppliers; incoming material identity testing, certificates of analysis, vendor audits",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="FDA guidance and inspection expectations evolve; USP chapters updated periodically",
+        authority_sources=(
+            {"domain": "fda.gov/drugs/pharmaceutical-quality-resources", "name": "FDA Pharmaceutical Quality Resources"},
+            {"domain": "usp.org", "name": "USP General Chapters"},
+        ),
+    ),
+    RegulationDef(
+        key="fda_inspection_readiness",
+        category="gmp_manufacturing",
+        name="FDA Inspection Types: Pre-Approval, Routine, For-Cause",
+        description="FDA inspection programs including pre-approval inspections (PAI), routine surveillance (biennial), for-cause inspections; Form 483 observations, warning letters, consent decrees",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Inspection cadence risk-based; compliance programs updated annually",
+        authority_sources=(
+            {"domain": "fda.gov/inspections-compliance-enforcement-and-criminal-investigations", "name": "FDA Inspections & Compliance"},
+        ),
+    ),
+
+    # ── Life Sciences: Good Laboratory Practice (6) ──────────────────────
+    RegulationDef(
+        key="glp_21cfr58",
+        category="glp_nonclinical",
+        name="21 CFR Part 58 (Good Laboratory Practice for Nonclinical Studies)",
+        description="GLP requirements for nonclinical laboratory studies supporting FDA submissions: organization, facilities, equipment, testing operations, protocols, records, reporting",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Rarely amended; OECD GLP Principles provide international harmonization",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Part 58"},
+            {"domain": "fda.gov/science-research/good-laboratory-practices", "name": "FDA GLP"},
+        ),
+    ),
+    RegulationDef(
+        key="study_director_responsibilities",
+        category="glp_nonclinical",
+        name="Study Director Qualifications & Responsibilities",
+        description="Study director as single point of study control; qualifications, protocol approval, data interpretation, final report certification, amendment documentation",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Defined in 21 CFR 58.33; interpretation through FDA inspections",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR 58.33 (Study Director)"},
+        ),
+    ),
+    RegulationDef(
+        key="glp_qa_unit",
+        category="glp_nonclinical",
+        name="Quality Assurance Unit Requirements",
+        description="Independent QAU responsible for monitoring studies, inspecting operations, reviewing records and reports, maintaining master schedule, reporting to management",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Defined in 21 CFR 58.35; QAU independence is key FDA inspection focus",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR 58.35 (QAU)"},
+        ),
+    ),
+    RegulationDef(
+        key="specimen_archiving",
+        category="glp_nonclinical",
+        name="Test Article & Specimen Retention/Archiving",
+        description="Requirements for retention of raw data, documentation, protocols, specimens, and samples; archive storage conditions, access controls, and retention periods",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Defined in 21 CFR 58.190, 58.195; retention periods vary by submission type",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR 58.190-195 (Archives)"},
+        ),
+    ),
+    RegulationDef(
+        key="equipment_calibration_glp",
+        category="glp_nonclinical",
+        name="Equipment Calibration & Maintenance for GLP Studies",
+        description="Equipment adequacy, calibration schedules, standard operating procedures, maintenance records; 21 CFR 58.61-63 requirements",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Defined in 21 CFR 58.61-63; consistent FDA inspection focus",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR 58.61-63 (Equipment)"},
+        ),
+    ),
+    RegulationDef(
+        key="protocol_amendments_deviations",
+        category="glp_nonclinical",
+        name="Protocol Amendments & Deviation Reporting",
+        description="Requirements for documenting protocol amendments, unplanned deviations, their impact assessment, and correction; GLP compliance statement in final reports",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Defined in 21 CFR 58.120, 58.185; emphasis on contemporary documentation",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR 58.120, 58.185"},
+        ),
+    ),
+
+    # ── Life Sciences: Clinical Trials & GCP (7) ─────────────────────────
+    RegulationDef(
+        key="ich_e6r2_gcp",
+        category="clinical_trials_gcp",
+        name="ICH E6(R2) Good Clinical Practice",
+        description="International standard for clinical trial design, conduct, monitoring, auditing, recording, analysis, and reporting; risk-based quality management, essential documents",
+        enforcing_agency="FDA / ICH",
+        state_variance="Low/None",
+        update_frequency="E6(R2) effective 2018; E6(R3) in development with risk-based focus",
+        authority_sources=(
+            {"domain": "ich.org", "name": "ICH E6(R2) GCP Guidelines"},
+            {"domain": "fda.gov/science-research/clinical-trials-and-human-subject-protection", "name": "FDA Clinical Trials"},
+        ),
+    ),
+    RegulationDef(
+        key="ind_application_21cfr312",
+        category="clinical_trials_gcp",
+        name="IND Application (21 CFR Part 312)",
+        description="Investigational New Drug application requirements: pre-IND meetings, IND content and format, clinical hold criteria, annual reports, IND amendments, IND withdrawal",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Regulatory framework stable; FDA guidance on specific topics updated regularly",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Part 312"},
+            {"domain": "fda.gov/drugs/types-applications/investigational-new-drug-ind-application", "name": "FDA IND Application"},
+        ),
+    ),
+    RegulationDef(
+        key="sponsor_responsibilities",
+        category="clinical_trials_gcp",
+        name="Sponsor Responsibilities (21 CFR 312.50-312.70)",
+        description="Sponsor obligations: selecting investigators, monitor selection and oversight, ensuring protocol compliance, drug accountability, safety reporting, data quality",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Stable regulation; FDA guidance on sponsor-investigator relationships updated periodically",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR 312.50-312.70"},
+        ),
+    ),
+    RegulationDef(
+        key="adverse_event_reporting_ind",
+        category="clinical_trials_gcp",
+        name="IND Safety Reporting (21 CFR 312.32)",
+        description="Expedited safety reporting: serious adverse events (SAEs), suspected unexpected serious adverse reactions (SUSARs), 7-day and 15-day reporting timelines",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Final rule 2010; ongoing guidance on safety assessment expectations",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR 312.32 (IND Safety Reports)"},
+            {"domain": "fda.gov/regulatory-information/search-fda-guidance-documents", "name": "FDA Safety Reporting Guidance"},
+        ),
+    ),
+    RegulationDef(
+        key="informed_consent_21cfr50",
+        category="clinical_trials_gcp",
+        name="Informed Consent (21 CFR Part 50)",
+        description="Requirements for obtaining legally effective informed consent: elements of consent, documentation, consent for emergency research, vulnerable populations, electronic consent",
+        enforcing_agency="FDA",
+        state_variance="Moderate",
+        update_frequency="Part 50 stable; state laws on consent for specific populations vary and change",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Part 50"},
+        ),
+    ),
+    RegulationDef(
+        key="irb_oversight_21cfr56",
+        category="clinical_trials_gcp",
+        name="IRB Requirements (21 CFR Part 56)",
+        description="Institutional Review Board organization, function, operations: initial and continuing review, criteria for approval, record keeping, single IRB requirements",
+        enforcing_agency="FDA",
+        state_variance="Moderate",
+        update_frequency="Single IRB mandate (2020 NIH, 2023 Revised Common Rule); state IRB requirements vary",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Part 56"},
+            {"domain": "ohrp.hhs.gov", "name": "HHS OHRP"},
+        ),
+    ),
+    RegulationDef(
+        key="clinical_data_integrity_part11",
+        category="clinical_trials_gcp",
+        name="21 CFR Part 11 (Electronic Records & Signatures in Clinical Trials)",
+        description="Requirements for electronic records and electronic signatures in FDA-regulated clinical data: validation, audit trails, system access controls, e-signature binding",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Part 11 unchanged since 1997; FDA guidance on Part 11 scope refined in 2003 and ongoing",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Part 11"},
+            {"domain": "fda.gov/regulatory-information/search-fda-guidance-documents", "name": "FDA Part 11 Guidance"},
+        ),
+    ),
+
+    # ── Life Sciences: Drug Supply Chain / DSCSA (7) ─────────────────────
+    RegulationDef(
+        key="dscsa_serialization",
+        category="drug_supply_chain",
+        name="DSCSA Serialization Requirements",
+        description="Drug Supply Chain Security Act package-level serialization: unique product identifiers (NDC, serial number, lot, expiration), machine-readable data carriers on each package",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Phased implementation 2015-2023; enhanced requirements effective Nov 2023 (with stabilization period)",
+        authority_sources=(
+            {"domain": "fda.gov/drugs/drug-supply-chain-integrity/drug-supply-chain-security-act-dscsa", "name": "FDA DSCSA"},
+        ),
+    ),
+    RegulationDef(
+        key="dscsa_verification",
+        category="drug_supply_chain",
+        name="DSCSA Product Verification",
+        description="Product identifier verification requirements: verification of returned product, suspect and illegitimate product investigation, notification to FDA and trading partners",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Enhanced requirements being enforced in phases through 2025-2026",
+        authority_sources=(
+            {"domain": "fda.gov/drugs/drug-supply-chain-integrity/drug-supply-chain-security-act-dscsa", "name": "FDA DSCSA"},
+        ),
+    ),
+    RegulationDef(
+        key="dscsa_tracing",
+        category="drug_supply_chain",
+        name="DSCSA Transaction Documentation & Tracing",
+        description="Transaction information, transaction history, and transaction statements passed between trading partners; interoperable electronic tracing at package level",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Package-level tracing required by Nov 2023; enforcement timeline extended",
+        authority_sources=(
+            {"domain": "fda.gov/drugs/drug-supply-chain-integrity/drug-supply-chain-security-act-dscsa", "name": "FDA DSCSA"},
+        ),
+    ),
+    RegulationDef(
+        key="wholesale_distribution_license",
+        category="drug_supply_chain",
+        name="Wholesale Drug Distribution Licensing",
+        description="State licensing requirements for wholesale drug distributors; NABP accreditation, FDA registration, bond/surety requirements, facility inspections",
+        enforcing_agency="State Pharmacy Boards / FDA",
+        state_variance="High",
+        update_frequency="State licensing requirements vary significantly; NABP VAWD accreditation updated annually",
+        authority_sources=(
+            {"domain": "nabp.pharmacy", "name": "NABP Wholesale Distribution"},
+            {"domain": "each state pharmacy board", "name": "State Pharmacy Board"},
+        ),
+    ),
+    RegulationDef(
+        key="gdp_storage_transport",
+        category="drug_supply_chain",
+        name="GDP Storage & Transport Conditions",
+        description="Good Distribution Practice requirements: temperature-controlled storage and transport, cold chain validation, environmental monitoring, excursion management",
+        enforcing_agency="FDA / USP",
+        state_variance="Low/None",
+        update_frequency="USP chapters (e.g., <1079>, <1118>) updated periodically; WHO GDP guidelines referenced",
+        authority_sources=(
+            {"domain": "usp.org", "name": "USP General Chapters"},
+            {"domain": "fda.gov", "name": "FDA Drug Distribution"},
+        ),
+    ),
+    RegulationDef(
+        key="suspicious_order_monitoring",
+        category="drug_supply_chain",
+        name="Suspicious Order Monitoring (DEA)",
+        description="DEA requirement for drug distributors to design and implement systems to identify and report suspicious orders of controlled substances; due diligence obligations",
+        enforcing_agency="DEA",
+        state_variance="Low/None",
+        update_frequency="DEA enforcement intensified post-opioid crisis; guidance letters ongoing",
+        authority_sources=(
+            {"domain": "deadiversion.usdoj.gov", "name": "DEA Diversion Control"},
+        ),
+    ),
+    RegulationDef(
+        key="drug_recall_procedures",
+        category="drug_supply_chain",
+        name="Drug Recall Procedures (21 CFR Part 7)",
+        description="FDA recall guidance: recall classification (Class I/II/III), recall strategy, health hazard evaluation, effectiveness checks, market withdrawal vs. recall distinction",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Part 7 framework stable; FDA recall database updated in real-time",
+        authority_sources=(
+            {"domain": "ecfr.gov", "name": "21 CFR Part 7 (Enforcement Policy)"},
+            {"domain": "fda.gov/safety/recalls-market-withdrawals-safety-alerts", "name": "FDA Recalls Database"},
+        ),
+    ),
+
+    # ── Life Sciences: Sunshine Act / Open Payments (6) ──────────────────
+    RegulationDef(
+        key="physician_payments_reporting",
+        category="sunshine_open_payments",
+        name="Physician Payments Sunshine Act (42 USC 1320a-7h)",
+        description="Federal requirement for drug/device/biological/medical supply manufacturers to report payments and transfers of value to physicians and teaching hospitals",
+        enforcing_agency="CMS",
+        state_variance="Moderate",
+        update_frequency="Annual data collection; CMS final rules update reporting requirements periodically",
+        authority_sources=(
+            {"domain": "cms.gov/openpayments", "name": "CMS Open Payments"},
+        ),
+    ),
+    RegulationDef(
+        key="aggregate_spend_tracking",
+        category="sunshine_open_payments",
+        name="Aggregate Spend Tracking & Reporting",
+        description="Systems and processes for tracking cumulative payments to individual HCPs: meals, travel, consulting, speaking, grants, royalties, ownership interests",
+        enforcing_agency="CMS",
+        state_variance="Moderate",
+        update_frequency="Annual reporting cycle; data published on CMS Open Payments website",
+        authority_sources=(
+            {"domain": "cms.gov/openpayments", "name": "CMS Open Payments"},
+        ),
+    ),
+    RegulationDef(
+        key="cms_open_payments_submission",
+        category="sunshine_open_payments",
+        name="CMS Open Payments Data Submission",
+        description="Annual electronic submission of payment data to CMS: data collection period, attestation, 45-day review/dispute period, public publication timeline",
+        enforcing_agency="CMS",
+        state_variance="Low/None",
+        update_frequency="Annual cycle: data due March 31, published June 30; CMS templates updated yearly",
+        authority_sources=(
+            {"domain": "cms.gov/openpayments", "name": "CMS Open Payments"},
+        ),
+    ),
+    RegulationDef(
+        key="teaching_hospital_reporting",
+        category="sunshine_open_payments",
+        name="Teaching Hospital Payment Reporting",
+        description="Separate reporting requirements for payments to teaching hospitals vs. individual physicians; CMS-defined teaching hospital list, research payment reporting",
+        enforcing_agency="CMS",
+        state_variance="Low/None",
+        update_frequency="CMS teaching hospital list published annually; thresholds adjusted",
+        authority_sources=(
+            {"domain": "cms.gov/openpayments", "name": "CMS Open Payments"},
+        ),
+    ),
+    RegulationDef(
+        key="state_gift_ban_laws",
+        category="sunshine_open_payments",
+        name="State Physician Gift Ban & Disclosure Laws",
+        description="State-specific laws limiting or banning gifts to physicians; marketing disclosure requirements; aggregate spending reports to state agencies that exceed federal Sunshine Act",
+        enforcing_agency="State AGs / State Legislatures",
+        state_variance="High",
+        update_frequency="Varies by state; MA, MN, VT, CT, DC, NV, OR among states with strict gift laws",
+        authority_sources=(
+            {"domain": "each state attorney general", "name": "State AG Offices"},
+            {"domain": "oig.hhs.gov", "name": "OIG Compliance Guidance for Pharma"},
+        ),
+    ),
+    RegulationDef(
+        key="covered_recipient_identification",
+        category="sunshine_open_payments",
+        name="Covered Recipient Identification Requirements",
+        description="Rules for identifying covered recipients: physician specialties, teaching hospital status, NPI-based matching, exclusions (pharmacists, nurses, non-teaching hospitals)",
+        enforcing_agency="CMS",
+        state_variance="Low/None",
+        update_frequency="CMS covered recipient definitions updated as new physician types added (e.g., PAs, NPs in 2022)",
+        authority_sources=(
+            {"domain": "cms.gov/openpayments", "name": "CMS Open Payments"},
+        ),
+    ),
+
+    # ── Life Sciences: Biosafety & Lab Safety (6) ────────────────────────
+    RegulationDef(
+        key="bsl_classifications",
+        category="biosafety_lab",
+        name="Biosafety Level (BSL) Classifications 1-4",
+        description="CDC/NIH BMBL biosafety level criteria: agent risk groups, facility design, equipment, practices and procedures for each BSL level; institutional biosafety program requirements",
+        enforcing_agency="CDC / NIH",
+        state_variance="Low/None",
+        update_frequency="BMBL 6th edition (2020); updated as new agents emerge",
+        authority_sources=(
+            {"domain": "cdc.gov/labs/BMBL.html", "name": "CDC BMBL Guidelines"},
+        ),
+    ),
+    RegulationDef(
+        key="institutional_biosafety_committee",
+        category="biosafety_lab",
+        name="Institutional Biosafety Committee (IBC) Requirements",
+        description="NIH requirement for IBCs at institutions receiving NIH funding for rDNA research: membership, community representation, protocol review, risk assessment, reporting",
+        enforcing_agency="NIH",
+        state_variance="Low/None",
+        update_frequency="NIH Guidelines updated periodically; IBC requirements are longstanding",
+        authority_sources=(
+            {"domain": "osp.od.nih.gov/biotechnology/institutional-biosafety-committees", "name": "NIH IBC Requirements"},
+        ),
+    ),
+    RegulationDef(
+        key="nih_rdna_guidelines",
+        category="biosafety_lab",
+        name="NIH Guidelines for Research Involving Recombinant or Synthetic Nucleic Acid Molecules",
+        description="Oversight framework for rDNA research: containment levels, IBC review requirements, RAC review for novel experiments, reporting requirements for incidents",
+        enforcing_agency="NIH",
+        state_variance="Low/None",
+        update_frequency="Updated periodically; applies to all NIH-funded institutions and voluntary compliance by industry",
+        authority_sources=(
+            {"domain": "osp.od.nih.gov/biotechnology/nih-guidelines", "name": "NIH rDNA Guidelines"},
+        ),
+    ),
+    RegulationDef(
+        key="select_agent_regulations",
+        category="biosafety_lab",
+        name="Select Agent Regulations (42 CFR Part 73 / 7 CFR Part 331 / 9 CFR Part 121)",
+        description="Federal Select Agent Program: registration, security risk assessments, biosafety plans, incident response, inventory controls, transfer requirements for Tier 1 and other select agents",
+        enforcing_agency="CDC / APHIS",
+        state_variance="Low/None",
+        update_frequency="Select agent list reviewed biennially; regulations updated as threats evolve",
+        authority_sources=(
+            {"domain": "selectagents.gov", "name": "Federal Select Agent Program"},
+            {"domain": "ecfr.gov", "name": "42 CFR Part 73"},
+        ),
+    ),
+    RegulationDef(
+        key="bloodborne_pathogen_lab",
+        category="biosafety_lab",
+        name="OSHA Bloodborne Pathogens Standard for Lab Settings (29 CFR 1910.1030)",
+        description="Employer obligations for lab workers with occupational exposure to blood/OPIM: exposure control plan, universal precautions, engineering controls, PPE, training, hepatitis B vaccination",
+        enforcing_agency="OSHA",
+        state_variance="Moderate",
+        update_frequency="Federal standard stable; Cal/OSHA and state-plan states may have stricter requirements",
+        authority_sources=(
+            {"domain": "osha.gov/bloodborne-pathogens", "name": "OSHA Bloodborne Pathogens"},
+        ),
+    ),
+    RegulationDef(
+        key="chemical_hygiene_plan",
+        category="biosafety_lab",
+        name="OSHA Laboratory Standard / Chemical Hygiene Plan (29 CFR 1910.1450)",
+        description="Requirements for labs using hazardous chemicals: written Chemical Hygiene Plan, chemical hygiene officer, employee training, exposure monitoring, medical consultations",
+        enforcing_agency="OSHA",
+        state_variance="Moderate",
+        update_frequency="Federal standard stable since 1990; state-plan states may have additional requirements",
+        authority_sources=(
+            {"domain": "osha.gov/laboratories", "name": "OSHA Laboratory Standard"},
+        ),
+    ),
 ]
 
 
@@ -3289,6 +3815,62 @@ state genomic data privacy laws,
 state cannabis/marijuana laws affecting healthcare employers and drug testing,
 and any other emerging healthcare regulatory trends in this jurisdiction.
 Set current_value to a SHORT summary (under 80 chars).""",
+
+    # ── Life Sciences ────────────────────────────────────────────────────
+    "gmp_manufacturing": """Research GOOD MANUFACTURING PRACTICE (GMP) requirements for pharmaceutical/biotech manufacturers in this jurisdiction.
+Cover: 21 CFR Parts 210/211 (drug cGMP), 21 CFR Part 820 (device QSR), FDA facility registration (21 CFR 207),
+process validation requirements (FDA 2011 guidance), annual product quality review,
+supplier qualification, FDA inspection types (pre-approval, routine, for-cause),
+and any STATE-specific drug manufacturing, compounding facility, or pharmaceutical production requirements.
+Include state drug manufacturer licensing if required separately from wholesale distribution.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+    "glp_nonclinical": """Research GOOD LABORATORY PRACTICE (GLP) requirements for nonclinical studies in this jurisdiction.
+Cover: 21 CFR Part 58 (GLP for Nonclinical Laboratory Studies), study director responsibilities,
+Quality Assurance Unit requirements, specimen archiving and retention,
+equipment calibration and maintenance standards, protocol amendment procedures,
+OECD GLP Principles where applicable, and any STATE-specific laboratory certification,
+accreditation, or registration requirements (e.g., CLIA, CAP, state lab licensing).
+Set current_value to a SHORT summary (under 80 chars).""",
+
+    "clinical_trials_gcp": """Research CLINICAL TRIAL AND GOOD CLINICAL PRACTICE requirements in this jurisdiction.
+Cover: ICH E6(R2) GCP guidelines, IND application requirements (21 CFR 312),
+sponsor responsibilities (21 CFR 312.50-312.70), IND safety reporting (21 CFR 312.32),
+informed consent (21 CFR Part 50), IRB oversight (21 CFR Part 56),
+21 CFR Part 11 electronic records and signatures for clinical data,
+and any STATE-specific clinical trial registration, notification, or patient protection requirements.
+Note: This complements research_consent by focusing on drug/device-specific trial regulations.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+    "drug_supply_chain": """Research DRUG SUPPLY CHAIN SECURITY requirements in this jurisdiction.
+Cover: Drug Supply Chain Security Act (DSCSA) serialization, verification, and tracing requirements,
+wholesale drug distributor licensing (state and federal), NABP VAWD accreditation,
+Good Distribution Practice (GDP) storage and transport standards,
+DEA suspicious order monitoring obligations,
+FDA drug recall procedures (21 CFR Part 7),
+and any STATE-specific wholesale distribution, third-party logistics, or drug pedigree requirements.
+Many states have separate wholesale distributor licensing with unique requirements.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+    "sunshine_open_payments": """Research SUNSHINE ACT AND OPEN PAYMENTS requirements in this jurisdiction.
+Cover: Federal Physician Payments Sunshine Act (42 USC 1320a-7h), CMS Open Payments reporting,
+aggregate spend tracking and annual submission deadlines,
+teaching hospital payment reporting requirements,
+covered recipient identification rules,
+and any STATE-specific physician gift ban laws, pharmaceutical marketing disclosure requirements,
+or industry payment reporting mandates that EXCEED federal requirements.
+States like MA, MN, VT, CT, NV have stricter gift bans. Identify state-specific thresholds and reporting.
+Set current_value to a SHORT summary (under 80 chars).""",
+
+    "biosafety_lab": """Research BIOSAFETY AND LABORATORY SAFETY requirements in this jurisdiction.
+Cover: CDC/NIH Biosafety in Microbiological and Biomedical Laboratories (BMBL) guidelines,
+Biosafety Level (BSL) classification requirements, Institutional Biosafety Committee (IBC) requirements,
+NIH Guidelines for Research Involving Recombinant or Synthetic Nucleic Acid Molecules,
+Select Agent Regulations (42 CFR Part 73 / 7 CFR Part 331 / 9 CFR Part 121),
+OSHA Bloodborne Pathogens Standard for laboratory settings (29 CFR 1910.1030),
+OSHA Laboratory Standard / Chemical Hygiene Plan (29 CFR 1910.1450),
+and any STATE-specific biosafety, lab registration, or hazardous materials requirements.
+Set current_value to a SHORT summary (under 80 chars).""",
 }
 
 
@@ -3370,6 +3952,39 @@ CATEGORY_ALIASES: Dict[str, str] = {
     "emtala": "emergency_preparedness",
     "nfpa": "emergency_preparedness",
     "life_safety_code": "emergency_preparedness",
+    # Life Sciences
+    "gmp": "gmp_manufacturing",
+    "cgmp": "gmp_manufacturing",
+    "current_good_manufacturing": "gmp_manufacturing",
+    "manufacturing_compliance": "gmp_manufacturing",
+    "21_cfr_211": "gmp_manufacturing",
+    "qsr": "gmp_manufacturing",
+    "quality_system_regulation": "gmp_manufacturing",
+    "glp": "glp_nonclinical",
+    "good_laboratory_practice": "glp_nonclinical",
+    "nonclinical_studies": "glp_nonclinical",
+    "21_cfr_58": "glp_nonclinical",
+    "good_clinical_practice": "clinical_trials_gcp",
+    "clinical_trial": "clinical_trials_gcp",
+    "clinical_trials": "clinical_trials_gcp",
+    "ind": "clinical_trials_gcp",
+    "ind_application": "clinical_trials_gcp",
+    "ich_e6": "clinical_trials_gcp",
+    "dscsa": "drug_supply_chain",
+    "track_and_trace": "drug_supply_chain",
+    "drug_pedigree": "drug_supply_chain",
+    "serialization": "drug_supply_chain",
+    "wholesale_distribution": "drug_supply_chain",
+    "sunshine_act": "sunshine_open_payments",
+    "open_payments": "sunshine_open_payments",
+    "physician_payments": "sunshine_open_payments",
+    "aggregate_spend": "sunshine_open_payments",
+    "biosafety": "biosafety_lab",
+    "bsl": "biosafety_lab",
+    "ibc": "biosafety_lab",
+    "select_agents": "biosafety_lab",
+    "lab_safety": "biosafety_lab",
+    "chemical_hygiene": "biosafety_lab",
 }
 
 
@@ -3524,6 +4139,37 @@ CATEGORY_AUTHORITY_SOURCES: Dict[str, List[Dict[str, str]]] = {
         {"domain": "cms.gov", "name": "CMS SDOH Initiatives"},
         {"domain": "hhs.gov", "name": "HHS Emerging Policy"},
     ],
+    # Life Sciences
+    "gmp_manufacturing": [
+        {"domain": "fda.gov/drugs/pharmaceutical-quality-resources", "name": "FDA Pharmaceutical Quality"},
+        {"domain": "ecfr.gov", "name": "21 CFR Parts 210/211 (Drug cGMP)"},
+        {"domain": "fda.gov/medical-devices/quality-system-qs-regulationmedical-device-good-manufacturing-practices", "name": "FDA Device QSR"},
+    ],
+    "glp_nonclinical": [
+        {"domain": "fda.gov/science-research/good-laboratory-practices", "name": "FDA GLP"},
+        {"domain": "ecfr.gov", "name": "21 CFR Part 58 (GLP)"},
+    ],
+    "clinical_trials_gcp": [
+        {"domain": "fda.gov/science-research/clinical-trials-and-human-subject-protection", "name": "FDA Clinical Trials"},
+        {"domain": "ich.org", "name": "ICH E6(R2) GCP Guidelines"},
+        {"domain": "clinicaltrials.gov", "name": "ClinicalTrials.gov"},
+        {"domain": "ecfr.gov", "name": "21 CFR Part 312 (IND)"},
+    ],
+    "drug_supply_chain": [
+        {"domain": "fda.gov/drugs/drug-supply-chain-integrity/drug-supply-chain-security-act-dscsa", "name": "FDA DSCSA"},
+        {"domain": "ecfr.gov", "name": "21 CFR Part 7 (Recalls)"},
+        {"domain": "nabp.pharmacy", "name": "NABP Wholesale Distribution"},
+    ],
+    "sunshine_open_payments": [
+        {"domain": "cms.gov/openpayments", "name": "CMS Open Payments"},
+        {"domain": "oig.hhs.gov", "name": "OIG Compliance Guidance for Pharma"},
+    ],
+    "biosafety_lab": [
+        {"domain": "cdc.gov/labs/BMBL.html", "name": "CDC BMBL Guidelines"},
+        {"domain": "osp.od.nih.gov/biotechnology/nih-guidelines", "name": "NIH rDNA Guidelines"},
+        {"domain": "selectagents.gov", "name": "Federal Select Agent Program"},
+        {"domain": "osha.gov", "name": "OSHA Lab Standard (29 CFR 1910.1450)"},
+    ],
 }
 
 
@@ -3550,6 +4196,9 @@ ONCOLOGY_CATEGORIES: FrozenSet[str] = frozenset(
 )
 MEDICAL_COMPLIANCE_CATEGORIES: FrozenSet[str] = frozenset(
     c.key for c in CATEGORIES if c.group == "medical_compliance"
+)
+LIFE_SCIENCES_CATEGORIES: FrozenSet[str] = frozenset(
+    c.key for c in CATEGORIES if c.group == "life_sciences"
 )
 
 # Research mode sets
@@ -3686,6 +4335,40 @@ _ONCOLOGY_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     ]),
 }
 EXPECTED_REGULATION_KEYS.update(_ONCOLOGY_REGULATION_KEYS)
+
+_LIFE_SCIENCES_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
+    "gmp_manufacturing": frozenset([
+        "cgmp_drugs_21cfr210_211", "cgmp_devices_21cfr820", "process_validation",
+        "fda_facility_registration", "annual_product_review",
+        "supplier_qualification", "fda_inspection_readiness",
+    ]),
+    "glp_nonclinical": frozenset([
+        "glp_21cfr58", "study_director_responsibilities", "glp_qa_unit",
+        "specimen_archiving", "equipment_calibration_glp",
+        "protocol_amendments_deviations",
+    ]),
+    "clinical_trials_gcp": frozenset([
+        "ich_e6r2_gcp", "ind_application_21cfr312", "sponsor_responsibilities",
+        "adverse_event_reporting_ind", "informed_consent_21cfr50",
+        "irb_oversight_21cfr56", "clinical_data_integrity_part11",
+    ]),
+    "drug_supply_chain": frozenset([
+        "dscsa_serialization", "dscsa_verification", "dscsa_tracing",
+        "wholesale_distribution_license", "gdp_storage_transport",
+        "suspicious_order_monitoring", "drug_recall_procedures",
+    ]),
+    "sunshine_open_payments": frozenset([
+        "physician_payments_reporting", "aggregate_spend_tracking",
+        "cms_open_payments_submission", "teaching_hospital_reporting",
+        "state_gift_ban_laws", "covered_recipient_identification",
+    ]),
+    "biosafety_lab": frozenset([
+        "bsl_classifications", "institutional_biosafety_committee",
+        "nih_rdna_guidelines", "select_agent_regulations",
+        "bloodborne_pathogen_lab", "chemical_hygiene_plan",
+    ]),
+}
+EXPECTED_REGULATION_KEYS.update(_LIFE_SCIENCES_REGULATION_KEYS)
 
 
 # ---------------------------------------------------------------------------

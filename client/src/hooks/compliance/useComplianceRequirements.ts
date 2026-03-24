@@ -7,13 +7,14 @@ import {
 
 type SectionId = CategoryGroup
 
-const SECTION_ORDER: SectionId[] = ['labor', 'supplementary', 'healthcare', 'oncology', 'medical_compliance']
+const SECTION_ORDER: SectionId[] = ['labor', 'supplementary', 'healthcare', 'oncology', 'medical_compliance', 'life_sciences']
 const SECTION_LABELS: Record<SectionId, string> = {
   labor: 'Core Labor',
   supplementary: 'Supplementary',
   healthcare: 'Healthcare',
   oncology: 'Oncology',
   medical_compliance: 'Medical Compliance',
+  life_sciences: 'Life Sciences',
 }
 
 const CATEGORY_ORDER_INDEX = new Map(ALL_CATEGORY_KEYS.map((k, i) => [k, i]))
