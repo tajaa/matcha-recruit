@@ -1721,6 +1721,27 @@ async def send_message(
         compliance_result = await build_compliance_context(company_id)
         ctx += "\n\n" + compliance_result.context_text
 
+        # RAG augmentation — find requirements most relevant to the user's question
+        try:
+            import os as _os_rag
+            from ...core.services.embedding_service import EmbeddingService as _ES_rag
+            from ...core.services.compliance_rag import ComplianceRAGService as _CRAG
+            from ...config import get_settings as _gs_rag
+
+            _ak_rag = _os_rag.getenv("GEMINI_API_KEY") or _gs_rag().gemini_api_key
+            if _ak_rag and body.content:
+                _es_rag = _ES_rag(api_key=_ak_rag)
+                _crag = _CRAG(_es_rag)
+                async with get_connection() as _rc:
+                    _rag_ctx, _ = await _crag.get_context_for_question(
+                        query=body.content, conn=_rc,
+                        company_id=company_id, max_tokens=4000,
+                    )
+                if _rag_ctx:
+                    ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + _rag_ctx
+        except Exception:
+            pass  # RAG is supplementary
+
     # Payer mode — build dedicated medical policy prompt (separate from HR copilot)
     payer_prompt = None
     payer_sources: list[dict] = []
@@ -1947,6 +1968,28 @@ async def send_message_stream(
                 else:
                     yield _sse_data({"type": "status", "message": "No compliance data found — will suggest running a check..."})
                 ctx += "\n\n" + compliance_ctx
+
+                # RAG augmentation — find requirements most relevant to the question
+                yield _sse_data({"type": "status", "message": "Searching relevant regulations..."})
+                try:
+                    import os as _os_rag2
+                    from ...core.services.embedding_service import EmbeddingService as _ES_rag2
+                    from ...core.services.compliance_rag import ComplianceRAGService as _CRAG2
+                    from ...config import get_settings as _gs_rag2
+
+                    _ak_rag2 = _os_rag2.getenv("GEMINI_API_KEY") or _gs_rag2().gemini_api_key
+                    if _ak_rag2 and body.content:
+                        _es_rag2 = _ES_rag2(api_key=_ak_rag2)
+                        _crag2 = _CRAG2(_es_rag2)
+                        async with get_connection() as _rc2:
+                            _rag_ctx2, _ = await _crag2.get_context_for_question(
+                                query=body.content, conn=_rc2,
+                                company_id=company_id, max_tokens=4000,
+                            )
+                        if _rag_ctx2:
+                            ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + _rag_ctx2
+                except Exception:
+                    pass  # RAG is supplementary
 
             # Payer mode — build payer prompt inside stream for status events
             stream_payer_prompt = None
