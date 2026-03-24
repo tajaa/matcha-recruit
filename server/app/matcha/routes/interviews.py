@@ -1184,16 +1184,17 @@ async def interview_websocket(
     await send_message(MessageType.SYSTEM, f"Connected to interview for {company_name}")
 
     try:
-        # Create Gemini session
+        # Create Gemini session (use alpha API for affective dialog + proactive audio)
         gemini_session = GeminiLiveSession(
             model=settings.live_model,
             voice=settings.voice,
             api_key=settings.gemini_api_key,
             vertex_project=settings.vertex_project,
             vertex_location=settings.vertex_location,
+            use_alpha_api=True,
         )
 
-        # Connect with appropriate interview prompt
+        # Connect with appropriate interview prompt + new Live API features
         await gemini_session.connect(
             company_name=company_name,
             interviewer_name=interviewer_name,
@@ -1206,6 +1207,10 @@ async def interview_websocket(
             investigation_questions=investigation_questions_text,
             interviewee_name_for_prompt=interviewee_name_for_prompt,
             interviewee_role_for_prompt=interviewee_role_for_prompt,
+            # Investigation interviews: don't let user interrupt the investigator
+            no_interruption=(interview_type == "investigation"),
+            enable_affective_dialog=True,
+            enable_proactive_audio=True,
         )
 
         await send_message(MessageType.STATUS, "Session started")
@@ -1239,6 +1244,9 @@ async def interview_websocket(
                         await send_message(MessageType.USER, response.text)
                     else:
                         await send_message(MessageType.ASSISTANT, response.text)
+                elif response.type == "interrupted":
+                    # User barged in — tell client to stop playing queued audio
+                    await send_message(MessageType.STATUS, "interrupted")
                 elif response.type == "turn_complete":
                     await send_message(MessageType.STATUS, "ready")
 

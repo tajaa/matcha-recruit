@@ -477,7 +477,7 @@ IMPORTANT:
 
 @dataclass
 class GeminiResponse:
-    type: str  # "audio", "transcription", "turn_complete"
+    type: str  # "audio", "transcription", "turn_complete", "interrupted"
     audio_data: Optional[bytes] = None
     text: Optional[str] = None
     is_input_transcription: bool = False
@@ -491,9 +491,15 @@ class GeminiLiveSession:
         api_key: Optional[str] = None,
         vertex_project: Optional[str] = None,
         vertex_location: str = "us-central1",
+        use_alpha_api: bool = False,
     ):
         self.model = model
         self.voice = voice
+
+        # Build client kwargs
+        client_kwargs = {}
+        if use_alpha_api:
+            client_kwargs["http_options"] = {"api_version": "v1alpha"}
 
         # Initialize client based on auth method
         if vertex_project:
@@ -501,9 +507,10 @@ class GeminiLiveSession:
                 vertexai=True,
                 project=vertex_project,
                 location=vertex_location,
+                **client_kwargs,
             )
         elif api_key:
-            self.client = genai.Client(api_key=api_key)
+            self.client = genai.Client(api_key=api_key, **client_kwargs)
         else:
             raise ValueError("Either api_key or vertex_project must be provided")
 
@@ -532,6 +539,9 @@ class GeminiLiveSession:
         investigation_questions: Optional[str] = None,
         interviewee_name_for_prompt: Optional[str] = None,
         interviewee_role_for_prompt: Optional[str] = None,
+        no_interruption: bool = False,
+        enable_affective_dialog: bool = False,
+        enable_proactive_audio: bool = False,
     ) -> None:
         """Connect to Gemini with appropriate interview prompt based on type."""
         # Check rate limit before starting a live session
@@ -599,7 +609,23 @@ class GeminiLiveSession:
 
         self._interview_type = interview_type
 
-        config = types.LiveConnectConfig(
+        # Build realtime input config (VAD tuning + interruption control)
+        activity_handling = (
+            types.ActivityHandling.NO_INTERRUPTION
+            if no_interruption
+            else types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS
+        )
+        realtime_input_config = types.RealtimeInputConfig(
+            activity_handling=activity_handling,
+            automatic_activity_detection=types.AutomaticActivityDetection(
+                # LOW end-of-speech sensitivity = waits longer before cutting off
+                # (reduces premature cutoffs when user pauses mid-thought)
+                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                silence_duration_ms=500,
+            ),
+        )
+
+        config_kwargs = dict(
             response_modalities=["AUDIO"],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
@@ -613,7 +639,22 @@ class GeminiLiveSession:
             ),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             output_audio_transcription=types.AudioTranscriptionConfig(),
+            realtime_input_config=realtime_input_config,
+            # Sliding window compression prevents long sessions from hitting token limits
+            context_window_compression=types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow(),
+            ),
         )
+
+        # Alpha API features (require use_alpha_api=True on client)
+        if enable_affective_dialog:
+            config_kwargs["enable_affective_dialog"] = True
+        if enable_proactive_audio:
+            config_kwargs["proactivity"] = types.ProactivityConfig(
+                proactive_audio=True
+            )
+
+        config = types.LiveConnectConfig(**config_kwargs)
 
         print(f"[Gemini] Connecting for interview with {company_name}")
 
@@ -664,6 +705,16 @@ class GeminiLiveSession:
                         text = getattr(server_content.output_transcription, "text", None)
                         if text:
                             self._output_transcript_buffer += text
+
+                    # Handle interruption (user barged in, model generation cancelled)
+                    if getattr(server_content, "interrupted", False):
+                        # Drain queued audio so client doesn't play stale data
+                        while not self._response_queue.empty():
+                            try:
+                                self._response_queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                        await self._response_queue.put(GeminiResponse(type="interrupted"))
 
                     # Handle turn complete
                     if server_content.turn_complete:
