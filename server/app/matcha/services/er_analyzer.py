@@ -108,6 +108,12 @@ Return ONLY a JSON object with this structure:
     "summary": "Overview of key discrepancies and their implications for the investigation"
 }}
 
+STRICT TEMPORAL ANCHORING:
+- Do not automatically assume cause-and-effect just because two events happen in sequence.
+- Map digital evidence (e.g., a chat message, email, log entry) to its specific referenced timestamp or event.
+- Do not allow one actor's subjective interpretation of a message to override the objective timestamp of when the referenced event actually occurred.
+- Correlation in timeline position does not imply causation.
+
 Be neutral and objective. Do not assume which account is correct."""
 
 
@@ -321,6 +327,23 @@ Return ONLY a JSON object with this structure:
   ],
   "case_summary": "2-3 sentence executive summary of the case and key evidence"
 }}
+
+MULTI-ACTOR EVALUATION (MANDATORY):
+- If the case involves allegations against multiple actors (e.g., two employees reporting each other), do NOT generate a single blended outcome.
+- Extract an array of distinct actors and run a completely independent policy evaluation for each individual.
+- Actor A being a victim in one context does NOT grant them immunity for separate policy violations they committed in another context.
+- Output a distinct determination for each actor. The "outcomes" array must reflect this — each outcome path should specify which actor(s) it applies to in its reasoning.
+
+SYSTEM DATA PRIORITY:
+- When evaluating the validity of a performance action, objective system data (audit logs, system records, documented metrics) must be weighted significantly higher than interpersonal chat sentiment or subjective interpretation.
+- Do NOT recommend overturning a data-backed performance action solely because concurrent interpersonal conflict exists.
+- If system records confirm the performance issue, the performance action stands as valid regardless of unrelated interpersonal disputes.
+
+STRICT TEMPORAL ANCHORING:
+- Do not automatically assume cause-and-effect just because two events happen in sequence.
+- Strictly map digital evidence (chat messages, emails, log entries) to their specific referenced timestamps or events.
+- Do not allow one actor's subjective interpretation of a message to override the objective timestamp of when the referenced event actually occurred.
+- Correlation in timeline position does not imply causation — require explicit evidence of causal linkage.
 
 Rules:
 - Provide 2 to 4 outcome paths, sorted by evidence strength

@@ -60,7 +60,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
         ...init,
         headers: _buildHeaders(init, newToken),
       })
-      if (!retry.ok) throw new Error(`${retry.status} ${retry.statusText}`)
+      if (!retry.ok) {
+        const retryBody = await retry.json().catch(() => null)
+        throw new Error(retryBody?.detail || `${retry.status} ${retry.statusText}`)
+      }
       return retry.json()
     }
 
@@ -68,7 +71,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error('Session expired')
   }
 
-  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => null)
+    throw new Error(errBody?.detail || `${res.status} ${res.statusText}`)
+  }
   if (res.status === 204) return null as T
   return res.json()
 }
