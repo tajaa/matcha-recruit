@@ -287,7 +287,7 @@ export default function ComplianceDecisionTree({ category, aiSteps }: Compliance
   }, [])
 
   return (
-    <div style={{ height }} className="w-full rounded-lg overflow-hidden border border-zinc-700/50">
+    <div style={{ height }} className="w-full rounded-lg overflow-hidden border border-zinc-700/50 [&_.react-flow__node.selected]:!outline-none [&_.react-flow__node.selected]:!shadow-none">
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -299,7 +299,6 @@ export default function ComplianceDecisionTree({ category, aiSteps }: Compliance
         proOptions={{ hideAttribution: true }}
         nodesDraggable={false}
         nodesConnectable={false}
-        elementsSelectable={false}
         panOnScroll
         zoomOnScroll={false}
         panOnDrag
