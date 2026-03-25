@@ -193,6 +193,25 @@ def _normalize_json_list(raw_value: Any) -> list:
     return []
 
 
+async def _resolve_involved_parties(conn, raw_employees: Any) -> list[dict]:
+    """Resolve involved_employees JSONB into name+role dicts for Gemini context."""
+    involved = _normalize_json_list(raw_employees)
+    if not involved:
+        return []
+    emp_ids = [UUID(e["employee_id"]) if isinstance(e["employee_id"], str) else e["employee_id"] for e in involved if "employee_id" in e]
+    if not emp_ids:
+        return []
+    rows = await conn.fetch(
+        "SELECT id, first_name, last_name FROM employees WHERE id = ANY($1::uuid[])",
+        emp_ids,
+    )
+    name_map = {str(r["id"]): f"{r['first_name']} {r['last_name']}" for r in rows}
+    return [
+        {"name": name_map.get(str(e["employee_id"]), "Unknown"), "role": e["role"]}
+        for e in involved
+    ]
+
+
 def _build_er_analyzer(model_override: Optional[str] = None):
     """Create ERAnalyzer using shared Gemini credential cascade."""
     from ..services.er_analyzer import ERAnalyzer
@@ -2844,7 +2863,7 @@ async def generate_outcome_analysis_stream(
 
         case_row = await conn.fetchrow(
             """
-            SELECT case_number, title, description, status, intake_context, category, created_at, updated_at
+            SELECT case_number, title, description, status, intake_context, category, created_at, updated_at, involved_employees
             FROM er_cases
             WHERE id = $1
             """,
@@ -2852,6 +2871,8 @@ async def generate_outcome_analysis_stream(
         )
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
+
+        involved_parties = await _resolve_involved_parties(conn, case_row.get("involved_employees"))
 
         analysis_rows = await conn.fetch(
             """
@@ -2955,6 +2976,8 @@ async def generate_outcome_analysis_stream(
             "category": case_row.get("category"),
             "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
         }
+        if involved_parties:
+            c_info["involved_parties"] = involved_parties
 
         if healthcare_context:
             yield sse({"type": "status", "message": "Applying Just Culture framework for clinical safety analysis..."})
@@ -3021,7 +3044,22 @@ async def generate_outcome_analysis_stream(
                     hr_considerations=o.get("hr_considerations", ""),
                     precedent_note=o.get("precedent_note", ""),
                     confidence=conf,
+                    applies_to=o.get("applies_to"),
                 ))
+
+            # Filter contradictory outcomes when evidence readiness >= 80%
+            if cached_determination_confidence is not None and cached_determination_confidence >= 0.80:
+                outcomes = [
+                    o for o in outcomes
+                    if not (
+                        "insufficient" in o.action_label.lower()
+                        or ("case closure" in o.action_label.lower() and "insufficient" in o.reasoning.lower())
+                    )
+                ]
+
+            # Sort by confidence: high first, then medium, then low
+            _CONF_ORDER = {"high": 0, "medium": 1, "low": 2}
+            outcomes.sort(key=lambda o: _CONF_ORDER.get(o.confidence, 99))
 
             response_obj = OutcomeAnalysisResponse(
                 outcomes=outcomes,
@@ -3071,11 +3109,13 @@ async def generate_outcome_analysis(
         await _verify_case_company(conn, case_id, company_id, is_admin)
 
         case_row = await conn.fetchrow(
-            "SELECT case_number, title, description, status, category, created_at, intake_context FROM er_cases WHERE id = $1",
+            "SELECT case_number, title, description, status, category, created_at, intake_context, involved_employees FROM er_cases WHERE id = $1",
             case_id,
         )
         if not case_row:
             raise HTTPException(status_code=404, detail="Case not found")
+
+        involved_parties_ns = await _resolve_involved_parties(conn, case_row.get("involved_employees"))
 
         analysis_rows = await conn.fetch(
             """
@@ -3149,6 +3189,8 @@ async def generate_outcome_analysis(
         "category": case_row.get("category"),
         "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
     }
+    if involved_parties_ns:
+        c_info["involved_parties"] = involved_parties_ns
 
     intake_ctx = _normalize_intake_context(case_row["intake_context"]) or {}
     last_guidance = intake_ctx.get("last_guidance", {}) if isinstance(intake_ctx, dict) else {}
@@ -3191,7 +3233,22 @@ async def generate_outcome_analysis(
             hr_considerations=o.get("hr_considerations", ""),
             precedent_note=o.get("precedent_note", ""),
             confidence=conf,
+            applies_to=o.get("applies_to"),
         ))
+
+    # Filter contradictory outcomes when evidence readiness >= 80%
+    if cached_determination_confidence is not None and cached_determination_confidence >= 0.80:
+        outcomes = [
+            o for o in outcomes
+            if not (
+                "insufficient" in o.action_label.lower()
+                or ("case closure" in o.action_label.lower() and "insufficient" in o.reasoning.lower())
+            )
+        ]
+
+    # Sort by confidence: high first, then medium, then low
+    _CONF_ORDER = {"high": 0, "medium": 1, "low": 2}
+    outcomes.sort(key=lambda o: _CONF_ORDER.get(o.confidence, 99))
 
     return OutcomeAnalysisResponse(
         outcomes=outcomes,

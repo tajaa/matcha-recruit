@@ -28,7 +28,7 @@ export function ProfileBanner({ onboardingNeeded }: ProfileBannerProps) {
           Add your headquarters, benefits, and employment details to unlock full compliance tracking.
         </p>
       </div>
-      <Button size="sm" onClick={() => navigate('/app/settings')}>
+      <Button size="sm" onClick={() => navigate('/app/company')}>
         Complete Profile
       </Button>
       <button

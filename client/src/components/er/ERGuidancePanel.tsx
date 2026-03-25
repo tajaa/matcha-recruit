@@ -282,6 +282,9 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
                 <Badge variant={confidenceVariant[opt.confidence] ?? 'neutral'}>
                   {opt.confidence} confidence
                 </Badge>
+                {opt.applies_to && (
+                  <span className="text-xs text-zinc-400 italic">— {opt.applies_to}</span>
+                )}
               </div>
 
               <button

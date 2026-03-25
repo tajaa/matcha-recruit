@@ -2235,6 +2235,56 @@ async def analyze_similar_incidents(
 # Policy Mapping
 # ===========================================
 
+
+async def _get_handbook_policy_entries(conn, company_id) -> list[dict]:
+    """Fetch active handbook sections as policy-compatible dicts for policy mapping."""
+    handbook = await conn.fetchrow(
+        """
+        SELECT id, title, active_version
+        FROM handbooks
+        WHERE company_id = $1 AND status = 'active'
+        ORDER BY published_at DESC NULLS LAST, updated_at DESC
+        LIMIT 1
+        """,
+        company_id,
+    )
+    if not handbook:
+        return []
+
+    version_id = await conn.fetchval(
+        "SELECT id FROM handbook_versions WHERE handbook_id = $1 AND version_number = $2",
+        handbook["id"], handbook["active_version"],
+    )
+    if version_id is None:
+        version_id = await conn.fetchval(
+            "SELECT id FROM handbook_versions WHERE handbook_id = $1 ORDER BY version_number DESC LIMIT 1",
+            handbook["id"],
+        )
+    if version_id is None:
+        return []
+
+    sections = await conn.fetch(
+        """
+        SELECT id, title, content
+        FROM handbook_sections
+        WHERE handbook_version_id = $1 AND content IS NOT NULL AND content != ''
+        ORDER BY section_order ASC
+        """,
+        version_id,
+    )
+    handbook_title = handbook["title"] or "Employee Handbook"
+    return [
+        {
+            "id": str(s["id"]),
+            "title": f"{handbook_title} — {s['title']}" if s["title"] else handbook_title,
+            "description": (s["content"] or "")[:300],
+            "content": s["content"],
+        }
+        for s in sections
+        if (s["content"] or "").strip()
+    ]
+
+
 async def _auto_map_policy_violations(incident_id: str, company_id: str):
     """Background task: auto-map incident to company policies."""
     try:
@@ -2249,17 +2299,18 @@ async def _auto_map_policy_violations(incident_id: str, company_id: str):
             if not row:
                 return
 
-            # Fetch active policies
+            # Fetch active policies + handbook sections
             policies = await conn.fetch(
                 "SELECT id, title, description, content FROM policies WHERE company_id = $1 AND status = 'active'",
                 company_id,
             )
+            handbook_policies = await _get_handbook_policy_entries(conn, company_id)
 
-            if not policies:
+            if not policies and not handbook_policies:
                 # Cache empty result
                 empty_result = {
                     "matches": [],
-                    "summary": "No active policies found for this company.",
+                    "summary": "No active policies or handbook found for this company.",
                     "no_matching_policies": True,
                     "generated_at": _utc_now_naive().isoformat(),
                 }
@@ -2278,7 +2329,7 @@ async def _auto_map_policy_violations(incident_id: str, company_id: str):
             policies_list = [
                 {"id": str(p["id"]), "title": p["title"], "description": p.get("description"), "content": p.get("content")}
                 for p in policies
-            ]
+            ] + handbook_policies
 
             analyzer = get_ir_analyzer()
             result = await analyzer.map_policy_violations(
@@ -2333,7 +2384,7 @@ async def get_policy_mapping(
                 result["from_cache"] = True
                 return PolicyMappingAnalysis(**result)
 
-        # Fetch active policies
+        # Fetch active policies + handbook sections
         company_id = inc.get("company_id")
         if not company_id:
             return PolicyMappingAnalysis(
@@ -2346,9 +2397,14 @@ async def get_policy_mapping(
             company_id,
         )
 
-        if not policies:
+        # Also include active handbook sections as policy sources
+        handbook_policies = await _get_handbook_policy_entries(conn, company_id)
+
+        all_policies = list(policies) + handbook_policies
+
+        if not all_policies:
             empty = PolicyMappingAnalysis(
-                matches=[], summary="No active policies found for this company.",
+                matches=[], summary="No active policies or handbook found for this company.",
                 no_matching_policies=True, generated_at=_utc_now_naive().isoformat(),
             )
             # Cache
@@ -2367,7 +2423,7 @@ async def get_policy_mapping(
         policies_list = [
             {"id": str(p["id"]), "title": p["title"], "description": p.get("description"), "content": p.get("content")}
             for p in policies
-        ]
+        ] + handbook_policies
 
         try:
             analyzer = get_ir_analyzer()

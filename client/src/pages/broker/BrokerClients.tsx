@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Building2, Plus, Loader2, Send, AlertCircle } from 'lucide-react'
+import { Building2, Plus, Loader2, Send, AlertCircle, FileCheck } from 'lucide-react'
 import { Button, Input, Modal, Badge } from '../../components/ui'
 import { api } from '../../api/client'
 
@@ -12,6 +12,38 @@ type ClientSetup = {
   invite_token: string | null
   invite_expires_at: string | null
   created_at: string
+}
+
+function BrokerTermsGate({ onAccepted }: { onAccepted: () => void }) {
+  const [accepting, setAccepting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function handleAccept() {
+    setAccepting(true)
+    setError('')
+    try {
+      await api.post('/auth/broker/accept-terms', {})
+      onAccepted()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to accept terms')
+    } finally {
+      setAccepting(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-center justify-center h-64 max-w-md mx-auto text-center">
+      <FileCheck className="h-10 w-10 text-emerald-500 mb-4" />
+      <h2 className="text-lg font-semibold text-zinc-100 mb-2">Accept Partner Terms</h2>
+      <p className="text-sm text-zinc-400 mb-6">
+        Before managing clients, please review and accept the Matcha broker partner terms of service.
+      </p>
+      {error && <p className="text-sm text-red-400 mb-4">{error}</p>}
+      <Button size="sm" onClick={handleAccept} disabled={accepting}>
+        {accepting ? 'Accepting...' : 'Accept Terms & Continue'}
+      </Button>
+    </div>
+  )
 }
 
 type SetupForm = {
@@ -47,6 +79,7 @@ export default function BrokerClients() {
   const [setups, setSetups] = useState<ClientSetup[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [needsTerms, setNeedsTerms] = useState(false)
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState<SetupForm>(EMPTY_SETUP)
   const [saving, setSaving] = useState(false)
@@ -55,9 +88,17 @@ export default function BrokerClients() {
 
   function fetchSetups() {
     setLoading(true)
+    setNeedsTerms(false)
     api.get<{ setups: ClientSetup[] }>('/brokers/client-setups')
       .then((res) => setSetups(res.setups))
-      .catch(() => setError('Unable to load client setups'))
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : ''
+        if (msg.toLowerCase().includes('terms')) {
+          setNeedsTerms(true)
+        } else {
+          setError('Unable to load client setups')
+        }
+      })
       .finally(() => setLoading(false))
   }
 
@@ -95,6 +136,10 @@ export default function BrokerClients() {
       fetchSetups()
     } catch {}
     setSendingInvite(null)
+  }
+
+  if (needsTerms) {
+    return <BrokerTermsGate onAccepted={fetchSetups} />
   }
 
   if (loading) {

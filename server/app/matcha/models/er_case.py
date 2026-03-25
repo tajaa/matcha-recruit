@@ -297,6 +297,7 @@ class OutcomeOption(BaseModel):
     hr_considerations: str
     precedent_note: str
     confidence: ConfidenceLevel
+    applies_to: Optional[str] = None
 
 
 class OutcomeAnalysisResponse(BaseModel):

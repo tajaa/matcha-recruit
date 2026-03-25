@@ -12,11 +12,11 @@ interface GettingStartedProps {
 }
 
 const ALL_ITEMS = [
-  { key: 'company_profile', label: 'Complete company profile', icon: Building2, href: '/app/settings', feature: null },
+  { key: 'company_profile', label: 'Complete company profile', icon: Building2, href: '/app/company', feature: null },
   { key: 'compliance', label: 'Add business locations', icon: Shield, href: '/app/compliance', feature: 'compliance' },
   { key: 'employees', label: 'Import employees', icon: Users, href: '/app/employees', feature: 'employees' },
   { key: 'policies', label: 'Create your first policy', icon: FileText, href: '/app/handbooks', feature: 'policies' },
-  { key: 'integrations', label: 'Connect integrations', icon: Plug, href: '/app/settings', feature: 'onboarding' },
+  { key: 'integrations', label: 'Connect integrations', icon: Plug, href: '/app/company', feature: 'onboarding' },
 ] as const
 
 export function GettingStarted({ userId, onboardingNeeded, enabledFeatures }: GettingStartedProps) {

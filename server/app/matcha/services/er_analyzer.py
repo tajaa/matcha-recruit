@@ -318,8 +318,9 @@ For each outcome path, provide:
 - hr_considerations: Best practice notes, risks, or mitigating factors to consider
 - precedent_note: How this aligns with the company's past case outcomes (use the precedent stats provided)
 - confidence: "high", "medium", or "low" based on evidence strength for this path
+- applies_to: (required when case_info.involved_parties has multiple non-witness parties) The name and role of the party this outcome applies to (e.g., "Amina El-Amin (respondent)")
 
-Order outcomes from most to least supported by evidence.
+Order outcomes from most to least supported by evidence, with highest confidence first.
 
 Return ONLY a JSON object with this structure:
 {{
@@ -332,17 +333,18 @@ Return ONLY a JSON object with this structure:
       "policy_basis": "Section 3.2 Workplace Conduct prohibits intimidating behavior. Progressive discipline policy calls for written warning on first offense.",
       "hr_considerations": "Consider respondent's tenure and clean prior record as mitigating factors. Document the warning thoroughly for potential future escalation.",
       "precedent_note": "3 of 5 similar past cases resulted in disciplinary action rather than termination.",
-      "confidence": "high"
+      "confidence": "high",
+      "applies_to": "Jane Doe (respondent)"
     }}
   ],
   "case_summary": "2-3 sentence executive summary of the case and key evidence"
 }}
 
 MULTI-ACTOR EVALUATION (MANDATORY):
-- If the case involves allegations against multiple actors (e.g., two employees reporting each other), do NOT generate a single blended outcome.
-- Extract an array of distinct actors and run a completely independent policy evaluation for each individual.
+- If case_info.involved_parties contains more than one non-witness party (complainant or respondent), you MUST produce separate outcome paths for EACH party.
+- Each outcome MUST include "applies_to" with the party's name and role.
+- Do NOT generate a single blended outcome for multiple parties — separate determinations are required.
 - Actor A being a victim in one context does NOT grant them immunity for separate policy violations they committed in another context.
-- Output a distinct determination for each actor. The "outcomes" array must reflect this — each outcome path should specify which actor(s) it applies to in its reasoning.
 
 SYSTEM DATA PRIORITY:
 - When evaluating the validity of a performance action, objective system data (audit logs, system records, documented metrics) must be weighted significantly higher than interpersonal chat sentiment or subjective interpretation.
@@ -900,11 +902,22 @@ class ERAnalyzer:
                 prompt += (
                     f"\n\nEVIDENCE READINESS SCORE: {determination_confidence:.0%}\n"
                     "This reflects investigation maturity — how complete and consistent the evidence record is.\n"
-                    "CALIBRATION RULE: If evidence readiness is >= 80%, do NOT recommend outcomes that say "
-                    "'gather more evidence' or 'insufficient documentation' — the system has already determined "
-                    "the investigation is sufficiently complete. At least one outcome should have 'medium' or "
-                    "'high' confidence when evidence readiness >= 80%."
                 )
+                if determination_confidence >= 0.80:
+                    prompt += (
+                        "MANDATORY CALIBRATION (EVIDENCE READINESS >= 80%):\n"
+                        "- The investigation has been certified as sufficiently complete.\n"
+                        "- You MUST NOT recommend 'case closure due to insufficient evidence' or any outcome "
+                        "whose action_label or reasoning says evidence is insufficient, lacking, or needs gathering.\n"
+                        "- At least one outcome MUST have confidence 'high'.\n"
+                        "- If the evidence genuinely doesn't support a specific allegation, use determination "
+                        "'unsubstantiated' with 'no_action' — NOT 'inconclusive' with 'insufficient evidence'.\n"
+                    )
+                else:
+                    prompt += (
+                        "NOTE: Evidence readiness is below 80%, so outcomes reflecting incomplete "
+                        "investigation (e.g., 'gather more evidence') are acceptable.\n"
+                    )
             text = await self._generate_content_async(prompt)
             result = self._parse_json_response(text)
             result["generated_at"] = datetime.now(timezone.utc).isoformat()
@@ -958,11 +971,22 @@ class ERAnalyzer:
                 prompt += (
                     f"\n\nEVIDENCE READINESS SCORE: {determination_confidence:.0%}\n"
                     "This reflects investigation maturity — how complete and consistent the evidence record is.\n"
-                    "CALIBRATION RULE: If evidence readiness is >= 80%, do NOT recommend outcomes that say "
-                    "'gather more evidence' or 'insufficient documentation' — the system has already determined "
-                    "the investigation is sufficiently complete. At least one outcome should have 'medium' or "
-                    "'high' confidence when evidence readiness >= 80%."
                 )
+                if determination_confidence >= 0.80:
+                    prompt += (
+                        "MANDATORY CALIBRATION (EVIDENCE READINESS >= 80%):\n"
+                        "- The investigation has been certified as sufficiently complete.\n"
+                        "- You MUST NOT recommend 'case closure due to insufficient evidence' or any outcome "
+                        "whose action_label or reasoning says evidence is insufficient, lacking, or needs gathering.\n"
+                        "- At least one outcome MUST have confidence 'high'.\n"
+                        "- If the evidence genuinely doesn't support a specific allegation, use determination "
+                        "'unsubstantiated' with 'no_action' — NOT 'inconclusive' with 'insufficient evidence'.\n"
+                    )
+                else:
+                    prompt += (
+                        "NOTE: Evidence readiness is below 80%, so outcomes reflecting incomplete "
+                        "investigation (e.g., 'gather more evidence') are acceptable.\n"
+                    )
 
             accumulated = ""
             fired_phases: set[str] = set()
