@@ -13,6 +13,7 @@ import Jurisdictions from './pages/admin/Jurisdictions'
 import IndustryRequirements from './pages/admin/IndustryRequirements'
 import SpecializationResearch from './pages/admin/SpecializationResearch'
 import Brokers from './pages/admin/Brokers'
+import ComplianceManagement from './pages/admin/ComplianceManagement'
 import Dashboard from './pages/app/Dashboard'
 import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
@@ -59,6 +60,7 @@ export default function App() {
         <Route path="industry-requirements" element={<IndustryRequirements />} />
         <Route path="specialization-research" element={<SpecializationResearch />} />
         <Route path="brokers" element={<Brokers />} />
+        <Route path="compliance-mgmt" element={<ComplianceManagement />} />
       </Route>
       <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
         <Route index element={<BrokerDashboard />} />

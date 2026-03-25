@@ -8707,3 +8707,69 @@ async def get_specialization_completeness(
             entry["coverage_pct"] = round(r["categories_covered"] / len(expected_categories) * 100, 1)
         result.append(entry)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Admin: cherry-pick a jurisdiction requirement into a company location
+# ---------------------------------------------------------------------------
+
+
+async def admin_add_requirement_to_location(
+    location_id: UUID, company_id: UUID, jurisdiction_requirement_id: UUID,
+) -> dict:
+    """Copy a single jurisdiction_requirements row into compliance_requirements
+    for *location_id*, marking governance_source = 'admin_override'.
+
+    Returns the inserted requirement dict, or raises if duplicate/not found.
+    """
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        # 1. Fetch the source row
+        jr = await conn.fetchrow(
+            "SELECT * FROM jurisdiction_requirements WHERE id = $1",
+            jurisdiction_requirement_id,
+        )
+        if not jr:
+            raise ValueError("Jurisdiction requirement not found")
+
+        req_key = f"{jr['category']}:{jr['regulation_key'] or jr['title']}"
+
+        # 2. Check for duplicate
+        exists = await conn.fetchval(
+            "SELECT 1 FROM compliance_requirements WHERE location_id = $1 AND requirement_key = $2",
+            location_id, req_key,
+        )
+        if exists:
+            raise ValueError("Requirement already exists for this location")
+
+        # 3. Insert
+        row = await conn.fetchrow(
+            """
+            INSERT INTO compliance_requirements (
+                location_id, category, jurisdiction_level, jurisdiction_name,
+                title, description, current_value, numeric_value,
+                source_url, source_name, effective_date,
+                requirement_key, governance_source
+            ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'admin_override')
+            RETURNING id, category, jurisdiction_level, jurisdiction_name,
+                      title, description, current_value, numeric_value,
+                      source_url, source_name, effective_date,
+                      requirement_key, governance_source
+            """,
+            location_id,
+            jr["category"],
+            jr["jurisdiction_level"],
+            jr["jurisdiction_name"],
+            jr["title"],
+            jr["description"],
+            jr["current_value"],
+            jr["numeric_value"],
+            jr["source_url"],
+            jr.get("source_name"),
+            jr["effective_date"],
+            req_key,
+        )
+        result = dict(row)
+        result["id"] = str(result["id"])
+        return result

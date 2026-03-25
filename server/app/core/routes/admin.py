@@ -22,7 +22,7 @@ from ..dependencies import require_admin
 from ..services.credential_crypto import decrypt_credential_fields
 from ..feature_flags import merge_company_features
 from ..services.email import get_email_service
-from ..models.compliance import AutoCheckSettings
+from ..models.compliance import AutoCheckSettings, LocationCreate
 from ..compliance_registry import (
     TRIGGER_PROFILES,
     LABOR_CATEGORIES, HEALTHCARE_CATEGORIES, ONCOLOGY_CATEGORIES,
@@ -34,6 +34,10 @@ from ..services.compliance_service import (
     run_compliance_check_background,
     run_compliance_check_stream,
     research_jurisdiction_repo_only,
+    get_locations,
+    get_location_requirements,
+    create_location,
+    admin_add_requirement_to_location,
 )
 from ..services.redis_cache import (
     get_redis_cache, cache_get, cache_set, cache_delete, cache_delete_pattern,
@@ -8641,3 +8645,170 @@ async def payer_run_staleness_check():
         "alerts_resolved": resolved if isinstance(resolved, int) else 0,
         "stale_found": len(stale_rows),
     }
+
+
+# ---------------------------------------------------------------------------
+# Admin Compliance Management — per-company location & requirement management
+# ---------------------------------------------------------------------------
+
+
+class AdminAddRequirementRequest(BaseModel):
+    jurisdiction_requirement_id: UUID
+
+
+@router.get("/companies/{company_id}/compliance")
+async def admin_company_compliance(
+    company_id: UUID,
+    current_user=Depends(require_admin),
+):
+    """Company compliance overview: locations with requirement category counts."""
+    async with get_connection() as conn:
+        company = await conn.fetchrow(
+            "SELECT id, company_name, industry FROM companies WHERE id = $1",
+            company_id,
+        )
+        if not company:
+            raise HTTPException(404, "Company not found")
+
+    locations = await get_locations(company_id)
+
+    # Batch category breakdown for all locations in one query
+    loc_ids = [loc["id"] for loc in locations]
+    cat_map: dict[str, dict[str, int]] = {str(lid): {} for lid in loc_ids}
+    if loc_ids:
+        async with get_connection() as conn:
+            rows = await conn.fetch(
+                "SELECT location_id, category, COUNT(*) AS cnt FROM compliance_requirements WHERE location_id = ANY($1) GROUP BY location_id, category",
+                loc_ids,
+            )
+            for r in rows:
+                cat_map.setdefault(str(r["location_id"]), {})[r["category"]] = r["cnt"]
+    for loc in locations:
+        loc["category_counts"] = cat_map.get(str(loc["id"]), {})
+
+    return {
+        "company": {"id": str(company["id"]), "name": company["company_name"], "industry": company["industry"]},
+        "locations": locations,
+    }
+
+
+@router.get("/companies/{company_id}/locations/{location_id}/requirements")
+async def admin_location_requirements(
+    company_id: UUID,
+    location_id: UUID,
+    category: Optional[str] = Query(None),
+    current_user=Depends(require_admin),
+):
+    """Full requirement list for a location, including governance_source."""
+    reqs = await get_location_requirements(location_id, company_id, category)
+
+    # Enrich with governance_source
+    async with get_connection() as conn:
+        gov_rows = await conn.fetch(
+            "SELECT id, governance_source FROM compliance_requirements WHERE location_id = $1",
+            location_id,
+        )
+        gov_map = {str(r["id"]): r["governance_source"] for r in gov_rows}
+
+    enriched = []
+    for r in reqs:
+        d = r.dict() if hasattr(r, "dict") else r
+        d["governance_source"] = gov_map.get(d["id"], "not_evaluated")
+        enriched.append(d)
+
+    return {"requirements": enriched}
+
+
+@router.post("/companies/{company_id}/locations")
+async def admin_create_location(
+    company_id: UUID,
+    data: LocationCreate,
+    background_tasks: BackgroundTasks,
+    current_user=Depends(require_admin),
+):
+    """Admin creates a location for a company, auto-syncs compliance requirements."""
+    async with get_connection() as conn:
+        exists = await conn.fetchval("SELECT 1 FROM companies WHERE id = $1", company_id)
+        if not exists:
+            raise HTTPException(404, "Company not found")
+
+    location, has_coverage = await create_location(company_id, data)
+
+    if not has_coverage:
+        background_tasks.add_task(run_compliance_check_background, location["id"], company_id)
+
+    return {"location": location, "has_coverage": has_coverage}
+
+
+@router.post("/companies/{company_id}/locations/{location_id}/requirements")
+async def admin_add_requirement(
+    company_id: UUID,
+    location_id: UUID,
+    body: AdminAddRequirementRequest,
+    current_user=Depends(require_admin),
+):
+    """Cherry-pick a jurisdiction requirement into a company location."""
+    try:
+        row = await admin_add_requirement_to_location(
+            location_id, company_id, body.jurisdiction_requirement_id,
+        )
+        return {"requirement": row}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/companies/{company_id}/locations/{location_id}/requirements/{requirement_id}")
+async def admin_remove_requirement(
+    company_id: UUID,
+    location_id: UUID,
+    requirement_id: UUID,
+    current_user=Depends(require_admin),
+):
+    """Remove an admin-added requirement from a location."""
+    async with get_connection() as conn:
+        deleted = await conn.fetchval(
+            """
+            DELETE FROM compliance_requirements
+            WHERE id = $1 AND location_id = $2 AND governance_source = 'admin_override'
+            RETURNING id
+            """,
+            requirement_id, location_id,
+        )
+    if not deleted:
+        raise HTTPException(404, "Requirement not found or not admin-added")
+    return {"deleted": True}
+
+
+@router.get("/companies/{company_id}/locations/{location_id}/repository")
+async def admin_browse_repository(
+    company_id: UUID,
+    location_id: UUID,
+    current_user=Depends(require_admin),
+):
+    """Browse jurisdiction requirements not yet assigned to this location."""
+    async with get_connection() as conn:
+        jurisdiction_id = await conn.fetchval(
+            "SELECT jurisdiction_id FROM business_locations WHERE id = $1 AND company_id = $2",
+            location_id, company_id,
+        )
+        if not jurisdiction_id:
+            raise HTTPException(404, "Location not found")
+
+        rows = await conn.fetch(
+            """
+            SELECT jr.id, jr.category, jr.regulation_key, jr.jurisdiction_level,
+                   jr.jurisdiction_name, jr.title, jr.description,
+                   jr.current_value, jr.source_url, jr.effective_date
+            FROM jurisdiction_requirements jr
+            WHERE jr.jurisdiction_id = $1
+              AND NOT EXISTS (
+                  SELECT 1 FROM compliance_requirements cr
+                  WHERE cr.location_id = $2
+                    AND cr.requirement_key = jr.category || ':' || COALESCE(jr.regulation_key, jr.title)
+              )
+            ORDER BY jr.category, jr.title
+            """,
+            jurisdiction_id, location_id,
+        )
+
+    return {"requirements": [dict(r) for r in rows]}
