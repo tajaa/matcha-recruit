@@ -385,3 +385,123 @@ To add support for a new country (e.g., Germany):
 6. **Key definitions auto-link**: Ingest script matches `regulation_key` to `key_definition_id`
 
 No code changes needed — just migration seeds for key definitions and precedence rules.
+
+---
+
+## Design Principle: Policies as Independent Units
+
+Each requirement/policy is an independent, atomic unit — like a stock on an exchange.
+
+| Concept | Compliance System | Stock Market Analogy |
+|---------|------------------|---------------------|
+| Key definition | `regulation_key_definitions` | Ticker symbol registry (AAPL, GOOGL) |
+| Master repository | `jurisdiction_requirements` | Exchange listings (AAPL on NASDAQ at $X) |
+| Company portfolio | `compliance_requirements` | Company's holdings (this firm holds AAPL, GOOGL) |
+| Category | `compliance_categories` | Sector/index (Tech, Healthcare) |
+| Admin cherry-pick | Manual assignment | Adding a single stock regardless of sector |
+
+**Why this matters**: Companies typically inherit entire categories based on their business profile (a healthcare company gets all healthcare categories). But occasionally, admin needs to assign 1-2 specific policies from another category — like a tech company that handles medical data needing just `hipaa_privacy` requirements without the full healthcare suite.
+
+**Current state**: The data model fully supports this. Each row in `jurisdiction_requirements` is independently addressable via `requirement_key` + `jurisdiction_id`. The sync function (`_sync_requirements_to_location()`) processes requirements individually, not as category batches. `is_bookmarked` and `is_pinned` work at the individual requirement level.
+
+**Gap**: No admin endpoint exists to manually add individual requirements from another category to a company location. Needed: `POST /admin/locations/{location_id}/requirements/add` with `governance_source = 'admin_override'`.
+
+---
+
+## Runtime Code Audit Findings
+
+Issues discovered when auditing the compliance service against international jurisdiction requirements:
+
+| Issue | Severity | Location | Fix |
+|-------|----------|----------|-----|
+| `resolve_jurisdiction_stack()` CTE doesn't SELECT/filter `country_code` | HIGH | compliance_service.py ~8107 | Add `country_code` to CTE + WHERE clause to prevent cross-country traversal |
+| `get_missing_regulations()` ignores country | HIGH | compliance_registry.py ~4565 | Add `country_code` parameter; filter by `applicable_countries` |
+| `jurisdiction_context.py` serves US-centric expected keys to all countries | MEDIUM | jurisdiction_context.py ~77 | Query `regulation_key_definitions` with `applicable_countries` filter for non-US |
+| Key definition linking doesn't validate `applicable_countries` | MEDIUM | ingest_research_md.py ~269 | Add JOIN to jurisdictions + WHERE on `applicable_countries` |
+| Coverage dashboard not filtered by `country_code` | MEDIUM | admin.py ~3877 | Filter CROSS JOIN by country |
+| `_filter_with_preemption()` assumes US state codes | LOW | compliance_service.py ~3807 | Add guard for non-US country_code |
+| `determine_governing_requirement()` defaults to "most local" when no precedence rule exists | LOW | compliance_service.py ~8237 | Acceptable — adding explicit precedence rules for all international jurisdictions makes this a non-issue |
+
+All fixes are backward-compatible (don't affect existing US jurisdictions).
+
+---
+
+## Known Issues & Data Quality
+
+### Key Definition Linkage Gap (US)
+
+**Status**: 2,131 of 2,173 requirements (98%) have `key_definition_id = NULL`.
+
+**Root cause**: The original key definition backfill (migration `p1q2r3s4t5u6`) matched `regulation_key` against `regulation_key_definitions.key`, but legacy US data from Gemini research uses long descriptive strings as `regulation_key` (e.g., `"fair employment and housing act feha protected classes"`, `"general"`, `"tipped"`) instead of canonical short keys (`protected_classes`, `state_minimum_wage`, `tipped_minimum_wage`).
+
+Only 42 rows currently match — those are from newer research that used canonical keys (London, recent ingest script runs).
+
+**Impact**: Without `key_definition_id`:
+- No staleness SLA tracking for those requirements
+- No enforcing agency metadata linkage
+- No base_weight for severity scoring
+- Gap detection still works (uses `regulation_key` string matching via `EXPECTED_REGULATION_KEYS`)
+
+**Fix (future task)**: Normalize legacy `regulation_key` values to canonical keys. This involves:
+1. Building a mapping of 1,668 distinct descriptive strings → 353 canonical keys
+2. Updating `regulation_key` and `key_definition_id` for all matched rows
+3. Creating new key definitions for any genuinely new keys not in the 353 set
+
+The problem won't grow — the ingest script (`ingest_research_md.py`) now writes canonical keys for all new data.
+
+### London Miscategorized Requirements
+
+**Status**: 13 of London's 46 requirements are in wrong categories due to the `ingest_research_md.py` parser bug (now fixed) that skipped single-word category headers like `overtime` and `leave`.
+
+**Affected keys**:
+
+| Current Category | Should Be | Keys |
+|-----------------|-----------|------|
+| `minimum_wage` | `overtime` | `daily_weekly_overtime` |
+| `sick_leave` | `leave` | `annual_leave_entitlement`, `statutory_maternity_leave`, `statutory_paternity_leave`, `shared_parental_leave`, `adoption_leave`, `bereavement_leave`, `severance_pay`, `statutory_notice_period_employer`, `emergency_dependant_leave`, `state_family_leave`, `jury_duty_leave` |
+| `minor_work_permit` | `anti_discrimination` | `uk_unfair_dismissal` |
+
+**Fix**: Included in the international migration — UPDATE statements to correct `category` and `category_id` for these rows.
+
+### `current_value` Column Width
+
+**Status**: Column is `VARCHAR(100)`. Max value in DB is exactly 100 characters. Mexico City research data has values exceeding 100 chars (e.g., `"3 months SDI + 20 days SDI/year of service + seniority premium + accrued benefits (unjust dismissal)"`).
+
+**Fix**: Widen to `VARCHAR(500)` in the international migration. ORM updated to match.
+
+---
+
+## Implementation Status
+
+### Completed
+- [x] Research: Mexico City (58 requirements across labor, healthcare, oncology)
+- [x] Research: NYC life sciences (11 requirements)
+- [x] Research: Boston life sciences (8 requirements)
+- [x] Fix: `ingest_research_md.py` parser for single-word categories
+- [x] Architecture doc (this file)
+
+### Next: International Migration
+- [ ] ORM models for `regulation_key_definitions`, history, alerts (`server/app/orm/key_definition.py`)
+- [ ] Enum values: `national`, `province`, `region` in `JurisdictionLevel` (`server/app/orm/enums.py`)
+- [ ] Migration: `applicable_countries` column on `regulation_key_definitions`
+- [ ] Migration: Seed ~50 international key definitions
+- [ ] Migration: Create national jurisdiction rows (UK, MX, SG) + parent linking
+- [ ] Migration: Precedence rules (UK supersede, MX supersede + additive)
+- [ ] Migration: Widen `current_value` to VARCHAR(500)
+- [ ] Migration: Fix London miscategorized requirements
+- [ ] Migration: Backfill `key_definition_id` (direct match)
+- [ ] Fix `resolve_jurisdiction_stack()` CTE — add `country_code` safety (`compliance_service.py`)
+- [ ] Fix `get_missing_regulations()` — country-aware gap detection (`compliance_registry.py`)
+- [ ] Fix `jurisdiction_context.py` — country-filtered expected keys
+- [ ] Fix `ingest_research_md.py` — validate `applicable_countries` on key linking
+- [ ] Update `compliance_registry.py` with `_INTERNATIONAL_REGULATION_KEYS`
+- [ ] Update `create_jurisdiction.py` for auto parent linking
+- [ ] Ingest: Mexico City, NYC life sciences, Boston life sciences
+
+### Future Work
+- [ ] Normalize legacy US `regulation_key` values to canonical keys (1,668 strings → 353 definitions)
+- [ ] Admin cherry-pick endpoint: `POST /admin/locations/{location_id}/requirements/add`
+- [ ] Admin coverage dashboard: filter by `country_code`
+- [ ] `_filter_with_preemption()`: guard for non-US country_code
+- [ ] Add more international jurisdictions (France, Germany, etc.)
+- [ ] Northern Ireland devolved employment law research

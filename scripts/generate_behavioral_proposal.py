@@ -488,7 +488,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha is an agentic workforce risk management platform built for multi-location behavioral health organizations managing high-turnover, clinically licensed workforces across complex regulatory environments. From HIPAA compliance monitoring and practitioner credential tracking to pre-termination risk scoring and employment relations case management, Matcha consolidates fragmented HR operations into a single platform&mdash;reducing regulatory exposure, eliminating manual tracking, and delivering real-time risk visibility across every care site. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
+    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For multi-location behavioral health organizations managing high-turnover, clinically licensed workforces, that means HIPAA compliance monitoring, practitioner credential tracking, pre-termination risk scoring, and employment relations case management &mdash; all in one system. During implementation, Matcha builds a custom compliance and HR management system tailored to your organization &mdash; your jurisdictions, your roles, your workflows. After go-live, this system is handed off to your admin team as a fully operational CMS that you own and run independently. The result: reduced regulatory exposure, eliminated manual tracking, and real-time risk visibility across every care site. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
   </div>
 
   <div class="workforce-note">
@@ -640,7 +640,7 @@ HTML_CONTENT = f"""
   </div>
 
   <p class="pricing-note">
-    First jurisdiction included in Platform Fee. Federal compliance (OSHA, FLSA, FMLA, ADA, EEOC) included at no additional charge. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Industry-specific regulatory bodies (e.g., state behavioral health licensing agencies, Medicaid credentialing bodies) requiring distinct compliance configuration are each treated as an additional Jurisdiction and scoped during implementation.<br><br>
+    First jurisdiction included in Platform Fee. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Jurisdiction count and the specific compliance categories covered within each are scoped during Discovery &amp; Gap Analysis.<br><br>
     <strong>FTE Billing</strong> &mdash; Part-time employees are billed at a 2:1 ratio (two part-time employees count as one FTE). This reduces the effective per-head cost for organizations with large part-time clinical workforces.<br>
     <strong>Volume Discount</strong> &mdash; 10% PEPM discount applied automatically for 500+ billable FTE.<br>
     Price locked for the 12-month initial term. FTE count subject to quarterly true-up.
@@ -682,7 +682,7 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with AI-driven document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation. Secure shared export links for external counsel. Designed for high-volume ER environments driven by elevated turnover and the emotionally complex nature of behavioral health work. In behavioral health, ER cases frequently involve clinical staff accused of boundary violations or therapeutic misconduct — matters where the documentary record must be both thorough and legally privileged, making the encrypted case workspace and counsel export link particularly critical. The timeline construction feature is especially valuable in these cases because it surfaces gaps and inconsistencies in supervisor documentation before those gaps appear in a state licensing board complaint or plaintiff's attorney deposition.</p>
+    <p><span class="feature-name">ER Copilot</span> &mdash; Employment relations case management with <strong>AI-driven document analysis, automatic timeline construction, and discrepancy detection</strong>. Encrypted PDF report generation. <strong>Secure shared export links for external counsel</strong>. Designed for high-volume ER environments driven by elevated turnover and the emotionally complex nature of behavioral health work. In behavioral health, ER cases frequently involve clinical staff accused of boundary violations or therapeutic misconduct — matters where the documentary record must be both thorough and legally privileged, making the encrypted case workspace and counsel export link particularly critical. The timeline construction feature is especially valuable in these cases because it surfaces gaps and inconsistencies in supervisor documentation before those gaps appear in a state licensing board complaint or plaintiff's attorney deposition.</p>
   </div>
 
   <div class="feature-block">
@@ -704,7 +704,7 @@ HTML_CONTENT = f"""
   </div>
 
   <div class="feature-block">
-    <p><span class="feature-name">Onboarding</span> &mdash; Task-based onboarding templates organized by role and employment type. Supports role-specific workflows for licensed clinicians, case managers, crisis counselors, and administrative staff. Credential and license expiration tracking built in. Progress analytics with funnel metrics and completion tracking across all sites.</p>
+    <p><span class="feature-name">Onboarding</span> &mdash; Custom onboarding templates built during implementation and tailored to your organization&rsquo;s specific roles, credential requirements, and compliance workflows. Matcha handles the initial onboarding build-out, then hands off the template system to your admin team &mdash; giving you full control to create, modify, and run future onboarding cohorts independently. Supports role-specific workflows for licensed clinicians, case managers, crisis counselors, and administrative staff with credential and license expiration tracking built in. Progress analytics with funnel metrics and completion tracking across all sites.</p>
   </div>
 
   <h2>Agentic Document Workspace (Matcha Work)</h2>
@@ -725,7 +725,7 @@ HTML_CONTENT = f"""
   </div>
 
   <h1>Implementation Timeline</h1>
-  <p>Total duration: 7&ndash;8 weeks. Your dedicated Customer Success Manager guides every phase.</p>
+  <p>Total duration: 7&ndash;8 weeks. During implementation, Matcha builds a custom compliance and HR management system configured to your jurisdictions, roles, and workflows. At go-live, this system is handed off to your admin team as a fully operational CMS &mdash; your team owns it and runs it independently from that point forward. Your dedicated Customer Success Manager guides every phase.</p>
 
   <table class="timeline-table">
     <thead>
@@ -773,6 +773,7 @@ HTML_CONTENT = f"""
   <h2>Security &amp; Infrastructure</h2>
 
   <ul class="terms-list">
+    <li><span class="term-label">HIPAA Compliance</span> Platform infrastructure and data handling practices are designed to support HIPAA compliance. BAA available upon request. PHI is encrypted in transit and at rest and never used for model training or third-party sharing.</li>
     <li><span class="term-label">SSO / SAML 2.0</span> Enterprise single sign-on via SAML 2.0. Compatible with Okta, Azure AD, OneLogin, and any SAML-compliant identity provider. Per-company configuration with auto-provisioning.</li>
     <li><span class="term-label">Role-Based Access</span> Granular role-based access controls across admin, HR, supervisor, and employee roles. Department and location-scoped visibility for multi-site organizations.</li>
     <li><span class="term-label">Uptime</span> 99.5% target platform availability with automated health monitoring and incident alerting.</li>

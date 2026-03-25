@@ -22,22 +22,28 @@ VOLUME_DISCOUNT = 0.10  # 10% automatic for 500+ employees
 PEPM = LIST_PEPM * (1 - VOLUME_DISCOUNT) if EMPLOYEE_COUNT >= 500 else LIST_PEPM
 PLATFORM_FEE = 5_000  # annual, Growth tier (includes federal + 1 jurisdiction)
 JURISDICTION_FEE = 4_000  # per additional jurisdiction/year, Growth tier
-IMPL_FEE = 8_000
+IMPL_FEE = 10_000
 
 MONTHLY = PEPM * EMPLOYEE_COUNT
 ANNUAL = MONTHLY * 12
 ANNUAL_RECURRING = ANNUAL + PLATFORM_FEE  # before additional jurisdictions
 YEAR1_TCV = ANNUAL_RECURRING + IMPL_FEE
-TODAY = date.today().strftime("%B %d, %Y")
+TODAY = "March 20, 2026"
 
-# ROI numbers
+# Jurisdiction estimate (midpoint of 4-8 range for ROI calculations)
+EST_JURISDICTIONS = 6
+EST_JURISDICTION_COST = EST_JURISDICTIONS * JURISDICTION_FEE
+ANNUAL_RECURRING_EST = ANNUAL_RECURRING + EST_JURISDICTION_COST
+YEAR1_TCV_EST = ANNUAL_RECURRING_EST + IMPL_FEE
+
+# ROI numbers (using estimated jurisdiction midpoint)
 HARD_SAVINGS = 224_000
 RISK_REDUCTION = 75_000
 TOTAL_VALUE = HARD_SAVINGS + RISK_REDUCTION
-NET_Y1 = TOTAL_VALUE - YEAR1_TCV
-ROI_MULTIPLE = TOTAL_VALUE / YEAR1_TCV
-YEAR2_NET = TOTAL_VALUE - ANNUAL_RECURRING
-THREE_YEAR_INVEST = YEAR1_TCV + (ANNUAL_RECURRING * 2)
+NET_Y1 = TOTAL_VALUE - YEAR1_TCV_EST
+ROI_MULTIPLE = TOTAL_VALUE / YEAR1_TCV_EST
+YEAR2_NET = TOTAL_VALUE - ANNUAL_RECURRING_EST
+THREE_YEAR_INVEST = YEAR1_TCV_EST + (ANNUAL_RECURRING_EST * 2)
 THREE_YEAR_VALUE = TOTAL_VALUE * 3
 THREE_YEAR_NET = THREE_YEAR_VALUE - THREE_YEAR_INVEST
 
@@ -501,7 +507,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For Momentum Life Sciences, that means U.S. federal and state jurisdiction-level compliance monitoring, multi-state licensure and Scope of Practice tracking, HIPAA and patient privacy compliance, employment law across every operating state, and employment relations case management. For teams with international operations or sponsor relationships, Matcha extends the same coverage to applicable international regulatory frameworks. From compliance tracking and sponsor audit readiness to ER investigations, pre-termination risk scoring, and intelligent policy documents, Matcha consolidates fragmented HR operations into a single platform &mdash; reducing regulatory exposure, eliminating manual tracking, and giving your HR team real-time visibility across every clinical engagement site and field operations team. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
+    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For Momentum Life Sciences, that means U.S. federal and state jurisdiction-level compliance monitoring, multi-state licensure and Scope of Practice tracking, HIPAA and patient privacy compliance, employment law across every operating state, and employment relations case management. For teams with international operations or sponsor relationships, Matcha extends the same coverage to applicable international regulatory frameworks. During implementation, Matcha builds a custom compliance and HR management system tailored to your organization &mdash; your jurisdictions, your roles, your workflows. After go-live, this system is handed off to your admin team as a fully operational CMS that you own and run independently. From compliance tracking and sponsor audit readiness to ER investigations, pre-termination risk scoring, and intelligent policy documents, Matcha consolidates fragmented HR operations into a single platform &mdash; reducing regulatory exposure, eliminating manual tracking, and giving your HR team real-time visibility across every clinical engagement site and field operations team. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
   </div>
 
   <h1>Investment Summary</h1>
@@ -523,28 +529,32 @@ HTML_CONTENT = f"""
           <td>Platform Fee (includes federal compliance + 1 jurisdiction)</td>
           <td class="amount">${PLATFORM_FEE:,.2f}</td>
         </tr>
+        <tr>
+          <td>Estimated additional jurisdictions (4&ndash;8 jurisdictions &times; ${JURISDICTION_FEE:,.0f})</td>
+          <td class="amount">${JURISDICTION_FEE*4:,.0f}&ndash;${JURISDICTION_FEE*8:,.0f}</td>
+        </tr>
         <tr style="background:#f5f5f7;">
           <td><strong>Annual Recurring</strong></td>
-          <td class="amount"><strong>${ANNUAL_RECURRING:,.2f}</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING + JURISDICTION_FEE*4:,.0f}&ndash;${ANNUAL_RECURRING + JURISDICTION_FEE*8:,.0f}</strong></td>
         </tr>
         <tr>
           <td>Implementation &amp; Configuration (one-time, Year 1 only)</td>
           <td class="amount">${IMPL_FEE:,.2f}</td>
         </tr>
         <tr class="total-row">
-          <td>Year 1 Total (before additional jurisdictions)</td>
-          <td class="amount">${YEAR1_TCV:,.2f}</td>
+          <td>Year 1 Total</td>
+          <td class="amount">${YEAR1_TCV + JURISDICTION_FEE*4:,.0f}&ndash;${YEAR1_TCV + JURISDICTION_FEE*8:,.0f}</td>
         </tr>
         <tr class="total-row" style="border-top: 1px solid #d1d5db;">
           <td>Year 2+ Annual (recurring only)</td>
-          <td class="amount">${ANNUAL_RECURRING:,.2f}</td>
+          <td class="amount">${ANNUAL_RECURRING + JURISDICTION_FEE*4:,.0f}&ndash;${ANNUAL_RECURRING + JURISDICTION_FEE*8:,.0f}</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <p class="pricing-note" style="margin-top:6px; margin-bottom:0;">
-    Implementation &amp; Configuration is a one-time fee. Subsequent years require only the annual recurring cost. Professional onboarding services for new locations, jurisdictions, or organizational changes are available on a fee-for-service basis&mdash;a schedule will be provided upon request.
+    Implementation &amp; Configuration is a one-time fee. Subsequent years require only the annual recurring cost. Exact jurisdiction count determined during Discovery &amp; Gap Analysis (Weeks 1&ndash;2). Federal compliance is included at no additional charge. Professional onboarding services for new locations, jurisdictions, or organizational changes are available on a fee-for-service basis&mdash;a schedule will be provided upon request.
   </p>
 
   <h2>Partner Program Pricing ({PARTNER_DISCOUNT:.0%} off)</h2>
@@ -584,11 +594,17 @@ HTML_CONTENT = f"""
           <td class="amount">${JURISDICTION_FEE * PARTNER_MULT:,.0f}</td>
           <td class="amount">${JURISDICTION_FEE * PARTNER_DISCOUNT:,.0f}</td>
         </tr>
+        <tr>
+          <td>Estimated additional jurisdictions (4&ndash;8 jurisdictions)</td>
+          <td class="amount">${JURISDICTION_FEE*4:,.0f}&ndash;${JURISDICTION_FEE*8:,.0f}</td>
+          <td class="amount">${JURISDICTION_FEE*4 * PARTNER_MULT:,.0f}&ndash;${JURISDICTION_FEE*8 * PARTNER_MULT:,.0f}</td>
+          <td class="amount">${JURISDICTION_FEE*4 * PARTNER_DISCOUNT:,.0f}&ndash;${JURISDICTION_FEE*8 * PARTNER_DISCOUNT:,.0f}</td>
+        </tr>
         <tr style="background:#f5f5f7;">
           <td><strong>Annual Recurring</strong></td>
-          <td class="amount"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
-          <td class="amount"><strong>${ANNUAL_RECURRING * PARTNER_MULT:,.0f}</strong></td>
-          <td class="amount"><strong>${ANNUAL_RECURRING * PARTNER_DISCOUNT:,.0f}</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING + JURISDICTION_FEE*4:,.0f}&ndash;${ANNUAL_RECURRING + JURISDICTION_FEE*8:,.0f}</strong></td>
+          <td class="amount"><strong>${(ANNUAL_RECURRING + JURISDICTION_FEE*4) * PARTNER_MULT:,.0f}&ndash;${(ANNUAL_RECURRING + JURISDICTION_FEE*8) * PARTNER_MULT:,.0f}</strong></td>
+          <td class="amount"><strong>${(ANNUAL_RECURRING + JURISDICTION_FEE*4) * PARTNER_DISCOUNT:,.0f}&ndash;${(ANNUAL_RECURRING + JURISDICTION_FEE*8) * PARTNER_DISCOUNT:,.0f}</strong></td>
         </tr>
         <tr>
           <td>Implementation &amp; Configuration</td>
@@ -598,15 +614,15 @@ HTML_CONTENT = f"""
         </tr>
         <tr class="total-row">
           <td>Year 1 Total</td>
-          <td class="amount">${YEAR1_TCV:,.0f}</td>
-          <td class="amount">${YEAR1_TCV * PARTNER_MULT:,.0f}</td>
-          <td class="amount"><strong>${YEAR1_TCV * PARTNER_DISCOUNT:,.0f}</strong></td>
+          <td class="amount">${YEAR1_TCV + JURISDICTION_FEE*4:,.0f}&ndash;${YEAR1_TCV + JURISDICTION_FEE*8:,.0f}</td>
+          <td class="amount">${(YEAR1_TCV + JURISDICTION_FEE*4) * PARTNER_MULT:,.0f}&ndash;${(YEAR1_TCV + JURISDICTION_FEE*8) * PARTNER_MULT:,.0f}</td>
+          <td class="amount"><strong>${(YEAR1_TCV + JURISDICTION_FEE*4) * PARTNER_DISCOUNT:,.0f}&ndash;${(YEAR1_TCV + JURISDICTION_FEE*8) * PARTNER_DISCOUNT:,.0f}</strong></td>
         </tr>
         <tr class="total-row" style="border-top: 1px solid #d1d5db;">
           <td>Year 2+ Annual</td>
-          <td class="amount">${ANNUAL_RECURRING:,.0f}</td>
-          <td class="amount">${ANNUAL_RECURRING * PARTNER_MULT:,.0f}</td>
-          <td class="amount"><strong>${ANNUAL_RECURRING * PARTNER_DISCOUNT:,.0f}</strong></td>
+          <td class="amount">${ANNUAL_RECURRING + JURISDICTION_FEE*4:,.0f}&ndash;${ANNUAL_RECURRING + JURISDICTION_FEE*8:,.0f}</td>
+          <td class="amount">${(ANNUAL_RECURRING + JURISDICTION_FEE*4) * PARTNER_MULT:,.0f}&ndash;${(ANNUAL_RECURRING + JURISDICTION_FEE*8) * PARTNER_MULT:,.0f}</td>
+          <td class="amount"><strong>${(ANNUAL_RECURRING + JURISDICTION_FEE*4) * PARTNER_DISCOUNT:,.0f}&ndash;${(ANNUAL_RECURRING + JURISDICTION_FEE*8) * PARTNER_DISCOUNT:,.0f}</strong></td>
         </tr>
       </tbody>
     </table>
@@ -648,7 +664,7 @@ HTML_CONTENT = f"""
   </div>
 
   <p class="pricing-note">
-    First jurisdiction included in Platform Fee. Federal compliance (OSHA, FLSA, FMLA, ADA, EEOC) included at no additional charge. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. State nursing board and telehealth regulatory frameworks requiring distinct compliance configuration are each treated as an additional Jurisdiction and scoped during implementation.<br><br>
+    First jurisdiction included in Platform Fee. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Jurisdiction count and the specific compliance categories covered within each are scoped during Discovery &amp; Gap Analysis.<br><br>
     <strong>Partner Program (${PARTNER_PEPM:.2f} PEPM)</strong> &mdash; {PARTNER_DISCOUNT:.0%} discount available for organizations that commit to: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.<br>
     <strong>Volume Discount</strong> &mdash; 10% PEPM discount applied automatically for organizations with 500 or more employees.<br>
     Price locked for the 12-month initial term. Employee count subject to quarterly true-up.
@@ -746,7 +762,7 @@ HTML_CONTENT = f"""
   </div>
 
   <h1>Implementation Timeline</h1>
-  <p>Total duration: 7&ndash;8 weeks. Your dedicated Customer Success Manager guides every phase.</p>
+  <p>Total duration: 7&ndash;8 weeks. During implementation, Matcha builds a custom compliance and HR management system configured to your jurisdictions, roles, and workflows. At go-live, this system is handed off to your admin team as a fully operational CMS &mdash; your team owns it and runs it independently from that point forward. Your dedicated Customer Success Manager guides every phase.</p>
 
   <table class="timeline-table">
     <thead>
@@ -761,19 +777,19 @@ HTML_CONTENT = f"""
       <tr>
         <td class="phase">Discovery &amp; Gap Analysis</td>
         <td>Weeks 1&ndash;2</td>
-        <td class="cost">$5,000</td>
+        <td class="cost">$3,000</td>
         <td>Organizational mapping, HRIS audit, clinical engagement site inventory, regulatory gap analysis &mdash; audit HIPAA compliance programs, sponsor agreement obligations, state nursing board licensure coverage, NLC compact participation map, GxP training records, telehealth deployment footprint</td>
       </tr>
       <tr>
         <td class="phase">Configuration &amp; Templating</td>
         <td>Weeks 3&ndash;4</td>
-        <td class="cost">$4,500</td>
+        <td class="cost">$3,000</td>
         <td>Location/jurisdiction setup, compliance baseline scan, build role-specific onboarding templates (program director, account executive, clinical program manager, operations staff, HR and compliance personnel), credential and nursing license expiration workflows, HIPAA training record workflows, handbook and policy document ingestion</td>
       </tr>
       <tr>
         <td class="phase">Data Migration &amp; Manual Run</td>
         <td>Weeks 5&ndash;6</td>
-        <td class="cost">$3,000</td>
+        <td class="cost">$2,000</td>
         <td>Employee data import, training record migration, run first onboarding cohort manually using templates to validate completeness and regulatory alignment</td>
       </tr>
       <tr>
@@ -785,7 +801,7 @@ HTML_CONTENT = f"""
       <tr>
         <td class="phase">Go-Live</td>
         <td>Week 8</td>
-        <td class="cost">$1,000</td>
+        <td class="cost">$500</td>
         <td>Production cutover, CSM handoff, post-launch monitoring</td>
       </tr>
     </tbody>
@@ -898,11 +914,11 @@ HTML_CONTENT = f"""
     </thead>
     <tbody>
       <tr>
-        <td>Annual recurring (PEPM + platform fee)</td>
-        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
-        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
-        <td style="text-align:right">${ANNUAL_RECURRING:,.0f}</td>
-        <td style="text-align:right">${ANNUAL_RECURRING*3:,.0f}</td>
+        <td>Annual recurring (est. 6 jurisdictions)</td>
+        <td style="text-align:right">${ANNUAL_RECURRING_EST:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING_EST:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING_EST:,.0f}</td>
+        <td style="text-align:right">${ANNUAL_RECURRING_EST*3:,.0f}</td>
       </tr>
       <tr>
         <td>Implementation</td>
@@ -913,9 +929,9 @@ HTML_CONTENT = f"""
       </tr>
       <tr>
         <td><strong>Total investment</strong></td>
-        <td style="text-align:right"><strong>${YEAR1_TCV:,.0f}</strong></td>
-        <td style="text-align:right"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
-        <td style="text-align:right"><strong>${ANNUAL_RECURRING:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${YEAR1_TCV_EST:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${ANNUAL_RECURRING_EST:,.0f}</strong></td>
+        <td style="text-align:right"><strong>${ANNUAL_RECURRING_EST:,.0f}</strong></td>
         <td style="text-align:right"><strong>${THREE_YEAR_INVEST:,.0f}</strong></td>
       </tr>
       <tr>

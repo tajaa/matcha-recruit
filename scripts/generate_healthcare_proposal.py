@@ -17,11 +17,11 @@ EMPLOYEE_COUNT = 650
 LIST_PEPM = 14.00
 PARTNER_DISCOUNT = 0.13  # 13% partner program discount
 PARTNER_PEPM = LIST_PEPM * (1 - PARTNER_DISCOUNT)  # $12.32
-VOLUME_DISCOUNT = 0.10  # 10% automatic for 500+ employees
+VOLUME_DISCOUNT = 0.05  # 5% automatic for 500+ employees
 PEPM = LIST_PEPM * (1 - VOLUME_DISCOUNT) if EMPLOYEE_COUNT >= 500 else LIST_PEPM
 PLATFORM_FEE = 10_000  # annual, Business tier (includes federal + 1 jurisdiction)
 JURISDICTION_FEE = 7_500  # per additional jurisdiction/year, Business tier
-IMPL_FEE = 17_000
+IMPL_FEE = 25_000
 
 MONTHLY = PEPM * EMPLOYEE_COUNT
 ANNUAL = MONTHLY * 12
@@ -489,7 +489,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For multi-location healthcare organizations, that means jurisdiction-level compliance monitoring, incident investigations, and pre-termination risk scoring &mdash; all consolidated into one system that reduces legal exposure, eliminates manual tracking, and delivers real-time risk visibility across every facility. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
+    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For multi-location healthcare organizations, that means jurisdiction-level compliance monitoring, incident investigations, and pre-termination risk scoring &mdash; all consolidated into one system. During implementation, Matcha builds a custom compliance and HR management system tailored to your organization &mdash; your jurisdictions, your roles, your workflows. After go-live, this system is handed off to your admin team as a fully operational CMS that you own and run independently &mdash; reducing legal exposure, eliminating manual tracking, and delivering real-time risk visibility across every facility. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps so your team can trust the data without independent research.
   </div>
 
   <h1>Investment Summary</h1>
@@ -504,7 +504,15 @@ HTML_CONTENT = f"""
       </thead>
       <tbody>
         <tr>
-          <td>PEPM Rate: ${PEPM:.2f} &times; {EMPLOYEE_COUNT} employees &times; 12 months</td>
+          <td>List Rate (Per Employee Per Month)</td>
+          <td class="amount">${LIST_PEPM:.2f}</td>
+        </tr>
+        <tr>
+          <td>Volume Discount (500+ employees)</td>
+          <td class="amount">&ndash;{VOLUME_DISCOUNT:.0%}</td>
+        </tr>
+        <tr>
+          <td>Your PEPM: ${PEPM:.2f} &times; {EMPLOYEE_COUNT} employees &times; 12 months</td>
           <td class="amount">${ANNUAL:,.2f}</td>
         </tr>
         <tr>
@@ -636,9 +644,9 @@ HTML_CONTENT = f"""
   </div>
 
   <p class="pricing-note">
-    First jurisdiction included in Platform Fee. Federal compliance (OSHA, FLSA, FMLA, ADA, EEOC) included at no additional charge. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Industry-specific regulatory bodies (e.g., state medical boards, DEA registration sites) requiring distinct compliance configuration are each treated as an additional Jurisdiction and scoped during implementation.<br><br>
+    First jurisdiction included in Platform Fee. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Jurisdiction count and the specific compliance categories covered within each are scoped during Discovery &amp; Gap Analysis.<br><br>
     <strong>Partner Program (${PARTNER_PEPM:.2f} PEPM)</strong> &mdash; 12% discount available for organizations that commit to: quarterly video insight sessions, anonymized case study participation, anonymized data sharing for industry benchmarking, logo rights for Matcha marketing materials, one public platform review (G2 or similar) within 90 days of go-live, and annual prepayment or 2-year term commitment.<br>
-    <strong>Volume Discount</strong> &mdash; 10% discount applied automatically for organizations with 500 or more employees.<br>
+    <strong>Volume Discount</strong> &mdash; 5% discount applied automatically for organizations with 500 or more employees.<br>
     Price locked for the 12-month initial term. Employee count subject to quarterly true-up.
   </p>
 
@@ -727,7 +735,7 @@ HTML_CONTENT = f"""
   </div>
 
   <h1>Implementation Timeline</h1>
-  <p>Total duration: 6&ndash;8 weeks. Your dedicated Customer Success Manager guides every phase.</p>
+  <p>Total duration: 6&ndash;8 weeks. During implementation, Matcha builds a custom compliance and HR management system configured to your jurisdictions, roles, and workflows. At go-live, this system is handed off to your admin team as a fully operational CMS &mdash; your team owns it and runs it independently from that point forward. Your dedicated Customer Success Manager guides every phase.</p>
 
   <table class="timeline-table">
     <thead>
@@ -775,6 +783,7 @@ HTML_CONTENT = f"""
   <h2>Security &amp; Infrastructure</h2>
 
   <ul class="terms-list">
+    <li><span class="term-label">HIPAA Compliance</span> Platform infrastructure and data handling practices are designed to support HIPAA compliance. BAA available upon request. PHI is encrypted in transit and at rest and never used for model training or third-party sharing.</li>
     <li><span class="term-label">SSO / SAML 2.0</span> Enterprise single sign-on via SAML 2.0. Compatible with Okta, Azure AD, OneLogin, and any SAML-compliant identity provider. Per-company configuration with auto-provisioning.</li>
     <li><span class="term-label">Role-Based Access</span> Granular role-based access controls across admin, HR, supervisor, and employee roles. Department and location-scoped visibility for multi-site organizations.</li>
     <li><span class="term-label">Uptime</span> 99.5% target platform availability with automated health monitoring and incident alerting.</li>
@@ -791,7 +800,7 @@ HTML_CONTENT = f"""
     <li><span class="term-label">Platform Fee</span> ${PLATFORM_FEE:,.2f}/year includes federal compliance monitoring and one jurisdiction</li>
     <li><span class="term-label">Jurisdiction Fees</span> ${JURISDICTION_FEE:,.2f} per additional jurisdiction per year, scoped during implementation</li>
     <li><span class="term-label">Partner Program</span> 12% discount (${PARTNER_PEPM:.2f} PEPM) with quarterly video insights, anonymized case study &amp; data sharing, logo rights, public review within 90 days, and annual prepayment or 2-year term</li>
-    <li><span class="term-label">Volume Discount</span> 10% discount applied automatically for 500+ employees</li>
+    <li><span class="term-label">Volume Discount</span> 5% discount applied automatically for 500+ employees</li>
     <li><span class="term-label">Auto-Renewal</span> Automatic 12-month renewal periods</li>
     <li><span class="term-label">Opt-Out Notice</span> 60-day written notice required before any renewal period</li>
     <li><span class="term-label">Employee True-Up</span> Quarterly adjustment based on active employee headcount</li>
