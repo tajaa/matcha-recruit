@@ -48,6 +48,21 @@ def compose_embedding_text(req: dict) -> str:
     if jurisdiction_name:
         parts.append(f"Jurisdiction: {jurisdiction_name} ({jurisdiction_level})")
 
+    # Include penalty context for retrieval
+    meta = req.get("metadata")
+    if isinstance(meta, str):
+        import json as _json
+        try:
+            meta = _json.loads(meta)
+        except Exception:
+            meta = None
+    if isinstance(meta, dict):
+        penalties = meta.get("penalties") or {}
+        if penalties.get("summary"):
+            parts.append(f"Penalties: {penalties['summary']}")
+        if penalties.get("enforcing_agency"):
+            parts.append(f"Enforced by: {penalties['enforcing_agency']}")
+
     return ". ".join(parts)
 
 

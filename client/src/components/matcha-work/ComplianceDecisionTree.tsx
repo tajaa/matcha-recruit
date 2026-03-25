@@ -75,7 +75,7 @@ function formatDate(iso: string | null) {
   } catch { return null }
 }
 
-function JurisdictionNode({ data }: { data: { level: string; name: string; title: string; value: string | null; citation: string | null; sourceUrl: string | null; isGoverning: boolean; effectiveDate: string | null; lastVerifiedAt: string | null; previousValue: string | null; lastChangedAt: string | null; expirationDate: string | null; requiresWrittenPolicy: boolean } }) {
+function JurisdictionNode({ data }: { data: { level: string; name: string; title: string; value: string | null; citation: string | null; sourceUrl: string | null; isGoverning: boolean; effectiveDate: string | null; lastVerifiedAt: string | null; previousValue: string | null; lastChangedAt: string | null; expirationDate: string | null; requiresWrittenPolicy: boolean; penaltySummary: string | null; enforcingAgency: string | null } }) {
   const [open, setOpen] = useState(false)
   return (
     <div
@@ -135,6 +135,12 @@ function JurisdictionNode({ data }: { data: { level: string; name: string; title
           {data.requiresWrittenPolicy && (
             <div className="text-[10px] text-cyan-400/70 mt-1">
               Requires written policy
+            </div>
+          )}
+          {data.penaltySummary && (
+            <div className="text-[10px] text-red-400/80 mt-1">
+              Penalty: {data.penaltySummary}
+              {data.enforcingAgency && <span className="text-zinc-500"> — {data.enforcingAgency}</span>}
             </div>
           )}
           {data.sourceUrl && (
@@ -268,6 +274,8 @@ function buildGraph(
         lastChangedAt: lv.last_changed_at,
         expirationDate: lv.expiration_date,
         requiresWrittenPolicy: lv.requires_written_policy ?? false,
+        penaltySummary: lv.penalty_summary,
+        enforcingAgency: lv.enforcing_agency,
       },
     })
 

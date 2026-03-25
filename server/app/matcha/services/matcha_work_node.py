@@ -478,6 +478,17 @@ def _format_category_reasoning(
             lines.append(f"  ⚠ EXPIRING: This requirement expires on {exp_str}")
         if gov_row.get("requires_written_policy"):
             lines.append("  📋 REQUIRES WRITTEN POLICY: Governing jurisdiction mandates a documented policy for this category")
+        raw_meta = gov_row.get("metadata")
+        if isinstance(raw_meta, str):
+            try:
+                raw_meta = json.loads(raw_meta)
+            except Exception:
+                raw_meta = None
+        if isinstance(raw_meta, dict):
+            pen = raw_meta.get("penalties") or {}
+            if pen.get("summary"):
+                agency = pen.get("enforcing_agency", "N/A")
+                lines.append(f"  ⚖️ PENALTY: {pen['summary']} (enforced by {agency})")
 
     return "\n".join(lines)
 
@@ -594,7 +605,22 @@ def _build_location_reasoning_chain(
                 "last_changed_at": lca.isoformat() if hasattr(lca, "isoformat") else None,
                 "expiration_date": exp.isoformat() if hasattr(exp, "isoformat") else None,
                 "requires_written_policy": bool(row.get("requires_written_policy")),
+                "penalty_summary": None,
+                "enforcing_agency": None,
             })
+            # Extract penalty data from metadata JSONB
+            raw_meta = row.get("metadata")
+            if isinstance(raw_meta, str):
+                try:
+                    raw_meta = json.loads(raw_meta)
+                except Exception:
+                    raw_meta = None
+            if isinstance(raw_meta, dict):
+                pen = raw_meta.get("penalties") or {}
+                if pen.get("summary"):
+                    all_levels_structured[-1]["penalty_summary"] = pen["summary"]
+                if pen.get("enforcing_agency"):
+                    all_levels_structured[-1]["enforcing_agency"] = pen["enforcing_agency"]
 
         gov_req = cat_result.get("governing_requirement") or {}
         categories.append({

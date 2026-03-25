@@ -48,6 +48,8 @@ export interface ComplianceReasoningLevel {
   last_changed_at: string | null
   expiration_date: string | null
   requires_written_policy: boolean
+  penalty_summary: string | null
+  enforcing_agency: string | null
 }
 
 export interface ComplianceReasoningCategory {

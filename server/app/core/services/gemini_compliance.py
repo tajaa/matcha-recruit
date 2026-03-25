@@ -392,6 +392,8 @@ If there is no distinct rule beyond federal/state baseline, still return one sta
 Do NOT return an empty requirements list.
 
 For each requirement, determine whether the statute explicitly requires the employer to include this policy in a written employee handbook or written notice. Set "requires_written_policy" to true only if written disclosure is legally mandated. If the obligation is satisfied by a workplace poster, verbal notice, or operational compliance alone, set it to false.
+
+For each requirement, include a "penalties" object with enforcement/penalty information from the authoritative source. Include the enforcing agency, civil penalty range (min/max per violation), whether penalties are per-violation or flat, any annual cap, criminal penalties if applicable, and a one-line summary. Use current inflation-adjusted amounts where possible.
 {regulation_key_instruction}
 Today's date is {date.today().isoformat()}. Return ONLY rates/values currently in effect.
 
@@ -418,7 +420,16 @@ Respond with JSON:
       "job_protection": <for leave only: true|false; else omit>,
       "employer_size_threshold": <for leave only: integer or null; else omit>,
       "employee_tenure_months": <for leave only: integer or null; else omit>,
-      "employee_hours_threshold": <for leave only: integer or null; else omit>
+      "employee_hours_threshold": <for leave only: integer or null; else omit>,
+      "penalties": {{
+        "enforcing_agency": "Agency name (e.g. HHS OCR, OSHA, State AG)",
+        "civil_penalty_min": <minimum civil penalty USD or null>,
+        "civil_penalty_max": <maximum civil penalty USD or null>,
+        "per_violation": <true if per-violation, false if flat>,
+        "annual_cap": <annual cap USD or null>,
+        "criminal": "Brief criminal penalty description or null",
+        "summary": "One-line human-readable penalty summary"
+      }}
     }}
   ]
 }}

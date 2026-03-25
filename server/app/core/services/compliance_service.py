@@ -1598,10 +1598,16 @@ async def _upsert_requirements_additive(
             req["category"] = cat
     await _validate_source_urls(reqs)
 
-    # Resolve metadata merge fragment once
-    meta_fragment = json.dumps({"research_source": research_source}) if research_source else None
-
     for req in reqs:
+        # Build per-requirement metadata (research_source + penalties if present)
+        meta_dict: dict = {}
+        if research_source:
+            meta_dict["research_source"] = research_source
+        penalties = req.get("penalties")
+        if isinstance(penalties, dict) and any(penalties.values()):
+            meta_dict["penalties"] = penalties
+        meta_fragment = json.dumps(meta_dict) if meta_dict else None
+
         requirement_key = _compute_requirement_key(req)
         tc = req.get("trigger_conditions")
         tc_json = json.dumps(tc) if tc else None
@@ -8121,7 +8127,7 @@ async def resolve_jurisdiction_stack(
                    jr.source_url, jr.source_name, jr.effective_date,
                    jr.last_verified_at, jr.previous_value,
                    jr.last_changed_at, jr.expiration_date,
-                   jr.requires_written_policy,
+                   jr.requires_written_policy, jr.metadata,
                    jr.rate_type, jr.canonical_key, jr.statute_citation,
                    jr.status::text AS req_status, jr.category_id,
                    jr.trigger_conditions, jr.applicable_entity_types,
