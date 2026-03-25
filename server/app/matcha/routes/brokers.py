@@ -756,7 +756,6 @@ async def expire_stale_broker_client_setups(current_user: CurrentUser = Depends(
 async def get_broker_portfolio_reporting(current_user: CurrentUser = Depends(require_broker)):
     async with get_connection() as conn:
         membership = await _get_broker_membership(conn, user_id=current_user.id)
-        await _assert_terms_accepted(conn, broker_id=membership["broker_id"], user_id=current_user.id)
         await _expire_stale_setups(conn, broker_id=membership["broker_id"])
 
         setup_counts = await conn.fetch(
@@ -1031,7 +1030,6 @@ async def get_broker_handbook_coverage(current_user: CurrentUser = Depends(requi
 
     async with get_connection() as conn:
         membership = await _get_broker_membership(conn, user_id=current_user.id)
-        await _assert_terms_accepted(conn, broker_id=membership["broker_id"], user_id=current_user.id)
 
         company_ids = [
             str(row["company_id"])

@@ -106,6 +106,8 @@ export default function Brokers() {
           invoice_owner: form.invoice_owner,
         }
       )
+      setShowAdd(false)
+      setForm(EMPTY_FORM)
       setResult(res)
       fetchBrokers()
     } catch (err) {
