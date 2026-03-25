@@ -19,6 +19,11 @@ from .enums import (
     SourceTier,
 )
 from .jurisdiction import ComplianceCategory, Jurisdiction, PrecedenceRule
+from .key_definition import (
+    RegulationKeyDefinition,
+    RegulationKeyDefinitionHistory,
+    RepositoryAlert,
+)
 from .location import BusinessLocation
 from .requirement import JurisdictionRequirement, PolicyChangeLog
 
@@ -34,6 +39,9 @@ __all__ = [
     "JurisdictionRequirement",
     "PolicyChangeLog",
     "PrecedenceRule",
+    "RegulationKeyDefinition",
+    "RegulationKeyDefinitionHistory",
+    "RepositoryAlert",
     # Enums
     "CategoryDomain",
     "ChangeSource",

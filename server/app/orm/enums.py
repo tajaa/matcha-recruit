@@ -9,7 +9,10 @@ import enum
 
 class JurisdictionLevel(str, enum.Enum):
     federal = "federal"
+    national = "national"
     state = "state"
+    province = "province"
+    region = "region"
     county = "county"
     city = "city"
     special_district = "special_district"

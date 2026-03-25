@@ -54,7 +54,7 @@ class JurisdictionRequirement(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     current_value: Mapped[Optional[str]] = mapped_column(
-        String(100), nullable=True
+        String(500), nullable=True
     )
     numeric_value: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(10, 4), nullable=True

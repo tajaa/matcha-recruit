@@ -4443,6 +4443,83 @@ _MANUFACTURING_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
 }
 EXPECTED_REGULATION_KEYS.update(_MANUFACTURING_REGULATION_KEYS)
 
+_INTERNATIONAL_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
+    "minimum_wage": frozenset(["national_minimum_wage", "zlfn_border_zone_minimum_wage"]),
+    "sick_leave": frozenset(["statutory_sick_leave", "imss_sick_leave"]),
+    "leave": frozenset([
+        "annual_leave_entitlement", "vacation_premium", "statutory_maternity_leave",
+        "statutory_paternity_leave", "aguinaldo_christmas_bonus", "ptu_profit_sharing",
+        "severance_pay", "seniority_premium", "shared_parental_leave",
+        "statutory_notice_period_employer", "adoption_leave",
+    ]),
+    "final_pay": frozenset(["finiquito", "liquidacion"]),
+    "scheduling_reporting": frozenset(["maximum_working_hours", "sunday_premium"]),
+    "workers_comp": frozenset([
+        "social_insurance_employer", "imss_employer_contribution",
+        "infonavit_contribution", "sar_retirement_contribution",
+        "uk_auto_enrolment_pension", "social_insurance_employee",
+        "cpf_employer_contribution", "foreign_worker_levy",
+    ]),
+    "workplace_safety": frozenset(["stps_nom_standards"]),
+    "anti_discrimination": frozenset(["nom_035_psychosocial_risk"]),
+    "hipaa_privacy": frozenset(["national_health_privacy_law", "lfpdppp_health_data"]),
+    "clinical_safety": frozenset(["cofepris_facility_standards"]),
+    "state_licensing": frozenset(["cofepris_sanitary_license"]),
+    "research_consent": frozenset(["national_research_consent_law", "cofepris_research_authorization"]),
+    "radiation_safety": frozenset(["national_radiation_control"]),
+    "chemotherapy_handling": frozenset(["national_hazardous_drug_handling"]),
+    "tumor_registry": frozenset(["national_cancer_registry"]),
+    "billing_integrity": frozenset(["national_anti_corruption_healthcare"]),
+    "corporate_integrity": frozenset(["national_whistleblower_protection"]),
+    "emergency_preparedness": frozenset(["national_emergency_preparedness"]),
+    "oncology_patient_rights": frozenset(["palliative_care_access"]),
+    "healthcare_workforce": frozenset(["professional_licensing"]),
+    "oncology_clinical_trials": frozenset(["clinical_trial_coverage_mandates"]),
+}
+EXPECTED_REGULATION_KEYS.update(
+    {k: v | EXPECTED_REGULATION_KEYS.get(k, frozenset())
+     for k, v in _INTERNATIONAL_REGULATION_KEYS.items()}
+)
+
+# Country scope for international keys — used by get_missing_regulations()
+# None = universal (all countries). Otherwise list of country codes.
+_KEY_COUNTRY_SCOPE: Dict[str, Optional[list]] = {
+    # Universal
+    "national_minimum_wage": None, "statutory_sick_leave": None,
+    "annual_leave_entitlement": None, "statutory_maternity_leave": None,
+    "statutory_paternity_leave": None, "severance_pay": None,
+    "statutory_notice_period_employer": None, "social_insurance_employer": None,
+    "maximum_working_hours": None,
+    # Mexico
+    "zlfn_border_zone_minimum_wage": ["MX"], "imss_sick_leave": ["MX"],
+    "vacation_premium": ["MX"], "aguinaldo_christmas_bonus": ["MX"],
+    "ptu_profit_sharing": ["MX"], "seniority_premium": ["MX"],
+    "finiquito": ["MX"], "liquidacion": ["MX"], "sunday_premium": ["MX"],
+    "imss_employer_contribution": ["MX"], "infonavit_contribution": ["MX"],
+    "sar_retirement_contribution": ["MX"], "stps_nom_standards": ["MX"],
+    "nom_035_psychosocial_risk": ["MX"], "national_health_privacy_law": ["MX"],
+    "lfpdppp_health_data": ["MX"], "cofepris_facility_standards": ["MX"],
+    "cofepris_sanitary_license": ["MX"], "national_research_consent_law": ["MX"],
+    "cofepris_research_authorization": ["MX"], "national_radiation_control": ["MX"],
+    "national_hazardous_drug_handling": ["MX"], "national_cancer_registry": ["MX"],
+    "national_anti_corruption_healthcare": ["MX"], "national_whistleblower_protection": ["MX"],
+    "national_emergency_preparedness": ["MX"], "palliative_care_access": ["MX"],
+    "professional_licensing": ["MX"], "clinical_trial_coverage_mandates": ["MX"],
+    # UK
+    "shared_parental_leave": ["GB"], "adoption_leave": ["GB"],
+    "uk_auto_enrolment_pension": ["GB"], "social_insurance_employee": ["GB"],
+    # Singapore
+    "cpf_employer_contribution": ["SG"], "foreign_worker_levy": ["SG"],
+}
+
+
+def _key_applies_to_country(key: str, category: str, country_code: str) -> bool:
+    """Check if a regulation key applies to a given country."""
+    scope = _KEY_COUNTRY_SCOPE.get(key)
+    if scope is None:
+        return True  # Universal or not in scope dict (default: applies everywhere)
+    return country_code in scope
+
 
 # ---------------------------------------------------------------------------
 # Trigger profiles — drive targeted Gemini research passes
@@ -4563,10 +4640,18 @@ def get_activated_profiles(facility_attributes: dict) -> List[TriggerProfileDef]
 # ---------------------------------------------------------------------------
 
 def get_missing_regulations(
-    category: str, existing_keys: Set[str]
+    category: str, existing_keys: Set[str], country_code: str = "US"
 ) -> List[RegulationDef]:
-    """Return regulations in this category not yet present in the DB."""
+    """Return regulations in this category not yet present in the DB.
+
+    For non-US jurisdictions, filters to only keys that apply to the given country
+    (universal keys + country-specific keys). This prevents flagging UK jurisdictions
+    as missing 'tipped_minimum_wage' or Mexico as missing 'state_paid_sick_leave'.
+    """
     expected = EXPECTED_REGULATION_KEYS.get(category, frozenset())
+    if country_code != "US":
+        expected = {k for k in expected
+                    if _key_applies_to_country(k, category, country_code)}
     missing_keys = expected - existing_keys
     return [REGULATION_MAP[k] for k in sorted(missing_keys) if k in REGULATION_MAP]
 
