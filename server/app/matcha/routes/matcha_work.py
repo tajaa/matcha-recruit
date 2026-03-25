@@ -80,8 +80,31 @@ from ..services.onboarding_orchestrator import (
 )
 from ...core.services.email import get_email_service
 from ...core.services.handbook_service import HandbookService
+from ...config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+async def _get_rag_context(content: str, company_id, max_tokens: int = 4000) -> str | None:
+    """Fetch compliance RAG context for a user question. Returns None on failure."""
+    try:
+        from ...core.services.embedding_service import EmbeddingService
+        from ...core.services.compliance_rag import ComplianceRAGService
+
+        api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
+        if not api_key or not content:
+            return None
+        es = EmbeddingService(api_key=api_key)
+        crag = ComplianceRAGService(es)
+        async with get_connection() as conn:
+            ctx, _ = await crag.get_context_for_question(
+                query=content, conn=conn,
+                company_id=company_id, max_tokens=max_tokens,
+            )
+        return ctx or None
+    except Exception as e:
+        logger.warning("RAG augmentation failed: %s", e)
+        return None
 
 router = APIRouter(dependencies=[Depends(require_feature("matcha_work"))])
 public_router = APIRouter()
@@ -1722,25 +1745,9 @@ async def send_message(
         ctx += "\n\n" + compliance_result.context_text
 
         # RAG augmentation — find requirements most relevant to the user's question
-        try:
-            import os as _os_rag
-            from ...core.services.embedding_service import EmbeddingService as _ES_rag
-            from ...core.services.compliance_rag import ComplianceRAGService as _CRAG
-            from ...config import get_settings as _gs_rag
-
-            _ak_rag = _os_rag.getenv("GEMINI_API_KEY") or _gs_rag().gemini_api_key
-            if _ak_rag and body.content:
-                _es_rag = _ES_rag(api_key=_ak_rag)
-                _crag = _CRAG(_es_rag)
-                async with get_connection() as _rc:
-                    _rag_ctx, _ = await _crag.get_context_for_question(
-                        query=body.content, conn=_rc,
-                        company_id=company_id, max_tokens=4000,
-                    )
-                if _rag_ctx:
-                    ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + _rag_ctx
-        except Exception:
-            pass  # RAG is supplementary
+        rag_ctx = await _get_rag_context(body.content, company_id)
+        if rag_ctx:
+            ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + rag_ctx
 
     # Payer mode — build dedicated medical policy prompt (separate from HR copilot)
     payer_prompt = None
@@ -1971,25 +1978,9 @@ async def send_message_stream(
 
                 # RAG augmentation — find requirements most relevant to the question
                 yield _sse_data({"type": "status", "message": "Searching relevant regulations..."})
-                try:
-                    import os as _os_rag2
-                    from ...core.services.embedding_service import EmbeddingService as _ES_rag2
-                    from ...core.services.compliance_rag import ComplianceRAGService as _CRAG2
-                    from ...config import get_settings as _gs_rag2
-
-                    _ak_rag2 = _os_rag2.getenv("GEMINI_API_KEY") or _gs_rag2().gemini_api_key
-                    if _ak_rag2 and body.content:
-                        _es_rag2 = _ES_rag2(api_key=_ak_rag2)
-                        _crag2 = _CRAG2(_es_rag2)
-                        async with get_connection() as _rc2:
-                            _rag_ctx2, _ = await _crag2.get_context_for_question(
-                                query=body.content, conn=_rc2,
-                                company_id=company_id, max_tokens=4000,
-                            )
-                        if _rag_ctx2:
-                            ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + _rag_ctx2
-                except Exception:
-                    pass  # RAG is supplementary
+                rag_ctx = await _get_rag_context(body.content, company_id)
+                if rag_ctx:
+                    ctx += "\n\n=== RELEVANT REGULATIONS (semantic search) ===\n" + rag_ctx
 
             # Payer mode — build payer prompt inside stream for status events
             stream_payer_prompt = None

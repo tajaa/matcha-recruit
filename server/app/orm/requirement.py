@@ -135,6 +135,14 @@ class JurisdictionRequirement(TimestampMixin, Base):
     metadata_extra: Mapped[Optional[dict]] = mapped_column(
         "metadata", JSONB, nullable=True
     )
+    regulation_key: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )
+    key_definition_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("regulation_key_definitions.id"),
+        nullable=True,
+    )
     source_tier: Mapped[Optional[SourceTier]] = mapped_column(nullable=True)
 
     # Relationships
@@ -146,6 +154,9 @@ class JurisdictionRequirement(TimestampMixin, Base):
     )
     superseded_by: Mapped[Optional["JurisdictionRequirement"]] = relationship(
         "JurisdictionRequirement", remote_side="JurisdictionRequirement.id"
+    )
+    key_definition: Mapped[Optional["RegulationKeyDefinition"]] = relationship(
+        "RegulationKeyDefinition"
     )
 
     __table_args__ = (

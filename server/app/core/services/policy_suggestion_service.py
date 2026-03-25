@@ -25,7 +25,6 @@ class PolicyGap:
     max_severity: str = "low"
     source_cases: list[dict] = field(default_factory=list)
     existing_match: Optional[str] = None
-    confidence: float = 0.0
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -79,7 +78,7 @@ async def get_policy_gaps(company_id: UUID) -> list[dict]:
         # --- ER case policy_check analyses ---
         er_rows = await conn.fetch(
             """
-            SELECT a.analysis_data, c.title AS case_title, c.id AS case_id, c.status AS case_status
+            SELECT a.analysis_data, c.title AS case_title, c.id AS case_id
             FROM er_case_analysis a
             JOIN er_cases c ON a.case_id = c.id
             WHERE c.company_id = $1 AND a.analysis_type = 'policy_check'
@@ -162,7 +161,7 @@ async def get_policy_gaps(company_id: UUID) -> list[dict]:
         # Sort by frequency desc, then severity desc
         sorted_gaps = sorted(
             gaps.values(),
-            key=lambda g: (g.frequency, SEVERITY_RANK.get(g.max_severity, 0), g.confidence),
+            key=lambda g: (g.frequency, SEVERITY_RANK.get(g.max_severity, 0)),
             reverse=True,
         )
 
@@ -170,27 +169,22 @@ async def get_policy_gaps(company_id: UUID) -> list[dict]:
 
 
 async def dismiss_suggestion(company_id: UUID, topic: str) -> None:
-    """Mark a suggestion as dismissed so it doesn't reappear."""
+    """Mark a suggestion as dismissed so it doesn't reappear.
+
+    Uses an atomic append to avoid TOCTOU race conditions.
+    """
     async with get_connection() as conn:
-        current = await conn.fetchval(
-            "SELECT policy_suggestions_dismissed FROM companies WHERE id = $1",
-            company_id,
-        )
-        dismissed = []
-        if current:
-            if isinstance(current, str):
-                try:
-                    dismissed = json.loads(current)
-                except (json.JSONDecodeError, TypeError):
-                    dismissed = []
-            elif isinstance(current, list):
-                dismissed = current
-
-        if topic not in dismissed:
-            dismissed.append(topic)
-
+        topic_json = json.dumps(topic)  # e.g. '"Anti-Retaliation Policy"'
         await conn.execute(
-            "UPDATE companies SET policy_suggestions_dismissed = $1::jsonb WHERE id = $2",
-            json.dumps(dismissed),
+            """
+            UPDATE companies
+            SET policy_suggestions_dismissed =
+                CASE WHEN policy_suggestions_dismissed @> $1::jsonb
+                     THEN policy_suggestions_dismissed
+                     ELSE COALESCE(policy_suggestions_dismissed, '[]'::jsonb) || $1::jsonb
+                END
+            WHERE id = $2
+            """,
+            topic_json,
             company_id,
         )

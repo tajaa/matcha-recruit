@@ -10,7 +10,6 @@ type PolicyGap = {
   max_severity: string
   source_cases: { type: string; id: string; title: string }[]
   existing_match: string | null
-  confidence: number
 }
 
 type Tab = 'all' | 'active' | 'draft' | 'archived'
@@ -88,7 +87,9 @@ export default function Policies() {
     try {
       await api.post('/policies/suggestions/dismiss', { topic })
       setSuggestions((prev) => prev.filter((s) => s.topic !== topic))
-    } catch {}
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to dismiss suggestion')
+    }
     setDismissing(null)
   }
 
@@ -127,6 +128,7 @@ export default function Policies() {
       setShowCreate(false)
       resetForm()
       fetchPolicies()
+      fetchSuggestions()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create policy')
     } finally {

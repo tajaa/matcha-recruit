@@ -277,8 +277,6 @@ def _insert_intl_key(
     """Insert an international key definition, skipping if exists."""
     name_esc = name.replace("'", "''") if name else ""
     agency_esc = enforcing_agency.replace("'", "''") if enforcing_agency else None
-    countries_literal = f"'{{\"'{country_code}'\"}}'" if country_code else "NULL"
-    # Proper array literal
     if country_code:
         countries_literal = "'{" + country_code + "}'"
     else:

@@ -47,6 +47,9 @@ class Jurisdiction(TimestampMixin, Base):
     level: Mapped[JurisdictionLevel] = mapped_column(
         nullable=False, server_default="city"
     )
+    country_code: Mapped[str] = mapped_column(
+        String(2), nullable=False, server_default="US"
+    )
     authority_type: Mapped[str] = mapped_column(
         String(30), nullable=False, server_default="geographic"
     )
