@@ -148,6 +148,24 @@ export default function ComplianceReasoningPanel({ locations, aiSteps, reference
                 </div>
               )}
 
+              {/* Data freshness indicator */}
+              {currentCategory && (() => {
+                const dates = currentCategory.all_levels
+                  .map(l => l.last_verified_at)
+                  .filter((d): d is string => !!d)
+                  .map(d => new Date(d).getTime())
+                const latest = dates.length ? new Date(Math.max(...dates)) : null
+                if (!latest) return null
+                return (
+                  <div className="text-[10px] text-zinc-500 flex items-center gap-1">
+                    <span>Data last verified:</span>
+                    <span className="text-zinc-400">
+                      {latest.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </span>
+                  </div>
+                )
+              })()}
+
               {/* Decision tree — lazy loaded so it doesn't block the answer */}
               {currentCategory && (
                 <Suspense

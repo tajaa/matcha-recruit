@@ -68,7 +68,14 @@ function QuestionNode({ data }: { data: { question: string; answer: string; conc
   )
 }
 
-function JurisdictionNode({ data }: { data: { level: string; name: string; title: string; value: string | null; citation: string | null; sourceUrl: string | null; isGoverning: boolean } }) {
+function formatDate(iso: string | null) {
+  if (!iso) return null
+  try {
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  } catch { return null }
+}
+
+function JurisdictionNode({ data }: { data: { level: string; name: string; title: string; value: string | null; citation: string | null; sourceUrl: string | null; isGoverning: boolean; effectiveDate: string | null; lastVerifiedAt: string | null } }) {
   const [open, setOpen] = useState(false)
   return (
     <div
@@ -100,6 +107,16 @@ function JurisdictionNode({ data }: { data: { level: string; name: string; title
           {data.citation && (
             <div className="text-[10px] text-zinc-500 mt-1.5">
               <span className="text-zinc-400 font-medium">Citation:</span> {data.citation}
+            </div>
+          )}
+          {(data.effectiveDate || data.lastVerifiedAt) && (
+            <div className="flex items-center gap-3 mt-1.5 text-[10px] text-zinc-500">
+              {data.effectiveDate && (
+                <span>Effective: <span className="text-zinc-400">{formatDate(data.effectiveDate)}</span></span>
+              )}
+              {data.lastVerifiedAt && (
+                <span>Verified: <span className="text-zinc-400">{formatDate(data.lastVerifiedAt)}</span></span>
+              )}
             </div>
           )}
           {data.sourceUrl && (
@@ -227,6 +244,8 @@ function buildGraph(
         citation: lv.statute_citation,
         sourceUrl: lv.source_url,
         isGoverning: lv.is_governing,
+        effectiveDate: lv.effective_date,
+        lastVerifiedAt: lv.last_verified_at,
       },
     })
 

@@ -8119,6 +8119,7 @@ async def resolve_jurisdiction_stack(
                    jr.jurisdiction_level, jr.jurisdiction_name, jr.title,
                    jr.description, jr.current_value, jr.numeric_value,
                    jr.source_url, jr.source_name, jr.effective_date,
+                   jr.last_verified_at,
                    jr.rate_type, jr.canonical_key, jr.statute_citation,
                    jr.status::text AS req_status, jr.category_id,
                    jr.trigger_conditions, jr.applicable_entity_types,

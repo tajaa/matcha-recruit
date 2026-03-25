@@ -42,6 +42,8 @@ export interface ComplianceReasoningLevel {
   statute_citation: string | null
   trigger_condition: Record<string, unknown> | null
   is_governing: boolean
+  effective_date: string | null
+  last_verified_at: string | null
 }
 
 export interface ComplianceReasoningCategory {

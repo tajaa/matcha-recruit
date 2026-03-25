@@ -556,6 +556,8 @@ def _build_location_reasoning_chain(
         for row in cat_result.get("all_levels", []):
             level = row.get("jur_level") or row.get("jurisdiction_level") or "unknown"
             jur_name = row.get("jur_display_name") or row.get("jurisdiction_name") or ""
+            eff = row.get("effective_date")
+            lva = row.get("last_verified_at")
             all_levels_structured.append({
                 "jurisdiction_level": level,
                 "jurisdiction_name": jur_name if jur_name else level.capitalize(),
@@ -569,6 +571,8 @@ def _build_location_reasoning_chain(
                     (row.get("jur_level") or row.get("jurisdiction_level"))
                     == cat_result.get("governing_level")
                 ),
+                "effective_date": eff.isoformat() if hasattr(eff, "isoformat") else None,
+                "last_verified_at": lva.isoformat() if hasattr(lva, "isoformat") else None,
             })
 
         gov_req = cat_result.get("governing_requirement") or {}
