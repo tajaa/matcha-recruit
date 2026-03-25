@@ -24,10 +24,15 @@ class EmailService:
     """Service for sending emails via Gmail API."""
 
     def __init__(self):
+        import os
         self.settings = get_settings()
         self.from_email = self.settings.gmail_from_email
         self.from_name = self.settings.gmail_from_name
         self._token_data: Optional[dict] = None
+        # MailerSend credentials (used by broker invite and other transactional emails)
+        self.api_key = os.getenv("MAILERSEND_API_KEY", "")
+        self.base_url = os.getenv("MAILERSEND_BASE_URL", "https://api.mailersend.com/v1")
+        self.mailersend_from_email = os.getenv("MAILERSEND_FROM_EMAIL", self.from_email)
 
     def _load_token(self) -> Optional[dict]:
         token_path = Path(self.settings.gmail_token_path)
@@ -40,7 +45,9 @@ class EmailService:
             return json.load(f)
 
     def is_configured(self) -> bool:
-        """Check if Gmail token file is present and has required fields."""
+        """Check if any email backend (Gmail or MailerSend) is configured."""
+        if self.api_key:
+            return True
         data = self._load_token()
         return bool(data and data.get("refresh_token") and data.get("client_id") and data.get("client_secret"))
 
@@ -145,7 +152,7 @@ class EmailService:
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -284,7 +291,7 @@ This link is unique to you and will expire in 14 days.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -423,7 +430,7 @@ You'll need to log in or create an account to access the interview.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         invite_url = f"{self.settings.app_base_url}/investigation/{invite_token}"
@@ -739,7 +746,7 @@ If you have questions, please contact your administrator.
     ) -> bool:
         """Send a broker client onboarding invitation email."""
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         expires_text = (
@@ -807,18 +814,19 @@ This invitation expires on {expires_text}.
 - Matcha Recruit
 """
 
+        subject = f"{broker_name} invited you to activate {company_name} on Matcha"
+
+        if not self.api_key:
+            # Fall back to Gmail API if MailerSend not configured
+            return await self.send_email(
+                to_email=to_email, to_name=to_name, subject=subject,
+                html_content=html_content, text_content=text_content,
+            )
+
         payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": f"{broker_name} invited you to activate {company_name} on Matcha",
+            "from": {"email": self.mailersend_from_email, "name": self.from_name},
+            "to": [{"email": to_email, "name": to_name}],
+            "subject": subject,
             "html": html_content,
             "text": text_content,
         }
@@ -828,22 +836,17 @@ This invitation expires on {expires_text}.
                 response = await client.post(
                     f"{self.base_url}/email",
                     json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
+                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
                     timeout=30.0,
                 )
-
                 if response.status_code in (200, 201, 202):
-                    logger.info("Sent broker client invite to %s", to_email)
+                    logger.info("Sent broker client invite to %s via MailerSend", to_email)
                     return True
                 else:
                     logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
                     return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
+        except Exception:
+            logger.exception("Error sending broker invite to %s", to_email)
             return False
 
     async def send_broker_welcome_email(
@@ -856,7 +859,7 @@ This invitation expires on {expires_text}.
     ) -> bool:
         """Send a welcome email to a newly created broker owner with their login credentials."""
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1618,7 +1621,7 @@ Open onboarding dashboard: {portal_url}
     ) -> bool:
         """Send a general compliance change notification to a business admin."""
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1840,7 +1843,7 @@ Sent by Matcha on behalf of {company_name}"""
     ) -> bool:
         """Send incident lifecycle notifications to a company admin/client."""
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -1998,7 +2001,7 @@ Open incident:
     ) -> bool:
         """Send lifecycle notifications for leave requests and deadlines."""
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -2154,7 +2157,7 @@ Date Range: {date_range}
     ) -> bool:
         """Send lifecycle notifications for accommodation cases."""
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -2294,7 +2297,7 @@ Employee: {employee_line}
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         html_content = f"""
@@ -2416,7 +2419,7 @@ In the meantime, you can log in to see your pending status. If you have any ques
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
@@ -2552,7 +2555,7 @@ Welcome to Matcha! We're excited to have you on board.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         # Wrap the plain-text body in a simple HTML email
@@ -2637,7 +2640,7 @@ Welcome to Matcha! We're excited to have you on board.
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         html_content = f"""
@@ -2758,7 +2761,7 @@ If you believe this was a mistake or have additional information to provide, ple
         Returns True if sent successfully, False otherwise.
         """
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         html_content = f"""
@@ -2995,7 +2998,7 @@ If you have any questions about getting started, reach out to your manager or HR
     ) -> bool:
         """Send a handbook freshness alert to a business admin."""
         if not self.is_configured():
-            logger.warning("MailerSend not configured, skipping email send")
+            logger.warning("Gmail not configured, skipping email send")
             return False
 
         app_base_url = self.settings.app_base_url
