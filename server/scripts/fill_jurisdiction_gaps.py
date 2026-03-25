@@ -35,7 +35,7 @@ async def main():
         "--categories",
         action="append",
         default=[],
-        help="Category groups to research: general, healthcare, oncology, life_sciences, all (default: all)",
+        help="Category groups to research: general, healthcare, oncology, life_sciences, manufacturing, all (default: all)",
     )
     parser.add_argument("--list-gaps", action="store_true", help="Just list what's missing, don't research")
     parser.add_argument("--output", "-o", help="Output file path (default: scripts/<city>_<state>_compliance.md)")
@@ -51,6 +51,7 @@ async def main():
         HEALTHCARE_CATEGORIES,
         ONCOLOGY_CATEGORIES,
         LIFE_SCIENCES_CATEGORIES,
+        MANUFACTURING_CATEGORIES,
         CATEGORY_LABELS,
     )
 
@@ -58,7 +59,7 @@ async def main():
     target_keys: Set[str] = set()
     for g in groups:
         if g == "all":
-            target_keys |= LABOR_CATEGORIES | HEALTHCARE_CATEGORIES | ONCOLOGY_CATEGORIES | LIFE_SCIENCES_CATEGORIES
+            target_keys |= LABOR_CATEGORIES | HEALTHCARE_CATEGORIES | ONCOLOGY_CATEGORIES | LIFE_SCIENCES_CATEGORIES | MANUFACTURING_CATEGORIES
         elif g == "general":
             target_keys |= LABOR_CATEGORIES
         elif g == "healthcare":
@@ -67,6 +68,8 @@ async def main():
             target_keys |= ONCOLOGY_CATEGORIES
         elif g == "life_sciences":
             target_keys |= LIFE_SCIENCES_CATEGORIES
+        elif g == "manufacturing":
+            target_keys |= MANUFACTURING_CATEGORIES
         else:
             # Treat as a literal category key
             target_keys.add(g)

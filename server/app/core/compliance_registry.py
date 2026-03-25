@@ -258,6 +258,40 @@ CATEGORIES: List[ComplianceCategoryDef] = [
         key="biosafety_lab", label="Biosafety & Lab Safety", short_label="Biosafety",
         group="life_sciences", industry_tag="biotech", research_mode="specialty", docx_section=None,
     ),
+
+    # ── Manufacturing (8) ────────────────────────────────────────────────────
+    ComplianceCategoryDef(
+        key="process_safety", label="Process Safety Management", short_label="PSM",
+        group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="environmental_compliance", label="Environmental & Emissions", short_label="Environ",
+        group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="chemical_safety", label="Chemical & Hazardous Materials", short_label="Chemical",
+        group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="machine_safety", label="Machine & Equipment Safety", short_label="Machine",
+        group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="industrial_hygiene", label="Industrial Hygiene & Exposure", short_label="IH",
+        group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="trade_compliance", label="Import/Export & Trade", short_label="Trade",
+        group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="product_safety", label="Product Safety & Standards", short_label="Product",
+        group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="labor_relations", label="Labor Relations", short_label="Labor Rel",
+        group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
 ]
 
 
@@ -4200,6 +4234,9 @@ MEDICAL_COMPLIANCE_CATEGORIES: FrozenSet[str] = frozenset(
 LIFE_SCIENCES_CATEGORIES: FrozenSet[str] = frozenset(
     c.key for c in CATEGORIES if c.group == "life_sciences"
 )
+MANUFACTURING_CATEGORIES: FrozenSet[str] = frozenset(
+    c.key for c in CATEGORIES if c.group == "manufacturing"
+)
 
 # Research mode sets
 SPECIALTY_CATEGORIES: FrozenSet[str] = frozenset(
@@ -4369,6 +4406,42 @@ _LIFE_SCIENCES_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     ]),
 }
 EXPECTED_REGULATION_KEYS.update(_LIFE_SCIENCES_REGULATION_KEYS)
+
+_MANUFACTURING_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
+    "process_safety": frozenset([
+        "osha_psm", "process_hazard_analysis", "management_of_change",
+        "pre_startup_review", "mechanical_integrity", "emergency_action_plan",
+    ]),
+    "environmental_compliance": frozenset([
+        "air_quality_permit", "neshap_compliance", "wastewater_discharge",
+        "hazardous_waste_rcra", "stormwater_permit", "emissions_reporting",
+    ]),
+    "chemical_safety": frozenset([
+        "hazcom_ghs", "chemical_inventory_reporting", "right_to_know",
+        "sds_management", "hazardous_substance_storage", "pfas_restrictions",
+    ]),
+    "machine_safety": frozenset([
+        "lockout_tagout", "machine_guarding", "powered_industrial_trucks",
+        "crane_hoist_safety", "electrical_safety", "confined_space",
+    ]),
+    "industrial_hygiene": frozenset([
+        "noise_exposure", "respiratory_protection", "heat_illness_prevention",
+        "permissible_exposure_limits", "personal_protective_equipment", "ergonomics",
+    ]),
+    "trade_compliance": frozenset([
+        "customs_tariff", "export_controls", "anti_dumping_duties",
+        "country_of_origin", "trade_agreements", "sanctions_screening",
+    ]),
+    "product_safety": frozenset([
+        "product_certification", "recall_procedures", "quality_system_requirements",
+        "consumer_safety_standards", "labeling_requirements", "type_approval",
+    ]),
+    "labor_relations": frozenset([
+        "collective_bargaining", "right_to_work", "union_notification",
+        "strike_lockout_rules", "works_council", "employee_representation",
+    ]),
+}
+EXPECTED_REGULATION_KEYS.update(_MANUFACTURING_REGULATION_KEYS)
 
 
 # ---------------------------------------------------------------------------
