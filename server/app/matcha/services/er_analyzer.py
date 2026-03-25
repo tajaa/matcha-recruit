@@ -225,6 +225,11 @@ Generate a formal determination letter that:
 5. Explains next steps and resources
 6. Is written in a professional, neutral tone
 
+CRITICAL — EVIDENCE ATTRIBUTION:
+- When citing facts, distinguish between findings from directly reviewed documents (uploaded evidence) and claims made in witness testimony.
+- Do NOT state that "records confirm" or "HR records show" something unless the actual records (Teams messages, emails, system logs) were uploaded and reviewed. If a fact comes from a witness's account of a record, attribute it to the witness: "Per [witness name]'s account..." or "According to testimony from [name]..."
+- This distinction is essential for the legal defensibility of the determination.
+
 The letter should be suitable for delivery to the employee and potential inclusion in personnel file.
 
 Return the letter as plain text, professionally formatted."""
@@ -247,6 +252,11 @@ Evaluate these four signals:
 
 4. HARD EVIDENCE — Is there documented proof (data, records, policy text matched to actions)
    that directly demonstrates a policy violation?
+
+CRITICAL EVIDENCE DISTINCTION:
+- Only count documents listed in EVIDENCE DOCUMENTS as "hard evidence." If a witness DESCRIBES a Teams message, email, or log entry but that record is not in the uploaded documents, it is TESTIMONY about evidence, not the evidence itself.
+- A witness saying "the Teams message was sent Friday" is NOT the same as having the Teams message. The witness's claim must be corroborated by the actual record to count as hard evidence.
+- When scoring confidence, clearly note if key claims rest on testimony alone vs. direct documentary proof.
 
 CASE INFORMATION:
 {case_info}
@@ -345,6 +355,11 @@ STRICT TEMPORAL ANCHORING:
 - Do not allow one actor's subjective interpretation of a message to override the objective timestamp of when the referenced event actually occurred.
 - Correlation in timeline position does not imply causation — require explicit evidence of causal linkage.
 
+CRITICAL — EVIDENCE ATTRIBUTION:
+- When citing evidence in reasoning, distinguish between documents actually reviewed (uploaded to the system) and records merely REFERENCED in witness testimony.
+- If a witness describes a Teams message, email, or system log but that record was not uploaded as evidence, do NOT state "records confirm" or "records show." Instead say "according to [witness name]'s testimony" or "as reported by [name]."
+- Flag outcomes where key claims rest on testimony alone (no corroborating document uploaded) — this affects confidence level.
+
 Rules:
 - Provide 2 to 4 outcome paths, sorted by evidence strength
 - Always include at least one path with a different determination when evidence allows
@@ -412,6 +427,13 @@ Use "run_analysis" ONLY if a specific analysis failed and should be retried, nev
 Prefer action types: "upload_document", "search_evidence", "open_tab".
 
 Generate practical, concrete recommendations for the human investigator. Recommendations must be realistic for the current evidence.
+
+CRITICAL — DISTINGUISH ACTUAL EVIDENCE FROM REFERENCED EVIDENCE:
+- ACTUAL EVIDENCE = only the documents listed in EVIDENCE OVERVIEW (completed_non_policy_doc_names). These have been uploaded and analyzed by the system.
+- REFERENCED EVIDENCE = records, messages, logs, or documents MENTIONED in witness testimony or uploaded documents but NOT themselves uploaded. These are CLAIMS, not verified facts.
+- When a witness describes a Teams message, email, log entry, or record — that is the WITNESS'S ACCOUNT of that record, not the record itself. Do NOT state that the record "confirms" or "shows" anything unless the actual record appears in the uploaded documents list.
+- In your summary and cards, clearly flag when a fact comes from witness testimony vs. direct documentary evidence.
+- If critical records (Teams messages, system logs, emails) are referenced in testimony but not uploaded, recommend obtaining them as a high-priority next step.
 
 CRITICAL — Use specific names and details:
 - Reference people BY NAME as they appear in the documents or involved_employees list. Never say "reporting party", "the employee", "the complainant", or "the subject" when you know the actual name.
