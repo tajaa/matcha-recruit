@@ -29,6 +29,11 @@ def parse_research_md(filepath: str) -> List[Dict]:
     with open(filepath) as f:
         content = f.read()
 
+    # Known single-word categories (no underscore) that the parser must recognise
+    SINGLE_WORD_CATEGORIES = {
+        "overtime", "leave",
+    }
+
     requirements = []
     current_category = None
     current_req: Optional[Dict] = None
@@ -38,6 +43,7 @@ def parse_research_md(filepath: str) -> List[Dict]:
 
         # Category header formats:
         #   ### minimum_wage              (Claude research format)
+        #   ### overtime                  (single-word category)
         #   ## 1. `minimum_wage` — Label  (Gemini bootstrap format)
         cat_match = re.match(r'^#{2,3}\s+(\w+)\s*$', line)
         if not cat_match:
@@ -46,7 +52,7 @@ def parse_research_md(filepath: str) -> List[Dict]:
                 cat_match = cat_match2
         if cat_match:
             candidate = cat_match.group(1)
-            if candidate == candidate.lower() and '_' in candidate:
+            if candidate == candidate.lower() and ('_' in candidate or candidate in SINGLE_WORD_CATEGORIES):
                 current_category = candidate
                 continue
 
