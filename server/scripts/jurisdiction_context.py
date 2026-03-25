@@ -54,6 +54,7 @@ async def main():
 
     has_local = False
     preemption = {}
+    intl_key_rows = []
 
     try:
         async with pool.acquire() as conn:
@@ -70,17 +71,35 @@ async def main():
                     preemption = {r["category"]: r["allows_local_override"] for r in rows}
                 except Exception:
                     preemption = {}
-            # International: no preemption concept, has_local_ordinance not applicable
+            else:
+                # International: query regulation_key_definitions filtered by applicable_countries
+                intl_key_rows = await conn.fetch("""
+                    SELECT category_slug, key FROM regulation_key_definitions
+                    WHERE (applicable_countries IS NULL OR $1 = ANY(applicable_countries))
+                    ORDER BY category_slug, key
+                """, country)
     finally:
         await close_pool()
 
     # Build expected keys (only for the 25 categories we research)
     target_cats = sorted(LABOR_CATEGORIES | HEALTHCARE_CATEGORIES | ONCOLOGY_CATEGORIES)
     expected = {}
-    for cat in target_cats:
-        keys = EXPECTED_REGULATION_KEYS.get(cat, frozenset())
-        if keys:
-            expected[cat] = sorted(keys)
+
+    if country != "US":
+        from app.core.compliance_registry import _key_applies_to_country
+        for r in intl_key_rows:
+            if r["category_slug"] in target_cats:
+                # Double-filter: DB query handles applicable_countries column,
+                # Python filter handles keys not yet tagged in DB (legacy US keys
+                # with applicable_countries=NULL that shouldn't appear for intl)
+                if _key_applies_to_country(r["key"], r["category_slug"], country):
+                    expected.setdefault(r["category_slug"], []).append(r["key"])
+    else:
+        # US: use Python registry (all keys apply)
+        for cat in target_cats:
+            keys = EXPECTED_REGULATION_KEYS.get(cat, frozenset())
+            if keys:
+                expected[cat] = sorted(keys)
 
     output = {
         "city": city,

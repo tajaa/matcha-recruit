@@ -4514,10 +4514,18 @@ _KEY_COUNTRY_SCOPE: Dict[str, Optional[list]] = {
 
 
 def _key_applies_to_country(key: str, category: str, country_code: str) -> bool:
-    """Check if a regulation key applies to a given country."""
-    scope = _KEY_COUNTRY_SCOPE.get(key)
+    """Check if a regulation key applies to a given country.
+
+    Keys explicitly listed in _KEY_COUNTRY_SCOPE with None = universal (all countries).
+    Keys explicitly listed with a country list = only those countries.
+    Keys NOT in _KEY_COUNTRY_SCOPE = US-only (the 353 legacy US keys).
+    """
+    if key not in _KEY_COUNTRY_SCOPE:
+        # Not in scope dict → legacy US key, only applies to US
+        return country_code == "US"
+    scope = _KEY_COUNTRY_SCOPE[key]
     if scope is None:
-        return True  # Universal or not in scope dict (default: applies everywhere)
+        return True  # Explicitly universal
     return country_code in scope
 
 

@@ -267,14 +267,19 @@ async def main():
             )
 
             # Link to key_definition_id where possible
+            # Validates applicable_countries to prevent linking country-restricted
+            # key definitions to wrong jurisdictions
             await conn.execute("""
                 UPDATE jurisdiction_requirements jr
                 SET key_definition_id = rkd.id
                 FROM regulation_key_definitions rkd
+                JOIN jurisdictions j ON j.id = jr.jurisdiction_id
                 WHERE jr.jurisdiction_id = $1
                   AND jr.category = rkd.category_slug
                   AND jr.regulation_key = rkd.key
                   AND jr.key_definition_id IS NULL
+                  AND (rkd.applicable_countries IS NULL
+                       OR j.country_code = ANY(rkd.applicable_countries))
             """, jurisdiction_id)
 
             linked = await conn.fetchval(

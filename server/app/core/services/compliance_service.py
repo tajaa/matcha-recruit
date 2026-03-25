@@ -8104,13 +8104,15 @@ async def resolve_jurisdiction_stack(
     """
     query = """
         WITH RECURSIVE jurisdiction_chain AS (
-            SELECT id, city, state, level::text AS level, display_name,
+            SELECT id, city, state, country_code, level::text AS level, display_name,
                    parent_id, authority_type, 0 AS depth
             FROM jurisdictions WHERE id = $1
             UNION ALL
-            SELECT j.id, j.city, j.state, j.level::text, j.display_name,
+            SELECT j.id, j.city, j.state, j.country_code, j.level::text, j.display_name,
                    j.parent_id, j.authority_type, jc.depth + 1
-            FROM jurisdictions j JOIN jurisdiction_chain jc ON j.id = jc.parent_id
+            FROM jurisdictions j
+            JOIN jurisdiction_chain jc ON j.id = jc.parent_id
+            WHERE j.country_code = jc.country_code
         ),
         chain_requirements AS (
             SELECT jr.id, jr.jurisdiction_id, jr.requirement_key, jr.category,
