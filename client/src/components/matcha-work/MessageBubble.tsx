@@ -26,6 +26,22 @@ const MessageBubble = React.memo(function MessageBubble({ message: m }: { messag
                 referencedLocations={m.metadata.referenced_locations}
               />
             )}
+            {m.metadata?.affected_employees && m.metadata.affected_employees.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-zinc-800">
+                <span className="text-[10px] text-zinc-500 uppercase tracking-wide">
+                  Affected Employees ({m.metadata.affected_employees.reduce((s, a) => s + a.count, 0)})
+                </span>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {m.metadata.affected_employees.map((ae, i) => (
+                    <span key={i} className="inline-flex items-center gap-1.5 text-[11px] bg-purple-900/30 text-purple-300 border border-purple-700/40 px-2 py-0.5 rounded">
+                      <span className="font-medium">{ae.count}</span>
+                      <span className="text-purple-400/70">in</span>
+                      <span>{ae.location}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
             {m.metadata?.payer_sources && m.metadata.payer_sources.length > 0 && (
               <div className="mt-2 pt-2 border-t border-zinc-800">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Sources ({m.metadata.payer_sources.length})</span>

@@ -71,12 +71,19 @@ export interface PayerPolicySource {
   similarity: number
 }
 
+export interface AffectedEmployeeGroup {
+  location: string
+  count: number
+  match_type: 'exact' | 'state'
+}
+
 export interface MWMessageMetadata {
   compliance_reasoning?: ComplianceReasoningLocation[]
   ai_reasoning_steps?: AIReasoningStep[]
   referenced_categories?: string[]
   referenced_locations?: string[]
   payer_sources?: PayerPolicySource[]
+  affected_employees?: AffectedEmployeeGroup[]
 }
 
 export interface MWMessage {

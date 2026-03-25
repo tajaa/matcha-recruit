@@ -297,6 +297,88 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: UUID) -> Th
     )
 
 
+async def _get_affected_employees(
+    company_id: UUID,
+    metadata: dict,
+) -> list[dict] | None:
+    """Count employees affected per referenced compliance location.
+
+    Cross-references Gemini's referenced_locations with the compliance
+    reasoning chains to find matching business_location IDs, then counts
+    employees at those locations (exact match via work_location_id, with
+    work_state fallback for employees without a linked location).
+    """
+    referenced = metadata.get("referenced_locations", [])
+    chains = metadata.get("compliance_reasoning", [])
+    if not referenced or not chains:
+        return None
+
+    label_to_id: dict[str, str] = {c["location_label"]: c["location_id"] for c in chains}
+
+    # Gemini may abbreviate labels — fuzzy match
+    loc_ids: list[UUID] = []
+    for ref in referenced:
+        for label, lid in label_to_id.items():
+            if ref == label or ref in label or label.startswith(ref):
+                loc_ids.append(UUID(lid))
+                break
+
+    if not loc_ids:
+        return None
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT bl.id as loc_id, bl.name, bl.city, bl.state, COUNT(e.id) as count
+            FROM employees e
+            JOIN business_locations bl ON bl.id = e.work_location_id
+            WHERE e.org_id = $1 AND e.termination_date IS NULL
+              AND bl.id = ANY($2::uuid[])
+            GROUP BY bl.id, bl.name, bl.city, bl.state
+            """,
+            company_id, loc_ids,
+        )
+
+        matched_loc_ids = {r["loc_id"] for r in rows}
+        unmatched = [lid for lid in loc_ids if lid not in matched_loc_ids]
+
+        state_rows: list = []
+        if unmatched:
+            loc_states = await conn.fetch(
+                "SELECT id, state FROM business_locations WHERE id = ANY($1::uuid[])",
+                unmatched,
+            )
+            states = [r["state"] for r in loc_states if r["state"]]
+            if states:
+                state_rows = await conn.fetch(
+                    """
+                    SELECT work_state as state, COUNT(*) as count
+                    FROM employees
+                    WHERE org_id = $1 AND termination_date IS NULL
+                      AND work_state = ANY($2::text[])
+                      AND (work_location_id IS NULL OR work_location_id != ALL($3::uuid[]))
+                    GROUP BY work_state
+                    """,
+                    company_id, states, list(matched_loc_ids),
+                )
+
+    result = []
+    for r in rows:
+        result.append({
+            "location": f"{r['name'] or r['city']}, {r['state']}",
+            "count": r["count"],
+            "match_type": "exact",
+        })
+    for r in state_rows:
+        result.append({
+            "location": r["state"],
+            "count": r["count"],
+            "match_type": "state",
+        })
+
+    return result if result else None
+
+
 def _build_compliance_metadata(
     compliance_result: ComplianceContextResult | None,
     ai_resp,
@@ -1812,6 +1894,12 @@ async def send_message(
             msg_metadata = {}
         msg_metadata["payer_sources"] = payer_sources
 
+    # Cross-reference affected employees when both node + compliance are on
+    if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata and msg_metadata.get("referenced_locations"):
+        affected = await _get_affected_employees(company_id, msg_metadata)
+        if affected:
+            msg_metadata["affected_employees"] = affected
+
     # Save assistant message
     assistant_msg = await doc_svc.add_message(
         thread_id,
@@ -2057,6 +2145,12 @@ async def send_message_stream(
                 if msg_metadata is None:
                     msg_metadata = {}
                 msg_metadata["payer_sources"] = stream_payer_sources
+
+            # Cross-reference affected employees when both node + compliance are on
+            if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata and msg_metadata.get("referenced_locations"):
+                affected = await _get_affected_employees(company_id, msg_metadata)
+                if affected:
+                    msg_metadata["affected_employees"] = affected
 
             # Save assistant message
             assistant_msg = await doc_svc.add_message(
