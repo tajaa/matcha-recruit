@@ -101,6 +101,19 @@ async def main():
                     """,
                     jurisdiction_id, city, state, county, country, display_name, level,
                 )
+
+                # Auto-link to national parent for non-US jurisdictions
+                if country != "US":
+                    national_parent = await conn.fetchrow(
+                        "SELECT id FROM jurisdictions WHERE country_code = $1 AND level = 'national' LIMIT 1",
+                        country,
+                    )
+                    if national_parent:
+                        await conn.execute(
+                            "UPDATE jurisdictions SET parent_id = $1 WHERE id = $2",
+                            national_parent["id"], jurisdiction_id,
+                        )
+
                 print(f"CREATED:{jurisdiction_id}:{city}:{state or ''}:{county or ''}:{country}")
     finally:
         await close_pool()

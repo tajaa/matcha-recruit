@@ -272,9 +272,9 @@ async def main():
             await conn.execute("""
                 UPDATE jurisdiction_requirements jr
                 SET key_definition_id = rkd.id
-                FROM regulation_key_definitions rkd
-                JOIN jurisdictions j ON j.id = jr.jurisdiction_id
-                WHERE jr.jurisdiction_id = $1
+                FROM regulation_key_definitions rkd, jurisdictions j
+                WHERE j.id = jr.jurisdiction_id
+                  AND jr.jurisdiction_id = $1
                   AND jr.category = rkd.category_slug
                   AND jr.regulation_key = rkd.key
                   AND jr.key_definition_id IS NULL
