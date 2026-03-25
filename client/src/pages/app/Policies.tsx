@@ -1,8 +1,17 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { policies } from '../../api/client'
+import { policies, api } from '../../api/client'
 import { Button, Badge, Modal } from '../../components/ui'
-import { Upload, Plus, FileText, ExternalLink } from 'lucide-react'
+import { Upload, Plus, FileText, ExternalLink, Lightbulb, X } from 'lucide-react'
 import type { PolicyResponse, PolicyCategory, PolicyStatus } from '../../types/policy'
+
+type PolicyGap = {
+  topic: string
+  frequency: number
+  max_severity: string
+  source_cases: { type: string; id: string; title: string }[]
+  existing_match: string | null
+  confidence: number
+}
 
 type Tab = 'all' | 'active' | 'draft' | 'archived'
 
@@ -49,6 +58,10 @@ export default function Policies() {
   const [formFile, setFormFile] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
+  // Policy suggestions from IR/ER case patterns
+  const [suggestions, setSuggestions] = useState<PolicyGap[]>([])
+  const [dismissing, setDismissing] = useState<string | null>(null)
+
   const fetchPolicies = useCallback(async () => {
     try {
       setItems(await policies.list())
@@ -59,7 +72,25 @@ export default function Policies() {
     }
   }, [])
 
-  useEffect(() => { fetchPolicies() }, [fetchPolicies])
+  const fetchSuggestions = useCallback(async () => {
+    try {
+      const res = await api.get<{ suggestions: PolicyGap[] }>('/policies/suggestions')
+      setSuggestions(res.suggestions)
+    } catch {
+      setSuggestions([])
+    }
+  }, [])
+
+  useEffect(() => { fetchPolicies(); fetchSuggestions() }, [fetchPolicies, fetchSuggestions])
+
+  async function dismissSuggestion(topic: string) {
+    setDismissing(topic)
+    try {
+      await api.post('/policies/suggestions/dismiss', { topic })
+      setSuggestions((prev) => prev.filter((s) => s.topic !== topic))
+    } catch {}
+    setDismissing(null)
+  }
 
   const filtered = items.filter((p) => {
     if (tab !== 'all' && p.status !== tab) return false
@@ -148,6 +179,50 @@ export default function Policies() {
         <div className="mb-4 p-3 rounded-lg border border-red-800/50 bg-red-900/20 text-sm text-red-400 flex items-center justify-between">
           <span>{error}</span>
           <button type="button" onClick={() => setError(null)} className="text-red-500 hover:text-red-300 text-xs">Dismiss</button>
+        </div>
+      )}
+
+      {/* Policy suggestions from IR/ER cases */}
+      {suggestions.length > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-800/40 bg-amber-900/10 p-3">
+          <div className="flex items-start gap-2">
+            <Lightbulb size={16} className="text-amber-400 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-amber-300">
+                Policy gaps detected from {suggestions.reduce((s, g) => s + g.frequency, 0)} case{suggestions.reduce((s, g) => s + g.frequency, 0) !== 1 ? 's' : ''}
+              </p>
+              <p className="text-xs text-zinc-400 mt-0.5">
+                Based on your incident reports and ER investigations, consider creating policies for:
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {suggestions.slice(0, 6).map((gap) => (
+                  <div
+                    key={gap.topic}
+                    className="flex items-center gap-1.5 bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs"
+                  >
+                    <span className="text-zinc-200">{gap.topic}</span>
+                    <span className="text-zinc-500">({gap.frequency})</span>
+                    {gap.max_severity === 'critical' || gap.max_severity === 'high' ? (
+                      <span className="text-[9px] px-1 py-px rounded bg-red-900/40 text-red-400">{gap.max_severity}</span>
+                    ) : null}
+                    <button
+                      onClick={() => { resetForm(); setFormTitle(gap.topic); setShowCreate(true) }}
+                      className="text-emerald-500 hover:text-emerald-400 text-[10px] font-medium ml-1"
+                    >
+                      Draft
+                    </button>
+                    <button
+                      onClick={() => dismissSuggestion(gap.topic)}
+                      disabled={dismissing === gap.topic}
+                      className="text-zinc-500 hover:text-zinc-300"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

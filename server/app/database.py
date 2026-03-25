@@ -745,6 +745,7 @@ async def init_db():
                 healthcare_specialties TEXT[],
                 report_email_token VARCHAR(32) UNIQUE,
                 report_token_used_at TIMESTAMPTZ,
+                policy_suggestions_dismissed JSONB DEFAULT '[]'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW()
             )
         """)

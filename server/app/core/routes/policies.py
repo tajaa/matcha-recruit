@@ -191,6 +191,44 @@ async def create_policy(
     return policy
 
 
+# ---------------------------------------------------------------------------
+# Policy suggestions from IR/ER case patterns
+# ---------------------------------------------------------------------------
+
+
+@router.get("/suggestions")
+async def get_policy_suggestions(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get policy gaps identified from IR incidents and ER cases."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return {"suggestions": []}
+
+    from ..services.policy_suggestion_service import get_policy_gaps
+    gaps = await get_policy_gaps(company_id)
+    return {"suggestions": gaps}
+
+
+class DismissSuggestionRequest(BaseModel):
+    topic: str = Field(..., min_length=1)
+
+
+@router.post("/suggestions/dismiss")
+async def dismiss_policy_suggestion(
+    body: DismissSuggestionRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Dismiss a policy suggestion so it doesn't reappear."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Company not found")
+
+    from ..services.policy_suggestion_service import dismiss_suggestion
+    await dismiss_suggestion(company_id, body.topic)
+    return {"status": "dismissed"}
+
+
 @router.get("/{policy_id}", response_model=PolicyResponse)
 async def get_policy(
     policy_id: str,
