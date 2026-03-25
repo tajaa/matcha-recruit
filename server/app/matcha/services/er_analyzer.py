@@ -871,6 +871,7 @@ class ERAnalyzer:
         policy_findings: str,
         precedent_stats: dict,
         healthcare_context: dict | None = None,
+        determination_confidence: float | None = None,
     ) -> dict[str, Any]:
         """Generate AI-analyzed outcome recommendations for case determination.
 
@@ -895,6 +896,15 @@ class ERAnalyzer:
                 specialties = healthcare_context.get("specialties")
                 specialties_str = ", ".join(specialties) if specialties else "general healthcare"
                 prompt += "\n\n" + HEALTHCARE_OUTCOME_RULES.format(specialties_context=specialties_str)
+            if determination_confidence is not None:
+                prompt += (
+                    f"\n\nEVIDENCE READINESS SCORE: {determination_confidence:.0%}\n"
+                    "This reflects investigation maturity — how complete and consistent the evidence record is.\n"
+                    "CALIBRATION RULE: If evidence readiness is >= 80%, do NOT recommend outcomes that say "
+                    "'gather more evidence' or 'insufficient documentation' — the system has already determined "
+                    "the investigation is sufficiently complete. At least one outcome should have 'medium' or "
+                    "'high' confidence when evidence readiness >= 80%."
+                )
             text = await self._generate_content_async(prompt)
             result = self._parse_json_response(text)
             result["generated_at"] = datetime.now(timezone.utc).isoformat()
@@ -926,6 +936,7 @@ class ERAnalyzer:
         precedent_stats: dict,
         on_status: Callable[[str], Any] | None = None,
         healthcare_context: dict | None = None,
+        determination_confidence: float | None = None,
     ) -> dict[str, Any]:
         """Generate outcome analysis with streaming status callbacks.
 
@@ -943,6 +954,15 @@ class ERAnalyzer:
                 specialties = healthcare_context.get("specialties")
                 specialties_str = ", ".join(specialties) if specialties else "general healthcare"
                 prompt += "\n\n" + HEALTHCARE_OUTCOME_RULES.format(specialties_context=specialties_str)
+            if determination_confidence is not None:
+                prompt += (
+                    f"\n\nEVIDENCE READINESS SCORE: {determination_confidence:.0%}\n"
+                    "This reflects investigation maturity — how complete and consistent the evidence record is.\n"
+                    "CALIBRATION RULE: If evidence readiness is >= 80%, do NOT recommend outcomes that say "
+                    "'gather more evidence' or 'insufficient documentation' — the system has already determined "
+                    "the investigation is sufficiently complete. At least one outcome should have 'medium' or "
+                    "'high' confidence when evidence readiness >= 80%."
+                )
 
             accumulated = ""
             fired_phases: set[str] = set()

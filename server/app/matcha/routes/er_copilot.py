@@ -2895,6 +2895,14 @@ async def generate_outcome_analysis_stream(
                 "specialties": company_row["healthcare_specialties"] or [],
             }
 
+    intake_ctx = _normalize_intake_context(case_row["intake_context"]) or {}
+    last_guidance = intake_ctx.get("last_guidance", {}) if isinstance(intake_ctx, dict) else {}
+    cached_determination_confidence = (
+        float(last_guidance["determination_confidence"])
+        if isinstance(last_guidance, dict) and isinstance(last_guidance.get("determination_confidence"), (int, float))
+        else None
+    )
+
     async def event_stream():
         def sse(event: dict) -> str:
             return f"data: {json.dumps(event)}\n\n"
@@ -2970,6 +2978,7 @@ async def generate_outcome_analysis_stream(
                     precedent_stats=precedent_display,
                     on_status=on_status,
                     healthcare_context=healthcare_context,
+                    determination_confidence=cached_determination_confidence,
                 )
             )
 
@@ -3062,7 +3071,7 @@ async def generate_outcome_analysis(
         await _verify_case_company(conn, case_id, company_id, is_admin)
 
         case_row = await conn.fetchrow(
-            "SELECT case_number, title, description, status, category, created_at FROM er_cases WHERE id = $1",
+            "SELECT case_number, title, description, status, category, created_at, intake_context FROM er_cases WHERE id = $1",
             case_id,
         )
         if not case_row:
@@ -3141,6 +3150,14 @@ async def generate_outcome_analysis(
         "created_at": case_row["created_at"].isoformat() if case_row["created_at"] else None,
     }
 
+    intake_ctx = _normalize_intake_context(case_row["intake_context"]) or {}
+    last_guidance = intake_ctx.get("last_guidance", {}) if isinstance(intake_ctx, dict) else {}
+    cached_determination_confidence = (
+        float(last_guidance["determination_confidence"])
+        if isinstance(last_guidance, dict) and isinstance(last_guidance.get("determination_confidence"), (int, float))
+        else None
+    )
+
     analyzer = _build_er_analyzer(model_override=model)
     raw_result = await analyzer.generate_outcome_analysis(
         case_info=c_info,
@@ -3148,6 +3165,7 @@ async def generate_outcome_analysis(
         policy_findings=policy_findings,
         precedent_stats={"total_closed_cases": total_closed, "outcome_distribution": precedent_stats},
         healthcare_context=healthcare_context,
+        determination_confidence=cached_determination_confidence,
     )
 
     outcomes = []

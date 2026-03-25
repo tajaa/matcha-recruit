@@ -223,11 +223,11 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
         <div className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-4 py-4">
           <div className="flex items-start gap-3">
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-emerald-300">Preponderance of Evidence Reached</p>
+              <p className="text-sm font-medium text-emerald-300">Sufficient Evidence to Determine</p>
               <p className="text-xs text-emerald-400/70 mt-1 leading-relaxed">
-                Based on the evidence gathered ({Math.round(guidance.determination_confidence * 100)}% confidence),
-                this case has reached the preponderance of evidence threshold.
-                You can begin generating case determination options or continue investigating to strengthen the record.
+                Evidence confidence at {Math.round(guidance.determination_confidence * 100)}% — the investigation
+                has gathered sufficient material to support a case determination. Individual outcome options reflect
+                how clearly the evidence points to each specific path.
               </p>
               {guidance.determination_signals.length > 0 && (
                 <ul className="mt-2 space-y-0.5">
