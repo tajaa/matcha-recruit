@@ -328,15 +328,15 @@ Return ONLY a JSON object with this structure:
     {{
       "determination": "substantiated",
       "recommended_action": "disciplinary_action",
-      "action_label": "Retraining for Doe + Written Warning for Smith",
-      "reasoning": "Two witnesses corroborate the reported behavior. The respondent's own statement partially acknowledges the conduct.",
-      "policy_basis": "Section 3.2 Workplace Conduct prohibits intimidating behavior. Progressive discipline policy calls for written warning on first offense.",
-      "hr_considerations": "Consider respondent's tenure and clean prior record as mitigating factors. Document the warning thoroughly for potential future escalation.",
-      "precedent_note": "3 of 5 similar past cases resulted in disciplinary action rather than termination.",
+      "action_label": "Retraining for [complainant] + Written Warning for [respondent]",
+      "reasoning": "Use ONLY facts from the provided case data. Cite specific evidence from uploaded documents or testimony by name.",
+      "policy_basis": "Cite ONLY policies listed in the POLICY FINDINGS section above.",
+      "hr_considerations": "Best practice notes based on the specific facts of this case.",
+      "precedent_note": "Reference the PAST CASE PRECEDENT stats provided above.",
       "confidence": "high",
       "party_actions": [
-        {{"name": "Jane Doe", "role": "complainant", "action": "Mandatory Retraining", "detail": "Doe admitted to clinical charting errors requiring remediation."}},
-        {{"name": "John Smith", "role": "respondent", "action": "Written Warning", "detail": "Smith's Teams message constitutes workplace harassment under policy 3.2."}}
+        {{"name": "USE ACTUAL NAME FROM case_info.involved_parties", "role": "complainant", "action": "Action label", "detail": "Explanation citing specific evidence from the case data."}},
+        {{"name": "USE ACTUAL NAME FROM case_info.involved_parties", "role": "respondent", "action": "Action label", "detail": "Explanation citing specific evidence from the case data."}}
       ]
     }}
   ],
@@ -361,10 +361,13 @@ STRICT TEMPORAL ANCHORING:
 - Do not allow one actor's subjective interpretation of a message to override the objective timestamp of when the referenced event actually occurred.
 - Correlation in timeline position does not imply causation — require explicit evidence of causal linkage.
 
-CRITICAL — EVIDENCE ATTRIBUTION:
-- When citing evidence in reasoning, distinguish between documents actually reviewed (uploaded to the system) and records merely REFERENCED in witness testimony.
-- If a witness describes a Teams message, email, or system log but that record was not uploaded as evidence, do NOT state "records confirm" or "records show." Instead say "according to [witness name]'s testimony" or "as reported by [name]."
-- Flag outcomes where key claims rest on testimony alone (no corroborating document uploaded) — this affects confidence level.
+CRITICAL — CLOSED-SYSTEM CONSTRAINT (MANDATORY):
+- You are operating as a CLOSED SYSTEM. You may ONLY reference information present in the CASE INFORMATION, ANALYSIS SUMMARY, and POLICY FINDINGS provided above.
+- NAMES: You may ONLY use names that appear in case_info.involved_parties or in the case description/analysis text. Do NOT invent, substitute, or fabricate any person's name. If a party's name is not in the data, refer to them by role ("the complainant", "the respondent").
+- EVENTS: You may ONLY describe events that are explicitly mentioned in the case description, analysis summary, or uploaded documents. Do NOT fabricate incidents, conversations, forensic findings, or specific dates that are not in the provided data.
+- EVIDENCE: Distinguish between documents actually uploaded to the system and records merely REFERENCED in testimony. If a witness describes a Teams message, email, or log but that record was not uploaded, say "according to [name]'s account" — NOT "records confirm" or "forensic logs show."
+- POLICY: Only cite policies that appear in the POLICY FINDINGS section. Do not invent policy names, section numbers, or framework titles.
+- If the provided data is insufficient to support a specific claim, say so honestly rather than filling gaps with fabricated details.
 
 Rules:
 - Provide 2 to 4 outcome paths, sorted by evidence strength
