@@ -32,7 +32,7 @@ type ERGuidancePanelProps = {
   hasDescription: boolean
   caseStatus?: string
   onActionClick?: (action: { type: string; label: string }) => void
-  onBeginDetermination?: (outcome: ERCaseOutcome, adminNotes: string) => Promise<void>
+  onBeginDetermination?: (outcome: ERCaseOutcome, adminNotes: string, outcomeDetail?: OutcomeOption) => Promise<void>
   skipCache?: boolean
   onCacheSkipped?: () => void
 }
@@ -175,8 +175,9 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
   async function handleApplyOutcome(outcome: ERCaseOutcome, outcomeIdx: number) {
     if (!onBeginDetermination) return
     setApplying(outcome)
+    const selectedOutcome = outcomeData?.outcomes?.[outcomeIdx]
     try {
-      await onBeginDetermination(outcome, adminNotes[outcomeIdx] ?? '')
+      await onBeginDetermination(outcome, adminNotes[outcomeIdx] ?? '', selectedOutcome)
       setShowDetermination(false)
     } catch (e) {
       setOutcomeError(e instanceof Error ? e.message : 'Failed to apply outcome')
@@ -282,9 +283,6 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
                 <Badge variant={confidenceVariant[opt.confidence] ?? 'neutral'}>
                   {opt.confidence} confidence
                 </Badge>
-                {opt.applies_to && (
-                  <span className="text-xs text-zinc-400 italic">— {opt.applies_to}</span>
-                )}
               </div>
 
               <button
@@ -309,6 +307,21 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
                     <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-0.5">HR Considerations</p>
                     <p className="text-sm text-zinc-300 leading-relaxed">{opt.hr_considerations}</p>
                   </div>
+                  {opt.party_actions && opt.party_actions.length > 0 && (
+                    <div>
+                      <p className="text-[11px] text-zinc-500 uppercase tracking-wide mb-1">Actions by Party</p>
+                      <div className="space-y-1.5">
+                        {opt.party_actions.map((pa, j) => (
+                          <div key={j} className="text-sm">
+                            <span className="font-medium text-zinc-200">{pa.name}</span>
+                            <span className="text-zinc-500"> ({pa.role})</span>
+                            <span className="text-zinc-400"> — {pa.action}</span>
+                            {pa.detail && <p className="text-xs text-zinc-500 mt-0.5">{pa.detail}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

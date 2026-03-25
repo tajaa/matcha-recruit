@@ -318,7 +318,7 @@ For each outcome path, provide:
 - hr_considerations: Best practice notes, risks, or mitigating factors to consider
 - precedent_note: How this aligns with the company's past case outcomes (use the precedent stats provided)
 - confidence: "high", "medium", or "low" based on evidence strength for this path
-- applies_to: (required when case_info.involved_parties has multiple non-witness parties) The name and role of the party this outcome applies to (e.g., "Amina El-Amin (respondent)")
+- party_actions: (required when case_info.involved_parties has multiple non-witness parties) Array of per-party action recommendations within THIS outcome. Each entry: {{"name": "...", "role": "complainant"|"respondent", "action": "short action label", "detail": "1-2 sentence explanation"}}
 
 Order outcomes from most to least supported by evidence, with highest confidence first.
 
@@ -328,22 +328,26 @@ Return ONLY a JSON object with this structure:
     {{
       "determination": "substantiated",
       "recommended_action": "disciplinary_action",
-      "action_label": "Written Warning with Mandatory Training",
+      "action_label": "Retraining for Doe + Written Warning for Smith",
       "reasoning": "Two witnesses corroborate the reported behavior. The respondent's own statement partially acknowledges the conduct.",
       "policy_basis": "Section 3.2 Workplace Conduct prohibits intimidating behavior. Progressive discipline policy calls for written warning on first offense.",
       "hr_considerations": "Consider respondent's tenure and clean prior record as mitigating factors. Document the warning thoroughly for potential future escalation.",
       "precedent_note": "3 of 5 similar past cases resulted in disciplinary action rather than termination.",
       "confidence": "high",
-      "applies_to": "Jane Doe (respondent)"
+      "party_actions": [
+        {{"name": "Jane Doe", "role": "complainant", "action": "Mandatory Retraining", "detail": "Doe admitted to clinical charting errors requiring remediation."}},
+        {{"name": "John Smith", "role": "respondent", "action": "Written Warning", "detail": "Smith's Teams message constitutes workplace harassment under policy 3.2."}}
+      ]
     }}
   ],
   "case_summary": "2-3 sentence executive summary of the case and key evidence"
 }}
 
 MULTI-ACTOR EVALUATION (MANDATORY):
-- If case_info.involved_parties contains more than one non-witness party (complainant or respondent), you MUST produce separate outcome paths for EACH party.
-- Each outcome MUST include "applies_to" with the party's name and role.
-- Do NOT generate a single blended outcome for multiple parties — separate determinations are required.
+- If case_info.involved_parties has multiple non-witness parties, each outcome MUST be a COMBINED recommendation covering ALL parties — not separate outcomes per party.
+- Each outcome represents a complete resolution path for the entire case. When applied, it should document what happens to every involved party.
+- Include a "party_actions" array listing the specific action for each non-witness party.
+- The action_label should summarize the combined actions (e.g., "Retraining for El-Amin + Written Warning for Patel").
 - Actor A being a victim in one context does NOT grant them immunity for separate policy violations they committed in another context.
 
 SYSTEM DATA PRIORITY:

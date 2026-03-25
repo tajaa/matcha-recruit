@@ -143,7 +143,8 @@ export interface EvidenceSearchResult { chunk_id: string; content: string; speak
 export interface EvidenceSearchResponse { results: EvidenceSearchResult[]; query: string; total_chunks: number }
 
 // Outcome Analysis
-export interface OutcomeOption { determination: 'substantiated' | 'unsubstantiated' | 'inconclusive'; recommended_action: ERCaseOutcome; action_label: string; reasoning: string; policy_basis: string; hr_considerations: string; precedent_note: string; confidence: 'high' | 'medium' | 'low'; applies_to?: string }
+export interface PartyAction { name: string; role: string; action: string; detail: string }
+export interface OutcomeOption { determination: 'substantiated' | 'unsubstantiated' | 'inconclusive'; recommended_action: ERCaseOutcome; action_label: string; reasoning: string; policy_basis: string; hr_considerations: string; precedent_note: string; confidence: 'high' | 'medium' | 'low'; party_actions?: PartyAction[] }
 export interface OutcomeAnalysisResponse { outcomes: OutcomeOption[]; case_summary: string; generated_at: string; model: string }
 
 // Export

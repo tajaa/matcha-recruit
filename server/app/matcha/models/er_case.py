@@ -287,6 +287,14 @@ class EvidenceSearchResponse(BaseModel):
 ERDetermination = Literal["substantiated", "unsubstantiated", "inconclusive"]
 
 
+class PartyAction(BaseModel):
+    """Action recommendation for a specific party in a multi-actor case."""
+    name: str
+    role: EREmployeeRole
+    action: str
+    detail: str = ""
+
+
 class OutcomeOption(BaseModel):
     """A single AI-suggested outcome path for case determination."""
     determination: ERDetermination
@@ -297,7 +305,7 @@ class OutcomeOption(BaseModel):
     hr_considerations: str
     precedent_note: str
     confidence: ConfidenceLevel
-    applies_to: Optional[str] = None
+    party_actions: list[PartyAction] = []
 
 
 class OutcomeAnalysisResponse(BaseModel):

@@ -54,6 +54,7 @@ from ..models.er_case import (
     SuggestedGuidanceResponse,
     OutcomeAnalysisResponse,
     OutcomeOption,
+    PartyAction,
     EvidenceSearchRequest,
     EvidenceSearchResponse,
     EvidenceSearchResult,
@@ -3044,7 +3045,10 @@ async def generate_outcome_analysis_stream(
                     hr_considerations=o.get("hr_considerations", ""),
                     precedent_note=o.get("precedent_note", ""),
                     confidence=conf,
-                    applies_to=o.get("applies_to"),
+                    party_actions=[
+                        PartyAction(**pa) for pa in o.get("party_actions", [])
+                        if isinstance(pa, dict) and "name" in pa and "action" in pa
+                    ],
                 ))
 
             # Filter contradictory outcomes when evidence readiness >= 80%

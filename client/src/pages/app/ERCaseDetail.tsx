@@ -19,6 +19,7 @@ import {
   NOTE_TYPES,
   type ERCaseStatus,
   type ERCaseOutcome,
+  type OutcomeOption,
   type SuggestedGuidanceResponse,
   type TimelineAnalysisResponse,
   type ShareLink,
@@ -243,10 +244,16 @@ export default function ERCaseDetail() {
                 caseStatus={case_.status}
                 skipCache={skipGuidanceCache}
                 onCacheSkipped={() => setSkipGuidanceCache(false)}
-                onBeginDetermination={async (outcome: ERCaseOutcome, adminNotes: string) => {
+                onBeginDetermination={async (outcome: ERCaseOutcome, adminNotes: string, outcomeDetail?: OutcomeOption) => {
                   await updateCase({ status: 'closed' as ERCaseStatus, outcome })
                   try {
                     const noteLines = [`Case closed with outcome: ${outcomeLabel[outcome] ?? outcome}`]
+                    if (outcomeDetail?.party_actions?.length) {
+                      noteLines.push('\n\nParty actions:')
+                      outcomeDetail.party_actions.forEach(pa => {
+                        noteLines.push(`\n- ${pa.name} (${pa.role}): ${pa.action}`)
+                      })
+                    }
                     if (adminNotes.trim()) noteLines.push(`\nAdmin notes: ${adminNotes.trim()}`)
                     await api.post(`/er/cases/${caseId}/notes`, {
                       note_type: 'system',
