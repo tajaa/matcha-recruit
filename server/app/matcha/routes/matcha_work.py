@@ -379,6 +379,77 @@ async def _get_affected_employees(
     return result if result else None
 
 
+_GAP_KEYWORDS: dict[str, list[str]] = {
+    "hipaa_privacy": ["hipaa", "privacy", "phi", "protected health"],
+    "workplace_safety": ["safety", "osha", "workplace safety", "injury prevention"],
+    "anti_discrimination": ["discrimination", "harassment", "equal employment", "eeo"],
+    "sick_leave": ["sick leave", "paid sick", "illness"],
+    "leave": ["leave", "fmla", "family leave", "medical leave"],
+    "meal_breaks": ["meal", "break", "rest period"],
+    "overtime": ["overtime", "hours worked", "flsa"],
+    "minimum_wage": ["minimum wage", "wage"],
+    "workers_comp": ["workers comp", "work injury", "occupational injury"],
+    "cybersecurity": ["cybersecurity", "data security", "breach", "information security"],
+    "emergency_preparedness": ["emergency", "disaster", "evacuation"],
+    "clinical_safety": ["clinical", "patient safety", "infection control"],
+    "billing_integrity": ["billing", "coding", "false claims", "anti-kickback"],
+    "telehealth": ["telehealth", "telemedicine", "remote care"],
+    "radiation_safety": ["radiation", "radiology", "nuclear"],
+}
+
+
+async def _detect_compliance_gaps(
+    company_id: UUID,
+    metadata: dict,
+) -> list[dict] | None:
+    """Detect gaps where jurisdiction requires a written policy but company lacks one."""
+    chains = metadata.get("compliance_reasoning", [])
+    if not chains:
+        return None
+
+    required_categories: set[str] = set()
+    for loc in chains:
+        for cat in loc.get("categories", []):
+            for level in cat.get("all_levels", []):
+                if level.get("requires_written_policy") and level.get("is_governing"):
+                    required_categories.add(cat["category"])
+
+    if not required_categories:
+        return None
+
+    async with get_connection() as conn:
+        policies = await conn.fetch(
+            "SELECT title FROM policies WHERE company_id = $1 AND status = 'active'",
+            company_id,
+        )
+        handbook_sections = await conn.fetch("""
+            SELECT hs.title FROM handbook_sections hs
+            JOIN handbook_versions hv ON hv.id = hs.handbook_version_id
+            JOIN handbooks h ON h.id = hv.handbook_id
+            WHERE h.company_id = $1 AND h.status = 'active'
+              AND hv.version_number = h.active_version
+        """, company_id)
+
+    all_titles = {
+        p["title"].lower() for p in policies if p["title"]
+    } | {
+        s["title"].lower() for s in handbook_sections if s["title"]
+    }
+
+    gaps = []
+    for cat in required_categories:
+        keywords = _GAP_KEYWORDS.get(cat, [cat.replace("_", " ")])
+        has_match = any(any(kw in title for kw in keywords) for title in all_titles)
+        if not has_match:
+            gaps.append({
+                "category": cat,
+                "label": cat.replace("_", " ").title(),
+                "status": "missing",
+            })
+
+    return gaps if gaps else None
+
+
 def _build_compliance_metadata(
     compliance_result: ComplianceContextResult | None,
     ai_resp,
@@ -1894,11 +1965,15 @@ async def send_message(
             msg_metadata = {}
         msg_metadata["payer_sources"] = payer_sources
 
-    # Cross-reference affected employees when both node + compliance are on
-    if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata and msg_metadata.get("referenced_locations"):
-        affected = await _get_affected_employees(company_id, msg_metadata)
-        if affected:
-            msg_metadata["affected_employees"] = affected
+    # Cross-reference affected employees + detect policy gaps when both node + compliance are on
+    if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata:
+        if msg_metadata.get("referenced_locations"):
+            affected = await _get_affected_employees(company_id, msg_metadata)
+            if affected:
+                msg_metadata["affected_employees"] = affected
+        gaps = await _detect_compliance_gaps(company_id, msg_metadata)
+        if gaps:
+            msg_metadata["compliance_gaps"] = gaps
 
     # Save assistant message
     assistant_msg = await doc_svc.add_message(
@@ -2146,11 +2221,15 @@ async def send_message_stream(
                     msg_metadata = {}
                 msg_metadata["payer_sources"] = stream_payer_sources
 
-            # Cross-reference affected employees when both node + compliance are on
-            if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata and msg_metadata.get("referenced_locations"):
-                affected = await _get_affected_employees(company_id, msg_metadata)
-                if affected:
-                    msg_metadata["affected_employees"] = affected
+            # Cross-reference affected employees + detect policy gaps when both node + compliance are on
+            if thread.get("node_mode") and thread.get("compliance_mode") and msg_metadata:
+                if msg_metadata.get("referenced_locations"):
+                    affected = await _get_affected_employees(company_id, msg_metadata)
+                    if affected:
+                        msg_metadata["affected_employees"] = affected
+                gaps = await _detect_compliance_gaps(company_id, msg_metadata)
+                if gaps:
+                    msg_metadata["compliance_gaps"] = gaps
 
             # Save assistant message
             assistant_msg = await doc_svc.add_message(

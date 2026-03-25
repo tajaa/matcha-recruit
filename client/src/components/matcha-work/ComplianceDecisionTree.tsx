@@ -75,7 +75,7 @@ function formatDate(iso: string | null) {
   } catch { return null }
 }
 
-function JurisdictionNode({ data }: { data: { level: string; name: string; title: string; value: string | null; citation: string | null; sourceUrl: string | null; isGoverning: boolean; effectiveDate: string | null; lastVerifiedAt: string | null } }) {
+function JurisdictionNode({ data }: { data: { level: string; name: string; title: string; value: string | null; citation: string | null; sourceUrl: string | null; isGoverning: boolean; effectiveDate: string | null; lastVerifiedAt: string | null; previousValue: string | null; lastChangedAt: string | null; expirationDate: string | null; requiresWrittenPolicy: boolean } }) {
   const [open, setOpen] = useState(false)
   return (
     <div
@@ -117,6 +117,24 @@ function JurisdictionNode({ data }: { data: { level: string; name: string; title
               {data.lastVerifiedAt && (
                 <span>Verified: <span className="text-zinc-400">{formatDate(data.lastVerifiedAt)}</span></span>
               )}
+            </div>
+          )}
+          {data.lastChangedAt && (
+            <div className="text-[10px] text-amber-400/80 mt-1.5">
+              Changed: {formatDate(data.lastChangedAt)}{data.previousValue && <span className="text-amber-500/60"> (was: {data.previousValue})</span>}
+            </div>
+          )}
+          {data.expirationDate && (
+            <div className={`text-[10px] mt-1 ${
+              new Date(data.expirationDate).getTime() - Date.now() < 90 * 86400000
+                ? 'text-red-400' : 'text-zinc-500'
+            }`}>
+              Expires: {formatDate(data.expirationDate)}
+            </div>
+          )}
+          {data.requiresWrittenPolicy && (
+            <div className="text-[10px] text-cyan-400/70 mt-1">
+              Requires written policy
             </div>
           )}
           {data.sourceUrl && (
@@ -246,6 +264,10 @@ function buildGraph(
         isGoverning: lv.is_governing,
         effectiveDate: lv.effective_date,
         lastVerifiedAt: lv.last_verified_at,
+        previousValue: lv.previous_value,
+        lastChangedAt: lv.last_changed_at,
+        expirationDate: lv.expiration_date,
+        requiresWrittenPolicy: lv.requires_written_policy ?? false,
       },
     })
 

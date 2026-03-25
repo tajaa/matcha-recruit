@@ -44,6 +44,10 @@ export interface ComplianceReasoningLevel {
   is_governing: boolean
   effective_date: string | null
   last_verified_at: string | null
+  previous_value: string | null
+  last_changed_at: string | null
+  expiration_date: string | null
+  requires_written_policy: boolean
 }
 
 export interface ComplianceReasoningCategory {
@@ -77,6 +81,12 @@ export interface AffectedEmployeeGroup {
   match_type: 'exact' | 'state'
 }
 
+export interface ComplianceGap {
+  category: string
+  label: string
+  status: 'missing' | 'partial'
+}
+
 export interface MWMessageMetadata {
   compliance_reasoning?: ComplianceReasoningLocation[]
   ai_reasoning_steps?: AIReasoningStep[]
@@ -84,6 +94,7 @@ export interface MWMessageMetadata {
   referenced_locations?: string[]
   payer_sources?: PayerPolicySource[]
   affected_employees?: AffectedEmployeeGroup[]
+  compliance_gaps?: ComplianceGap[]
 }
 
 export interface MWMessage {

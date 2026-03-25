@@ -42,6 +42,20 @@ const MessageBubble = React.memo(function MessageBubble({ message: m }: { messag
                 </div>
               </div>
             )}
+            {m.metadata?.compliance_gaps && m.metadata.compliance_gaps.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-zinc-800">
+                <span className="text-[10px] text-amber-500/80 uppercase tracking-wide">
+                  Policy Gaps ({m.metadata.compliance_gaps.length})
+                </span>
+                <div className="mt-1 space-y-1">
+                  {m.metadata.compliance_gaps.map((g, i) => (
+                    <div key={i} className="text-[11px] text-amber-400/80 bg-amber-900/20 border border-amber-700/30 px-2 py-1 rounded">
+                      No written policy found for <span className="font-medium">{g.label}</span> — required by governing jurisdiction
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
             {m.metadata?.payer_sources && m.metadata.payer_sources.length > 0 && (
               <div className="mt-2 pt-2 border-t border-zinc-800">
                 <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Sources ({m.metadata.payer_sources.length})</span>

@@ -464,6 +464,21 @@ def _format_category_reasoning(
     if not has_any_trigger:
         lines.append("  (No trigger — applies to all entity types)")
 
+    # Surface change/expiry context for the governing requirement
+    gov_row = next((r for r in all_levels if (r.get("jur_level") or r.get("jurisdiction_level")) == gov_level), None)
+    if gov_row:
+        prev = gov_row.get("previous_value")
+        lca = gov_row.get("last_changed_at")
+        if lca and prev:
+            lca_str = lca.strftime("%Y-%m-%d") if hasattr(lca, "strftime") else str(lca)[:10]
+            lines.append(f"  ⚠ RECENT CHANGE: Updated {lca_str} (was: {prev})")
+        exp = gov_row.get("expiration_date")
+        if exp:
+            exp_str = exp.strftime("%Y-%m-%d") if hasattr(exp, "strftime") else str(exp)[:10]
+            lines.append(f"  ⚠ EXPIRING: This requirement expires on {exp_str}")
+        if gov_row.get("requires_written_policy"):
+            lines.append("  📋 REQUIRES WRITTEN POLICY: Governing jurisdiction mandates a documented policy for this category")
+
     return "\n".join(lines)
 
 
@@ -558,6 +573,8 @@ def _build_location_reasoning_chain(
             jur_name = row.get("jur_display_name") or row.get("jurisdiction_name") or ""
             eff = row.get("effective_date")
             lva = row.get("last_verified_at")
+            lca = row.get("last_changed_at")
+            exp = row.get("expiration_date")
             all_levels_structured.append({
                 "jurisdiction_level": level,
                 "jurisdiction_name": jur_name if jur_name else level.capitalize(),
@@ -573,6 +590,10 @@ def _build_location_reasoning_chain(
                 ),
                 "effective_date": eff.isoformat() if hasattr(eff, "isoformat") else None,
                 "last_verified_at": lva.isoformat() if hasattr(lva, "isoformat") else None,
+                "previous_value": row.get("previous_value"),
+                "last_changed_at": lca.isoformat() if hasattr(lca, "isoformat") else None,
+                "expiration_date": exp.isoformat() if hasattr(exp, "isoformat") else None,
+                "requires_written_policy": bool(row.get("requires_written_policy")),
             })
 
         gov_req = cat_result.get("governing_requirement") or {}
