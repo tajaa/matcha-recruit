@@ -30,6 +30,7 @@ import RiskAssessment from './pages/app/RiskAssessment'
 import CompanySettings from './pages/app/CompanySettings'
 import BrokerSidebar from './components/BrokerSidebar'
 import BrokerDashboard from './pages/broker/BrokerDashboard'
+import BrokerClients from './pages/broker/BrokerClients'
 import ERExportDownload from './pages/shared/ERExportDownload'
 import SSOCallback from './pages/SSOCallback'
 import WorkLayout from './layouts/WorkLayout'
@@ -61,6 +62,7 @@ export default function App() {
       </Route>
       <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
         <Route index element={<BrokerDashboard />} />
+        <Route path="clients" element={<BrokerClients />} />
       </Route>
       <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
         <Route index element={<Dashboard />} />

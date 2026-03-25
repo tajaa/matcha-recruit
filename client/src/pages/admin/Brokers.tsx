@@ -51,6 +51,11 @@ const EMPTY_FORM: CreateForm = {
   invoice_owner: 'matcha',
 }
 
+type EditForm = {
+  status: string
+  support_routing: string
+}
+
 type CreateResult = {
   broker: { name: string; slug: string }
   owner: { email: string; password?: string; generated_password: boolean; email_sent: boolean }
@@ -72,6 +77,12 @@ export default function Brokers() {
   const [saving, setSaving] = useState(false)
   const [addError, setAddError] = useState('')
   const [result, setResult] = useState<CreateResult | null>(null)
+
+  // Edit state
+  const [editBroker, setEditBroker] = useState<Broker | null>(null)
+  const [editForm, setEditForm] = useState<EditForm>({ status: '', support_routing: '' })
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
 
   function fetchBrokers() {
     setLoading(true)
@@ -114,6 +125,31 @@ export default function Brokers() {
       setAddError(err instanceof Error ? err.message : 'Failed to create broker')
     } finally {
       setSaving(false)
+    }
+  }
+
+  function openEdit(b: Broker) {
+    setEditBroker(b)
+    setEditForm({ status: b.status, support_routing: b.support_routing })
+    setEditError('')
+  }
+
+  async function handleEdit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editBroker) return
+    setEditError('')
+    setEditSaving(true)
+    try {
+      await api.patch(`/admin/brokers/${editBroker.id}`, {
+        status: editForm.status,
+        support_routing: editForm.support_routing,
+      })
+      setEditBroker(null)
+      fetchBrokers()
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Update failed')
+    } finally {
+      setEditSaving(false)
     }
   }
 
@@ -168,6 +204,7 @@ export default function Brokers() {
                   <th className="px-4 py-3 font-medium">Members</th>
                   <th className="px-4 py-3 font-medium">Companies</th>
                   <th className="px-4 py-3 font-medium">Billing</th>
+                  <th className="px-4 py-3 font-medium text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-800">
@@ -187,6 +224,11 @@ export default function Brokers() {
                           ${b.active_contract.pepm_rate}/pepm
                         </span>
                       ) : null}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <Button size="sm" variant="ghost" onClick={() => openEdit(b)}>
+                        Edit
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -299,6 +341,57 @@ export default function Brokers() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Edit Modal */}
+      <Modal open={!!editBroker} onClose={() => setEditBroker(null)} title={`Edit — ${editBroker?.name}`} width="md">
+        {editBroker && (
+          <form onSubmit={handleEdit} className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Status</label>
+                <select
+                  value={editForm.status}
+                  onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
+                >
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                  <option value="terminated">Terminated</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Support Routing</label>
+                <select
+                  value={editForm.support_routing}
+                  onChange={(e) => setEditForm({ ...editForm, support_routing: e.target.value })}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
+                >
+                  <option value="shared">Shared</option>
+                  <option value="broker_first">Broker First</option>
+                  <option value="matcha_first">Matcha First</option>
+                </select>
+              </div>
+            </div>
+
+            {editForm.status === 'terminated' && (
+              <p className="text-xs text-red-400 bg-red-900/20 border border-red-800/30 rounded px-2 py-1.5">
+                Terminating a broker will prevent them from logging in and managing clients. Existing client links will remain but no new onboarding will be possible.
+              </p>
+            )}
+
+            {editError && <p className="text-sm text-red-400">{editError}</p>}
+
+            <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
+              <Button type="submit" size="sm" disabled={editSaving}>
+                {editSaving ? 'Saving...' : 'Save Changes'}
+              </Button>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setEditBroker(null)}>
+                Cancel
+              </Button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       {/* Success Modal */}
