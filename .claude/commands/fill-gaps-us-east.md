@@ -4,18 +4,28 @@ No arguments needed — this skill auto-discovers US East/Central jurisdictions 
 
 ---
 
-## Thin categories to research
+## Categories to research
 
-These categories exist but have sparse jurisdiction coverage:
-
+### Existing thin categories (sparse jurisdiction coverage):
 1. `telehealth` — Telehealth & Digital Health (High state variance)
-2. `cybersecurity` — Cybersecurity (High state variance)
+2. `cybersecurity` — Cybersecurity & Data Protection (High state variance) — includes NIST CSF, SOC 2, state privacy acts
 3. `language_access` — Language Access & Civil Rights (High state variance)
 4. `emerging_regulatory` — Emerging Regulatory (High state variance)
 5. `health_it` — Health IT & Interoperability
 6. `marketing_comms` — Marketing & Communications
 7. `tax_exempt` — Tax-Exempt Compliance
 8. `transplant_organ` — Transplant & Organ Procurement
+
+### New categories from Policy Expansion Plan:
+9. `fda_lifecycle` — FDA Pre/Post-Market Lifecycle (NDA/BLA, ANDA, post-market surveillance, pharmacovigilance, REMS)
+10. `quality_systems` — Quality Management Systems (ISO 13485, ISO 9001, CLIA, CAP, Joint Commission)
+11. `reimbursement_vbc` — Reimbursement & Value-Based Care (MIPS/QPP, APMs, bundled payments, star ratings, HEDIS, price transparency, No Surprises Act)
+12. `supply_chain` — Supply Chain & Procurement Compliance (conflict minerals, REACH, RoHS, UFLPA, FCPA)
+
+### Expanded existing categories (need deeper key coverage):
+13. `medical_devices` — now includes 510(k)/PMA/De Novo, design controls, SaMD, UDI, device cybersecurity
+14. `environmental_safety` — now includes TSCA, CERCLA, Clean Air Act, EPA RMP, EPCRA/TRI
+15. `environmental_compliance` — now includes RCRA hazardous waste, Clean Water Act, SPCC
 
 ## Step 1: Discover jurisdictions and gaps
 
@@ -64,13 +74,20 @@ For each category, search for **state-specific** laws. These are healthcare cate
 | Category | Search Query Pattern |
 |----------|---------------------|
 | `telehealth` | `"<state> telehealth law telemedicine prescribing licensure 2025 2026"` |
-| `cybersecurity` | `"<state> cybersecurity law data breach notification health data 2025"` |
+| `cybersecurity` | `"<state> cybersecurity data breach notification health data privacy CCPA NIST 2025"` |
 | `language_access` | `"<state> language access healthcare interpreter requirements law"` |
 | `emerging_regulatory` | `"<state> AI healthcare regulation emerging technology law 2025 2026"` |
 | `health_it` | `"<state> health information exchange HIE interoperability law"` |
 | `marketing_comms` | `"<state> healthcare advertising marketing regulations law"` |
 | `tax_exempt` | `"<state> tax exempt hospital community benefit requirements law"` |
 | `transplant_organ` | `"<state> organ transplant procurement donation registry law"` |
+| `fda_lifecycle` | `"<state> FDA facility registration drug manufacturer biologics state requirements"` |
+| `quality_systems` | `"<state> clinical laboratory CLIA accreditation ISO certification healthcare quality"` |
+| `reimbursement_vbc` | `"<state> Medicaid reimbursement value-based care hospital price transparency 2025"` |
+| `supply_chain` | `"<state> pharmaceutical supply chain DSCSA track trace procurement compliance"` |
+| `medical_devices` | `"<state> medical device registration 510k SaMD digital health state requirements"` |
+| `environmental_safety` | `"<state> EPA hazardous waste RCRA medical waste environmental compliance healthcare"` |
+| `environmental_compliance` | `"<state> clean air water act NPDES permitting environmental healthcare facility"` |
 
 **Critical rule**: ONLY capture requirements where the state has laws that DIFFER FROM or EXCEED the federal baseline. If a state has no specific law for a category, mark it as federal-only.
 
