@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Button, Input } from '../../components/ui'
+import { Button } from '../../components/ui'
 import {
   fetchPayerOverview,
   fetchPayerIntegrity,
@@ -214,11 +214,12 @@ export default function PayerData() {
             <div className="space-y-3">
               {/* Filters */}
               <div className="flex gap-2 items-center">
-                <Input
+                <input
+                  type="text"
                   placeholder="Search title, policy #, procedure..."
                   value={policySearch}
                   onChange={e => setPolicySearch(e.target.value)}
-                  className="max-w-xs"
+                  className="max-w-xs rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 outline-none focus:border-zinc-500"
                 />
                 <select
                   value={coverageFilter}
