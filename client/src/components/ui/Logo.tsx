@@ -10,7 +10,7 @@ export function Logo({ to = '/', label = 'Matcha', className = '' }: LogoProps) 
   const content = (
     <>
       <img src="/logo.svg" alt="Matcha" className="h-7 w-7" />
-      <span className="text-sm font-semibold tracking-tight text-zinc-100 font-[Space_Grotesk]">
+      <span className="text-sm font-semibold text-zinc-100">
         {label}
       </span>
     </>

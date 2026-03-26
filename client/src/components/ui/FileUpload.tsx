@@ -56,12 +56,12 @@ export function FileUpload({
           disabled
             ? 'border-zinc-800 text-zinc-600 cursor-not-allowed'
             : dragOver
-              ? 'border-emerald-500 bg-emerald-500/5 text-emerald-400'
+              ? 'border-zinc-500 bg-zinc-500/5 text-zinc-400'
               : 'border-zinc-700 text-zinc-400 hover:border-zinc-600'
         }`}
       >
         {children ?? (
-          <p>Drop files here or <span className="text-emerald-400 underline">browse</span></p>
+          <p>Drop files here or <span className="text-zinc-400 underline">browse</span></p>
         )}
       </div>
       <input

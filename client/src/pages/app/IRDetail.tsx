@@ -75,7 +75,7 @@ export default function IRDetail() {
       <div className="flex items-center gap-3 mb-6">
         <Link to="/app/ir" className="text-zinc-500 hover:text-zinc-300 transition-colors">&larr;</Link>
         <span className="text-xs text-zinc-500 font-mono">{incident.incident_number}</span>
-        <h1 className="text-xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">{incident.title}</h1>
+        <h1 className="text-xl font-semibold text-zinc-100">{incident.title}</h1>
         <Badge variant={SEVERITY_BADGE[incident.severity] ?? 'neutral'}>{severityLabel(incident.severity)}</Badge>
         <Badge variant={STATUS_BADGE[incident.status] ?? 'neutral'}>{statusLabel(incident.status)}</Badge>
       </div>

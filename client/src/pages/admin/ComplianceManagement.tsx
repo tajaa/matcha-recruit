@@ -138,7 +138,7 @@ export default function ComplianceManagement() {
 
   return (
     <div>
-      <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Compliance Management</h1>
+      <h1 className="text-2xl font-semibold text-zinc-100">Compliance Management</h1>
       <p className="mt-1 text-sm text-zinc-500">View and manage compliance requirements for client companies.</p>
 
       {error && (

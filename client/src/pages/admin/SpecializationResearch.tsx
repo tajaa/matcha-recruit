@@ -275,7 +275,7 @@ export default function SpecializationResearch() {
       <div className="flex items-center gap-3 mb-6">
         <Microscope className="w-6 h-6 text-emerald-400" />
         <div className="flex-1">
-          <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Specialization Research</h1>
+          <h1 className="text-2xl font-semibold text-zinc-100">Specialization Research</h1>
           <p className="text-sm text-zinc-500">Discover and research compliance categories for industry specializations</p>
         </div>
         {(() => {
@@ -583,7 +583,7 @@ export default function SpecializationResearch() {
           {/* Final summary */}
           {finalSummary && (
             <div className="bg-emerald-950/30 border border-emerald-800/40 rounded-lg p-6 text-center">
-              <p className="text-lg font-semibold text-emerald-300 font-[Space_Grotesk]">
+              <p className="text-lg font-semibold text-emerald-300">
                 Found {finalSummary.total_requirements} requirements for {specialization} across{' '}
                 {finalSummary.jurisdictions_researched} jurisdictions
               </p>

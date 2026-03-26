@@ -52,7 +52,7 @@ export default function ERExportDownload() {
         <Logo className="justify-center mb-8 grayscale" />
 
         <div className="border border-zinc-800 rounded-xl p-6">
-          <h1 className="text-lg font-semibold text-zinc-100 font-[Space_Grotesk] mb-1">
+          <h1 className="text-lg font-semibold text-zinc-100 mb-1">
             ER Case Export
           </h1>
           <p className="text-sm text-zinc-500 mb-5">
@@ -61,7 +61,7 @@ export default function ERExportDownload() {
 
           <form onSubmit={handleDownload} className="space-y-4">
             <div>
-              <label htmlFor="password" className="block text-xs font-medium tracking-[0.1em] text-zinc-400 mb-1.5 font-[Space_Mono] uppercase">
+              <label htmlFor="password" className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase">
                 Password
               </label>
               <input
@@ -81,7 +81,7 @@ export default function ERExportDownload() {
             <Button
               type="submit"
               variant="secondary"
-              className="w-full tracking-[0.15em] font-[Space_Mono] uppercase border border-zinc-600"
+              className="w-full uppercase border border-zinc-600"
               disabled={loading || !password.trim()}
             >
               {loading ? 'Downloading...' : 'Download'}

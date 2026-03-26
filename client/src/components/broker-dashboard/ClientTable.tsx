@@ -58,20 +58,15 @@ export function ClientTable({ companies }: ClientTableProps) {
                     {riskLabels[c.risk_signal] ?? c.risk_signal}
                   </span>
                 </td>
-                <td className="py-2.5 pr-4 text-right text-zinc-300 tabular-nums font-[Space_Grotesk]">
+                <td className="py-2.5 pr-4 text-right text-zinc-300 tabular-nums">
                   {c.active_employee_count}
                 </td>
                 <td className="py-2.5 pr-4 text-right">
-                  <span className={`tabular-nums font-[Space_Grotesk] ${
-                    c.policy_compliance_rate >= 80 ? 'text-emerald-400' :
-                    c.policy_compliance_rate >= 50 ? 'text-amber-400' : 'text-red-400'
-                  }`}>
+                  <span className={`tabular-nums ${ c.policy_compliance_rate >= 80 ? 'text-emerald-400' : c.policy_compliance_rate >= 50 ? 'text-amber-400' : 'text-red-400' }`}>
                     {Math.round(c.policy_compliance_rate)}%
                   </span>
                 </td>
-                <td className={`py-2.5 text-right tabular-nums font-[Space_Grotesk] ${
-                  c.open_action_items > 0 ? 'text-amber-400' : 'text-zinc-500'
-                }`}>
+                <td className={`py-2.5 text-right tabular-nums ${ c.open_action_items > 0 ? 'text-amber-400' : 'text-zinc-500' }`}>
                   {c.open_action_items}
                 </td>
               </tr>

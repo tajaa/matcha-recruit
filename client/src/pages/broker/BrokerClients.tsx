@@ -680,7 +680,7 @@ export default function BrokerClients() {
                         const missing = !row.company_name.trim()
                         return (
                           <tr key={i} className={missing ? 'bg-red-950/30' : 'text-zinc-300'}>
-                            <td className="px-3 py-1.5 text-zinc-500 font-[Space_Grotesk]">{i + 1}</td>
+                            <td className="px-3 py-1.5 text-zinc-500">{i + 1}</td>
                             <td className={`px-3 py-1.5 ${missing ? 'text-red-400' : ''}`}>
                               {row.company_name || '(missing)'}
                             </td>

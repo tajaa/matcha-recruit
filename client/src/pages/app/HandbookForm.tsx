@@ -313,7 +313,7 @@ export default function HandbookForm() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] mb-4">
+      <h1 className="text-2xl font-semibold text-zinc-100 mb-4">
         {isEdit ? 'Edit Handbook' : 'Create Handbook'}
       </h1>
 

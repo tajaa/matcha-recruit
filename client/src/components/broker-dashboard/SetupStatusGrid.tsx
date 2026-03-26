@@ -33,7 +33,7 @@ export function SetupStatusGrid({ counts }: SetupStatusGridProps) {
                 <span className={`h-2 w-2 rounded-full ${dot}`} />
                 {label}
               </span>
-              <span className="text-sm font-medium text-zinc-200 tabular-nums font-[Space_Grotesk]">
+              <span className="text-sm font-medium text-zinc-200 tabular-nums">
                 {count}
               </span>
             </div>
@@ -54,7 +54,7 @@ export function SetupStatusGrid({ counts }: SetupStatusGridProps) {
                 <span className={`h-2 w-2 rounded-full ${dot}`} />
                 {label}
               </span>
-              <span className="text-sm font-medium text-zinc-200 tabular-nums font-[Space_Grotesk]">
+              <span className="text-sm font-medium text-zinc-200 tabular-nums">
                 {count}
               </span>
             </div>

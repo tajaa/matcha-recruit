@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Button } from '../../components/ui'
+import { Button, Input } from '../../components/ui'
 import {
   fetchPayerOverview,
   fetchPayerIntegrity,
+  fetchPayerPolicies,
   runPayerStalenessCheck,
   runCmsIngest,
 } from '../../api/compliance'
-import type { PayerOverviewResponse, PayerIntegrityResponse } from '../../api/compliance'
+import type { PayerOverviewResponse, PayerIntegrityResponse, PayerPolicy } from '../../api/compliance'
 
-type Tab = 'overview' | 'integrity' | 'changelog'
+type Tab = 'overview' | 'policies' | 'integrity' | 'changelog'
 
 function Section({ title, count, children }: { title: string; count: number; children: React.ReactNode }) {
   const [open, setOpen] = useState(count > 0)
@@ -30,6 +31,14 @@ export default function PayerData() {
   const [tab, setTab] = useState<Tab>('overview')
   const [overview, setOverview] = useState<PayerOverviewResponse | null>(null)
   const [integrity, setIntegrity] = useState<PayerIntegrityResponse | null>(null)
+  const [policies, setPolicies] = useState<PayerPolicy[]>([])
+  const [policiesLoading, setPoliciesLoading] = useState(false)
+  const [policySearch, setPolicySearch] = useState('')
+  const [coverageFilter, setCoverageFilter] = useState('')
+  const [priorAuthFilter, setPriorAuthFilter] = useState('')
+  const [policyOffset, setPolicyOffset] = useState(0)
+  const [expandedPolicy, setExpandedPolicy] = useState<string | null>(null)
+  const POLICY_PAGE_SIZE = 50
   const [loading, setLoading] = useState(true)
   const [running, setRunning] = useState<string | null>(null)
 
@@ -42,8 +51,31 @@ export default function PayerData() {
     fetchPayerIntegrity().then(setIntegrity).catch(() => {})
   }, [])
 
+  const loadPolicies = useCallback((offset = 0) => {
+    setPoliciesLoading(true)
+    const params: Parameters<typeof fetchPayerPolicies>[0] = {
+      limit: POLICY_PAGE_SIZE,
+      offset,
+    }
+    if (coverageFilter) params.coverage_status = coverageFilter
+    if (priorAuthFilter !== '') params.requires_prior_auth = priorAuthFilter === 'true'
+    fetchPayerPolicies(params)
+      .then(data => {
+        if (offset === 0) setPolicies(data)
+        else setPolicies(prev => [...prev, ...data])
+      })
+      .catch(() => {})
+      .finally(() => setPoliciesLoading(false))
+  }, [coverageFilter, priorAuthFilter])
+
   useEffect(() => { loadOverview() }, [loadOverview])
   useEffect(() => { if (tab === 'integrity' || tab === 'changelog') loadIntegrity() }, [tab, loadIntegrity])
+  useEffect(() => {
+    if (tab === 'policies') {
+      setPolicyOffset(0)
+      loadPolicies(0)
+    }
+  }, [tab, loadPolicies])
 
   const handleStalenessCheck = async () => {
     setRunning('staleness')
@@ -97,6 +129,7 @@ export default function PayerData() {
       <div className="flex items-center gap-1">
         {([
           { id: 'overview' as Tab, label: 'Overview' },
+          { id: 'policies' as Tab, label: 'Policies' },
           { id: 'integrity' as Tab, label: 'Integrity' },
           { id: 'changelog' as Tab, label: 'Change Log' },
         ]).map(t => (
@@ -172,6 +205,162 @@ export default function PayerData() {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* Policies */}
+          {tab === 'policies' && (
+            <div className="space-y-3">
+              {/* Filters */}
+              <div className="flex gap-2 items-center">
+                <Input
+                  placeholder="Search title, policy #, procedure..."
+                  value={policySearch}
+                  onChange={e => setPolicySearch(e.target.value)}
+                  className="max-w-xs"
+                />
+                <select
+                  value={coverageFilter}
+                  onChange={e => { setCoverageFilter(e.target.value); setPolicyOffset(0) }}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+                >
+                  <option value="">All coverage</option>
+                  <option value="covered">Covered</option>
+                  <option value="conditional">Conditional</option>
+                  <option value="not_covered">Not covered</option>
+                </select>
+                <select
+                  value={priorAuthFilter}
+                  onChange={e => { setPriorAuthFilter(e.target.value); setPolicyOffset(0) }}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+                >
+                  <option value="">All auth</option>
+                  <option value="true">Prior auth required</option>
+                  <option value="false">No prior auth</option>
+                </select>
+                <span className="text-xs text-zinc-500 ml-auto">{policies.length} loaded</span>
+              </div>
+
+              {/* Table */}
+              <div className="border border-zinc-800 rounded-lg overflow-hidden">
+                <table className="w-full text-xs">
+                  <thead className="text-zinc-500 uppercase bg-zinc-800/50 sticky top-0">
+                    <tr>
+                      <th className="px-3 py-2 text-left">Policy #</th>
+                      <th className="px-3 py-2 text-left">Title</th>
+                      <th className="px-3 py-2 text-left">Payer</th>
+                      <th className="px-3 py-2 text-left">Coverage</th>
+                      <th className="px-3 py-2 text-center">Prior Auth</th>
+                      <th className="px-3 py-2 text-left">Procedures</th>
+                      <th className="px-3 py-2 text-left">Reviewed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {policies
+                      .filter(p => {
+                        if (!policySearch) return true
+                        const q = policySearch.toLowerCase()
+                        return (
+                          p.policy_title?.toLowerCase().includes(q) ||
+                          p.policy_number?.toLowerCase().includes(q) ||
+                          p.procedure_description?.toLowerCase().includes(q) ||
+                          p.procedure_codes?.some(c => c.toLowerCase().includes(q))
+                        )
+                      })
+                      .map(p => (
+                        <>
+                          <tr
+                            key={p.id}
+                            className="border-t border-zinc-800/30 hover:bg-zinc-800/20 cursor-pointer"
+                            onClick={() => setExpandedPolicy(expandedPolicy === p.id ? null : p.id)}
+                          >
+                            <td className="px-3 py-2 font-mono text-zinc-400">{p.policy_number || '—'}</td>
+                            <td className="px-3 py-2 text-zinc-200 max-w-xs">
+                              <span className="line-clamp-1">{p.policy_title || '—'}</span>
+                            </td>
+                            <td className="px-3 py-2 text-zinc-400">{p.payer_name}</td>
+                            <td className="px-3 py-2">
+                              <span className={
+                                p.coverage_status === 'covered' ? 'text-emerald-400' :
+                                p.coverage_status === 'conditional' ? 'text-amber-400' :
+                                'text-red-400'
+                              }>{p.coverage_status}</span>
+                            </td>
+                            <td className="px-3 py-2 text-center">
+                              {p.requires_prior_auth ? <span className="text-amber-400">Yes</span> : <span className="text-zinc-600">No</span>}
+                            </td>
+                            <td className="px-3 py-2 text-zinc-500 font-mono">
+                              {p.procedure_codes?.length ? p.procedure_codes.slice(0, 3).join(', ') + (p.procedure_codes.length > 3 ? ` +${p.procedure_codes.length - 3}` : '') : '—'}
+                            </td>
+                            <td className="px-3 py-2 text-zinc-600">
+                              {p.last_reviewed ? new Date(p.last_reviewed).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' }) : '—'}
+                            </td>
+                          </tr>
+                          {expandedPolicy === p.id && (
+                            <tr key={`${p.id}-detail`} className="bg-zinc-900/50">
+                              <td colSpan={7} className="px-4 py-3 space-y-2">
+                                {p.clinical_criteria && (
+                                  <div>
+                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Clinical Criteria</p>
+                                    <p className="text-xs text-zinc-300 whitespace-pre-wrap">{p.clinical_criteria}</p>
+                                  </div>
+                                )}
+                                {p.medical_necessity_criteria && (
+                                  <div>
+                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Medical Necessity</p>
+                                    <p className="text-xs text-zinc-300 whitespace-pre-wrap">{p.medical_necessity_criteria}</p>
+                                  </div>
+                                )}
+                                {p.documentation_requirements && (
+                                  <div>
+                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Documentation Requirements</p>
+                                    <p className="text-xs text-zinc-300 whitespace-pre-wrap">{p.documentation_requirements}</p>
+                                  </div>
+                                )}
+                                {p.age_restrictions && (
+                                  <div>
+                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Age Restrictions</p>
+                                    <p className="text-xs text-zinc-300">{p.age_restrictions}</p>
+                                  </div>
+                                )}
+                                {p.frequency_limits && (
+                                  <div>
+                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Frequency Limits</p>
+                                    <p className="text-xs text-zinc-300">{p.frequency_limits}</p>
+                                  </div>
+                                )}
+                                {p.procedure_codes?.length > 0 && (
+                                  <div>
+                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">All Procedure Codes</p>
+                                    <p className="text-xs text-zinc-300 font-mono">{p.procedure_codes.join(', ')}</p>
+                                  </div>
+                                )}
+                                {p.source_url && (
+                                  <div>
+                                    <p className="text-[10px] uppercase text-zinc-500 mb-0.5">Source</p>
+                                    <a href={p.source_url} target="_blank" rel="noreferrer" className="text-xs text-blue-400 hover:underline break-all">{p.source_url}</a>
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      ))}
+                  </tbody>
+                </table>
+                {policiesLoading && (
+                  <div className="text-center py-4 text-zinc-500 text-sm">Loading...</div>
+                )}
+                {!policiesLoading && policies.length === POLICY_PAGE_SIZE && (
+                  <div className="py-3 text-center border-t border-zinc-800">
+                    <Button variant="ghost" size="sm" onClick={() => {
+                      const next = policyOffset + POLICY_PAGE_SIZE
+                      setPolicyOffset(next)
+                      loadPolicies(next)
+                    }}>Load more</Button>
+                  </div>
+                )}
               </div>
             </div>
           )}

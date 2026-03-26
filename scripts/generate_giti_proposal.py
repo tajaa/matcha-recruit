@@ -6,7 +6,7 @@ from datetime import date
 from weasyprint import HTML
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deals", "giti")
-VERSION = "v3"
+VERSION = "v5"
 OUTPUT_PATH = os.path.join(OUTPUT_DIR, f"Matcha_Giti_Proposal_{VERSION}.pdf")
 
 # ── Config ──────────────────────────────────────────────────────────────────
@@ -15,11 +15,11 @@ EMPLOYEE_COUNT = 900
 
 # Pricing
 LIST_PEPM = 15.00
-VOLUME_DISCOUNT = 0.10  # 10% automatic for 500+ employees
+VOLUME_DISCOUNT = 0.05  # 5% automatic for 500+ employees
 PEPM = LIST_PEPM * (1 - VOLUME_DISCOUNT) if EMPLOYEE_COUNT >= 500 else LIST_PEPM
 PLATFORM_FEE = 10_000  # annual, Business tier (includes federal + 1 jurisdiction)
 JURISDICTION_FEE = 7_500  # per additional jurisdiction/year, Business tier
-IMPL_FEE = 30_000
+IMPL_FEE = 50_000
 
 MONTHLY = PEPM * EMPLOYEE_COUNT
 ANNUAL = MONTHLY * 12
@@ -483,7 +483,7 @@ HTML_CONTENT = f"""
   <h1>Executive Summary</h1>
 
   <div class="executive-summary">
-    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For Giti Tire, that means jurisdiction-level compliance monitoring across federal and multi-state OSHA requirements, incident tracking across a large production floor, proactive employment relations case management, and pre-termination risk intelligence &mdash; all in a single system. During implementation, Matcha builds a custom compliance and HR management system tailored to your organization &mdash; your jurisdictions, your roles, your workflows. After go-live, this system is handed off to your admin team as a fully operational CMS that you own and run independently. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps your team can act on with confidence.
+    Matcha replaces manual compliance tracking, fragmented ER case management, spreadsheet-based credential monitoring, and reactive risk management with a single agentic platform. For Giti Tire, that means jurisdiction-level compliance monitoring across federal, multi-state OSHA, and international requirements, incident tracking across a large production floor, proactive employment relations case management, and pre-termination risk intelligence &mdash; all in a single system. With employees in international locations, Matcha extends compliance coverage beyond U.S. borders, mapping local labor laws, employment standards, and regulatory obligations for every jurisdiction where your people work. During implementation, Matcha builds a custom compliance and HR management system tailored to your organization &mdash; your jurisdictions, your roles, your workflows. After go-live, this system is handed off to your admin team as a fully operational CMS that you own and run independently. Every requirement is sourced from government databases and regulatory texts, with citation links and verification timestamps your team can act on with confidence.
   </div>
 
   <h1>Investment Summary</h1>
@@ -503,7 +503,7 @@ HTML_CONTENT = f"""
         </tr>
         <tr>
           <td>Volume Discount (500+ employees)</td>
-          <td class="amount">&ndash;10%</td>
+          <td class="amount">&ndash;5%</td>
         </tr>
         <tr>
           <td>Your PEPM: ${PEPM:.2f} &times; {EMPLOYEE_COUNT} employees &times; 12 months</td>
@@ -514,27 +514,35 @@ HTML_CONTENT = f"""
           <td class="amount">${PLATFORM_FEE:,.2f}</td>
         </tr>
         <tr style="background:#f5f5f7;">
-          <td><strong>Annual Recurring</strong></td>
+          <td><strong>Annual Recurring (base)</strong></td>
           <td class="amount"><strong>${ANNUAL_RECURRING:,.2f}</strong></td>
+        </tr>
+        <tr>
+          <td>Estimated additional jurisdictions (4&ndash;8 &times; ${JURISDICTION_FEE:,.0f}/jurisdiction)</td>
+          <td class="amount">${JURISDICTION_FEE*4:,.0f}&ndash;${JURISDICTION_FEE*8:,.0f}</td>
+        </tr>
+        <tr style="background:#f5f5f7;">
+          <td><strong>Annual Recurring (with jurisdictions)</strong></td>
+          <td class="amount"><strong>${ANNUAL_RECURRING + JURISDICTION_FEE*4:,.0f}&ndash;${ANNUAL_RECURRING + JURISDICTION_FEE*8:,.0f}</strong></td>
         </tr>
         <tr>
           <td>Implementation &amp; Configuration (one-time, Year 1 only)</td>
           <td class="amount">${IMPL_FEE:,.2f}</td>
         </tr>
         <tr class="total-row">
-          <td>Year 1 Total (before additional jurisdictions)</td>
-          <td class="amount">${YEAR1_TCV:,.2f}</td>
+          <td>Year 1 Total (with jurisdictions)</td>
+          <td class="amount">${YEAR1_TCV + JURISDICTION_FEE*4:,.0f}&ndash;${YEAR1_TCV + JURISDICTION_FEE*8:,.0f}</td>
         </tr>
         <tr class="total-row" style="border-top: 1px solid #d1d5db;">
-          <td>Year 2+ Annual (recurring only)</td>
-          <td class="amount">${ANNUAL_RECURRING:,.2f}</td>
+          <td>Year 2+ Annual (with jurisdictions)</td>
+          <td class="amount">${ANNUAL_RECURRING + JURISDICTION_FEE*4:,.0f}&ndash;${ANNUAL_RECURRING + JURISDICTION_FEE*8:,.0f}</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <p class="pricing-note" style="margin-top:6px; margin-bottom:0;">
-    Implementation &amp; Configuration is a one-time fee. Subsequent years require only the annual recurring cost. Professional onboarding services for new locations, jurisdictions, or organizational changes are available on a fee-for-service basis&mdash;a schedule will be provided upon request.
+    Implementation &amp; Configuration is a one-time fee. Subsequent years require only the annual recurring cost. Exact jurisdiction count determined during Discovery &amp; Gap Analysis (Weeks 1&ndash;2). Federal compliance is included at no additional charge. Professional onboarding services for new locations, jurisdictions, or organizational changes are available on a fee-for-service basis&mdash;a schedule will be provided upon request.
   </p>
 
   <h2>Jurisdiction Fee Schedule</h2>
@@ -570,7 +578,7 @@ HTML_CONTENT = f"""
 
   <p class="pricing-note">
     First jurisdiction included in Platform Fee. A Jurisdiction is any U.S. state, city, county, or municipality in which Client has employees and which imposes distinct compliance obligations. Jurisdiction count and the specific compliance categories covered within each are scoped during Discovery &amp; Gap Analysis.<br><br>
-    <strong>Volume Discount</strong> &mdash; 10% PEPM discount applied automatically for organizations with 500 or more employees.<br>
+    <strong>Volume Discount</strong> &mdash; 5% PEPM discount applied automatically for organizations with 500 or more employees.<br>
     Price locked for the 12-month initial term. Employee count subject to quarterly true-up.
   </p>
 
@@ -589,6 +597,10 @@ HTML_CONTENT = f"""
 
   <div class="feature-block">
     <p><span class="feature-name">Compliance Engine</span> &mdash; Jurisdiction research across federal and state levels for all active locations. Covers state-plan and federal OSHA standards, FLSA, NLRA, and applicable environmental and chemical exposure regulations. Multi-location support with preemption rule analysis and tiered data approach for emerging regulatory changes. For a South Carolina manufacturer operating under federal OSHA alongside states with their own approved plans, this means a single dashboard that surfaces the controlling standard at each facility without manual cross-referencing. Chemical process change at one plant? The engine flags updated PEL requirements and SDS obligations in the affected jurisdiction before a coordinator even opens a browser.</p>
+  </div>
+
+  <div class="feature-block">
+    <p><span class="feature-name">International Compliance</span> &mdash; Extends jurisdiction-level compliance monitoring to international locations where Giti has employees. Covers local labor codes, employment standards, termination protections, working time regulations, statutory benefits, and health &amp; safety requirements for each country. The platform maps regulatory obligations by jurisdiction&mdash;whether that&rsquo;s a U.S. state or an international country&mdash;so your HR team manages domestic and international compliance from a single dashboard. Preemption and conflict-of-law rules are applied where local, regional, and national regulations overlap, and the system flags when international requirements impose stricter obligations than U.S. equivalents your team may be accustomed to.</p>
   </div>
 
   <div class="feature-block">
@@ -662,7 +674,7 @@ HTML_CONTENT = f"""
   </div>
 
   <h1>Implementation Timeline</h1>
-  <p>Total duration: 6&ndash;8 weeks. During implementation, Matcha builds a custom compliance and HR management system configured to your jurisdictions, roles, and workflows. At go-live, this system is handed off to your admin team as a fully operational CMS &mdash; your team owns it and runs it independently from that point forward. Your dedicated Customer Success Manager guides every phase.</p>
+  <p>Total duration: 8 weeks. During implementation, Matcha builds a custom compliance and HR management system configured to your jurisdictions, roles, and workflows &mdash; including a dedicated phase for international compliance setup covering all countries where Giti has employees. At go-live, this system is handed off to your admin team as a fully operational CMS &mdash; your team owns it and runs it independently from that point forward. Your dedicated Customer Success Manager guides every phase.</p>
 
   <table class="timeline-table">
     <thead>
@@ -677,32 +689,38 @@ HTML_CONTENT = f"""
       <tr>
         <td class="phase">Discovery &amp; Gap Analysis</td>
         <td>Weeks 1&ndash;2</td>
-        <td class="cost">$8,000</td>
-        <td>Organizational mapping, HRIS audit, shift structure inventory, regulatory gap analysis &mdash; audit existing OSHA written programs (HazCom, LOTO, Respiratory Protection, Hearing Conservation, Benzene/Butadiene exposure programs), incident log history, state-plan compliance status across active jurisdictions, and NLRA-related policy documentation</td>
+        <td class="cost">$10,000</td>
+        <td>Organizational mapping, HRIS audit, shift structure inventory, regulatory gap analysis &mdash; audit existing OSHA written programs (HazCom, LOTO, Respiratory Protection, Hearing Conservation, Benzene/Butadiene exposure programs), incident log history, state-plan compliance status across active jurisdictions, NLRA-related policy documentation, and international workforce inventory</td>
       </tr>
       <tr>
         <td class="phase">Configuration &amp; Templating</td>
         <td>Weeks 3&ndash;4</td>
-        <td class="cost">$8,000</td>
+        <td class="cost">$10,000</td>
         <td>Jurisdiction setup (federal + multi-state OSHA for all active locations), compliance baseline scan, build role-specific onboarding templates (production floor, maintenance, quality, warehouse, supervisory), OSHA pre-floor training workflows, NLRA-compliant policy templates, handbook ingestion</td>
+      </tr>
+      <tr>
+        <td class="phase">International Compliance Setup</td>
+        <td>Weeks 4&ndash;5</td>
+        <td class="cost">$10,000</td>
+        <td>International jurisdiction onboarding &mdash; map local labor codes, employment standards, statutory benefits, termination protections, and health &amp; safety requirements for each country where Giti has employees. Configure cross-border compliance rules and preemption logic between local, regional, and national regulations</td>
       </tr>
       <tr>
         <td class="phase">Data Migration &amp; Manual Run</td>
         <td>Weeks 5&ndash;6</td>
-        <td class="cost">$6,000</td>
-        <td>Employee data import, OSHA 300 log migration, historical incident records, policy document ingestion, run first onboarding cohort manually using templates to validate completeness</td>
+        <td class="cost">$8,000</td>
+        <td>Employee data import (domestic and international), OSHA 300 log migration, historical incident records, policy document ingestion, run first onboarding cohort manually using templates to validate completeness</td>
       </tr>
       <tr>
         <td class="phase">UAT &amp; Automation</td>
         <td>Week 7</td>
-        <td class="cost">$4,000</td>
-        <td>Admin and supervisor training, user acceptance testing, convert validated manual workflows to automated ingestion pipelines</td>
+        <td class="cost">$6,000</td>
+        <td>Admin and supervisor training, user acceptance testing, convert validated manual workflows to automated ingestion pipelines, validate international compliance coverage</td>
       </tr>
       <tr>
         <td class="phase">Go-Live</td>
         <td>Week 8</td>
-        <td class="cost">$4,000</td>
-        <td>Production cutover, CSM handoff, post-launch monitoring</td>
+        <td class="cost">$6,000</td>
+        <td>Production cutover, CSM handoff, post-launch monitoring, international compliance verification</td>
       </tr>
     </tbody>
   </table>
@@ -726,7 +744,7 @@ HTML_CONTENT = f"""
     <li><span class="term-label">Price Lock</span> PEPM rate of ${PEPM:.2f}, Platform Fee of ${PLATFORM_FEE:,.2f}, and Jurisdiction Fee of ${JURISDICTION_FEE:,.2f} locked for the initial 12-month term</li>
     <li><span class="term-label">Platform Fee</span> ${PLATFORM_FEE:,.2f}/year includes federal compliance monitoring and one jurisdiction</li>
     <li><span class="term-label">Jurisdiction Fees</span> ${JURISDICTION_FEE:,.2f} per additional jurisdiction per year, scoped during implementation</li>
-    <li><span class="term-label">Volume Discount</span> 10% discount applied automatically for 500+ employees</li>
+    <li><span class="term-label">Volume Discount</span> 5% discount applied automatically for 500+ employees</li>
     <li><span class="term-label">Auto-Renewal</span> Automatic 12-month renewal periods</li>
     <li><span class="term-label">Opt-Out Notice</span> 60-day written notice required before any renewal period</li>
     <li><span class="term-label">Employee True-Up</span> Quarterly adjustment based on active employee headcount</li>

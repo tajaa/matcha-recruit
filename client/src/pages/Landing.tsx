@@ -61,7 +61,7 @@ function JurisdictionCascade() {
           style={{ top: `${ti * 32 + 4}%` }}
         >
           <span
-            className="text-[9px] tracking-[0.3em] font-[Space_Mono] uppercase mb-2 transition-all duration-700"
+            className="text-[9px] uppercase mb-2 transition-all duration-700"
             style={{
               color: ti === 0 ? '#10b981' : ti === 1 ? '#34d399' : '#6ee7b7',
               opacity: inView ? 1 : 0,
@@ -75,7 +75,7 @@ function JurisdictionCascade() {
             {tier.items.map((item, ii) => (
               <span
                 key={item}
-                className="px-2.5 py-1 border text-[9px] font-[Space_Mono] tracking-wider transition-all duration-500"
+                className="px-2.5 py-1 border text-[9px] transition-all duration-500"
                 style={{
                   borderColor: inView ? (ti === 0 ? '#10b981' : '#3f3f46') : 'transparent',
                   color: inView ? '#a1a1aa' : 'transparent',
@@ -99,7 +99,7 @@ function JurisdictionCascade() {
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
         </span>
-        <span className="text-[8px] font-[Space_Mono] text-emerald-500/60 uppercase tracking-widest">Live</span>
+        <span className="text-[8px] text-emerald-500/60 uppercase">Live</span>
       </div>
     </div>
   )
@@ -188,7 +188,7 @@ function SignalMonitor() {
         ))}
       </svg>
 
-      <div className="absolute bottom-3 left-3 text-[8px] font-[Space_Mono] text-amber-500/50 tracking-widest uppercase">
+      <div className="absolute bottom-3 left-3 text-[8px] text-amber-500/50 uppercase">
         Regulatory Signal // {inView ? 'Monitoring' : 'Standby'}
       </div>
     </div>
@@ -220,7 +220,7 @@ function MonteCarloDistribution() {
           transitionDelay: '1.2s',
         }}
       >
-        <span className="absolute right-2 -top-4 text-[8px] font-[Space_Mono] text-red-400/60 uppercase tracking-wider">
+        <span className="absolute right-2 -top-4 text-[8px] text-red-400/60 uppercase">
           Critical Threshold
         </span>
       </div>
@@ -246,7 +246,7 @@ function MonteCarloDistribution() {
       })}
 
       {/* Axis labels */}
-      <div className="absolute bottom-2 left-8 right-8 flex justify-between text-[7px] font-[Space_Mono] text-zinc-600">
+      <div className="absolute bottom-2 left-8 right-8 flex justify-between text-[7px] text-zinc-600">
         <span>$0</span>
         <span>ANNUAL LOSS EXPOSURE</span>
         <span>$5M+</span>
@@ -257,9 +257,9 @@ function MonteCarloDistribution() {
         className="absolute top-3 left-3 flex flex-col gap-1 transition-opacity duration-700"
         style={{ opacity: inView ? 1 : 0, transitionDelay: '1.5s' }}
       >
-        <span className="text-[8px] font-[Space_Mono] text-emerald-500/70 tracking-wider">P50: $142,000</span>
-        <span className="text-[8px] font-[Space_Mono] text-amber-500/70 tracking-wider">P90: $890,000</span>
-        <span className="text-[8px] font-[Space_Mono] text-red-400/70 tracking-wider">P99: $2.4M</span>
+        <span className="text-[8px] text-emerald-500/70">P50: $142,000</span>
+        <span className="text-[8px] text-amber-500/70">P90: $890,000</span>
+        <span className="text-[8px] text-red-400/70">P99: $2.4M</span>
       </div>
     </div>
   )
@@ -304,7 +304,7 @@ function TimelineConstructor() {
                   transitionDelay: `${i * 400 + 400}ms`,
                 }}
               >
-                <span className="text-[8px] font-[Space_Mono] text-zinc-500 uppercase tracking-wider text-center w-20">
+                <span className="text-[8px] text-zinc-500 uppercase text-center w-20">
                   {node.label}
                 </span>
                 <div className="relative">
@@ -320,7 +320,7 @@ function TimelineConstructor() {
                   )}
                 </div>
                 <span
-                  className="text-[7px] font-[Space_Mono] uppercase tracking-wider"
+                  className="text-[7px] uppercase"
                   style={{ color: node.status === 'alert' ? '#f59e0b' : '#52525b' }}
                 >
                   {node.status === 'alert' ? '! FLAGGED' : 'VERIFIED'}
@@ -338,7 +338,7 @@ function TimelineConstructor() {
           {['policy_doc.pdf', 'witness_stmt.docx', 'email_chain.eml'].map((doc, i) => (
             <div key={doc} className="flex items-center gap-1.5 px-2 py-1 border border-zinc-800 bg-zinc-900/80">
               <div className="h-1 w-1 rounded-full bg-amber-500" style={{ animation: `pulse 2s ${i * 0.4}s infinite` }} />
-              <span className="text-[7px] font-[Space_Mono] text-zinc-500">{doc}</span>
+              <span className="text-[7px] text-zinc-500">{doc}</span>
             </div>
           ))}
         </div>
@@ -404,7 +404,7 @@ function PatternGrid() {
         />
       ))}
 
-      <div className="absolute bottom-3 right-3 text-[8px] font-[Space_Mono] text-amber-500/50 uppercase tracking-widest">
+      <div className="absolute bottom-3 right-3 text-[8px] text-amber-500/50 uppercase">
         {PATTERN_INCIDENTS.size} Incidents // Pattern Detected
       </div>
     </div>
@@ -504,7 +504,7 @@ function RadarChart() {
               y={p.y}
               textAnchor="middle"
               dominantBaseline="middle"
-              className="font-[Space_Mono]"
+              className=""
               style={{
                 fontSize: '2.5px',
                 fill: RADAR_VALUES[i] > 0.7 ? '#ef4444' : '#71717a',
@@ -524,9 +524,9 @@ function RadarChart() {
         className="absolute top-3 right-3 text-right transition-opacity duration-700"
         style={{ opacity: inView ? 1 : 0, transitionDelay: '1.5s' }}
       >
-        <div className="text-[8px] font-[Space_Mono] text-zinc-500 uppercase tracking-wider">Risk Score</div>
+        <div className="text-[8px] text-zinc-500 uppercase">Risk Score</div>
         <div className="text-lg font-[Orbitron] font-bold text-amber-500">72</div>
-        <div className="text-[8px] font-[Space_Mono] text-red-400/60 uppercase">HIGH</div>
+        <div className="text-[8px] text-red-400/60 uppercase">HIGH</div>
       </div>
     </div>
   )
@@ -567,15 +567,15 @@ function TerminalTyping() {
         <span className="h-2 w-2 rounded-full bg-red-500/50" />
         <span className="h-2 w-2 rounded-full bg-amber-500/50" />
         <span className="h-2 w-2 rounded-full bg-emerald-500/50" />
-        <span className="ml-2 text-[8px] font-[Space_Mono] text-zinc-600 tracking-wider uppercase">matcha-work // compliance-query</span>
+        <span className="ml-2 text-[8px] text-zinc-600 uppercase">matcha-work // compliance-query</span>
       </div>
       <div className="p-5 min-h-[180px]">
-        <p className="text-xs font-[Space_Mono] text-emerald-400 leading-relaxed">
+        <p className="text-xs text-emerald-400 leading-relaxed">
           {query.slice(0, queryIdx)}
           {queryIdx < query.length && <span className="animate-pulse">▊</span>}
         </p>
         {queryIdx >= query.length && responseIdx > 0 && (
-          <p className="text-xs font-[Space_Mono] text-zinc-400 leading-relaxed mt-4">
+          <p className="text-xs text-zinc-400 leading-relaxed mt-4">
             {response.slice(0, responseIdx)}
             {responseIdx < response.length && <span className="animate-pulse text-amber-500">▊</span>}
           </p>
@@ -660,14 +660,14 @@ export default function Landing() {
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60" />
                 <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500" />
               </span>
-              <span className="text-[10px] tracking-[0.2em] text-zinc-500 font-[Space_Mono] uppercase">
+              <span className="text-[10px] text-zinc-500 uppercase">
                 Systems Online
               </span>
             </div>
             <div className="flex items-center gap-5">
               <span
                 onClick={() => setIsPricingOpen(true)}
-                className="hidden sm:inline text-[11px] tracking-[0.2em] text-zinc-400 font-[Space_Mono] uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300"
+                className="hidden sm:inline text-[11px] text-zinc-400 uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300"
               >
                 Pricing
               </span>
@@ -675,7 +675,7 @@ export default function Landing() {
                 to="/login"
                 variant="ghost"
                 size="sm"
-                className="tracking-[0.2em] font-[Space_Mono] uppercase text-zinc-300 hover:text-emerald-400 border border-zinc-600/50 hover:border-emerald-500/40 rounded-full px-5 transition-all duration-300"
+                className="uppercase text-zinc-300 hover:text-emerald-400 border border-zinc-600/50 hover:border-emerald-500/40 rounded-full px-5 transition-all duration-300"
               >
                 Login
               </LinkButton>
@@ -688,7 +688,7 @@ export default function Landing() {
           <AsciiHalftone />
         <section className="relative max-w-7xl mx-auto px-8 min-h-[90vh] flex items-center">
           {/* System tag */}
-          <div className="absolute top-8 left-8 text-[11px] tracking-[0.12em] text-zinc-600 font-[Space_Mono] border border-zinc-700/40 px-3 py-1.5 rounded-sm">
+          <div className="absolute top-8 left-8 text-[11px] text-zinc-600 border border-zinc-700/40 px-3 py-1.5 rounded-sm">
             SYSTEM CORE // OFFLINE MODE
           </div>
 
@@ -711,7 +711,7 @@ export default function Landing() {
                 to="/login"
                 variant="secondary"
                 size="lg"
-                className="tracking-[0.25em] font-[Space_Mono] uppercase border border-zinc-600 hover:border-zinc-400 px-10"
+                className="uppercase border border-zinc-600 hover:border-zinc-400 px-10"
               >
                 Initialize Account
               </LinkButton>
@@ -722,7 +722,7 @@ export default function Landing() {
           <div className="absolute right-0 top-0 bottom-0 w-[60%] hidden lg:flex items-center justify-center">
             <Suspense
               fallback={
-                <div className="text-zinc-600 font-[Space_Mono] text-[8px] uppercase tracking-[0.4em] animate-pulse">
+                <div className="text-zinc-600 text-[8px] uppercase animate-pulse">
                   Booting Neural Sphere...
                 </div>
               }
@@ -739,7 +739,7 @@ export default function Landing() {
             className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 group cursor-pointer z-10"
             aria-label="Scroll down"
           >
-            <span className="text-[9px] font-[Space_Mono] tracking-[0.3em] text-zinc-600 uppercase group-hover:text-zinc-400 transition-colors duration-300">
+            <span className="text-[9px] text-zinc-600 uppercase group-hover:text-zinc-400 transition-colors duration-300">
               Explore
             </span>
             <svg
@@ -858,7 +858,7 @@ export default function Landing() {
                 to="/login"
                 variant="secondary"
                 size="lg"
-                className="tracking-[0.25em] font-[Space_Mono] uppercase border border-zinc-600 hover:border-zinc-400 px-10"
+                className="uppercase border border-zinc-600 hover:border-zinc-400 px-10"
               >
                 Launch Workspace
               </LinkButton>
@@ -869,7 +869,7 @@ export default function Landing() {
         {/* Footer */}
         <footer className="border-t border-zinc-700/50 py-6 px-8">
           <div className="flex items-center justify-between max-w-7xl mx-auto">
-            <p className="text-[10px] tracking-[0.15em] text-zinc-600 font-[Space_Mono] uppercase">
+            <p className="text-[10px] text-zinc-600 uppercase">
               &copy; {new Date().getFullYear()} Matcha Systems Inc.
               {import.meta.env.VITE_LANDING_BUILD_VERSION ? (
                 <span className="ml-2 text-zinc-700">build {import.meta.env.VITE_LANDING_BUILD_VERSION}</span>
@@ -879,7 +879,7 @@ export default function Landing() {
               {['Terms', 'Privacy', 'Status'].map((link) => (
                 <span
                   key={link}
-                  className="text-[10px] tracking-[0.15em] text-zinc-600 font-[Space_Mono] uppercase hover:text-zinc-400 cursor-pointer transition-colors"
+                  className="text-[10px] text-zinc-600 uppercase hover:text-zinc-400 cursor-pointer transition-colors"
                 >
                   {link}
                 </span>

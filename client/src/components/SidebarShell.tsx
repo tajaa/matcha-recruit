@@ -36,7 +36,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav }: SidebarShellPro
       <div className="mx-4 border-t border-zinc-800/40" />
 
       {/* Navigation */}
-      <nav className="flex-1 px-2.5 pt-3 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 px-2.5 pt-3 space-y-1 overflow-y-auto">
         {nav.map((item) => {
           const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
           const isActive = isExact
@@ -48,14 +48,14 @@ export default function SidebarShell({ logoTo, logoLabel, nav }: SidebarShellPro
               key={item.to}
               to={item.to}
               className={
-                `group relative flex items-center gap-2.5 rounded-md px-2.5 py-[6px] text-[13px] transition-colors duration-100 ${
+                `group relative flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors duration-100 ${
                   isActive
                     ? 'bg-zinc-800/60 text-zinc-100 font-medium'
-                    : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30 font-normal'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 font-normal'
                 }`
               }
             >
-              <item.icon className={`h-4 w-4 flex-shrink-0 ${isActive ? 'text-zinc-300' : 'text-zinc-600 group-hover:text-zinc-500'}`} strokeWidth={1.6} />
+              <item.icon className={`h-4 w-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-zinc-50 group-hover:text-white'}`} strokeWidth={1.6} />
               {item.label}
             </NavLink>
           )
@@ -67,9 +67,9 @@ export default function SidebarShell({ logoTo, logoLabel, nav }: SidebarShellPro
         <button
           type="button"
           onClick={handleLogout}
-          className="flex items-center gap-2.5 w-full rounded-md px-2.5 py-[6px] text-[13px] text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/30 transition-colors duration-100"
+          className="flex items-center gap-2.5 w-full rounded-md px-2.5 py-[7px] text-[13px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/30 transition-colors duration-100 group"
         >
-          <LogOut className="h-4 w-4" strokeWidth={1.6} />
+          <LogOut className="h-4 w-4 text-zinc-500 group-hover:text-zinc-200" strokeWidth={1.6} />
           Log out
         </button>
       </div>

@@ -13,7 +13,7 @@ export function Toggle({ checked, onChange, disabled }: ToggleProps) {
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-        checked ? 'bg-emerald-600' : 'bg-zinc-700'
+        checked ? 'bg-zinc-600' : 'bg-zinc-700'
       }`}
     >
       <span

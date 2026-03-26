@@ -25,7 +25,7 @@ export function StatCard({ label, value, subtitle, icon: Icon, href, urgent }: S
         href ? 'text-zinc-800/40 group-hover:text-zinc-700/40' : 'text-zinc-800/30'
       }`} />
       <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">{label}</p>
-      <p className="text-3xl font-semibold text-zinc-100 tabular-nums mt-1.5 font-[Space_Grotesk]">{value}</p>
+      <p className="text-3xl font-semibold text-zinc-100 tabular-nums mt-1.5">{value}</p>
       {subtitle && <p className="text-[11px] text-zinc-500 mt-1">{subtitle}</p>}
     </button>
   )

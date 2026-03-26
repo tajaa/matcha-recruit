@@ -194,7 +194,7 @@ function OverviewTab({
             <MapPin className="h-4 w-4 text-zinc-500" />
             <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Compliance Locations</h3>
           </div>
-          <p className="text-xl font-semibold text-zinc-100 font-[Space_Grotesk]">{compliance.total_locations}</p>
+          <p className="text-xl font-semibold text-zinc-100">{compliance.total_locations}</p>
           <p className="text-xs text-zinc-500 mt-1">{compliance.total_requirements} total requirements</p>
         </Card>
 
@@ -203,7 +203,7 @@ function OverviewTab({
             <FileText className="h-4 w-4 text-zinc-500" />
             <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Policy Compliance</h3>
           </div>
-          <p className={`text-xl font-semibold font-[Space_Grotesk] ${complianceColor(policies.compliance_rate)}`}>
+          <p className={`text-xl font-semibold ${complianceColor(policies.compliance_rate)}`}>
             {Math.round(policies.compliance_rate)}%
           </p>
           <p className="text-xs text-zinc-500 mt-1">{policies.total_active} active policies</p>
@@ -214,7 +214,7 @@ function OverviewTab({
             <AlertTriangle className="h-4 w-4 text-zinc-500" />
             <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">Open Incidents</h3>
           </div>
-          <p className="text-xl font-semibold text-zinc-100 font-[Space_Grotesk]">{ir.total_open}</p>
+          <p className="text-xl font-semibold text-zinc-100">{ir.total_open}</p>
           <p className="text-xs text-zinc-500 mt-1">{ir.recent_30_days} in last 30 days</p>
         </Card>
 
@@ -223,7 +223,7 @@ function OverviewTab({
             <Building2 className="h-4 w-4 text-zinc-500" />
             <h3 className="text-xs font-medium text-zinc-500 uppercase tracking-wider">ER Cases</h3>
           </div>
-          <p className="text-xl font-semibold text-zinc-100 font-[Space_Grotesk]">{er.total_open}</p>
+          <p className="text-xl font-semibold text-zinc-100">{er.total_open}</p>
           <p className="text-xs text-zinc-500 mt-1">open cases</p>
         </Card>
       </div>
@@ -255,7 +255,7 @@ function ComplianceTab({ compliance }: { compliance: BrokerClientDetailResponse[
                 <p className="text-xs text-zinc-500 mt-0.5">{loc.city}, {loc.state}</p>
               )}
             </div>
-            <span className="text-xs text-zinc-400 font-[Space_Grotesk]">
+            <span className="text-xs text-zinc-400">
               {loc.total_requirements} req.
             </span>
           </div>
@@ -269,7 +269,7 @@ function ComplianceTab({ compliance }: { compliance: BrokerClientDetailResponse[
                     : 'bg-emerald-500/10 text-emerald-400'
                 }`}
               >
-                {cat}: <span className="font-[Space_Grotesk]">{count}</span>
+                {cat}: <span className="">{count}</span>
               </span>
             ))}
           </div>
@@ -311,11 +311,11 @@ function PoliciesTab({
                   <tr key={p.id} className="border-b border-zinc-800/30 last:border-0">
                     <td className="py-2.5 pr-4 text-zinc-200 font-medium">{p.title}</td>
                     <td className="py-2.5 pr-4 text-zinc-400 text-xs">{p.category ?? '\u2014'}</td>
-                    <td className="py-2.5 pr-4 text-right text-zinc-300 tabular-nums font-[Space_Grotesk]">
+                    <td className="py-2.5 pr-4 text-right text-zinc-300 tabular-nums">
                       {p.signed_count}/{p.total_count}
                     </td>
                     <td className="py-2.5 text-right">
-                      <span className={`tabular-nums font-[Space_Grotesk] ${complianceColor(p.signature_rate)}`}>
+                      <span className={`tabular-nums ${complianceColor(p.signature_rate)}`}>
                         {Math.round(p.signature_rate)}%
                       </span>
                     </td>
@@ -345,7 +345,7 @@ function PoliciesTab({
                     <p className="text-xs text-zinc-500 mt-0.5">{h.total_sections} sections, {h.state_count} states</p>
                   </div>
                   <div className="text-right">
-                    <p className={`text-sm font-medium font-[Space_Grotesk] ${strengthColor}`}>
+                    <p className={`text-sm font-medium ${strengthColor}`}>
                       {Math.round(h.strength_score)}%
                     </p>
                     <p className={`text-xs ${strengthColor}`}>{h.strength_label}</p>
@@ -380,11 +380,11 @@ function IRERTab({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs text-zinc-500">Total Open</span>
-            <span className="text-sm font-medium text-zinc-200 font-[Space_Grotesk]">{ir.total_open}</span>
+            <span className="text-sm font-medium text-zinc-200">{ir.total_open}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-xs text-zinc-500">Last 30 Days</span>
-            <span className="text-sm font-medium text-zinc-200 font-[Space_Grotesk]">{ir.recent_30_days}</span>
+            <span className="text-sm font-medium text-zinc-200">{ir.recent_30_days}</span>
           </div>
           {Object.keys(ir.by_severity).length > 0 && (
             <div className="pt-2 border-t border-zinc-800/40">
@@ -397,7 +397,7 @@ function IRERTab({
                       severityColors[sev] ?? 'bg-zinc-700 text-zinc-300'
                     }`}
                   >
-                    {sev}: <span className="font-[Space_Grotesk]">{count}</span>
+                    {sev}: <span className="">{count}</span>
                   </span>
                 ))}
               </div>
@@ -415,7 +415,7 @@ function IRERTab({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs text-zinc-500">Total Open</span>
-            <span className="text-sm font-medium text-zinc-200 font-[Space_Grotesk]">{er.total_open}</span>
+            <span className="text-sm font-medium text-zinc-200">{er.total_open}</span>
           </div>
           {Object.keys(er.by_status).length > 0 && (
             <div className="pt-2 border-t border-zinc-800/40">
@@ -426,7 +426,7 @@ function IRERTab({
                     key={status}
                     className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300"
                   >
-                    {status}: <span className="font-[Space_Grotesk]">{count}</span>
+                    {status}: <span className="">{count}</span>
                   </span>
                 ))}
               </div>

@@ -140,7 +140,7 @@ export default function Dashboard() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">
+            <h1 className="text-2xl font-semibold text-zinc-100">
               Command Center
             </h1>
             <span className="flex items-center gap-1.5 rounded-full bg-emerald-950/60 border border-emerald-800/30 px-2.5 py-0.5 text-[10px] font-medium text-emerald-400/90 uppercase tracking-wider">

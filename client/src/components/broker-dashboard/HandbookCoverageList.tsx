@@ -48,7 +48,7 @@ export function HandbookCoverageList({ handbooks }: HandbookCoverageListProps) {
             </div>
 
             <div className="flex items-center gap-3 flex-shrink-0">
-              <span className={`text-sm font-medium tabular-nums font-[Space_Grotesk] ${strengthText[h.strength_label] ?? 'text-zinc-400'}`}>
+              <span className={`text-sm font-medium tabular-nums ${strengthText[h.strength_label] ?? 'text-zinc-400'}`}>
                 {h.strength_score}%
               </span>
               {h.missing_section_count > 0 && (

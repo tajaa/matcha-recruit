@@ -226,7 +226,7 @@ export default function IndustryRequirements() {
 
       {/* ── Right Panel ── */}
       <div className="flex-1 min-w-0">
-        <h1 className="text-2xl font-semibold text-zinc-100 font-[Space_Grotesk] tracking-tight">Industry Requirements</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100">Industry Requirements</h1>
         <p className="mt-1 text-sm text-zinc-500">Category matrix by industry profile</p>
 
         {loading ? (

@@ -21,7 +21,7 @@ const roleRoutes: Record<string, string> = {
 function GrayInput({ label, id, ...props }: React.ComponentProps<'input'> & { label: string }) {
   return (
     <div>
-      <label htmlFor={id} className="block text-xs font-medium tracking-[0.1em] text-zinc-400 mb-1.5 font-[Space_Mono] uppercase">
+      <label htmlFor={id} className="block text-xs font-medium text-zinc-400 mb-1.5 uppercase">
         {label}
       </label>
       <input
@@ -89,7 +89,7 @@ export default function Login() {
             <Button
               type="submit"
               variant="secondary"
-              className="w-full tracking-[0.15em] font-[Space_Mono] uppercase border border-zinc-600"
+              className="w-full uppercase border border-zinc-600"
               disabled={ssoLoading}
             >
               {ssoLoading ? 'Redirecting...' : 'Continue with SSO'}
@@ -126,7 +126,7 @@ export default function Login() {
             <Button
               type="submit"
               variant="secondary"
-              className="w-full tracking-[0.15em] font-[Space_Mono] uppercase border border-zinc-600"
+              className="w-full uppercase border border-zinc-600"
               disabled={loading}
             >
               {loading ? 'Signing in...' : 'Sign in'}
