@@ -38,7 +38,7 @@ export default function EmployeeDetail() {
   const navigate = useNavigate()
   const {
     employee, loading, error,
-    updateEmployee, updateStatus, deleteEmployee, sendInvite,
+    updateEmployee, updateStatus, deleteEmployee,
   } = useEmployeeDetail(employeeId!)
   const [tab, setTab] = useState<Tab>('profile')
   const [editing, setEditing] = useState(false)
