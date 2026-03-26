@@ -130,11 +130,11 @@ def _coerce_bool(value, default: bool = True) -> bool:
 
 
 def _serialize_setup(row, *, invite_base_url: str) -> dict:
-    invite_token = row["invite_token"]
-    google_workspace_status = row["google_workspace_status"]
+    invite_token = row.get("invite_token")
+    google_workspace_status = row.get("google_workspace_status")
     google_workspace = None
     if google_workspace_status:
-        google_workspace_config = _to_dict(row["google_workspace_config"])
+        google_workspace_config = _to_dict(row.get("google_workspace_config"))
         google_workspace = {
             "connected": google_workspace_status == "connected",
             "status": google_workspace_status,
@@ -147,31 +147,31 @@ def _serialize_setup(row, *, invite_base_url: str) -> dict:
         "id": str(row["id"]),
         "broker_id": str(row["broker_id"]),
         "company_id": str(row["company_id"]),
-        "company_name": row["company_name"],
-        "company_status": row["company_status"] or "approved",
-        "industry": row["industry"],
-        "company_size": row["company_size"],
+        "company_name": row.get("company_name"),
+        "company_status": row.get("company_status") or "approved",
+        "industry": row.get("industry"),
+        "company_size": row.get("company_size"),
         "status": row["status"],
-        "link_status": row["link_status"],
-        "contact_name": row["contact_name"],
-        "contact_email": row["contact_email"],
-        "contact_phone": row["contact_phone"],
-        "headcount_hint": row["headcount_hint"],
-        "notes": row["notes"],
-        "locations": _to_list(row["locations"]),
-        "onboarding_stage": row["onboarding_stage"] or "submitted",
-        "preconfigured_features": _to_dict(row["preconfigured_features"]),
-        "onboarding_template": _to_dict(row["onboarding_template"]),
-        "link_permissions": _to_dict(row["link_permissions"]),
+        "link_status": row.get("link_status"),
+        "contact_name": row.get("contact_name"),
+        "contact_email": row.get("contact_email"),
+        "contact_phone": row.get("contact_phone"),
+        "headcount_hint": row.get("headcount_hint"),
+        "notes": row.get("notes"),
+        "locations": _to_list(row.get("locations")),
+        "onboarding_stage": row.get("onboarding_stage") or "submitted",
+        "preconfigured_features": _to_dict(row.get("preconfigured_features")),
+        "onboarding_template": _to_dict(row.get("onboarding_template")),
+        "link_permissions": _to_dict(row.get("link_permissions")),
         "invite_token": invite_token,
         "invite_url": f"{invite_base_url}/register/broker-client/{invite_token}" if invite_token else None,
-        "invite_expires_at": row["invite_expires_at"].isoformat() if row["invite_expires_at"] else None,
-        "invited_at": row["invited_at"].isoformat() if row["invited_at"] else None,
-        "activated_at": row["activated_at"].isoformat() if row["activated_at"] else None,
-        "expired_at": row["expired_at"].isoformat() if row["expired_at"] else None,
-        "cancelled_at": row["cancelled_at"].isoformat() if row["cancelled_at"] else None,
-        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
-        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        "invite_expires_at": row.get("invite_expires_at").isoformat() if row.get("invite_expires_at") else None,
+        "invited_at": row.get("invited_at").isoformat() if row.get("invited_at") else None,
+        "activated_at": row.get("activated_at").isoformat() if row.get("activated_at") else None,
+        "expired_at": row.get("expired_at").isoformat() if row.get("expired_at") else None,
+        "cancelled_at": row.get("cancelled_at").isoformat() if row.get("cancelled_at") else None,
+        "created_at": row.get("created_at").isoformat() if row.get("created_at") else None,
+        "updated_at": row.get("updated_at").isoformat() if row.get("updated_at") else None,
         "google_workspace": google_workspace,
     }
 
