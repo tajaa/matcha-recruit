@@ -142,14 +142,14 @@ export default function Accommodations() {
           onChange={(e) => setStatusFilter(e.target.value)}
           className="w-48 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
         >
-          <option value="all">All Statuses</option>
-          <option value="requested">Requested</option>
-          <option value="interactive_process">Interactive Process</option>
-          <option value="medical_review">Medical Review</option>
-          <option value="approved">Approved</option>
-          <option value="implemented">Implemented</option>
-          <option value="denied">Denied</option>
-          <option value="closed">Closed</option>
+          <option value="all" className="bg-zinc-900 text-zinc-100">All Statuses</option>
+          <option value="requested" className="bg-zinc-900 text-zinc-100">Requested</option>
+          <option value="interactive_process" className="bg-zinc-900 text-zinc-100">Interactive Process</option>
+          <option value="medical_review" className="bg-zinc-900 text-zinc-100">Medical Review</option>
+          <option value="approved" className="bg-zinc-900 text-zinc-100">Approved</option>
+          <option value="implemented" className="bg-zinc-900 text-zinc-100">Implemented</option>
+          <option value="denied" className="bg-zinc-900 text-zinc-100">Denied</option>
+          <option value="closed" className="bg-zinc-900 text-zinc-100">Closed</option>
         </select>
       </div>
 
@@ -219,9 +219,9 @@ export default function Accommodations() {
               className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
               required
             >
-              <option value="">Select employee...</option>
+              <option value="" className="bg-zinc-900 text-zinc-300">Select employee...</option>
               {employees.map((emp) => (
-                <option key={emp.id} value={emp.id}>
+                <option key={emp.id} value={emp.id} className="bg-zinc-900 text-zinc-100">
                   {emp.name}{emp.department ? ` (${emp.department})` : ''}
                 </option>
               ))}
@@ -241,9 +241,9 @@ export default function Accommodations() {
               onChange={(e) => setForm({ ...form, disability_category: e.target.value })}
               className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
             >
-              <option value="">Select category...</option>
+              <option value="" className="bg-zinc-900 text-zinc-300">Select category...</option>
               {Object.entries(CATEGORY_LABEL).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
+                <option key={k} value={k} className="bg-zinc-900 text-zinc-100">{v}</option>
               ))}
             </select>
           </div>
