@@ -178,6 +178,7 @@ def compute_compliance_cost_of_risk(
     all_violations: list[dict[str, Any]],
     employee_count: int,
     is_healthcare: bool,
+    credential_at_risk: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Estimate dollar exposure from compliance violations."""
     line_items: list[dict[str, Any]] = []
@@ -275,6 +276,7 @@ def compute_compliance_cost_of_risk(
             "low": employee_count * 145,
             "high": employee_count * 1452,
             "affected_count": employee_count,
+            "affected_employees": [{"name": "All employees", "detail": f"All {employee_count} employee records contain PHI (benefits, workers' comp, FMLA)"}],
             "basis": "HIPAA penalty tiers, Tier 1\u2013Tier 2 (inflation-adjusted)",
             "formula": (
                 f"{employee_count} employee records \u00d7 $145\u2013$1,452 per record "
@@ -299,13 +301,15 @@ def compute_compliance_cost_of_risk(
                 "and trigger mandatory investigation."
             ),
         })
-        at_risk = math.ceil(employee_count * 0.10)
+        cred_list = credential_at_risk or []
+        at_risk = len(cred_list) if cred_list else math.ceil(employee_count * 0.10)
         line_items.append({
             "key": "lapsed_credential_risk",
             "label": "Lapsed Credential Risk",
             "low": at_risk * 1000,
             "high": at_risk * 10000,
             "affected_count": at_risk,
+            "affected_employees": cred_list[:10] if cred_list else [{"name": f"~{at_risk} estimated", "detail": "Based on industry 8–12% lapse rate (no credential data uploaded yet)"}],
             "basis": "State licensing board penalties + CMS Conditions of Participation",
             "formula": (
                 f"{at_risk} employees (10% of {employee_count}) \u00d7 $1,000\u2013$10,000 "
@@ -676,8 +680,54 @@ async def compute_compliance_dimension(company_id: UUID, conn) -> DimensionResul
         "SELECT COUNT(*) FROM employees WHERE org_id = $1 AND termination_date IS NULL",
         company_id,
     )
+    # Query actual credential expiration data for affected employee names
+    credential_at_risk = []
+    if is_healthcare:
+        cred_rows = await conn.fetch(
+            """
+            SELECT e.first_name, e.last_name, ec.license_type, ec.license_expiration,
+                   ec.dea_expiration, ec.board_certification_expiration, ec.malpractice_expiration
+            FROM employee_credentials ec
+            JOIN employees e ON e.id = ec.employee_id AND e.org_id = ec.org_id
+            WHERE ec.org_id = $1 AND e.termination_date IS NULL
+              AND (
+                  ec.license_expiration < NOW() + INTERVAL '90 days'
+                  OR ec.dea_expiration < NOW() + INTERVAL '90 days'
+                  OR ec.board_certification_expiration < NOW() + INTERVAL '90 days'
+                  OR ec.malpractice_expiration < NOW() + INTERVAL '90 days'
+              )
+            ORDER BY LEAST(
+                COALESCE(ec.license_expiration, '2999-01-01'),
+                COALESCE(ec.dea_expiration, '2999-01-01'),
+                COALESCE(ec.board_certification_expiration, '2999-01-01'),
+                COALESCE(ec.malpractice_expiration, '2999-01-01')
+            )
+            LIMIT 10
+            """,
+            company_id,
+        )
+        from datetime import date as _date
+        today = _date.today()
+        for r in cred_rows:
+            name = f"{r['first_name']} {r['last_name']}"
+            expiring = []
+            for field, label in [
+                ("license_expiration", r.get("license_type") or "License"),
+                ("dea_expiration", "DEA"),
+                ("board_certification_expiration", "Board Cert"),
+                ("malpractice_expiration", "Malpractice"),
+            ]:
+                exp = r.get(field)
+                if exp and exp < today:
+                    expiring.append(f"{label} expired {exp.strftime('%m/%d/%Y')}")
+                elif exp and (exp - today).days < 90:
+                    expiring.append(f"{label} expires {exp.strftime('%m/%d/%Y')}")
+            if expiring:
+                credential_at_risk.append({"name": name, "detail": "; ".join(expiring)})
+
     compliance_cost = compute_compliance_cost_of_risk(
-        all_violations, int(total_employees or 0), is_healthcare
+        all_violations, int(total_employees or 0), is_healthcare,
+        credential_at_risk=credential_at_risk,
     )
 
     return DimensionResult(
