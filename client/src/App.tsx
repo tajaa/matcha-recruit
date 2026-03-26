@@ -30,6 +30,8 @@ import HandbookDetail from './pages/app/HandbookDetail'
 import HandbookForm from './pages/app/HandbookForm'
 import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
+import Accommodations from './pages/app/Accommodations'
+import AccommodationDetail from './pages/app/AccommodationDetail'
 import CompanySettings from './pages/app/CompanySettings'
 import BrokerSidebar from './components/BrokerSidebar'
 import BrokerDashboard from './pages/broker/BrokerDashboard'
@@ -83,6 +85,8 @@ export default function App() {
         <Route path="compliance" element={<Compliance />} />
         <Route path="ir" element={<IRList />} />
         <Route path="ir/:incidentId" element={<IRDetail />} />
+        <Route path="accommodations" element={<Accommodations />} />
+        <Route path="accommodations/:caseId" element={<AccommodationDetail />} />
         <Route path="policies" element={<Policies />} />
         <Route path="handbooks" element={<Handbooks />} />
         <Route path="handbook/new" element={<HandbookForm />} />
