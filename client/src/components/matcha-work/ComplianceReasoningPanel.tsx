@@ -178,23 +178,38 @@ export default function ComplianceReasoningPanel({ locations, aiSteps, reference
                 >
                   <ComplianceDecisionTree
                     category={currentCategory}
-                    aiSteps={aiSteps?.filter((step) => {
-                      if (!currentLocation) return true
-                      const label = currentLocation.location_label.toLowerCase()
-                      // Extract key location identifiers (city, state)
-                      const parts = label.split(/[,()\s]+/).filter(Boolean)
-                      const text = (step.question + ' ' + step.answer + ' ' + step.conclusion).toLowerCase()
-                      // Show step if it mentions this location or is location-agnostic (federal/general)
-                      const mentionsThisLocation = parts.some((p) => p.length > 1 && text.includes(p))
-                      const mentionsAnyOtherLocation = filteredLocations
+                    aiSteps={(() => {
+                      if (!aiSteps || !currentLocation || filteredLocations.length <= 1) return aiSteps
+                      // Build state name map from location labels (e.g., "New York, NY" → ["new york", "ny"])
+                      const stateNames: Record<string, string[]> = {}
+                      const STATE_MAP: Record<string, string> = {
+                        CA: 'california', NY: 'new york', TX: 'texas', FL: 'florida', IL: 'illinois',
+                        MI: 'michigan', OH: 'ohio', TN: 'tennessee', NC: 'north carolina', CO: 'colorado',
+                        WA: 'washington', OR: 'oregon', NV: 'nevada', AZ: 'arizona', PA: 'pennsylvania',
+                        NJ: 'new jersey', GA: 'georgia', MA: 'massachusetts', ID: 'idaho', UT: 'utah',
+                      }
+                      for (const loc of filteredLocations) {
+                        const match = loc.location_label.match(/\(([^,]+),\s*([A-Z]{2})\)/)
+                        if (match) {
+                          const city = match[1].toLowerCase()
+                          const code = match[2]
+                          const fullName = STATE_MAP[code] || ''
+                          stateNames[loc.location_label] = [code.toLowerCase(), fullName, city].filter(Boolean)
+                        }
+                      }
+                      const thisKeys = stateNames[currentLocation.location_label] || []
+                      const otherKeys = filteredLocations
                         .filter((_, i) => i !== selectedLocation)
-                        .some((loc) => {
-                          const otherParts = loc.location_label.toLowerCase().split(/[,()\s]+/).filter(Boolean)
-                          return otherParts.some((p) => p.length > 2 && text.includes(p))
-                        })
-                      // Keep if it mentions this location, or if it doesn't mention any specific location (generic/federal)
-                      return mentionsThisLocation || !mentionsAnyOtherLocation
-                    })}
+                        .flatMap((loc) => stateNames[loc.location_label] || [])
+
+                      return aiSteps.filter((step) => {
+                        const text = (step.question + ' ' + step.answer + ' ' + step.conclusion).toLowerCase()
+                        const mentionsThis = thisKeys.some((k) => text.includes(k))
+                        const mentionsOther = otherKeys.some((k) => k.length > 2 && text.includes(k))
+                        // Keep if: mentions this location, OR doesn't mention any other location (generic/federal)
+                        return mentionsThis || !mentionsOther
+                      })
+                    })()}
                   />
                 </Suspense>
               )}

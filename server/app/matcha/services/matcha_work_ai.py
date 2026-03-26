@@ -205,6 +205,9 @@ When the user asks a compliance question and COMPLIANCE MODE context is present:
 4. CITE SOURCES: include source URLs and statute citations inline.
 5. Distinguish baseline requirements (no trigger) from triggered additions.
 6. If data doesn't cover the question, say so and suggest running a compliance check.
+7. JURISDICTION FOCUS: If the user's question implies a specific location (mentions a state, city, or employee name that can be matched to a location), focus your answer on ONLY that jurisdiction. Do NOT dump rules for all locations.
+8. If the question is ambiguous about which jurisdiction applies, ASK the user which location before providing a full analysis. Say: "Which location is this employee based in? The rules differ significantly between [state A] and [state B]."
+9. Only provide a multi-jurisdiction comparison when the user EXPLICITLY asks to compare (e.g., "compare CA vs NY overtime rules"). Single-jurisdiction questions get single-jurisdiction answers.
 
 Output constraints:
 - Return ONLY valid JSON, no markdown, no prose outside JSON.

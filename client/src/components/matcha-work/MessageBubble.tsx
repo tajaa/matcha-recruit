@@ -5,11 +5,18 @@ import ComplianceReasoningPanel from './ComplianceReasoningPanel'
 
 function extractPenalties(reasoning: MWMessage['metadata']): { category: string; summary: string; agency: string }[] {
   if (!reasoning?.compliance_reasoning) return []
+  const refCats = new Set(reasoning.referenced_categories ?? [])
+  const refLocs = new Set(reasoning.referenced_locations ?? [])
   const seen = new Set<string>()
   const results: { category: string; summary: string; agency: string }[] = []
   for (const loc of reasoning.compliance_reasoning) {
+    // Skip locations not referenced in the answer
+    if (refLocs.size > 0 && !refLocs.has(loc.location_label) &&
+        !Array.from(refLocs).some(r => loc.location_label.includes(r) || r.includes(loc.location_label.split('(')[0]?.trim() ?? ''))) continue
     for (const cat of loc.categories) {
       if (seen.has(cat.category)) continue
+      // Skip categories not referenced in the answer
+      if (refCats.size > 0 && !refCats.has(cat.category)) continue
       const gov = cat.all_levels.find(l => l.is_governing)
       if (gov?.penalty_summary) {
         seen.add(cat.category)
@@ -64,20 +71,26 @@ const MessageBubble = React.memo(function MessageBubble({ message: m }: { messag
                 </div>
               </div>
             )}
-            {m.metadata?.compliance_gaps && m.metadata.compliance_gaps.length > 0 && (
+            {m.metadata?.compliance_gaps && (() => {
+              const refCats = new Set(m.metadata.referenced_categories ?? [])
+              const filtered = refCats.size > 0
+                ? m.metadata.compliance_gaps.filter(g => refCats.has(g.category))
+                : m.metadata.compliance_gaps
+              if (filtered.length === 0) return null
+              return (
               <div className="mt-2 pt-2 border-t border-zinc-800">
                 <span className="text-[10px] text-amber-500/80 uppercase tracking-wide">
-                  Policy Gaps ({m.metadata.compliance_gaps.length})
+                  Policy Gaps ({filtered.length})
                 </span>
                 <div className="mt-1 space-y-1">
-                  {m.metadata.compliance_gaps.map((g, i) => (
+                  {filtered.map((g, i) => (
                     <div key={i} className="text-[11px] text-amber-400/80 bg-amber-900/20 border border-amber-700/30 px-2 py-1 rounded">
                       No written policy found for <span className="font-medium">{g.label}</span> — required by governing jurisdiction
                     </div>
                   ))}
                 </div>
               </div>
-            )}
+              )})()}
             {penalties.length > 0 && (
               <div className="mt-2 pt-2 border-t border-zinc-800">
                 <span className="text-[10px] text-red-400/70 uppercase tracking-wide">
