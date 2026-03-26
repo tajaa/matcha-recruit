@@ -74,6 +74,8 @@ export default function PolicyDetailPage() {
   const [saving, setSaving] = useState(false)
   const [logOpen, setLogOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [stateFilter, setStateFilter] = useState('')
+  const [cityFilter, setCityFilter] = useState('')
 
   useEffect(() => {
     if (!id) return
@@ -86,14 +88,31 @@ export default function PolicyDetailPage() {
     return () => { cancelled = true }
   }, [id])
 
+  const states = useMemo(() => {
+    if (!data) return []
+    return [...new Set(data.jurisdictions.map((j) => j.state).filter(Boolean))].sort()
+  }, [data])
+
+  const cities = useMemo(() => {
+    if (!data) return []
+    return [...new Set(
+      data.jurisdictions
+        .filter((j) => (!stateFilter || j.state === stateFilter) && j.city)
+        .map((j) => j.city!)
+    )].sort()
+  }, [data, stateFilter])
+
   const filtered = useMemo(() => {
     if (!data) return []
+    let result = data.jurisdictions
+    if (stateFilter) result = result.filter((j) => j.state === stateFilter)
+    if (cityFilter) result = result.filter((j) => j.city === cityFilter)
     const q = search.toLowerCase().trim()
-    if (!q) return data.jurisdictions
-    return data.jurisdictions.filter(
+    if (q) result = result.filter(
       (j) => j.display_name.toLowerCase().includes(q) || j.title.toLowerCase().includes(q) || (j.current_value || '').toLowerCase().includes(q)
     )
-  }, [data, search])
+    return result
+  }, [data, search, stateFilter, cityFilter])
 
   function startEditing(j: JurisdictionEntry) {
     setEditingId(j.requirement_id)
@@ -167,14 +186,35 @@ export default function PolicyDetailPage() {
         </div>
       </div>
 
-      {/* Search */}
-      <input
-        type="text"
-        placeholder="Filter jurisdictions..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-200 text-sm px-3 py-2 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-      />
+      {/* Filters */}
+      <div className="flex gap-2 items-center">
+        <select
+          value={stateFilter}
+          onChange={(e) => { setStateFilter(e.target.value); setCityFilter('') }}
+          className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+        >
+          <option value="">All states</option>
+          {states.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        {stateFilter && cities.length > 0 && (
+          <select
+            value={cityFilter}
+            onChange={(e) => setCityFilter(e.target.value)}
+            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+          >
+            <option value="">All cities</option>
+            {cities.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+        )}
+        <input
+          type="text"
+          placeholder="Search..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="max-w-xs bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-200 text-sm px-3 py-2 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+        />
+        <span className="text-xs text-zinc-500 ml-auto">{filtered.length} of {data.jurisdictions.length}</span>
+      </div>
 
       {/* Jurisdictions table */}
       <div className="border border-zinc-800 rounded-lg overflow-hidden">
