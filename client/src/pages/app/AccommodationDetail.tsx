@@ -3,7 +3,12 @@ import { useParams, Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import { Badge, Button, Card } from '../../components/ui'
 import { Loader2, Upload, FileText, Brain } from 'lucide-react'
-import { NoteThread } from '../../components/NoteThread'
+// audit log types
+type AuditEntry = {
+  id: string; action: string; entity_type: string | null; details: Record<string, unknown> | null
+  created_at: string
+}
+type AuditLogResponse = { entries: AuditEntry[]; total: number }
 
 type AccommodationCase = {
   id: string; case_number: string; org_id: string; employee_id: string
@@ -40,6 +45,8 @@ export default function AccommodationDetail() {
   const [hardship, setHardship] = useState<Analysis | null>(null)
   const [analyzing, setAnalyzing] = useState<string | null>(null)
   const [statusUpdating, setStatusUpdating] = useState(false)
+  const [auditLog, setAuditLog] = useState<AuditEntry[]>([])
+  const [auditLoading, setAuditLoading] = useState(false)
 
   useEffect(() => {
     if (!caseId) return
@@ -57,6 +64,13 @@ export default function AccommodationDetail() {
         .then(setDocs)
         .catch(() => setDocs([]))
         .finally(() => setDocsLoading(false))
+    }
+    if (tab === 'notes' && caseId) {
+      setAuditLoading(true)
+      api.get<AuditLogResponse>(`/accommodations/${caseId}/audit-log`)
+        .then(res => setAuditLog(res.entries))
+        .catch(() => setAuditLog([]))
+        .finally(() => setAuditLoading(false))
     }
   }, [tab, caseId])
 
@@ -281,9 +295,34 @@ export default function AccommodationDetail() {
         </div>
       )}
 
-      {/* Notes tab */}
-      {tab === 'notes' && caseId && (
-        <NoteThread endpoint={`/accommodations/${caseId}/audit-log`} />
+      {/* Notes / Audit Log tab */}
+      {tab === 'notes' && (
+        <div>
+          {auditLoading ? (
+            <p className="text-xs text-zinc-500">Loading audit log...</p>
+          ) : auditLog.length === 0 ? (
+            <p className="text-xs text-zinc-500">No audit log entries yet.</p>
+          ) : (
+            <div className="space-y-3 max-h-96 overflow-y-auto">
+              {auditLog.map((e) => (
+                <div key={e.id} className="rounded-lg bg-zinc-900/50 border border-zinc-800 px-4 py-3">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] text-zinc-500">{new Date(e.created_at).toLocaleString()}</span>
+                    <span className="text-xs text-zinc-400 font-medium">{e.action.replace(/_/g, ' ')}</span>
+                    {e.entity_type && <span className="text-[10px] text-zinc-600">{e.entity_type}</span>}
+                  </div>
+                  {e.details && Object.keys(e.details).length > 0 && (
+                    <p className="text-sm text-zinc-300">{
+                      e.details.content ? String(e.details.content)
+                        : e.details.new_status ? `Status → ${e.details.new_status}`
+                        : JSON.stringify(e.details)
+                    }</p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
     </div>
   )
