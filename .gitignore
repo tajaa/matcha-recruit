@@ -102,8 +102,9 @@ Pods/
 
 # Xcode build output
 desktop/Matcha/build/
-.claude/worktrees/
-.claude/
+.claude/*
+!.claude/commands/
+!.claude/CLAUDE.md
 /soc/
 
 # Proposals / docs
