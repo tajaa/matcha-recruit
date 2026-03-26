@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { fetchKeyCoverage } from '../../../api/compliance'
 import type { CategoryKeyCoverage, RegulationKeyCoverage } from '../../../api/compliance'
 import { CATEGORY_LABELS } from '../../../generated/complianceCategories'
@@ -24,8 +25,12 @@ function KeyRow({ k, expanded, onToggle }: { k: RegulationKeyCoverage; expanded:
         className={`border-b border-zinc-800/50 cursor-pointer hover:bg-zinc-800/30 ${isMissing ? 'text-red-400' : ''}`}
         onClick={onToggle}
       >
-        <td className="px-3 py-2 font-mono text-xs">{k.key}</td>
-        <td className="px-3 py-2 text-sm">{k.name}</td>
+        <td className="px-3 py-2 font-mono text-xs">
+          <Link to={`/admin/jurisdiction-data/policy/${k.id}`} className="hover:text-emerald-400" onClick={e => e.stopPropagation()}>{k.key}</Link>
+        </td>
+        <td className="px-3 py-2 text-sm">
+          <Link to={`/admin/jurisdiction-data/policy/${k.id}`} className="hover:text-emerald-400" onClick={e => e.stopPropagation()}>{k.name}</Link>
+        </td>
         <td className="px-3 py-2 text-xs text-zinc-400">{k.enforcing_agency || '—'}</td>
         <td className="px-3 py-2 text-xs text-center">{k.base_weight > 1 ? <span className="text-purple-300">{k.base_weight}x</span> : '1x'}</td>
         <td className="px-3 py-2 text-xs text-zinc-500">{k.key_group || '—'}</td>
@@ -179,7 +184,7 @@ function CategorySection({
         <td colSpan={8} className="px-3 py-2">
           <div className="flex items-center gap-3 text-sm">
             <span className="text-zinc-500">{collapsed ? '▸' : '▾'}</span>
-            <span className="font-medium text-zinc-200">{label}</span>
+            <Link to={`/admin/jurisdiction-data/category/${cat.category}`} className="font-medium text-zinc-200 hover:text-emerald-400" onClick={e => e.stopPropagation()}>{label}</Link>
             <span className="text-xs text-zinc-500">{cat.category}</span>
             <span className="text-xs font-mono text-zinc-400">{cat.present}/{cat.expected}</span>
             {missingCount > 0 && (

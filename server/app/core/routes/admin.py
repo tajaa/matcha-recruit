@@ -4522,6 +4522,176 @@ async def jurisdiction_key_coverage(
     }
 
 
+@router.get("/jurisdictions/categories/{slug}", dependencies=[Depends(require_admin)])
+async def get_category_detail(slug: str):
+    """Full detail for a compliance category: description, domain, and all regulation key definitions with coverage stats."""
+    async with get_connection() as conn:
+        # Get category info
+        cat = await conn.fetchrow(
+            'SELECT id, slug, name, description, domain::text, "group" FROM compliance_categories WHERE slug = $1',
+            slug
+        )
+        if not cat:
+            raise HTTPException(status_code=404, detail="Category not found")
+
+        # Get all key definitions for this category with coverage stats
+        keys = await conn.fetch("""
+            SELECT rkd.id, rkd.key, rkd.name, rkd.description,
+                   rkd.state_variance, rkd.enforcing_agency, rkd.base_weight,
+                   rkd.key_group, rkd.staleness_warning_days,
+                   COUNT(jr.id) AS jurisdiction_count,
+                   COUNT(jr.id) FILTER (WHERE jr.change_status = 'changed') AS changed_count,
+                   COUNT(jr.id) FILTER (WHERE jr.change_status = 'new') AS new_count,
+                   MIN(jr.last_verified_at) AS oldest_verified,
+                   CASE
+                       WHEN COUNT(jr.id) = 0 THEN 'no_data'
+                       WHEN MIN(jr.last_verified_at) < NOW() - (rkd.staleness_expired_days || ' days')::interval THEN 'expired'
+                       WHEN MIN(jr.last_verified_at) < NOW() - (rkd.staleness_critical_days || ' days')::interval THEN 'critical'
+                       WHEN MIN(jr.last_verified_at) < NOW() - (rkd.staleness_warning_days || ' days')::interval THEN 'warning'
+                       ELSE 'fresh'
+                   END AS staleness_level
+            FROM regulation_key_definitions rkd
+            LEFT JOIN jurisdiction_requirements jr
+                ON jr.key_definition_id = rkd.id
+            WHERE rkd.category_slug = $1
+            GROUP BY rkd.id
+            ORDER BY rkd.key
+        """, slug)
+
+        total_reqs = sum(r["jurisdiction_count"] for r in keys)
+
+        def fmt_date(d):
+            return d.isoformat() if d else None
+
+        return {
+            "slug": cat["slug"],
+            "name": cat["name"],
+            "description": cat["description"],
+            "domain": cat["domain"],
+            "group": cat["group"],
+            "key_count": len(keys),
+            "requirement_count": total_reqs,
+            "keys": [
+                {
+                    "id": str(r["id"]),
+                    "key": r["key"],
+                    "name": r["name"],
+                    "description": r["description"],
+                    "state_variance": r["state_variance"],
+                    "enforcing_agency": r["enforcing_agency"],
+                    "base_weight": float(r["base_weight"]) if r["base_weight"] else 1.0,
+                    "key_group": r["key_group"],
+                    "jurisdiction_count": r["jurisdiction_count"],
+                    "changed_count": r["changed_count"],
+                    "new_count": r["new_count"],
+                    "staleness_level": r["staleness_level"],
+                }
+                for r in keys
+            ],
+        }
+
+
+@router.get("/jurisdictions/policies/{key_definition_id}", dependencies=[Depends(require_admin)])
+async def get_policy_detail(key_definition_id: UUID):
+    """Full detail for a regulation key: definition + all jurisdiction instances + change log."""
+    async with get_connection() as conn:
+        # Key definition
+        kd = await conn.fetchrow("""
+            SELECT rkd.id, rkd.key, rkd.category_slug, rkd.name, rkd.description,
+                   rkd.state_variance, rkd.enforcing_agency, rkd.base_weight,
+                   rkd.authority_source_urls, rkd.applies_to_levels,
+                   rkd.staleness_warning_days, rkd.staleness_critical_days,
+                   rkd.staleness_expired_days, rkd.key_group, rkd.update_frequency,
+                   cc.name AS category_name
+            FROM regulation_key_definitions rkd
+            JOIN compliance_categories cc ON cc.id = rkd.category_id
+            WHERE rkd.id = $1
+        """, key_definition_id)
+        if not kd:
+            raise HTTPException(status_code=404, detail="Key definition not found")
+
+        # All jurisdiction instances
+        reqs = await conn.fetch("""
+            SELECT jr.id, jr.jurisdiction_id, jr.title, jr.description,
+                   jr.current_value, jr.previous_value, jr.previous_description,
+                   jr.change_status, jr.effective_date, jr.source_url, jr.source_name,
+                   jr.last_verified_at, jr.last_changed_at, jr.requires_written_policy,
+                   j.city, j.state, j.display_name, j.level::text AS jur_level
+            FROM jurisdiction_requirements jr
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE jr.key_definition_id = $1
+            ORDER BY j.state, j.city NULLS FIRST
+        """, key_definition_id)
+
+        # Recent change log entries
+        change_log = await conn.fetch("""
+            SELECT pcl.field_changed, pcl.old_value, pcl.new_value,
+                   pcl.changed_at, pcl.change_source,
+                   j.display_name AS jurisdiction_name
+            FROM policy_change_log pcl
+            JOIN jurisdiction_requirements jr ON jr.id = pcl.requirement_id
+            JOIN jurisdictions j ON j.id = jr.jurisdiction_id
+            WHERE jr.key_definition_id = $1
+            ORDER BY pcl.changed_at DESC
+            LIMIT 50
+        """, key_definition_id)
+
+        def fmt_date(d):
+            return d.isoformat() if d else None
+
+        return {
+            "id": str(kd["id"]),
+            "key": kd["key"],
+            "category_slug": kd["category_slug"],
+            "category_name": kd["category_name"],
+            "name": kd["name"],
+            "description": kd["description"],
+            "state_variance": kd["state_variance"],
+            "enforcing_agency": kd["enforcing_agency"],
+            "base_weight": float(kd["base_weight"]) if kd["base_weight"] else 1.0,
+            "authority_source_urls": kd["authority_source_urls"],
+            "applies_to_levels": kd["applies_to_levels"],
+            "staleness_warning_days": kd["staleness_warning_days"],
+            "staleness_critical_days": kd["staleness_critical_days"],
+            "update_frequency": kd["update_frequency"],
+            "key_group": kd["key_group"],
+            "jurisdictions": [
+                {
+                    "requirement_id": str(r["id"]),
+                    "jurisdiction_id": str(r["jurisdiction_id"]),
+                    "state": r["state"],
+                    "city": r["city"],
+                    "display_name": r["display_name"],
+                    "level": r["jur_level"],
+                    "title": r["title"],
+                    "description": r["description"],
+                    "current_value": r["current_value"],
+                    "previous_value": r["previous_value"],
+                    "previous_description": r["previous_description"],
+                    "change_status": r["change_status"],
+                    "effective_date": fmt_date(r["effective_date"]),
+                    "source_url": r["source_url"],
+                    "source_name": r["source_name"],
+                    "requires_written_policy": r["requires_written_policy"],
+                    "last_verified_at": fmt_date(r["last_verified_at"]),
+                    "last_changed_at": fmt_date(r["last_changed_at"]),
+                }
+                for r in reqs
+            ],
+            "change_log": [
+                {
+                    "jurisdiction_name": r["jurisdiction_name"],
+                    "field_changed": r["field_changed"],
+                    "old_value": r["old_value"],
+                    "new_value": r["new_value"],
+                    "changed_at": fmt_date(r["changed_at"]),
+                    "change_source": r["change_source"],
+                }
+                for r in change_log
+            ],
+        }
+
+
 @router.get("/jurisdictions/{jurisdiction_id}", dependencies=[Depends(require_admin)])
 async def get_jurisdiction_detail(jurisdiction_id: UUID):
     """Get full detail for a jurisdiction: requirements, legislation, linked locations."""

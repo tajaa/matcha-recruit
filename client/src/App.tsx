@@ -14,6 +14,8 @@ import IndustryRequirements from './pages/admin/IndustryRequirements'
 import SpecializationResearch from './pages/admin/SpecializationResearch'
 import Brokers from './pages/admin/Brokers'
 import ComplianceManagement from './pages/admin/ComplianceManagement'
+import CategoryDetailPage from './pages/admin/CategoryDetailPage'
+import PolicyDetailPage from './pages/admin/PolicyDetailPage'
 import Dashboard from './pages/app/Dashboard'
 import Employees from './pages/app/Employees'
 import Onboarding from './pages/app/Onboarding'
@@ -56,6 +58,8 @@ export default function App() {
         <Route path="features" element={<Features />} />
         <Route path="settings" element={<Settings />} />
         <Route path="jurisdiction-data" element={<JurisdictionData />} />
+        <Route path="jurisdiction-data/category/:slug" element={<CategoryDetailPage />} />
+        <Route path="jurisdiction-data/policy/:id" element={<PolicyDetailPage />} />
         <Route path="payer-data" element={<PayerData />} />
         <Route path="jurisdictions" element={<Jurisdictions />} />
         <Route path="industry-requirements" element={<IndustryRequirements />} />

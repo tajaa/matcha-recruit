@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../../api/client'
 import { fmtDate } from './utils'
 import type {
@@ -206,6 +207,13 @@ export default function PolicyBrowserTab() {
                     {cat.latest_verified && (
                       <span className="text-zinc-600">verified {fmtDate(cat.latest_verified)}</span>
                     )}
+                    <Link
+                      to={`/admin/jurisdiction-data/category/${cat.slug}`}
+                      className="text-emerald-500 hover:text-emerald-400 ml-auto"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      View details →
+                    </Link>
                   </div>
                   <div className="mt-2">
                     <TierMiniBar breakdown={cat.tier_breakdown} />
