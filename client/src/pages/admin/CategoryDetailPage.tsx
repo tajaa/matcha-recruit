@@ -25,6 +25,8 @@ interface CategoryDetail {
   group: string
   key_count: number
   requirement_count: number
+  state_filter: string | null
+  available_states: string[]
   keys: PolicyKey[]
 }
 
@@ -67,17 +69,19 @@ export default function CategoryDetailPage() {
   const [data, setData] = useState<CategoryDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [stateFilter, setStateFilter] = useState('')
 
   useEffect(() => {
     if (!slug) return
     let cancelled = false
     setLoading(true)
-    api.get<CategoryDetail>(`/admin/jurisdictions/categories/${slug}`)
+    const qs = stateFilter ? `?state=${stateFilter}` : ''
+    api.get<CategoryDetail>(`/admin/jurisdictions/categories/${slug}${qs}`)
       .then((d) => { if (!cancelled) setData(d) })
       .catch(() => { if (!cancelled) setData(null) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [slug])
+  }, [slug, stateFilter])
 
   const filtered = useMemo(() => {
     if (!data) return []
@@ -116,16 +120,27 @@ export default function CategoryDetailPage() {
       {/* Stats */}
       <p className="text-xs text-zinc-500">
         {data.key_count} policies &middot; {data.requirement_count.toLocaleString()} jurisdiction entries
+        {stateFilter && ` (${stateFilter})`}
       </p>
 
-      {/* Search */}
-      <input
-        type="text"
-        placeholder="Filter policies by name or key..."
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="w-full max-w-md bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-200 text-sm px-3 py-2 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
-      />
+      {/* Filters */}
+      <div className="flex gap-2 items-center">
+        <select
+          value={stateFilter}
+          onChange={(e) => setStateFilter(e.target.value)}
+          className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-zinc-500"
+        >
+          <option value="">All states</option>
+          {data.available_states.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <input
+          type="text"
+          placeholder="Filter policies by name or key..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="flex-1 max-w-md bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-200 text-sm px-3 py-2 placeholder:text-zinc-600 focus:outline-none focus:border-zinc-500"
+        />
+      </div>
 
       {/* Table */}
       <div className="border border-zinc-800 rounded-lg overflow-hidden">

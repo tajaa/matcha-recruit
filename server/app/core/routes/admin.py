@@ -4572,7 +4572,7 @@ async def jurisdiction_key_coverage(
 
 
 @router.get("/jurisdictions/categories/{slug}", dependencies=[Depends(require_admin)])
-async def get_category_detail(slug: str):
+async def get_category_detail(slug: str, state: str = Query(default=None)):
     """Full detail for a compliance category: description, domain, and all regulation key definitions with coverage stats."""
     async with get_connection() as conn:
         # Get category info
@@ -4584,7 +4584,13 @@ async def get_category_detail(slug: str):
             raise HTTPException(status_code=404, detail="Category not found")
 
         # Get all key definitions for this category with coverage stats
-        keys = await conn.fetch("""
+        state_filter = ""
+        params = [slug]
+        if state:
+            state_filter = "AND jr.jurisdiction_id IN (SELECT id FROM jurisdictions WHERE state = $2)"
+            params.append(state)
+
+        keys = await conn.fetch(f"""
             SELECT rkd.id, rkd.key, rkd.name, rkd.description,
                    rkd.state_variance, rkd.enforcing_agency, rkd.base_weight,
                    rkd.key_group, rkd.staleness_warning_days,
@@ -4601,13 +4607,18 @@ async def get_category_detail(slug: str):
                    END AS staleness_level
             FROM regulation_key_definitions rkd
             LEFT JOIN jurisdiction_requirements jr
-                ON jr.key_definition_id = rkd.id
+                ON jr.key_definition_id = rkd.id {state_filter}
             WHERE rkd.category_slug = $1
             GROUP BY rkd.id
             ORDER BY rkd.key
-        """, slug)
+        """, *params)
 
         total_reqs = sum(r["jurisdiction_count"] for r in keys)
+
+        # Get states that have jurisdictions (for filter dropdown)
+        available_states = await conn.fetch(
+            "SELECT DISTINCT state FROM jurisdictions WHERE state IS NOT NULL ORDER BY state"
+        )
 
         def fmt_date(d):
             return d.isoformat() if d else None
@@ -4620,6 +4631,8 @@ async def get_category_detail(slug: str):
             "group": cat["group"],
             "key_count": len(keys),
             "requirement_count": total_reqs,
+            "state_filter": state,
+            "available_states": [r["state"] for r in available_states],
             "keys": [
                 {
                     "id": str(r["id"]),
