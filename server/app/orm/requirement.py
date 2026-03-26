@@ -138,6 +138,12 @@ class JurisdictionRequirement(TimestampMixin, Base):
     regulation_key: Mapped[Optional[str]] = mapped_column(
         String(100), nullable=True
     )
+    previous_description: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True
+    )
+    change_status: Mapped[Optional[str]] = mapped_column(
+        String(20), nullable=True, server_default="new"
+    )
     key_definition_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("regulation_key_definitions.id"),

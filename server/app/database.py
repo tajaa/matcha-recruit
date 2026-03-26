@@ -2772,6 +2772,8 @@ async def init_db():
                 effective_date DATE,
                 expiration_date DATE,
                 previous_value VARCHAR(100),
+                previous_description TEXT,
+                change_status VARCHAR(20) DEFAULT 'new',
                 last_changed_at TIMESTAMP,
                 last_verified_at TIMESTAMP NOT NULL DEFAULT NOW(),
                 is_bookmarked BOOLEAN NOT NULL DEFAULT false,

@@ -4549,7 +4549,8 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
             SELECT id, requirement_key, category, jurisdiction_level, jurisdiction_name,
                    title, description, current_value, numeric_value,
                    source_url, source_name, effective_date, expiration_date,
-                   previous_value, last_changed_at, last_verified_at, is_bookmarked,
+                   previous_value, previous_description, change_status,
+                   last_changed_at, last_verified_at, is_bookmarked,
                    sort_order, created_at, updated_at
             FROM jurisdiction_requirements
             WHERE jurisdiction_id = $1
@@ -4611,6 +4612,8 @@ async def get_jurisdiction_detail(jurisdiction_id: UUID):
                     "effective_date": fmt_date(r["effective_date"]),
                     "expiration_date": fmt_date(r["expiration_date"]),
                     "previous_value": r["previous_value"],
+                    "previous_description": r["previous_description"],
+                    "change_status": r["change_status"],
                     "last_changed_at": fmt_date(r["last_changed_at"]),
                     "last_verified_at": fmt_date(r["last_verified_at"]),
                     "is_bookmarked": r["is_bookmarked"],
