@@ -12,6 +12,11 @@ ENV/
 .env
 .env.local
 
+# Secrets / credentials
+client_secret*.json
+gmail_token.json
+token.json
+
 # IDE
 .idea/
 .vscode/
