@@ -1961,7 +1961,6 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 has_profile = await conn.fetchval(
                     """SELECT EXISTS(SELECT 1 FROM companies WHERE id = $1
                        AND headquarters_state IS NOT NULL
-                       AND benefits_summary IS NOT NULL
                        AND default_employment_type IS NOT NULL)""",
                     company_id
                 )
