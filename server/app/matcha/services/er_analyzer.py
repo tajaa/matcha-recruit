@@ -350,6 +350,12 @@ MULTI-ACTOR EVALUATION (MANDATORY):
 - The action_label should summarize the combined actions (e.g., "Retraining for El-Amin + Written Warning for Patel").
 - Actor A being a victim in one context does NOT grant them immunity for separate policy violations they committed in another context.
 
+NO IMMUNITY FOR ANY PARTY (CRITICAL):
+- Filing a complaint does NOT shield the complainant from accountability for their OWN policy violations discovered during the investigation.
+- If the complainant made discriminatory remarks (homophobic, racist, etc.), skipped safety/medication protocols, or committed other violations — these MUST be addressed in the party_actions with appropriate disciplinary action, even if they are the victim of the original complaint.
+- If a respondent/supervisor lied during the investigation, engaged in retaliation, or destroyed evidence — these are AGGRAVATING factors that should escalate the recommended action (e.g., from warning to termination), not be treated as minor issues.
+- Dishonesty during an investigation is itself a terminable offense under most employer policies — flag this explicitly.
+
 SYSTEM DATA PRIORITY:
 - When evaluating the validity of a performance action, objective system data (audit logs, system records, documented metrics) must be weighted significantly higher than interpersonal chat sentiment or subjective interpretation.
 - Do NOT recommend overturning a data-backed performance action solely because concurrent interpersonal conflict exists.

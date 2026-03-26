@@ -194,6 +194,51 @@ def _normalize_json_list(raw_value: Any) -> list:
     return []
 
 
+async def _fetch_company_policy_context(conn, company_id: UUID) -> str:
+    """Fetch active policies + handbook sections as fallback policy context for outcome analysis."""
+    parts: list[str] = []
+
+    policies = await conn.fetch(
+        "SELECT title, LEFT(content, 1000) as content FROM policies WHERE company_id = $1 AND status = 'active' LIMIT 15",
+        company_id,
+    )
+    if policies:
+        parts.append("COMPANY POLICIES:")
+        for p in policies:
+            title = p["title"] or "Untitled"
+            content = (p["content"] or "").strip()
+            parts.append(f"- {title}: {content[:500]}" if content else f"- {title}")
+
+    handbook = await conn.fetchrow(
+        "SELECT id, title, active_version FROM handbooks WHERE company_id = $1 AND status = 'active' ORDER BY published_at DESC NULLS LAST LIMIT 1",
+        company_id,
+    )
+    if handbook:
+        version_id = await conn.fetchval(
+            "SELECT id FROM handbook_versions WHERE handbook_id = $1 AND version_number = $2",
+            handbook["id"], handbook["active_version"],
+        )
+        if version_id is None:
+            version_id = await conn.fetchval(
+                "SELECT id FROM handbook_versions WHERE handbook_id = $1 ORDER BY version_number DESC LIMIT 1",
+                handbook["id"],
+            )
+        if version_id:
+            sections = await conn.fetch(
+                "SELECT title, LEFT(content, 800) as content FROM handbook_sections WHERE handbook_version_id = $1 AND content IS NOT NULL ORDER BY section_order LIMIT 20",
+                version_id,
+            )
+            if sections:
+                hb_title = handbook["title"] or "Employee Handbook"
+                parts.append(f"\nHANDBOOK ({hb_title}):")
+                for s in sections:
+                    title = s["title"] or "Section"
+                    content = (s["content"] or "").strip()
+                    parts.append(f"- {title}: {content[:400]}" if content else f"- {title}")
+
+    return "\n".join(parts) if parts else ""
+
+
 async def _resolve_involved_parties(conn, raw_employees: Any) -> list[dict]:
     """Resolve involved_employees JSONB into name+role dicts for Gemini context."""
     involved = _normalize_json_list(raw_employees)
@@ -2958,7 +3003,16 @@ async def generate_outcome_analysis_stream(
             analysis_summary_parts.append(f"Discrepancies: {disc_data['summary']}")
         analysis_summary = "\n".join(analysis_summary_parts) or "No analysis summaries available."
 
-        policy_findings = policy_data.get("summary", "No policy findings available.")
+        policy_findings = policy_data.get("summary", "")
+
+        # Fallback: if policy_check analysis is empty, pull company policies + handbook directly
+        if not policy_findings or policy_findings == "No policy findings available.":
+            async with get_connection() as policy_conn:
+                direct_policy_ctx = await _fetch_company_policy_context(policy_conn, company_id)
+            if direct_policy_ctx:
+                policy_findings = direct_policy_ctx
+            else:
+                policy_findings = "No policy findings available."
 
         yield sse({"type": "status", "message": f"Found {n_discrepancies} discrepancies and {n_violations} policy violations"})
 
@@ -3183,7 +3237,16 @@ async def generate_outcome_analysis(
         summary_parts.append(f"Discrepancies: {disc_data['summary']}")
     analysis_summary = "\n".join(summary_parts) or "No analysis summaries available."
 
-    policy_findings = policy_data.get("summary", "No policy findings available.")
+    policy_findings = policy_data.get("summary", "")
+
+    # Fallback: if policy_check analysis is empty, pull company policies + handbook directly
+    if not policy_findings or policy_findings == "No policy findings available.":
+        async with get_connection() as policy_conn:
+            direct_policy_ctx = await _fetch_company_policy_context(policy_conn, company_id)
+        if direct_policy_ctx:
+            policy_findings = direct_policy_ctx
+        else:
+            policy_findings = "No policy findings available."
 
     c_info = {
         "case_number": case_row["case_number"],
