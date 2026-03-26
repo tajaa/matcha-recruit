@@ -3,6 +3,7 @@ from typing import Any
 
 DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "handbooks": True,
+    "accommodations": True,
     "matcha_work": False,
     "risk_assessment": True,
     "training": False,
