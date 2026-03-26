@@ -121,7 +121,7 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 ---
 
-## Healthcare (8 categories)
+## Healthcare (9 categories)
 
 ### HIPAA Privacy & Security (hipaa_privacy)
 
@@ -285,6 +285,24 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | nims_hics | NIMS / HICS | FEMA / ASPR | Low/None |
 | pandemic_preparedness | Pandemic Preparedness | HHS / CDC / State | High |
 | state_emergency_preparedness_requirements | State Emergency Preparedness Requirements | State Health Depts / EM | High |
+
+### Reimbursement & Value-Based Care (reimbursement_vbc)
+
+**Industry**: healthcare:provider
+**Keys**: 10
+
+| Key | Name | Enforcing Agency | State Variance |
+|-----|------|-----------------|----------------|
+| apm_participation | Apm Participation | - | - |
+| bundled_payment_compliance | Bundled Payment Compliance | - | - |
+| cms_star_ratings | Cms Star Ratings | - | - |
+| drg_coding_compliance | Drg Coding Compliance | - | - |
+| good_faith_estimates | Good Faith Estimates | - | - |
+| hedis_quality_measures | Hedis Quality Measures | - | - |
+| macra_mips_reporting | Macra Mips Reporting | - | - |
+| no_surprises_act | No Surprises Act | - | - |
+| price_transparency_rule | Price Transparency Rule | - | - |
+| value_based_contract_requirements | Value Based Contract Requirements | - | - |
 
 ## Labor (12 categories)
 
@@ -480,7 +498,7 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | salary_history_ban | Salary History Ban | - | - |
 | whistleblower_protection | Whistleblower Protection | - | - |
 
-## Life Sciences (6 categories)
+## Life Sciences (7 categories)
 
 ### GMP Manufacturing (gmp_manufacturing)
 
@@ -569,7 +587,27 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | nih_rdna_guidelines | NIH Guidelines for Research Involving Recombinant or Synthetic Nucleic Acid Molecules | NIH | Low/None |
 | select_agent_regulations | Select Agent Regulations (42 CFR Part 73 / 7 CFR Part 331 / 9 CFR Part 121) | CDC / APHIS | Low/None |
 
-## Manufacturing (8 categories)
+### FDA Pre/Post-Market Lifecycle (fda_lifecycle)
+
+**Industry**: biotech:pharma
+**Keys**: 12
+
+| Key | Name | Enforcing Agency | State Variance |
+|-----|------|-----------------|----------------|
+| anda_generic_pathway | Anda Generic Pathway | - | - |
+| fda_483_observations | Fda 483 Observations | - | - |
+| fda_breakthrough_accelerated | Fda Breakthrough Accelerated | - | - |
+| fda_priority_review | Fda Priority Review | - | - |
+| nda_bla_submission | Nda Bla Submission | - | - |
+| orphan_drug_exclusivity | Orphan Drug Exclusivity | - | - |
+| patent_exclusivity_orange_book | Patent Exclusivity Orange Book | - | - |
+| pediatric_study_requirements | Pediatric Study Requirements | - | - |
+| pharmacovigilance_safety_reporting | Pharmacovigilance Safety Reporting | - | - |
+| post_market_surveillance_faers | Post Market Surveillance Faers | - | - |
+| product_labeling_pi_medication_guide | Product Labeling Pi Medication Guide | - | - |
+| rems_lifecycle | Rems Lifecycle | - | - |
+
+## Manufacturing (10 categories)
 
 ### Process Safety Management (process_safety)
 
@@ -588,15 +626,23 @@ Every policy key, when applied to a jurisdiction, stores this data:
 ### Environmental & Emissions (environmental_compliance)
 
 **Industry**: manufacturing
-**Keys**: 6
+**Keys**: 14
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
 | air_quality_permit | Air Quality Permit | - | - |
+| cercla_superfund_liability | Cercla Superfund Liability | - | - |
+| clean_air_act_title_v | Clean Air Act Title V | - | - |
+| clean_water_act_npdes | Clean Water Act Npdes | - | - |
 | emissions_reporting | Emissions Reporting | - | - |
+| epa_risk_management_program | Epa Risk Management Program | - | - |
+| epcra_tri_reporting | Epcra Tri Reporting | - | - |
 | hazardous_waste_rcra | Hazardous Waste Rcra | - | - |
 | neshap_compliance | Neshap Compliance | - | - |
+| rcra_hazardous_waste | Rcra Hazardous Waste | - | - |
+| spcc_oil_spill_prevention | Spcc Oil Spill Prevention | - | - |
 | stormwater_permit | Stormwater Permit | - | - |
+| tsca_toxic_substances | Tsca Toxic Substances | - | - |
 | wastewater_discharge | Wastewater Discharge | - | - |
 
 ### Chemical & Hazardous Materials (chemical_safety)
@@ -683,6 +729,39 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | union_notification | Union Notification | - | - |
 | works_council | Works Council | - | - |
 
+### Quality Management Systems (quality_systems)
+
+**Industry**: manufacturing:quality
+**Keys**: 9
+
+| Key | Name | Enforcing Agency | State Variance |
+|-----|------|-----------------|----------------|
+| cap_accreditation | Cap Accreditation | - | - |
+| clia_lab_certification | Clia Lab Certification | - | - |
+| iso_13485_medical_devices | Iso 13485 Medical Devices | - | - |
+| iso_14001_environmental | Iso 14001 Environmental | - | - |
+| iso_15189_clinical_labs | Iso 15189 Clinical Labs | - | - |
+| iso_27001_information_security | Iso 27001 Information Security | - | - |
+| iso_45001_ohs | Iso 45001 Ohs | - | - |
+| iso_9001_general_qms | Iso 9001 General Qms | - | - |
+| joint_commission_accreditation | Joint Commission Accreditation | - | - |
+
+### Supply Chain & Procurement (supply_chain)
+
+**Industry**: manufacturing:procurement
+**Keys**: 8
+
+| Key | Name | Enforcing Agency | State Variance |
+|-----|------|-----------------|----------------|
+| antibribery_fcpa_uk_bribery | Antibribery Fcpa Uk Bribery | - | - |
+| conflict_minerals_dodd_frank | Conflict Minerals Dodd Frank | - | - |
+| gpp_green_procurement | Gpp Green Procurement | - | - |
+| reach_regulation | Reach Regulation | - | - |
+| rohs_directive | Rohs Directive | - | - |
+| supplier_qualification_audit | Supplier Qualification Audit | - | - |
+| track_trace_serialization | Track Trace Serialization | - | - |
+| uyghur_forced_labor_prevention | Uyghur Forced Labor Prevention | - | - |
+
 ## Medical Compliance (17 categories)
 
 ### Health IT & Interoperability (health_it)
@@ -726,19 +805,27 @@ Every policy key, when applied to a jurisdiction, stores this data:
 ### Cybersecurity (cybersecurity)
 
 **Industry**: healthcare
-**Keys**: 9
+**Keys**: 17
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
 | circia | CIRCIA (Cyber Incident Reporting) | CISA | Low/None |
 | cisa_healthcare_guidance | CISA Healthcare Guidance | CISA | Low/None |
+| fda_device_cybersecurity_guidance | FDA Pre/Post-Market Cybersecurity Guidance (Devices) | FDA | Low/None |
+| gdpr_health_data | GDPR — Health Data Processing | EU Data Protection Authorities | Low/None |
 | hhs_healthcare_cybersecurity_performance_goals | HHS Healthcare Cybersecurity Performance Goals (HPH CPGs) | HHS / CISA | Low/None |
 | hipaa_security_rule_cybersecurity | HIPAA Security Rule (Technical Details) | HHS OCR | Low/None |
+| incident_response_plan | Cybersecurity Incident Response Plan Requirements | Multiple | Moderate |
 | medical_device_cybersecurity | Medical Device Cybersecurity (Section 524B FD&C Act) | FDA | Low/None |
+| nist_csf_implementation | NIST Cybersecurity Framework Implementation | NIST (voluntary) | Low/None |
 | nist_cybersecurity_framework | NIST Cybersecurity Framework (CSF 2.0) | NIST / HHS | Low/None |
+| patch_act_medical_devices | PATCH Act — Medical Device Cybersecurity | FDA / Congress | Low/None |
 | ransomware_cyber_extortion_response | Ransomware & Cyber Extortion Response | HHS OCR / FBI / CISA | Low/None |
+| soc2_type2_compliance | SOC 2 Type II Compliance | AICPA / Auditors | Low/None |
+| state_consumer_privacy_acts | State Consumer Privacy Acts (CCPA, CPA, CTDPA, etc.) | State AGs | High |
 | state_cybersecurity_requirements | State Cybersecurity Requirements | State regulators | High |
 | state_data_breach_notification_laws | State Data Breach Notification Laws | State AGs | High |
+| third_party_risk_management | Third-Party / Vendor Risk Management | Multiple | Moderate |
 
 ### Environmental Safety (environmental_safety)
 
@@ -848,17 +935,25 @@ Every policy key, when applied to a jurisdiction, stores this data:
 ### Medical Device Safety (medical_devices)
 
 **Industry**: healthcare:devices
-**Keys**: 7
+**Keys**: 15
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
+| 510k_pma_de_novo | 510(k) / PMA / De Novo Classification Pathways | FDA / CDRH | Low/None |
+| cybersecurity_medical_devices | Cybersecurity for Medical Devices (FDA Guidance + PATCH Act) | FDA | Low/None |
+| design_controls_21cfr820 | Design Controls (21 CFR 820 Subpart C) | FDA | Low/None |
+| device_establishment_registration | Device Establishment Registration & Listing | FDA | Low/None |
+| device_master_record | Device Master Record (DMR) & Device History Record (DHR) | FDA | Low/None |
 | equipment_maintenance_testing | Equipment Maintenance & Testing | CMS / Joint Commission | Moderate |
 | fda_medical_device_reporting | FDA Medical Device Reporting (21 CFR Part 803) | FDA | Low/None |
 | fda_recalls_safety_communications | FDA Recalls & Safety Communications | FDA | Low/None |
+| human_factors_usability | Human Factors / Usability Engineering (IEC 62366) | FDA | Low/None |
 | medical_device_tracking | Medical Device Tracking (21 CFR Part 821) | FDA | Low/None |
 | radiationemitting_device_standards | Radiation-Emitting Device Standards (21 CFR Subchapter J) | FDA / State | Moderate |
 | safe_medical_devices_act | Safe Medical Devices Act (SMDA) | FDA | Low/None |
+| software_as_medical_device | Software as a Medical Device (SaMD) — IEC 62304 | FDA / IEC | Low/None |
 | unique_device_identification | Unique Device Identification (UDI) | FDA | Low/None |
+| unique_device_identification_udi | Unique Device Identification (UDI) System | FDA | Low/None |
 
 ### Transplant & Organ Procurement (transplant_organ)
 
@@ -1077,4 +1172,6 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 ---
 
-**Total**: 7 groups, 59 categories, 483 policy keys
+**Total**: 7 groups, 63 categories, 546 policy keys
+
+*Generated from compliance_registry.py on 2026-03-25*

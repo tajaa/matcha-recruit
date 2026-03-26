@@ -39,7 +39,7 @@ class RegulationDef:
 
 
 # ---------------------------------------------------------------------------
-# CATEGORIES  (40 entries)
+# CATEGORIES  (63 entries)
 # ---------------------------------------------------------------------------
 
 CATEGORIES: List[ComplianceCategoryDef] = [
@@ -139,6 +139,10 @@ CATEGORIES: List[ComplianceCategoryDef] = [
     ComplianceCategoryDef(
         key="emergency_preparedness", label="Emergency Preparedness", short_label="Emergency Prep",
         group="healthcare", industry_tag="healthcare", research_mode="specialty", docx_section=10,
+    ),
+    ComplianceCategoryDef(
+        key="reimbursement_vbc", label="Reimbursement & Value-Based Care", short_label="Reimbursement/VBC",
+        group="healthcare", industry_tag="healthcare:provider", research_mode="health_specs", docx_section=None,
     ),
 
     # ── Oncology (5) ───────────────────────────────────────────────────────
@@ -258,6 +262,10 @@ CATEGORIES: List[ComplianceCategoryDef] = [
         key="biosafety_lab", label="Biosafety & Lab Safety", short_label="Biosafety",
         group="life_sciences", industry_tag="biotech", research_mode="specialty", docx_section=None,
     ),
+    ComplianceCategoryDef(
+        key="fda_lifecycle", label="FDA Pre/Post-Market Lifecycle", short_label="FDA Lifecycle",
+        group="life_sciences", industry_tag="biotech:pharma", research_mode="specialty", docx_section=None,
+    ),
 
     # ── Manufacturing (8) ────────────────────────────────────────────────────
     ComplianceCategoryDef(
@@ -291,6 +299,14 @@ CATEGORIES: List[ComplianceCategoryDef] = [
     ComplianceCategoryDef(
         key="labor_relations", label="Labor Relations", short_label="Labor Rel",
         group="manufacturing", industry_tag="manufacturing", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="quality_systems", label="Quality Management Systems", short_label="QMS",
+        group="manufacturing", industry_tag="manufacturing:quality", research_mode="specialty", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="supply_chain", label="Supply Chain & Procurement", short_label="Supply Chain",
+        group="manufacturing", industry_tag="manufacturing:procurement", research_mode="specialty", docx_section=None,
     ),
 ]
 
@@ -332,6 +348,11 @@ CATEGORY_DOMAIN_MAP: Dict[str, str] = {
     "gmp_manufacturing": "safety", "glp_nonclinical": "safety",
     "clinical_trials_gcp": "clinical", "drug_supply_chain": "safety",
     "sunshine_open_payments": "corporate_integrity", "biosafety_lab": "safety",
+    "fda_lifecycle": "safety",
+    # Healthcare expansion
+    "reimbursement_vbc": "billing",
+    # Manufacturing expansion
+    "quality_systems": "safety", "supply_chain": "safety",
 }
 
 
@@ -1475,6 +1496,86 @@ REGULATIONS: List[RegulationDef] = [
         ),
     ),
     RegulationDef(
+        key="nist_csf_implementation",
+        category="cybersecurity",
+        name="NIST Cybersecurity Framework Implementation",
+        description="Voluntary framework for managing cybersecurity risk; widely adopted in healthcare",
+        enforcing_agency="NIST (voluntary)",
+        state_variance="Low/None",
+        update_frequency="CSF 2.0 released Feb 2024",
+        authority_sources=({"domain": "nist.gov/cyberframework", "name": "NIST CSF"},),
+    ),
+    RegulationDef(
+        key="soc2_type2_compliance",
+        category="cybersecurity",
+        name="SOC 2 Type II Compliance",
+        description="Trust service criteria for security, availability, processing integrity, confidentiality, privacy",
+        enforcing_agency="AICPA / Auditors",
+        state_variance="Low/None",
+        update_frequency="Annually audited",
+        authority_sources=({"domain": "aicpa.org", "name": "AICPA"},),
+    ),
+    RegulationDef(
+        key="gdpr_health_data",
+        category="cybersecurity",
+        name="GDPR — Health Data Processing",
+        description="EU General Data Protection Regulation requirements for processing health data (special category)",
+        enforcing_agency="EU Data Protection Authorities",
+        state_variance="Low/None",
+        update_frequency="Active enforcement; guidance evolving",
+        authority_sources=({"domain": "gdpr.eu", "name": "GDPR.eu"},),
+    ),
+    RegulationDef(
+        key="fda_device_cybersecurity_guidance",
+        category="cybersecurity",
+        name="FDA Pre/Post-Market Cybersecurity Guidance (Devices)",
+        description="FDA guidance on cybersecurity in pre-market submissions and post-market management for medical devices",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Guidance updated 2023",
+        authority_sources=({"domain": "fda.gov", "name": "FDA"},),
+    ),
+    RegulationDef(
+        key="patch_act_medical_devices",
+        category="cybersecurity",
+        name="PATCH Act — Medical Device Cybersecurity",
+        description="Consolidated Appropriations Act provisions requiring cybersecurity plans for new device submissions",
+        enforcing_agency="FDA / Congress",
+        state_variance="Low/None",
+        update_frequency="Enacted 2022; FDA implementing",
+        authority_sources=({"domain": "congress.gov", "name": "Congress.gov"},),
+    ),
+    RegulationDef(
+        key="state_consumer_privacy_acts",
+        category="cybersecurity",
+        name="State Consumer Privacy Acts (CCPA, CPA, CTDPA, etc.)",
+        description="State-level comprehensive privacy laws with health data provisions",
+        enforcing_agency="State AGs",
+        state_variance="High",
+        update_frequency="New states enacting annually",
+        authority_sources=({"domain": "iapp.org", "name": "IAPP"},),
+    ),
+    RegulationDef(
+        key="incident_response_plan",
+        category="cybersecurity",
+        name="Cybersecurity Incident Response Plan Requirements",
+        description="Requirements for documented incident response plans across federal and state frameworks",
+        enforcing_agency="Multiple",
+        state_variance="Moderate",
+        update_frequency="Best practices evolving",
+        authority_sources=({"domain": "cisa.gov", "name": "CISA"},),
+    ),
+    RegulationDef(
+        key="third_party_risk_management",
+        category="cybersecurity",
+        name="Third-Party / Vendor Risk Management",
+        description="Requirements for managing cybersecurity risk from vendors and business associates",
+        enforcing_agency="Multiple",
+        state_variance="Moderate",
+        update_frequency="Growing regulatory emphasis",
+        authority_sources=({"domain": "healthit.gov", "name": "ONC"},),
+    ),
+    RegulationDef(
         key="cms_life_safety_code",
         category="environmental_safety",
         name="CMS Life Safety Code (NFPA 101)",
@@ -2436,6 +2537,86 @@ REGULATIONS: List[RegulationDef] = [
         state_variance="Low/None",
         update_frequency="Rarely amended (enacted 1990)",
         authority_sources=({"domain": "fda.gov/medical-devices/postmarket-requirements-devices", "name": "fda.gov/medical-devices/postmarket-requirements-devices"},),
+    ),
+    RegulationDef(
+        key="510k_pma_de_novo",
+        category="medical_devices",
+        name="510(k) / PMA / De Novo Classification Pathways",
+        description="Pre-market submission pathways for medical devices",
+        enforcing_agency="FDA / CDRH",
+        state_variance="Low/None",
+        update_frequency="Guidance updated periodically",
+        authority_sources=({"domain": "fda.gov/medical-devices", "name": "FDA CDRH"},),
+    ),
+    RegulationDef(
+        key="design_controls_21cfr820",
+        category="medical_devices",
+        name="Design Controls (21 CFR 820 Subpart C)",
+        description="Design input/output, verification, validation, transfer, changes",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="21 CFR 820 modernization ongoing",
+        authority_sources=({"domain": "ecfr.gov", "name": "eCFR 21 CFR 820"},),
+    ),
+    RegulationDef(
+        key="device_master_record",
+        category="medical_devices",
+        name="Device Master Record (DMR) & Device History Record (DHR)",
+        description="Documentation requirements for device specifications and manufacturing history",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Stable",
+        authority_sources=({"domain": "ecfr.gov", "name": "eCFR 21 CFR 820"},),
+    ),
+    RegulationDef(
+        key="unique_device_identification_udi",
+        category="medical_devices",
+        name="Unique Device Identification (UDI) System",
+        description="Device identification and labeling through supply chain",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Phase-in complete; GUDID maintained",
+        authority_sources=({"domain": "fda.gov/medical-devices/unique-device-identification-system-udi-system", "name": "FDA UDI"},),
+    ),
+    RegulationDef(
+        key="device_establishment_registration",
+        category="medical_devices",
+        name="Device Establishment Registration & Listing",
+        description="Annual registration of manufacturing establishments and device listings",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="Annual renewal",
+        authority_sources=({"domain": "fda.gov", "name": "FDA"},),
+    ),
+    RegulationDef(
+        key="software_as_medical_device",
+        category="medical_devices",
+        name="Software as a Medical Device (SaMD) — IEC 62304",
+        description="Software lifecycle for medical device software per IEC 62304 and FDA guidance",
+        enforcing_agency="FDA / IEC",
+        state_variance="Low/None",
+        update_frequency="FDA guidance evolving; IEC 62304:2015",
+        authority_sources=({"domain": "fda.gov", "name": "FDA Digital Health"},),
+    ),
+    RegulationDef(
+        key="cybersecurity_medical_devices",
+        category="medical_devices",
+        name="Cybersecurity for Medical Devices (FDA Guidance + PATCH Act)",
+        description="Pre/post-market cybersecurity for connected medical devices",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="FDA guidance 2023; PATCH Act provisions",
+        authority_sources=({"domain": "fda.gov/medical-devices/digital-health-center-excellence", "name": "FDA Digital Health"},),
+    ),
+    RegulationDef(
+        key="human_factors_usability",
+        category="medical_devices",
+        name="Human Factors / Usability Engineering (IEC 62366)",
+        description="Usability engineering process for medical devices",
+        enforcing_agency="FDA",
+        state_variance="Low/None",
+        update_frequency="IEC 62366-1:2015+AMD1:2020",
+        authority_sources=({"domain": "fda.gov", "name": "FDA Human Factors"},),
     ),
     RegulationDef(
         key="national_organ_transplant_act",
@@ -4415,6 +4596,10 @@ _MANUFACTURING_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     "environmental_compliance": frozenset([
         "air_quality_permit", "neshap_compliance", "wastewater_discharge",
         "hazardous_waste_rcra", "stormwater_permit", "emissions_reporting",
+        # Expansion
+        "tsca_toxic_substances", "cercla_superfund_liability", "clean_air_act_title_v",
+        "epa_risk_management_program", "epcra_tri_reporting", "rcra_hazardous_waste",
+        "clean_water_act_npdes", "spcc_oil_spill_prevention",
     ]),
     "chemical_safety": frozenset([
         "hazcom_ghs", "chemical_inventory_reporting", "right_to_know",
@@ -4442,6 +4627,33 @@ _MANUFACTURING_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     ]),
 }
 EXPECTED_REGULATION_KEYS.update(_MANUFACTURING_REGULATION_KEYS)
+
+_EXPANSION_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
+    "fda_lifecycle": frozenset([
+        "nda_bla_submission", "anda_generic_pathway", "fda_breakthrough_accelerated",
+        "fda_priority_review", "post_market_surveillance_faers",
+        "pharmacovigilance_safety_reporting", "rems_lifecycle", "fda_483_observations",
+        "product_labeling_pi_medication_guide", "pediatric_study_requirements",
+        "orphan_drug_exclusivity", "patent_exclusivity_orange_book",
+    ]),
+    "reimbursement_vbc": frozenset([
+        "macra_mips_reporting", "apm_participation", "bundled_payment_compliance",
+        "cms_star_ratings", "hedis_quality_measures", "value_based_contract_requirements",
+        "drg_coding_compliance", "price_transparency_rule", "no_surprises_act",
+        "good_faith_estimates",
+    ]),
+    "quality_systems": frozenset([
+        "iso_13485_medical_devices", "iso_9001_general_qms", "iso_15189_clinical_labs",
+        "iso_14001_environmental", "iso_45001_ohs", "iso_27001_information_security",
+        "clia_lab_certification", "cap_accreditation", "joint_commission_accreditation",
+    ]),
+    "supply_chain": frozenset([
+        "conflict_minerals_dodd_frank", "reach_regulation", "rohs_directive",
+        "uyghur_forced_labor_prevention", "supplier_qualification_audit",
+        "track_trace_serialization", "gpp_green_procurement", "antibribery_fcpa_uk_bribery",
+    ]),
+}
+EXPECTED_REGULATION_KEYS.update(_EXPANSION_REGULATION_KEYS)
 
 _INTERNATIONAL_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     "minimum_wage": frozenset(["national_minimum_wage", "zlfn_border_zone_minimum_wage"]),
