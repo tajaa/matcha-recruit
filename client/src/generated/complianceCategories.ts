@@ -109,7 +109,7 @@ export const CATEGORY_SHORT_LABELS: Record<string, string> = {
   'biosafety_lab': 'Biosafety',
 };
 
-export type CategoryGroup = 'healthcare' | 'labor' | 'life_sciences' | 'medical_compliance' | 'oncology' | 'supplementary';
+export type CategoryGroup = 'healthcare' | 'labor' | 'life_sciences' | 'manufacturing' | 'medical_compliance' | 'oncology' | 'supplementary';
 
 export const CATEGORY_GROUPS: Record<string, CategoryGroup> = {
   'minimum_wage': 'labor',
@@ -163,12 +163,23 @@ export const CATEGORY_GROUPS: Record<string, CategoryGroup> = {
   'drug_supply_chain': 'life_sciences',
   'sunshine_open_payments': 'life_sciences',
   'biosafety_lab': 'life_sciences',
+  'process_safety': 'manufacturing',
+  'environmental_compliance': 'manufacturing',
+  'chemical_safety': 'manufacturing',
+  'machine_safety': 'manufacturing',
+  'industrial_hygiene': 'manufacturing',
+  'trade_compliance': 'manufacturing',
+  'product_safety': 'manufacturing',
+  'labor_relations': 'manufacturing',
+  'quality_systems': 'manufacturing',
+  'supply_chain': 'manufacturing',
 };
 
 export const LABOR_CATEGORIES = new Set(['anti_discrimination', 'final_pay', 'leave', 'meal_breaks', 'minimum_wage', 'minor_work_permit', 'overtime', 'pay_frequency', 'scheduling_reporting', 'sick_leave', 'workers_comp', 'workplace_safety']);
 export const HEALTHCARE_CATEGORIES = new Set(['billing_integrity', 'clinical_safety', 'corporate_integrity', 'emergency_preparedness', 'healthcare_workforce', 'hipaa_privacy', 'research_consent', 'state_licensing']);
 export const ONCOLOGY_CATEGORIES = new Set(['chemotherapy_handling', 'oncology_clinical_trials', 'oncology_patient_rights', 'radiation_safety', 'tumor_registry']);
 export const MEDICAL_COMPLIANCE_CATEGORIES = new Set(['antitrust', 'cybersecurity', 'emerging_regulatory', 'environmental_safety', 'health_it', 'language_access', 'marketing_comms', 'medical_devices', 'payer_relations', 'pediatric_vulnerable', 'pharmacy_drugs', 'quality_reporting', 'records_retention', 'reproductive_behavioral', 'tax_exempt', 'telehealth', 'transplant_organ']);
+export const MANUFACTURING_CATEGORIES = new Set(['process_safety', 'environmental_compliance', 'chemical_safety', 'machine_safety', 'industrial_hygiene', 'trade_compliance', 'product_safety', 'labor_relations', 'quality_systems', 'supply_chain']);
 export const LIFE_SCIENCES_CATEGORIES = new Set(['biosafety_lab', 'clinical_trials_gcp', 'drug_supply_chain', 'glp_nonclinical', 'gmp_manufacturing', 'sunshine_open_payments']);
 export const SUPPLEMENTARY_CATEGORIES = new Set(['business_license', 'posting_requirements', 'tax_rate']);
 

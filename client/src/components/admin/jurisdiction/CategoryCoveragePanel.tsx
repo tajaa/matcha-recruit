@@ -18,6 +18,7 @@ const GROUP_LABELS: Record<CategoryGroup | 'supplementary', string> = {
   oncology: 'Oncology',
   medical_compliance: 'Medical Compliance',
   life_sciences: 'Life Sciences',
+  manufacturing: 'Manufacturing',
   supplementary: 'Supplementary',
 }
 
@@ -26,6 +27,8 @@ const GROUP_ORDER: (CategoryGroup | 'supplementary')[] = [
   'healthcare',
   'oncology',
   'medical_compliance',
+  'life_sciences',
+  'manufacturing',
   'supplementary',
 ]
 

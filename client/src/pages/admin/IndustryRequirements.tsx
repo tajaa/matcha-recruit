@@ -72,7 +72,7 @@ const SOURCE_BADGE: Record<string, { bg: string; text: string; border: string }>
   focused: { bg: 'bg-zinc-800', text: 'text-zinc-400', border: 'border-zinc-700' },
 }
 
-const GROUP_ORDER = ['Core Labor', 'Supplementary', 'Healthcare', 'Oncology', 'Medical Compliance', 'Life Sciences']
+const GROUP_ORDER = ['Core Labor', 'Supplementary', 'Healthcare', 'Oncology', 'Medical Compliance', 'Life Sciences', 'Manufacturing']
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
