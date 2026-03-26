@@ -4424,6 +4424,7 @@ async def jurisdiction_key_coverage(
                 staleness_level = "no_data" if not is_present else "fresh"
 
             key_entry = {
+                "id": str(d["id"]),
                 "key": d["key"],
                 "name": d["name"],
                 "enforcing_agency": d["enforcing_agency"],

@@ -33,34 +33,67 @@ San Francisco → California → United States (federal)
 
 The `resolve_jurisdiction_stack` query assembles all requirements from every level in the chain. If the same key exists at multiple levels (e.g., `state_minimum_wage` at both federal and state), precedence rules determine which governs.
 
+### International jurisdictions
+
+The system is not US-only. International jurisdictions follow the same hierarchy model but with country-level roots:
+
+```
+Mexico City → CDMX (state) → Mexico (national)
+London → England (region) → United Kingdom (national)
+Paris → Ile-de-France (region) → France (national)
+Singapore → Singapore (city-state, no parent)
+```
+
+Key definitions have an `applicable_countries` field:
+- `NULL` = universal (applies to all countries) — 362 keys
+- `['MX']` = Mexico-only — 28 keys (e.g., `imss_employer_contribution`, `aguinaldo_christmas_bonus`, `nom_035_psychosocial_risk`)
+- `['GB']` = UK-only — 4 keys (e.g., `social_insurance_employee`, `uk_auto_enrolment_pension`)
+- `['SG']` = Singapore-only — 2 keys (e.g., `cpf_employer_contribution`, `foreign_worker_levy`)
+
+When researching or ingesting data for an international jurisdiction, only keys matching that country (or universal keys) are eligible.
+
 ### Key coverage in practice
 
-- A **well-covered state** like California might have 40-80 state-level keys across labor + healthcare categories
-- A **city with local ordinances** like San Francisco might add 5-15 city-level keys on top
-- A **city without local ordinances** inherits everything from state and has 0 city-level keys
-- The federal jurisdiction has the national baselines — roughly 100-150 keys
+- A **well-covered US state** like California might have 40-80 state-level keys across labor + healthcare categories
+- A **US city with local ordinances** like San Francisco might add 5-15 city-level keys on top
+- A **US city without local ordinances** inherits everything from state and has 0 city-level keys
+- The **federal jurisdiction** has the national baselines �� roughly 100-150 keys
+- **Mexico City** has 57 requirements using MX-specific + universal keys
+- **London** has 28 requirements using GB-specific + universal keys
+- **Paris** has 18 requirements using universal keys (no FR-specific defs yet)
+- **Singapore** has 17 requirements using SG-specific + universal keys
 
 ### When we add data for a key
 
 We only create a `jurisdiction_requirements` row when:
 1. The key is defined in `regulation_key_definitions` (this registry)
-2. The jurisdiction has a **specific law or rule** for that key that differs from the parent level
-3. The data includes a source citation
+2. The key's `applicable_countries` includes this jurisdiction's country (or is NULL/universal)
+3. The jurisdiction has a **specific law or rule** for that key that differs from the parent level
+4. The data includes a source citation
 
 We never create rows just to say "this jurisdiction follows the federal default" — that's implied by inheritance.
 
 ### Current coverage (as of 2026-03-25)
+
+**US jurisdictions:**
 
 | Level | Jurisdictions | Requirements |
 |-------|--------------|-------------|
 | Federal | 1 | 17 |
 | State | 26 | 297 |
 | County | 5 | 14 |
-| City | 20 | 227 |
-| **Total** | **52** | **555** |
+| City (US) | 16 | 107 |
 
-- 396 key definitions in the registry (of 483 defined in code — remainder need seeding)
-- Every requirement is linked to a key definition (0 unkeyed)
+**International jurisdictions:**
+
+| Jurisdiction | Country | Requirements |
+|---|---|---|
+| Mexico City | MX | 57 |
+| London | GB | 28 |
+| Paris | FR | 18 |
+| Singapore | SG | 17 |
+
+**Totals:** 52 jurisdictions, 555 requirements, 396 key definitions (of 483 in code), 0 unkeyed
 
 ---
 

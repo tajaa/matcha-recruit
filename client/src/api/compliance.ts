@@ -446,6 +446,7 @@ export function draftPolicy(
 // ── Key Coverage & Integrity (Admin) ──
 
 export interface RegulationKeyCoverage {
+  id: string
   key: string
   name: string
   enforcing_agency: string | null
