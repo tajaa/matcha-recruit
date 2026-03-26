@@ -66,6 +66,7 @@ export type CostLineItem = {
   statute?: string
   risk_context?: string
   benchmark?: string
+  affected_employees?: { name: string; detail: string }[]
 }
 
 export type CostOfRisk = {

@@ -41,7 +41,6 @@ export default function EmployeeDetail() {
     updateEmployee, updateStatus, deleteEmployee, sendInvite,
   } = useEmployeeDetail(employeeId!)
   const [tab, setTab] = useState<Tab>('profile')
-  const [inviting, setInviting] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
@@ -90,11 +89,6 @@ export default function EmployeeDetail() {
     } finally {
       setSaving(false)
     }
-  }
-
-  async function handleInvite() {
-    setInviting(true)
-    try { await sendInvite() } finally { setInviting(false) }
   }
 
   return (
