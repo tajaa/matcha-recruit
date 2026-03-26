@@ -1502,6 +1502,54 @@ async def upsert_broker_company_link(
 # =============================================================================
 
 
+@router.get("/brokers/{broker_id}/client-setups", dependencies=[Depends(require_admin)])
+async def get_broker_client_setups_admin(broker_id: UUID):
+    """Get all client setups submitted by a broker (admin view)."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT s.id, s.status, s.contact_name, s.contact_email, s.contact_phone,
+                   s.headcount_hint, s.notes, s.locations, s.onboarding_template,
+                   s.preconfigured_features, s.created_at, s.updated_at,
+                   c.name as company_name, c.industry, c.size as company_size,
+                   c.status as company_status
+            FROM broker_client_setups s
+            JOIN companies c ON c.id = s.company_id
+            WHERE s.broker_id = $1
+            ORDER BY s.created_at DESC
+            """,
+            broker_id,
+        )
+    import json as _json
+    setups = []
+    for r in rows:
+        locs = r.get("locations")
+        if isinstance(locs, str):
+            try: locs = _json.loads(locs)
+            except: locs = []
+        template = r.get("onboarding_template")
+        if isinstance(template, str):
+            try: template = _json.loads(template)
+            except: template = {}
+        setups.append({
+            "id": str(r["id"]),
+            "company_name": r["company_name"],
+            "company_status": r.get("company_status"),
+            "industry": r.get("industry"),
+            "company_size": r.get("company_size"),
+            "status": r["status"],
+            "contact_name": r.get("contact_name"),
+            "contact_email": r.get("contact_email"),
+            "contact_phone": r.get("contact_phone"),
+            "headcount": r.get("headcount_hint"),
+            "notes": r.get("notes"),
+            "locations": locs if isinstance(locs, list) else [],
+            "specialties": (template or {}).get("specialties"),
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        })
+    return {"setups": setups, "total": len(setups)}
+
+
 @router.get("/brokers/{broker_id}/branding", dependencies=[Depends(require_admin)])
 async def get_broker_branding(broker_id: UUID):
     """Get broker white-label/co-brand branding configuration."""

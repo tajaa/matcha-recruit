@@ -98,6 +98,7 @@ type SetupForm = {
   invite_immediately: boolean
   locations: LocationEntry[]
   notes: string
+  specialties: string
 }
 
 const EMPTY_SETUP: SetupForm = {
@@ -111,6 +112,7 @@ const EMPTY_SETUP: SetupForm = {
   invite_immediately: true,
   locations: [],
   notes: '',
+  specialties: '',
 }
 
 const EMPTY_LOCATION: LocationEntry = { city: '', state: '', type: 'headquarters' }
@@ -252,6 +254,7 @@ export default function BrokerClients() {
         invite_immediately: form.invite_immediately,
         locations: form.locations.length > 0 ? form.locations.filter((l) => l.city || l.state) : undefined,
         notes: form.notes.trim() || undefined,
+        onboarding_template: form.specialties.trim() ? { specialties: form.specialties.trim() } : undefined,
       })
       setShowAdd(false)
       setForm(EMPTY_SETUP)
@@ -575,6 +578,18 @@ export default function BrokerClients() {
               <Plus size={12} />
               Add Location
             </button>
+          </div>
+
+          {/* Specialties */}
+          <div>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">Specialties</p>
+            <Input
+              label=""
+              placeholder="e.g., Oncology, Cardiology, Primary Care, Behavioral Health"
+              value={form.specialties ?? ''}
+              onChange={(e) => setForm({ ...form, specialties: e.target.value })}
+            />
+            <p className="text-[10px] text-zinc-600 mt-1">Comma-separated if multiple</p>
           </div>
 
           {/* Notes */}
