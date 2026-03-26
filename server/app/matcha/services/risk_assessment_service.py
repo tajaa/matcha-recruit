@@ -196,7 +196,7 @@ def compute_compliance_cost_of_risk(
             "high": round(high),
             "affected_count": len(hourly),
             "affected_employees": [
-                {"name": v.get("name", "Unknown"), "detail": f"${v.get('shortfall', 0):.2f}/hr below {v.get('state', '')} minimum"}
+                {"name": v.get("employee_name", "Unknown"), "detail": f"${v.get('shortfall', 0):.2f}/hr below {v.get('location_state', '')} minimum"}
                 for v in hourly[:10]
             ],
             "basis": "FLSA \u00a7 216(b), 2\u20133yr lookback + liquidated damages",
@@ -241,7 +241,7 @@ def compute_compliance_cost_of_risk(
             "high": round(high),
             "affected_count": len(exempt),
             "affected_employees": [
-                {"name": v.get("name", "Unknown"), "detail": f"Salary ${v.get('pay_rate', 0):,.0f} below {v.get('state', '')} exempt threshold"}
+                {"name": v.get("employee_name", "Unknown"), "detail": f"Salary ${v.get('pay_rate', 0):,.0f} below {v.get('location_state', '')} exempt threshold"}
                 for v in exempt[:10]
             ],
             "basis": "FLSA \u00a7 207, overtime liability for misclassified exempt employees",
