@@ -15,7 +15,7 @@ export function SignatureRing({ rate, hasPolicies, title = 'Policy Signatures', 
   const offset = circumference - (rate / 100) * circumference
 
   const color =
-    rate >= 80 ? 'text-emerald-500' : rate >= 50 ? 'text-amber-500' : 'text-red-500'
+    rate >= 80 ? 'text-zinc-100' : rate >= 50 ? 'text-zinc-400' : 'text-zinc-600'
 
   return (
     <Card className="p-5 flex flex-col items-center">
@@ -54,7 +54,7 @@ export function SignatureRing({ rate, hasPolicies, title = 'Policy Signatures', 
           <div className="h-1.5 rounded-full bg-zinc-800">
             <div
               className={`h-1.5 rounded-full transition-all duration-700 ${
-                rate >= 80 ? 'bg-emerald-500' : rate >= 50 ? 'bg-amber-500' : 'bg-red-500'
+                rate >= 80 ? 'bg-zinc-100' : rate >= 50 ? 'bg-zinc-400' : 'bg-zinc-600'
               }`}
               style={{ width: `${rate}%` }}
             />

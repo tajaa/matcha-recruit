@@ -3,9 +3,9 @@ import { Card } from '../ui'
 import type { BrokerCompanyMetric } from '../../types/broker'
 
 const riskColors: Record<string, string> = {
-  healthy: 'bg-emerald-500',
-  watch: 'bg-amber-500',
-  at_risk: 'bg-red-500',
+  healthy: 'bg-zinc-500',
+  watch: 'bg-zinc-700',
+  at_risk: 'bg-zinc-800',
 }
 
 const riskLabels: Record<string, string> = {
@@ -62,11 +62,11 @@ export function ClientTable({ companies }: ClientTableProps) {
                   {c.active_employee_count}
                 </td>
                 <td className="py-2.5 pr-4 text-right">
-                  <span className={`tabular-nums ${ c.policy_compliance_rate >= 80 ? 'text-emerald-400' : c.policy_compliance_rate >= 50 ? 'text-amber-400' : 'text-red-400' }`}>
+                  <span className={`tabular-nums ${ c.policy_compliance_rate >= 80 ? 'text-zinc-100' : c.policy_compliance_rate >= 50 ? 'text-zinc-400' : 'text-zinc-600' }`}>
                     {Math.round(c.policy_compliance_rate)}%
                   </span>
                 </td>
-                <td className={`py-2.5 text-right tabular-nums ${ c.open_action_items > 0 ? 'text-amber-400' : 'text-zinc-500' }`}>
+                <td className={`py-2.5 text-right tabular-nums ${ c.open_action_items > 0 ? 'text-zinc-400' : 'text-zinc-500' }`}>
                   {c.open_action_items}
                 </td>
               </tr>

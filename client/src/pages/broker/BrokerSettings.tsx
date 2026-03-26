@@ -78,7 +78,7 @@ export default function BrokerSettings() {
 
           {error && <p className="text-sm text-red-400">{error}</p>}
           {success && (
-            <div className="flex items-center gap-2 text-sm text-emerald-400">
+            <div className="flex items-center gap-2 text-sm text-zinc-100">
               <Check size={14} />
               Password changed successfully
             </div>

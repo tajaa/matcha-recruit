@@ -10,9 +10,9 @@ import { fetchBrokerClientDetail } from '../../api/broker'
 import type { BrokerClientDetailResponse } from '../../types/broker'
 
 const riskColors: Record<string, string> = {
-  healthy: 'bg-emerald-500',
-  watch: 'bg-amber-500',
-  at_risk: 'bg-red-500',
+  healthy: 'bg-zinc-500',
+  watch: 'bg-zinc-700',
+  at_risk: 'bg-zinc-800',
 }
 
 const riskLabels: Record<string, string> = {
@@ -22,10 +22,10 @@ const riskLabels: Record<string, string> = {
 }
 
 const severityColors: Record<string, string> = {
-  critical: 'bg-red-500 text-white',
-  high: 'bg-orange-500 text-white',
-  medium: 'bg-amber-500 text-zinc-900',
-  low: 'bg-zinc-600 text-zinc-200',
+  critical: 'bg-zinc-100 text-zinc-900',
+  high: 'bg-zinc-300 text-zinc-900',
+  medium: 'bg-zinc-500 text-zinc-100',
+  low: 'bg-zinc-800 text-zinc-400',
 }
 
 type Tab = 'overview' | 'compliance' | 'policies' | 'ir_er' | 'activity'
@@ -39,9 +39,9 @@ const tabs: { key: Tab; label: string }[] = [
 ]
 
 function complianceColor(rate: number) {
-  if (rate >= 80) return 'text-emerald-400'
-  if (rate >= 50) return 'text-amber-400'
-  return 'text-red-400'
+  if (rate >= 80) return 'text-zinc-100'
+  if (rate >= 50) return 'text-zinc-400'
+  return 'text-zinc-600'
 }
 
 function formatRelative(ts: string) {
@@ -137,7 +137,7 @@ export default function BrokerClientDetail() {
             onClick={() => setActiveTab(t.key)}
             className={`px-4 py-2.5 text-sm font-medium transition-colors ${
               activeTab === t.key
-                ? 'text-emerald-400 border-b-2 border-emerald-500'
+                ? 'text-zinc-100 border-b-2 border-zinc-100'
                 : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
@@ -266,7 +266,7 @@ function ComplianceTab({ compliance }: { compliance: BrokerClientDetailResponse[
                 className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full ${
                   count === 0
                     ? 'bg-zinc-800 text-zinc-500'
-                    : 'bg-emerald-500/10 text-emerald-400'
+                    : 'bg-zinc-800 text-zinc-300'
                 }`}
               >
                 {cat}: <span className="">{count}</span>
@@ -336,8 +336,8 @@ function PoliciesTab({
           <div className="space-y-3">
             {handbooks.map((h) => {
               const strengthColor =
-                h.strength_label === 'Strong' ? 'text-emerald-400' :
-                h.strength_label === 'Moderate' ? 'text-amber-400' : 'text-red-400'
+                h.strength_label === 'Strong' ? 'text-zinc-100' :
+                h.strength_label === 'Moderate' ? 'text-zinc-400' : 'text-zinc-600'
               return (
                 <div key={h.handbook_id} className="flex items-center justify-between py-2 border-b border-zinc-800/30 last:border-0">
                   <div>
@@ -450,8 +450,8 @@ function ActivityTab({ activity }: { activity: BrokerClientDetailResponse['recen
   }
 
   const sourceBadge: Record<string, string> = {
-    IR: 'bg-red-500/10 text-red-400',
-    ER: 'bg-amber-500/10 text-amber-400',
+    IR: 'bg-zinc-800 text-zinc-400',
+    ER: 'bg-zinc-800 text-zinc-500',
   }
 
   return (

@@ -1,16 +1,16 @@
 import { Card } from '../ui'
 import type { BrokerHandbookCoverage } from '../../types/broker'
 
-const strengthColors: Record<string, string> = {
-  Strong: 'bg-emerald-500',
-  Moderate: 'bg-amber-500',
-  Weak: 'bg-red-500',
+const dotColors: Record<string, string> = {
+  Strong: 'bg-zinc-300',
+  Moderate: 'bg-zinc-500',
+  Weak: 'bg-zinc-700',
 }
 
-const strengthText: Record<string, string> = {
-  Strong: 'text-emerald-400',
-  Moderate: 'text-amber-400',
-  Weak: 'text-red-400',
+const textColors: Record<string, string> = {
+  Strong: 'text-zinc-100',
+  Moderate: 'text-zinc-400',
+  Weak: 'text-zinc-600',
 }
 
 interface HandbookCoverageListProps {
@@ -41,14 +41,14 @@ export function HandbookCoverageList({ handbooks }: HandbookCoverageListProps) {
               </div>
               <div className="h-1.5 rounded-full bg-zinc-800">
                 <div
-                  className={`h-1.5 rounded-full transition-all duration-500 ${strengthColors[h.strength_label] ?? 'bg-zinc-600'}`}
+                  className={`h-1.5 rounded-full transition-all duration-500 ${dotColors[h.strength_label] ?? 'bg-zinc-600'}`}
                   style={{ width: `${h.strength_score}%` }}
                 />
               </div>
             </div>
 
             <div className="flex items-center gap-3 flex-shrink-0">
-              <span className={`text-sm font-medium tabular-nums ${strengthText[h.strength_label] ?? 'text-zinc-400'}`}>
+              <span className={`text-sm font-medium tabular-nums ${textColors[h.strength_label] ?? 'text-zinc-400'}`}>
                 {h.strength_score}%
               </span>
               {h.missing_section_count > 0 && (

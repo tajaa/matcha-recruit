@@ -1,18 +1,18 @@
 import { Card } from '../ui'
 
 const statusConfig: { key: string; label: string; dot: string }[] = [
-  { key: 'draft', label: 'Draft', dot: 'bg-zinc-500' },
-  { key: 'invited', label: 'Invited', dot: 'bg-blue-500' },
-  { key: 'activated', label: 'Active', dot: 'bg-emerald-500' },
-  { key: 'expired', label: 'Expired', dot: 'bg-amber-500' },
-  { key: 'cancelled', label: 'Cancelled', dot: 'bg-red-500' },
+  { key: 'draft', label: 'Draft', dot: 'bg-zinc-600' },
+  { key: 'invited', label: 'Invited', dot: 'bg-zinc-700' },
+  { key: 'activated', label: 'Active', dot: 'bg-zinc-500' },
+  { key: 'expired', label: 'Expired', dot: 'bg-zinc-800' },
+  { key: 'cancelled', label: 'Cancelled', dot: 'bg-zinc-900' },
 ]
 
 const onboardingConfig: { key: string; label: string; dot: string }[] = [
-  { key: 'submitted', label: 'Submitted', dot: 'bg-zinc-400' },
-  { key: 'under_review', label: 'Under Review', dot: 'bg-blue-500' },
-  { key: 'configuring', label: 'Configuring', dot: 'bg-amber-500' },
-  { key: 'live', label: 'Live', dot: 'bg-emerald-500' },
+  { key: 'submitted', label: 'Submitted', dot: 'bg-zinc-700' },
+  { key: 'under_review', label: 'Under Review', dot: 'bg-zinc-600' },
+  { key: 'configuring', label: 'Configuring', dot: 'bg-zinc-500' },
+  { key: 'live', label: 'Live', dot: 'bg-zinc-300' },
 ]
 
 interface SetupStatusGridProps {

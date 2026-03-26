@@ -42,7 +42,7 @@ function BrokerTermsGate({ onAccepted }: { onAccepted: () => void }) {
   return (
     <div className="max-w-2xl mx-auto py-8 px-4">
       <div className="flex items-center gap-3 mb-4">
-        <FileCheck className="h-8 w-8 text-emerald-500" />
+        <FileCheck className="h-8 w-8 text-zinc-500" />
         <h2 className="text-lg font-semibold text-zinc-100">Broker Partner Terms of Service</h2>
       </div>
       <p className="text-sm text-zinc-400 mb-4">
@@ -72,7 +72,7 @@ function BrokerTermsGate({ onAccepted }: { onAccepted: () => void }) {
           id="agree-terms"
           checked={agreed}
           onChange={(e) => setAgreed(e.target.checked)}
-          className="mt-0.5 rounded border-zinc-600 bg-zinc-800 text-emerald-600 focus:ring-emerald-500"
+          className="mt-0.5 rounded border-zinc-600 bg-zinc-800 text-zinc-600 focus:ring-zinc-500"
         />
         <label htmlFor="agree-terms" className="text-sm text-zinc-400">
           I have read and agree to the Matcha Broker Partner Terms of Service
@@ -135,10 +135,10 @@ const statusBadge = (status: string) => {
 const onboardingStageBadge = (stage?: string) => {
   if (!stage) return <span className="text-zinc-600">—</span>
   const config: Record<string, { dot: string; label: string }> = {
-    submitted: { dot: 'bg-zinc-400', label: 'Submitted' },
-    under_review: { dot: 'bg-blue-500', label: 'Under Review' },
-    configuring: { dot: 'bg-amber-500', label: 'Configuring' },
-    live: { dot: 'bg-emerald-500', label: 'Live' },
+    submitted: { dot: 'bg-zinc-700', label: 'Submitted' },
+    under_review: { dot: 'bg-zinc-600', label: 'Under Review' },
+    configuring: { dot: 'bg-zinc-500', label: 'Configuring' },
+    live: { dot: 'bg-zinc-300', label: 'Live' },
   }
   const c = config[stage]
   if (!c) return <span className="text-zinc-600">—</span>
@@ -610,7 +610,7 @@ export default function BrokerClients() {
               id="invite-immediately"
               checked={form.invite_immediately}
               onChange={(e) => setForm({ ...form, invite_immediately: e.target.checked })}
-              className="rounded border-zinc-600 bg-zinc-800 text-emerald-600 focus:ring-emerald-500"
+              className="rounded border-zinc-600 bg-zinc-800 text-zinc-600 focus:ring-zinc-500"
             />
             <label htmlFor="invite-immediately" className="text-sm text-zinc-400">
               Send invitation email immediately
