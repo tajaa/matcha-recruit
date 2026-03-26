@@ -80,10 +80,86 @@ export interface BrokerClientSetup {
   invited_at?: string
   activated_at?: string
   created_at: string
+  notes?: string
+  locations?: { city: string; state: string; type: string }[]
+  onboarding_stage?: 'submitted' | 'under_review' | 'configuring' | 'live'
+}
+
+export interface BrokerBatchCreateResponse {
+  status: string
+  count: number
+  setups: BrokerClientSetup[]
+  errors: { index: number; company_name: string; error: string }[]
 }
 
 export interface BrokerClientSetupsResponse {
   setups: BrokerClientSetup[]
   total: number
   expired_count: number
+}
+
+// --- Per-client detail ---
+
+export interface BrokerClientCompany {
+  id: string
+  name: string
+  industry: string | null
+  size: string | null
+  status: string
+  link_status: string
+  setup_status: string
+  onboarding_stage: string | null
+  active_employee_count: number
+  policy_compliance_rate: number
+  open_action_items: number
+  risk_signal: 'healthy' | 'watch' | 'at_risk'
+}
+
+export interface BrokerClientLocation {
+  id: string
+  name: string | null
+  city: string
+  state: string
+  total_requirements: number
+  categories: Record<string, number>
+}
+
+export interface BrokerClientPolicyItem {
+  id: string
+  title: string
+  category: string | null
+  status: string
+  pending_count: number
+  signed_count: number
+  total_count: number
+  signature_rate: number
+}
+
+export interface BrokerClientDetailResponse {
+  company: BrokerClientCompany
+  compliance: {
+    locations: BrokerClientLocation[]
+    total_locations: number
+    total_requirements: number
+  }
+  policies: {
+    total_active: number
+    compliance_rate: number
+    items: BrokerClientPolicyItem[]
+  }
+  ir_summary: {
+    total_open: number
+    by_severity: Record<string, number>
+    recent_30_days: number
+  }
+  er_summary: {
+    total_open: number
+    by_status: Record<string, number>
+  }
+  handbooks: BrokerHandbookCoverage[]
+  recent_activity: {
+    action: string
+    timestamp: string
+    source: string
+  }[]
 }

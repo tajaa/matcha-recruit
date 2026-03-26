@@ -4035,6 +4035,10 @@ async def init_db():
                 cancelled_at TIMESTAMPTZ,
                 created_by UUID REFERENCES users(id),
                 updated_by UUID REFERENCES users(id),
+                notes TEXT,
+                locations JSONB DEFAULT '[]'::jsonb,
+                onboarding_stage VARCHAR(30) DEFAULT 'submitted'
+                    CHECK (onboarding_stage IN ('submitted', 'under_review', 'configuring', 'live')),
                 metadata JSONB DEFAULT '{}'::jsonb,
                 created_at TIMESTAMP DEFAULT NOW(),
                 updated_at TIMESTAMP DEFAULT NOW(),

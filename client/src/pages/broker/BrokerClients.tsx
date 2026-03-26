@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
-import { Building2, Plus, Loader2, Send, AlertCircle, FileCheck } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { Building2, Plus, Loader2, Send, AlertCircle, FileCheck, Upload, X, MapPin } from 'lucide-react'
 import { Button, Input, Modal, Badge } from '../../components/ui'
 import { api } from '../../api/client'
+import { createBatchClientSetups } from '../../api/broker'
+import type { BrokerBatchCreateResponse } from '../../types/broker'
 
 type ClientSetup = {
   id: string
@@ -12,7 +14,12 @@ type ClientSetup = {
   invite_token: string | null
   invite_expires_at: string | null
   created_at: string
+  notes?: string
+  locations?: { city: string; state: string; type: string }[]
+  onboarding_stage?: 'submitted' | 'under_review' | 'configuring' | 'live'
 }
+
+type LocationEntry = { city: string; state: string; type: string }
 
 function BrokerTermsGate({ onAccepted }: { onAccepted: () => void }) {
   const [accepting, setAccepting] = useState(false)
@@ -89,6 +96,8 @@ type SetupForm = {
   company_size: string
   headcount: string
   invite_immediately: boolean
+  locations: LocationEntry[]
+  notes: string
 }
 
 const EMPTY_SETUP: SetupForm = {
@@ -100,13 +109,93 @@ const EMPTY_SETUP: SetupForm = {
   company_size: '',
   headcount: '1',
   invite_immediately: true,
+  locations: [],
+  notes: '',
 }
+
+const EMPTY_LOCATION: LocationEntry = { city: '', state: '', type: 'headquarters' }
+
+const US_STATES = [
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+  'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+  'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY','DC',
+]
+
+const LOCATION_TYPES = ['headquarters', 'branch', 'remote']
 
 const statusBadge = (status: string) => {
   if (status === 'active' || status === 'registered') return <Badge variant="success">{status}</Badge>
   if (status === 'invited' || status === 'pending') return <Badge variant="warning">{status}</Badge>
   if (status === 'expired') return <Badge variant="danger">Expired</Badge>
   return <Badge variant="warning">{status}</Badge>
+}
+
+const onboardingStageBadge = (stage?: string) => {
+  if (!stage) return <span className="text-zinc-600">—</span>
+  const config: Record<string, { dot: string; label: string }> = {
+    submitted: { dot: 'bg-zinc-400', label: 'Submitted' },
+    under_review: { dot: 'bg-blue-500', label: 'Under Review' },
+    configuring: { dot: 'bg-amber-500', label: 'Configuring' },
+    live: { dot: 'bg-emerald-500', label: 'Live' },
+  }
+  const c = config[stage]
+  if (!c) return <span className="text-zinc-600">—</span>
+  return (
+    <span className="flex items-center gap-1.5 text-xs text-zinc-300">
+      <span className={`h-2 w-2 rounded-full ${c.dot}`} />
+      {c.label}
+    </span>
+  )
+}
+
+function locationSummary(locations?: { city: string; state: string; type: string }[]) {
+  if (!locations || locations.length === 0) return null
+  if (locations.length === 1) {
+    const l = locations[0]
+    return `${l.city}${l.state ? ', ' + l.state : ''}`
+  }
+  return `${locations.length} locations`
+}
+
+// --- CSV Upload types ---
+type CsvRow = {
+  company_name: string
+  contact_name: string
+  contact_email: string
+  contact_phone: string
+  industry: string
+  company_size: string
+  headcount: string
+  notes: string
+}
+
+function parseCsv(text: string): CsvRow[] {
+  const lines = text.split('\n').map((l) => l.trim()).filter(Boolean)
+  if (lines.length < 2) return []
+  const headers = lines[0].split(',').map((h) => h.trim().toLowerCase().replace(/\s+/g, '_'))
+  return lines.slice(1).map((line) => {
+    const values: string[] = []
+    let current = ''
+    let inQuotes = false
+    for (const ch of line) {
+      if (ch === '"') { inQuotes = !inQuotes; continue }
+      if (ch === ',' && !inQuotes) { values.push(current.trim()); current = ''; continue }
+      current += ch
+    }
+    values.push(current.trim())
+    const row: any = {}
+    headers.forEach((h, i) => { row[h] = values[i] || '' })
+    return {
+      company_name: row.company_name || '',
+      contact_name: row.contact_name || '',
+      contact_email: row.contact_email || '',
+      contact_phone: row.contact_phone || '',
+      industry: row.industry || '',
+      company_size: row.company_size || '',
+      headcount: row.headcount || '',
+      notes: row.notes || '',
+    } as CsvRow
+  })
 }
 
 export default function BrokerClients() {
@@ -119,6 +208,15 @@ export default function BrokerClients() {
   const [saving, setSaving] = useState(false)
   const [addError, setAddError] = useState('')
   const [sendingInvite, setSendingInvite] = useState<string | null>(null)
+
+  // CSV upload state
+  const [showCsvUpload, setShowCsvUpload] = useState(false)
+  const [csvRows, setCsvRows] = useState<CsvRow[]>([])
+  const [csvFile, setCsvFile] = useState<File | null>(null)
+  const [csvSubmitting, setCsvSubmitting] = useState(false)
+  const [csvResult, setCsvResult] = useState<BrokerBatchCreateResponse | null>(null)
+  const [csvError, setCsvError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   function fetchSetups() {
     setLoading(true)
@@ -152,6 +250,8 @@ export default function BrokerClients() {
         company_size: form.company_size.trim() || undefined,
         headcount: parseInt(form.headcount, 10) || undefined,
         invite_immediately: form.invite_immediately,
+        locations: form.locations.length > 0 ? form.locations.filter((l) => l.city || l.state) : undefined,
+        notes: form.notes.trim() || undefined,
       })
       setShowAdd(false)
       setForm(EMPTY_SETUP)
@@ -170,6 +270,73 @@ export default function BrokerClients() {
       fetchSetups()
     } catch {}
     setSendingInvite(null)
+  }
+
+  // Location helpers
+  function addLocation() {
+    setForm({ ...form, locations: [...form.locations, { ...EMPTY_LOCATION }] })
+  }
+
+  function removeLocation(idx: number) {
+    setForm({ ...form, locations: form.locations.filter((_, i) => i !== idx) })
+  }
+
+  function updateLocation(idx: number, field: keyof LocationEntry, value: string) {
+    const locs = [...form.locations]
+    locs[idx] = { ...locs[idx], [field]: value }
+    setForm({ ...form, locations: locs })
+  }
+
+  // CSV handlers
+  function handleCsvFile(file: File) {
+    setCsvFile(file)
+    setCsvResult(null)
+    setCsvError('')
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      const text = e.target?.result as string
+      const rows = parseCsv(text)
+      setCsvRows(rows)
+    }
+    reader.readAsText(file)
+  }
+
+  function handleCsvDrop(e: React.DragEvent) {
+    e.preventDefault()
+    const file = e.dataTransfer.files[0]
+    if (file && file.name.endsWith('.csv')) handleCsvFile(file)
+  }
+
+  async function submitCsvBatch() {
+    setCsvSubmitting(true)
+    setCsvError('')
+    try {
+      const clients = csvRows.map((r) => ({
+        company_name: r.company_name,
+        contact_name: r.contact_name || undefined,
+        contact_email: r.contact_email || undefined,
+        contact_phone: r.contact_phone || undefined,
+        industry: r.industry || undefined,
+        company_size: r.company_size || undefined,
+        headcount: parseInt(r.headcount, 10) || undefined,
+        notes: r.notes || undefined,
+      }))
+      const result = await createBatchClientSetups(clients)
+      setCsvResult(result)
+      fetchSetups()
+    } catch (err) {
+      setCsvError(err instanceof Error ? err.message : 'Batch upload failed')
+    } finally {
+      setCsvSubmitting(false)
+    }
+  }
+
+  function closeCsvModal() {
+    setShowCsvUpload(false)
+    setCsvRows([])
+    setCsvFile(null)
+    setCsvResult(null)
+    setCsvError('')
   }
 
   if (needsTerms) {
@@ -200,10 +367,16 @@ export default function BrokerClients() {
           <h1 className="text-2xl font-semibold text-zinc-100 tracking-tight">Client Onboarding</h1>
           <p className="text-sm text-zinc-500 mt-1">Create and manage client setups for your referred companies.</p>
         </div>
-        <Button size="sm" onClick={() => setShowAdd(true)}>
-          <Plus size={14} className="mr-1" />
-          Add Client
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={() => setShowCsvUpload(true)}>
+            <Upload size={14} className="mr-1" />
+            Upload CSV
+          </Button>
+          <Button size="sm" onClick={() => setShowAdd(true)}>
+            <Plus size={14} className="mr-1" />
+            Add Client
+          </Button>
+        </div>
       </div>
 
       {setups.length === 0 ? (
@@ -223,39 +396,50 @@ export default function BrokerClients() {
                 <th className="px-4 py-3 font-medium">Company</th>
                 <th className="px-4 py-3 font-medium">Contact</th>
                 <th className="px-4 py-3 font-medium">Status</th>
+                <th className="px-4 py-3 font-medium">Onboarding</th>
                 <th className="px-4 py-3 font-medium">Created</th>
                 <th className="px-4 py-3 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800">
-              {setups.map((s) => (
-                <tr key={s.id} className="text-zinc-300">
-                  <td className="px-4 py-3">
-                    <p className="font-medium text-zinc-100">{s.company_name}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <p className="text-zinc-300">{s.contact_name || '—'}</p>
-                    <p className="text-xs text-zinc-500">{s.contact_email || ''}</p>
-                  </td>
-                  <td className="px-4 py-3">{statusBadge(s.status)}</td>
-                  <td className="px-4 py-3 text-xs text-zinc-500">
-                    {new Date(s.created_at).toLocaleDateString()}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {(s.status === 'draft' || s.status === 'expired') && s.contact_email && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={sendingInvite === s.id}
-                        onClick={() => sendInvite(s.id)}
-                      >
-                        <Send size={12} className="mr-1" />
-                        {sendingInvite === s.id ? 'Sending...' : 'Send Invite'}
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {setups.map((s) => {
+                const locText = locationSummary(s.locations)
+                return (
+                  <tr key={s.id} className="text-zinc-300">
+                    <td className="px-4 py-3">
+                      <p className="font-medium text-zinc-100">{s.company_name}</p>
+                      {locText && (
+                        <p className="text-xs text-zinc-500 flex items-center gap-1 mt-0.5">
+                          <MapPin size={10} />
+                          {locText}
+                        </p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <p className="text-zinc-300">{s.contact_name || '—'}</p>
+                      <p className="text-xs text-zinc-500">{s.contact_email || ''}</p>
+                    </td>
+                    <td className="px-4 py-3">{statusBadge(s.status)}</td>
+                    <td className="px-4 py-3">{onboardingStageBadge(s.onboarding_stage)}</td>
+                    <td className="px-4 py-3 text-xs text-zinc-500">
+                      {new Date(s.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      {(s.status === 'draft' || s.status === 'expired') && s.contact_email && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          disabled={sendingInvite === s.id}
+                          onClick={() => sendInvite(s.id)}
+                        >
+                          <Send size={12} className="mr-1" />
+                          {sendingInvite === s.id ? 'Sending...' : 'Send Invite'}
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
@@ -339,6 +523,71 @@ export default function BrokerClients() {
             </div>
           </div>
 
+          {/* Locations */}
+          <div>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">Locations</p>
+            {form.locations.length > 0 && (
+              <div className="space-y-2 mb-2">
+                {form.locations.map((loc, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <Input
+                      placeholder="City"
+                      value={loc.city}
+                      onChange={(e) => updateLocation(idx, 'city', e.target.value)}
+                      className="flex-1"
+                    />
+                    <select
+                      value={loc.state}
+                      onChange={(e) => updateLocation(idx, 'state', e.target.value)}
+                      className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
+                    >
+                      <option value="">State...</option>
+                      {US_STATES.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={loc.type}
+                      onChange={(e) => updateLocation(idx, 'type', e.target.value)}
+                      className="bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
+                    >
+                      {LOCATION_TYPES.map((t) => (
+                        <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => removeLocation(idx)}
+                      className="p-1 text-zinc-500 hover:text-red-400 transition-colors"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={addLocation}
+              className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors flex items-center gap-1"
+            >
+              <Plus size={12} />
+              Add Location
+            </button>
+          </div>
+
+          {/* Notes */}
+          <div>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium mb-2">Notes</p>
+            <textarea
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              placeholder="Additional context about this client, special requirements, timeline notes..."
+              rows={3}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500 resize-none placeholder:text-zinc-600"
+            />
+          </div>
+
           <div className="flex items-center gap-2">
             <input
               type="checkbox"
@@ -363,6 +612,122 @@ export default function BrokerClients() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* CSV Upload Modal */}
+      <Modal open={showCsvUpload} onClose={closeCsvModal} title="Upload CSV" width="lg">
+        <div className="space-y-4">
+          {!csvResult ? (
+            <>
+              {/* Drop zone */}
+              <div
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={handleCsvDrop}
+                onClick={() => fileInputRef.current?.click()}
+                className="border-2 border-dashed border-zinc-700 rounded-lg p-8 text-center cursor-pointer hover:border-zinc-500 transition-colors"
+              >
+                <Upload className="h-8 w-8 text-zinc-500 mx-auto mb-2" />
+                <p className="text-sm text-zinc-400">
+                  {csvFile ? csvFile.name : 'Drop a CSV file here or click to browse'}
+                </p>
+                <p className="text-xs text-zinc-600 mt-1">
+                  Expected columns: company_name, contact_name, contact_email, contact_phone, industry, company_size, headcount, notes
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    if (f) handleCsvFile(f)
+                  }}
+                />
+              </div>
+
+              {/* Preview table */}
+              {csvRows.length > 0 && (
+                <div className="overflow-x-auto max-h-64 overflow-y-auto rounded-lg border border-zinc-800">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-zinc-900/50 text-zinc-400 sticky top-0">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">#</th>
+                        <th className="px-3 py-2 font-medium">Company</th>
+                        <th className="px-3 py-2 font-medium">Contact</th>
+                        <th className="px-3 py-2 font-medium">Email</th>
+                        <th className="px-3 py-2 font-medium">Industry</th>
+                        <th className="px-3 py-2 font-medium">Notes</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-800">
+                      {csvRows.map((row, i) => {
+                        const missing = !row.company_name.trim()
+                        return (
+                          <tr key={i} className={missing ? 'bg-red-950/30' : 'text-zinc-300'}>
+                            <td className="px-3 py-1.5 text-zinc-500 font-[Space_Grotesk]">{i + 1}</td>
+                            <td className={`px-3 py-1.5 ${missing ? 'text-red-400' : ''}`}>
+                              {row.company_name || '(missing)'}
+                            </td>
+                            <td className="px-3 py-1.5">{row.contact_name}</td>
+                            <td className="px-3 py-1.5">{row.contact_email}</td>
+                            <td className="px-3 py-1.5">{row.industry}</td>
+                            <td className="px-3 py-1.5 max-w-[120px] truncate">{row.notes}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              {csvError && <p className="text-sm text-red-400">{csvError}</p>}
+
+              <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
+                <Button
+                  size="sm"
+                  disabled={csvSubmitting || csvRows.length === 0 || csvRows.every((r) => !r.company_name.trim())}
+                  onClick={submitCsvBatch}
+                >
+                  {csvSubmitting ? (
+                    <>
+                      <Loader2 size={12} className="mr-1 animate-spin" />
+                      Submitting...
+                    </>
+                  ) : (
+                    `Submit All (${csvRows.filter((r) => r.company_name.trim()).length} clients)`
+                  )}
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={closeCsvModal}>
+                  Cancel
+                </Button>
+              </div>
+            </>
+          ) : (
+            /* Results view */
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Badge variant="success">{csvResult.count} created</Badge>
+                {csvResult.errors.length > 0 && (
+                  <Badge variant="danger">{csvResult.errors.length} errors</Badge>
+                )}
+              </div>
+
+              {csvResult.errors.length > 0 && (
+                <div className="rounded-lg border border-red-900/50 bg-red-950/20 p-3 space-y-1">
+                  {csvResult.errors.map((err, i) => (
+                    <p key={i} className="text-xs text-red-400">
+                      Row {err.index + 1} ({err.company_name}): {err.error}
+                    </p>
+                  ))}
+                </div>
+              )}
+
+              <div className="pt-2 border-t border-zinc-800">
+                <Button size="sm" onClick={closeCsvModal}>Done</Button>
+              </div>
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   )

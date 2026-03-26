@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { Card } from '../ui'
 import type { BrokerCompanyMetric } from '../../types/broker'
 
@@ -18,6 +19,7 @@ interface ClientTableProps {
 }
 
 export function ClientTable({ companies }: ClientTableProps) {
+  const navigate = useNavigate()
   if (companies.length === 0) {
     return (
       <Card className="p-5">
@@ -44,7 +46,11 @@ export function ClientTable({ companies }: ClientTableProps) {
           </thead>
           <tbody>
             {companies.map((c) => (
-              <tr key={c.company_id} className="border-b border-zinc-800/30 last:border-0">
+              <tr
+                key={c.company_id}
+                className="border-b border-zinc-800/30 last:border-0 cursor-pointer hover:bg-zinc-800/50 transition-colors"
+                onClick={() => navigate(`/broker/clients/${c.company_id}`)}
+              >
                 <td className="py-2.5 pr-4 text-zinc-200 font-medium">{c.company_name}</td>
                 <td className="py-2.5 pr-4">
                   <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">

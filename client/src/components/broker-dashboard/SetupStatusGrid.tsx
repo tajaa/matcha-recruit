@@ -8,6 +8,13 @@ const statusConfig: { key: string; label: string; dot: string }[] = [
   { key: 'cancelled', label: 'Cancelled', dot: 'bg-red-500' },
 ]
 
+const onboardingConfig: { key: string; label: string; dot: string }[] = [
+  { key: 'submitted', label: 'Submitted', dot: 'bg-zinc-400' },
+  { key: 'under_review', label: 'Under Review', dot: 'bg-blue-500' },
+  { key: 'configuring', label: 'Configuring', dot: 'bg-amber-500' },
+  { key: 'live', label: 'Live', dot: 'bg-emerald-500' },
+]
+
 interface SetupStatusGridProps {
   counts: Record<string, number>
 }
@@ -19,6 +26,27 @@ export function SetupStatusGrid({ counts }: SetupStatusGridProps) {
 
       <div className="space-y-2">
         {statusConfig.map(({ key, label, dot }) => {
+          const count = counts[key] ?? 0
+          return (
+            <div key={key} className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-zinc-400">
+                <span className={`h-2 w-2 rounded-full ${dot}`} />
+                {label}
+              </span>
+              <span className="text-sm font-medium text-zinc-200 tabular-nums font-[Space_Grotesk]">
+                {count}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+
+      <div className="border-t border-zinc-800 my-4" />
+
+      <h3 className="text-sm font-medium text-zinc-200 tracking-wide mb-4">Onboarding</h3>
+
+      <div className="space-y-2">
+        {onboardingConfig.map(({ key, label, dot }) => {
           const count = counts[key] ?? 0
           return (
             <div key={key} className="flex items-center justify-between">
