@@ -178,7 +178,23 @@ export default function ComplianceReasoningPanel({ locations, aiSteps, reference
                 >
                   <ComplianceDecisionTree
                     category={currentCategory}
-                    aiSteps={aiSteps}
+                    aiSteps={aiSteps?.filter((step) => {
+                      if (!currentLocation) return true
+                      const label = currentLocation.location_label.toLowerCase()
+                      // Extract key location identifiers (city, state)
+                      const parts = label.split(/[,()\s]+/).filter(Boolean)
+                      const text = (step.question + ' ' + step.answer + ' ' + step.conclusion).toLowerCase()
+                      // Show step if it mentions this location or is location-agnostic (federal/general)
+                      const mentionsThisLocation = parts.some((p) => p.length > 1 && text.includes(p))
+                      const mentionsAnyOtherLocation = filteredLocations
+                        .filter((_, i) => i !== selectedLocation)
+                        .some((loc) => {
+                          const otherParts = loc.location_label.toLowerCase().split(/[,()\s]+/).filter(Boolean)
+                          return otherParts.some((p) => p.length > 2 && text.includes(p))
+                        })
+                      // Keep if it mentions this location, or if it doesn't mention any specific location (generic/federal)
+                      return mentionsThisLocation || !mentionsAnyOtherLocation
+                    })}
                   />
                 </Suspense>
               )}
