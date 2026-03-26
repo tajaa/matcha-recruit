@@ -10,6 +10,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "i9": False,
     "cobra": False,
     "separation_agreements": False,
+    "credential_templates": False,
 }
 
 

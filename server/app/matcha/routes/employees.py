@@ -1137,30 +1137,27 @@ async def create_employee(
         except Exception:
             logger.exception("Failed to auto-assign onboarding tasks for employee %s", row["id"])
 
-        # Auto-create credential onboarding tasks based on job title
+        # Auto-create credential onboarding tasks based on job title + jurisdiction
         try:
-            from ...core.services.credential_inference import infer_credential_requirements
+            from ...core.services.credential_template_service import (
+                resolve_credential_requirements,
+                assign_credential_requirements_to_employee,
+            )
             job_title_val = None
             if org_fields_available:
                 job_title_val = row.get("job_title")
             if not job_title_val:
                 job_title_val = body.job_title
-            cred_reqs = await infer_credential_requirements(job_title_val)
+            work_state = row.get("work_state")
+            work_city = row.get("work_city") if compensation_fields_available else None
+            cred_reqs = await resolve_credential_requirements(
+                conn, company_id, work_state, work_city, job_title_val,
+            )
             if cred_reqs:
-                cred_base_date = start_date or date.today()
-                cred_due = cred_base_date + timedelta(days=7)
-                for req in cred_reqs:
-                    await conn.execute(
-                        "INSERT INTO employee_onboarding_tasks "
-                        "(id, employee_id, title, description, category, is_employee_task, due_date, status, document_type) "
-                        "VALUES (gen_random_uuid(), $1, $2, $3, 'credentials', TRUE, $4, 'pending', $5)",
-                        row["id"],
-                        f"Upload {req.label}",
-                        f"Upload your {req.label.lower()} document for verification",
-                        cred_due,
-                        req.document_type,
-                    )
-                logger.info("Created %d credential tasks for employee %s (%s)", len(cred_reqs), row["id"], job_title_val)
+                count = await assign_credential_requirements_to_employee(
+                    conn, row["id"], company_id, cred_reqs, start_date,
+                )
+                logger.info("Created %d credential requirements for employee %s (%s)", count, row["id"], job_title_val)
         except Exception:
             logger.exception("Failed to auto-create credential tasks for employee %s", row["id"])
 

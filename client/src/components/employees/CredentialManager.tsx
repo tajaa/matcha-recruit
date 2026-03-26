@@ -1,8 +1,11 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Badge, Button, Card, Input } from '../ui'
 import { useCredentialDocuments } from '../../hooks/employees/useCredentialDocuments'
 import { api } from '../../api/client'
+import { fetchEmployeeRequirements } from '../../api/credentialTemplates'
 import type { CredentialDocument } from '../../types/employee'
+import type { EmployeeCredentialRequirement } from '../../types/credential-templates'
+import { REQUIREMENT_STATUS_COLORS } from '../../types/credential-templates'
 
 const DOC_TYPE_LABELS: Record<string, string> = {
   medical_license: 'Professional License',
@@ -189,6 +192,18 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
     upload, approve, reject, remove, download, refetch,
   } = useCredentialDocuments(employeeId)
 
+  const [requirements, setRequirements] = useState<EmployeeCredentialRequirement[]>([])
+  const [reqLoading, setReqLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchEmployeeRequirements(employeeId)
+      .then((reqs) => { if (!cancelled) setRequirements(reqs) })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setReqLoading(false) })
+    return () => { cancelled = true }
+  }, [employeeId])
+
   const [editing, setEditing] = useState(false)
   const [editForm, setEditForm] = useState<Record<string, string>>({})
   const [confirmWord, setConfirmWord] = useState('')
@@ -246,11 +261,17 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
     ;(docsByType[doc.document_type] ??= []).push(doc)
   }
 
-  // All known document types (from uploaded docs + standard set)
+  // Requirement-driven: show only types this employee actually needs
+  // Fall back to the old hardcoded set if no requirements loaded yet
+  const hasRequirements = requirements.length > 0
+  const requiredTypeKeys = hasRequirements
+    ? requirements.map(r => r.credential_type_key)
+    : Object.keys(DOC_TYPE_LABELS).filter((t) => t !== 'other')
   const allTypes = Array.from(new Set([
-    ...Object.keys(DOC_TYPE_LABELS).filter((t) => t !== 'other'),
+    ...requiredTypeKeys,
     ...Object.keys(docsByType),
   ]))
+  const reqByType = Object.fromEntries(requirements.map(r => [r.credential_type_key, r]))
 
   // Credential expiration data for summary
   const expirations: { label: string; date: string | null }[] = []
@@ -371,20 +392,40 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
         </Card>
       )}
 
+      {/* Requirement checklist summary */}
+      {hasRequirements && !reqLoading && (
+        <Card className="p-4">
+          <h4 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">Requirement Checklist</h4>
+          <div className="flex flex-wrap gap-2">
+            {requirements.map(r => (
+              <div key={r.id} className="flex items-center gap-1.5">
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ${REQUIREMENT_STATUS_COLORS[r.status]}`}>
+                  {r.status}
+                </span>
+                <span className="text-xs text-zinc-300">{r.credential_type_label}</span>
+                {!r.is_required && <span className="text-[10px] text-zinc-600">(opt)</span>}
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Document sections by type */}
       {allTypes.map((docType) => {
         const docs = docsByType[docType] ?? []
         const hasApproved = docs.some((d) => d.review_status === 'approved')
+        const req = reqByType[docType]
 
         return (
           <div key={docType}>
             <div className="flex items-center gap-2 mb-2">
               <h4 className="text-xs font-medium text-zinc-300">
-                {DOC_TYPE_LABELS[docType] ?? docType}
+                {req?.credential_type_label || (DOC_TYPE_LABELS[docType] ?? docType)}
               </h4>
               {hasApproved && <Badge variant="success">Verified</Badge>}
               {!hasApproved && docs.length > 0 && <Badge variant="warning">Pending Review</Badge>}
               {docs.length === 0 && <Badge variant="neutral">Not uploaded</Badge>}
+              {req && !req.is_required && <span className="text-[10px] text-zinc-600">Optional</span>}
             </div>
 
             {docs.length > 0 && (

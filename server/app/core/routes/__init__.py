@@ -19,6 +19,7 @@ from .admin_handbook_references import router as admin_handbook_references_route
 from .legislative_tracker import router as legislative_tracker_router
 from .investigation_invite import router as investigation_invite_router
 from .sso import router as sso_router
+from .credential_templates import router as credential_templates_router
 from ...matcha.dependencies import require_feature
 
 # Create main core router
@@ -46,6 +47,9 @@ core_router.include_router(hr_news_router, prefix="/admin/news", tags=["hr-news"
 core_router.include_router(legislative_tracker_router, prefix="/admin/legislative-tracker", tags=["legislative-tracker"])
 core_router.include_router(investigation_invite_router, tags=["investigation-invite"])
 core_router.include_router(sso_router, prefix="/sso", tags=["sso"])
+core_router.include_router(credential_templates_router, prefix="/credential-templates",
+                           tags=["credential-templates"],
+                           dependencies=[Depends(require_feature("credential_templates"))])
 
 # Export individual routers for backwards compatibility
 __all__ = [
@@ -66,4 +70,5 @@ __all__ = [
     "hr_news_router",
     "legislative_tracker_router",
     "sso_router",
+    "credential_templates_router",
 ]

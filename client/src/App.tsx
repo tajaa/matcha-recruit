@@ -30,6 +30,7 @@ import HandbookDetail from './pages/app/HandbookDetail'
 import HandbookForm from './pages/app/HandbookForm'
 import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
+import CredentialTemplates from './pages/app/CredentialTemplates'
 import Accommodations from './pages/app/Accommodations'
 import AccommodationDetail from './pages/app/AccommodationDetail'
 import CompanySettings from './pages/app/CompanySettings'
@@ -95,6 +96,7 @@ export default function App() {
         <Route path="handbook/:id" element={<HandbookDetail />} />
         <Route path="handbook/:id/edit" element={<HandbookForm />} />
         <Route path="risk-assessment" element={<RiskAssessment />} />
+        <Route path="credential-templates" element={<CredentialTemplates />} />
       </Route>
     </Routes>
   )
