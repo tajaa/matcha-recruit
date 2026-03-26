@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { api } from '../../../api/client'
 import { Badge } from '../../ui'
 import { CATEGORY_LABELS } from '../../../generated/complianceCategories'
-import { ExternalLink, AlertTriangle, Shield, Loader2 } from 'lucide-react'
+import { ExternalLink, Shield, Loader2 } from 'lucide-react'
 
 type CoverageStat = { category: string; total: number; has_penalty: number; pct: number }
 type PenaltyDetail = {

@@ -531,6 +531,7 @@ export default function BrokerClients() {
                 {form.locations.map((loc, idx) => (
                   <div key={idx} className="flex items-center gap-2">
                     <Input
+                      label=""
                       placeholder="City"
                       value={loc.city}
                       onChange={(e) => updateLocation(idx, 'city', e.target.value)}
