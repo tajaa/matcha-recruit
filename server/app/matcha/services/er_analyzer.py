@@ -309,18 +309,33 @@ POLICY FINDINGS:
 PAST CASE PRECEDENT (this company):
 {precedent_stats}
 
+ABSOLUTE RULES — READ BEFORE GENERATING ANY OUTPUT:
+
+1. NO IMMUNITY FOR ANY PARTY: Filing a complaint does NOT shield the complainant from accountability.
+   - If the complainant committed policy violations (discriminatory remarks, skipped safety/medication protocols, harassment, etc.), they MUST receive disciplinary action in party_actions — NEVER "No Action."
+   - If the respondent lied during the investigation, retaliated, or destroyed evidence, these are AGGRAVATING factors. Escalate to termination, not just a warning.
+   - Dishonesty during an HR investigation is itself a terminable offense. State this explicitly.
+   - "No Action" for ANY party is ONLY permitted if the investigation found zero evidence of wrongdoing by that party.
+
+2. MULTI-ACTOR: Each outcome MUST be a COMBINED recommendation covering ALL non-witness parties.
+   - Include a "party_actions" array with an entry for EVERY non-witness party.
+   - EVERY party_action must have a substantive action. Do not default to "No Action" for complainants.
+   - The action_label must summarize actions for all parties (e.g., "Written Warning for [complainant] + Termination for [respondent]").
+
+3. CLOSED SYSTEM: Only reference names, events, policies, and evidence from the provided data. Do not fabricate.
+
 For each outcome path, provide:
 - determination: "substantiated", "unsubstantiated", or "inconclusive"
 - recommended_action: one of "termination", "disciplinary_action", "retraining", "no_action", "resignation", "other"
-- action_label: Human-readable label for the action (e.g. "Termination for Cause", "Written Warning + Retraining")
-- reasoning: 2-3 sentences citing specific evidence that supports this path
-- policy_basis: Which company policies or legal standards support this outcome
-- hr_considerations: Best practice notes, risks, or mitigating factors to consider
-- precedent_note: How this aligns with the company's past case outcomes (use the precedent stats provided)
-- confidence: "high", "medium", or "low" based on evidence strength for this path
-- party_actions: (required when case_info.involved_parties has multiple non-witness parties) Array of per-party action recommendations within THIS outcome. Each entry: {{"name": "...", "role": "complainant"|"respondent", "action": "short action label", "detail": "1-2 sentence explanation"}}
+- action_label: Human-readable label summarizing actions for ALL parties
+- reasoning: 2-3 sentences citing specific evidence from the provided data only
+- policy_basis: Which company policies from POLICY FINDINGS support this outcome
+- hr_considerations: Best practice notes, risks, or mitigating factors
+- precedent_note: How this aligns with the PAST CASE PRECEDENT stats provided
+- confidence: "high", "medium", or "low" based on evidence strength
+- party_actions: Array of per-party action recommendations. REQUIRED when multiple non-witness parties exist. Each: {{"name": "...", "role": "complainant"|"respondent", "action": "short action label", "detail": "1-2 sentence explanation citing evidence"}}
 
-Order outcomes from most to least supported by evidence, with highest confidence first.
+Order outcomes from most to least supported by evidence, highest confidence first.
 
 Return ONLY a JSON object with this structure:
 {{
@@ -328,33 +343,20 @@ Return ONLY a JSON object with this structure:
     {{
       "determination": "substantiated",
       "recommended_action": "disciplinary_action",
-      "action_label": "Retraining for [complainant] + Written Warning for [respondent]",
-      "reasoning": "Use ONLY facts from the provided case data. Cite specific evidence from uploaded documents or testimony by name.",
-      "policy_basis": "Cite ONLY policies listed in the POLICY FINDINGS section above.",
-      "hr_considerations": "Best practice notes based on the specific facts of this case.",
-      "precedent_note": "Reference the PAST CASE PRECEDENT stats provided above.",
+      "action_label": "Written Warning for [complainant] + Termination for [respondent]",
+      "reasoning": "Cite specific facts from CASE INFORMATION and ANALYSIS SUMMARY only.",
+      "policy_basis": "Cite policies from POLICY FINDINGS only.",
+      "hr_considerations": "Note legal exposure, precedent alignment, and mitigation steps.",
+      "precedent_note": "Reference the precedent stats above.",
       "confidence": "high",
       "party_actions": [
-        {{"name": "USE ACTUAL NAME FROM case_info.involved_parties", "role": "complainant", "action": "Action label", "detail": "Explanation citing specific evidence from the case data."}},
-        {{"name": "USE ACTUAL NAME FROM case_info.involved_parties", "role": "respondent", "action": "Action label", "detail": "Explanation citing specific evidence from the case data."}}
+        {{"name": "ACTUAL NAME", "role": "complainant", "action": "Written Warning", "detail": "Complainant's own violations (cite specific evidence) require corrective action despite being the victim of the original complaint."}},
+        {{"name": "ACTUAL NAME", "role": "respondent", "action": "Termination", "detail": "Respondent's retaliation and dishonesty during investigation constitute gross misconduct."}}
       ]
     }}
   ],
-  "case_summary": "2-3 sentence executive summary of the case and key evidence"
+  "case_summary": "2-3 sentence executive summary"
 }}
-
-MULTI-ACTOR EVALUATION (MANDATORY):
-- If case_info.involved_parties has multiple non-witness parties, each outcome MUST be a COMBINED recommendation covering ALL parties — not separate outcomes per party.
-- Each outcome represents a complete resolution path for the entire case. When applied, it should document what happens to every involved party.
-- Include a "party_actions" array listing the specific action for each non-witness party.
-- The action_label should summarize the combined actions (e.g., "Retraining for El-Amin + Written Warning for Patel").
-- Actor A being a victim in one context does NOT grant them immunity for separate policy violations they committed in another context.
-
-NO IMMUNITY FOR ANY PARTY (CRITICAL):
-- Filing a complaint does NOT shield the complainant from accountability for their OWN policy violations discovered during the investigation.
-- If the complainant made discriminatory remarks (homophobic, racist, etc.), skipped safety/medication protocols, or committed other violations — these MUST be addressed in the party_actions with appropriate disciplinary action, even if they are the victim of the original complaint.
-- If a respondent/supervisor lied during the investigation, engaged in retaliation, or destroyed evidence — these are AGGRAVATING factors that should escalate the recommended action (e.g., from warning to termination), not be treated as minor issues.
-- Dishonesty during an investigation is itself a terminable offense under most employer policies — flag this explicitly.
 
 SYSTEM DATA PRIORITY:
 - When evaluating the validity of a performance action, objective system data (audit logs, system records, documented metrics) must be weighted significantly higher than interpersonal chat sentiment or subjective interpretation.
