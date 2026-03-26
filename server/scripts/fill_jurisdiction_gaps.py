@@ -83,10 +83,17 @@ async def main():
     pool = await get_pool()
     try:
         async with pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT id, city, state, county FROM jurisdictions WHERE LOWER(city) = LOWER($1) AND state = $2",
-                city, state,
-            )
+            if city == "" or city.lower() == "none":
+                # State-level jurisdiction (city is NULL)
+                row = await conn.fetchrow(
+                    "SELECT id, city, state, county FROM jurisdictions WHERE city IS NULL AND state = $1",
+                    state,
+                )
+            else:
+                row = await conn.fetchrow(
+                    "SELECT id, city, state, county FROM jurisdictions WHERE LOWER(city) = LOWER($1) AND state = $2",
+                    city, state,
+                )
             if not row:
                 print(f"Jurisdiction not found: {city}, {state}")
                 print("Searching for close matches...")
@@ -101,7 +108,7 @@ async def main():
 
             jurisdiction_id = row["id"]
             county = row["county"]
-            location_name = f"{city}, {state}"
+            location_name = f"{city}, {state}" if city else f"{state} (state)"
 
             # Check what already exists in jurisdiction_requirements
             existing_rows = await conn.fetch(

@@ -17,6 +17,11 @@ client_secret*.json
 gmail_token.json
 token.json
 
+# Generated research artifacts
+server/scripts/*_gaps.md
+server/scripts/*_compliance.md
+server/scripts/*_research.md
+
 # IDE
 .idea/
 .vscode/
