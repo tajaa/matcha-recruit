@@ -136,6 +136,56 @@ class EmailService:
             logger.exception("Error sending email to %s", to_email)
             return False
 
+    async def _send_with_fallback(
+        self,
+        to_email: str,
+        to_name: Optional[str],
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None,
+    ) -> bool:
+        """Send via Gmail first, fall back to MailerSend if Gmail fails."""
+        # Try Gmail first
+        gmail_token = self._load_token()
+        if gmail_token and gmail_token.get("refresh_token"):
+            sent = await self.send_email(
+                to_email=to_email, to_name=to_name, subject=subject,
+                html_content=html_content, text_content=text_content,
+            )
+            if sent:
+                return True
+            logger.warning("Gmail send failed for %s, trying MailerSend fallback", to_email)
+
+        # Fallback to MailerSend
+        if not self.api_key:
+            logger.warning("MailerSend not configured, cannot send to %s", to_email)
+            return False
+
+        payload = {
+            "from": {"email": self.mailersend_from_email, "name": self.from_name},
+            "to": [{"email": to_email, "name": to_name or to_email}],
+            "subject": subject,
+            "html": html_content,
+            "text": text_content or "",
+        }
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"{self.base_url}/email",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                    timeout=30.0,
+                )
+                if response.status_code in (200, 201, 202):
+                    logger.info("Sent email to %s via MailerSend fallback", to_email)
+                    return True
+                else:
+                    logger.warning("MailerSend fallback failed for %s: %s", to_email, response.status_code)
+                    return False
+        except Exception:
+            logger.exception("MailerSend fallback error for %s", to_email)
+            return False
+
     async def send_outreach_email(
         self,
         to_email: str,
@@ -233,44 +283,8 @@ This link is unique to you and will expire in 14 days.
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name or to_email,
-                }
-            ],
-            "subject": f"Opportunity: {position_title} at {company_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent outreach email to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        _subject = f"Opportunity: {position_title} at {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_screening_invite_email(
         self,
@@ -375,44 +389,8 @@ You'll need to log in or create an account to access the interview.
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name or to_email,
-                }
-            ],
-            "subject": f"Screening Interview: {position_title} at {company_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent screening invite to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        _subject = f"Screening Interview: {position_title} at {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_investigation_interview_invite_email(
         self,
@@ -500,44 +478,8 @@ This link is unique to you. Do not share it with others.
 Sent on behalf of {company_name} via Matcha
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name or to_email,
-                }
-            ],
-            "subject": f"Workplace Investigation Interview Request from {company_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent investigation invite to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        _subject = f"Workplace Investigation Interview Request from {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_contact_form_email(
         self,
@@ -823,31 +765,7 @@ This invitation expires on {expires_text}.
                 html_content=html_content, text_content=text_content,
             )
 
-        payload = {
-            "from": {"email": self.mailersend_from_email, "name": self.from_name},
-            "to": [{"email": to_email, "name": to_name}],
-            "subject": subject,
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                    timeout=30.0,
-                )
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent broker client invite to %s via MailerSend", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-        except Exception:
-            logger.exception("Error sending broker invite to %s", to_email)
-            return False
+        return await self._send_with_fallback(to_email, to_name, subject, html_content, text_content)
 
     async def send_broker_welcome_email(
         self,
@@ -1283,33 +1201,8 @@ Open onboarding portal: {portal_url}
 - Matcha Recruit / {company_name}
 """
 
-        payload = {
-            "from": {"email": self.from_email, "name": self.from_name},
-            "to": [{"email": to_email, "name": to_name or to_email}],
-            "subject": f"Onboarding reminder: {task_title}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent onboarding reminder to %s", to_email)
-                    return True
-                logger.warning("Failed onboarding reminder to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                return False
-        except Exception as e:
-            logger.exception("Error sending onboarding reminder to %s", to_email)
-            return False
+        _subject = f"Onboarding reminder: {task_title}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_task_completion_notification(
         self,
@@ -1381,33 +1274,8 @@ View onboarding dashboard: {portal_url}
 - Matcha Recruit / {company_name}
 """
 
-        payload = {
-            "from": {"email": self.from_email, "name": self.from_name},
-            "to": [{"email": to_email, "name": to_name or to_email}],
-            "subject": f"[{company_name}] Onboarding task completed \u2014 {employee_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent task completion notification to %s", to_email)
-                    return True
-                logger.warning("Failed task completion notification to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                return False
-        except Exception as e:
-            logger.exception("Error sending task completion notification to %s", to_email)
-            return False
+        _subject = f"[{company_name}] Onboarding task completed \u2014 {employee_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_task_escalation(
         self,
@@ -1486,33 +1354,8 @@ Review onboarding status: {portal_url}
 - Matcha Recruit / {company_name}
 """
 
-        payload = {
-            "from": {"email": self.from_email, "name": self.from_name},
-            "to": [{"email": to_email, "name": to_name or to_email}],
-            "subject": f"Onboarding escalation ({escalation_label}): {task_title}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent onboarding escalation to %s", to_email)
-                    return True
-                logger.warning("Failed onboarding escalation to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                return False
-        except Exception as e:
-            logger.exception("Error sending onboarding escalation to %s", to_email)
-            return False
+        _subject = f"Onboarding escalation ({escalation_label}): {task_title}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_manager_onboarding_summary(
         self,
@@ -1581,33 +1424,8 @@ Open onboarding dashboard: {portal_url}
 - Matcha Recruit / {company_name}
 """
 
-        payload = {
-            "from": {"email": self.from_email, "name": self.from_name},
-            "to": [{"email": to_email, "name": to_name or to_email}],
-            "subject": f"Weekly onboarding summary — {company_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent manager onboarding summary to %s", to_email)
-                    return True
-                logger.warning("Failed manager onboarding summary to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                return False
-        except Exception as e:
-            logger.exception("Error sending manager onboarding summary to %s", to_email)
-            return False
+        _subject = f"Weekly onboarding summary — {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
 
     async def send_compliance_change_notification_email(
@@ -1704,44 +1522,8 @@ Please log in and review the Compliance tab to see what changed:
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": recipient_name,
-                }
-            ],
-            "subject": f"{company_name}: Compliance update available",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent compliance change notification to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        _subject = f"{company_name}: Compliance update available"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_compliance_action_reminder(
         self,
@@ -1946,44 +1728,7 @@ Open incident:
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": recipient_name,
-                }
-            ],
-            "subject": subject,
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent IR notification to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        return await self._send_with_fallback(to_email, to_name, subject, html_content, text_content)
 
     async def send_leave_request_notification_email(
         self,
@@ -2106,44 +1851,7 @@ Date Range: {date_range}
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": recipient_name,
-                }
-            ],
-            "subject": subject,
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent leave notification to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        return await self._send_with_fallback(to_email, to_name, subject, html_content, text_content)
 
     async def send_accommodation_notification_email(
         self,
@@ -2246,44 +1954,7 @@ Employee: {employee_line}
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": recipient_name,
-                }
-            ],
-            "subject": subject,
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent accommodation notification to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        return await self._send_with_fallback(to_email, to_name, subject, html_content, text_content)
 
 
     async def send_business_registration_pending_email(
@@ -2369,44 +2040,8 @@ In the meantime, you can log in to see your pending status. If you have any ques
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": f"Registration Pending: {company_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent business registration pending email to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        _subject = f"Registration Pending: {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_business_approved_email(
         self,
@@ -2501,44 +2136,8 @@ Welcome to Matcha! We're excited to have you on board.
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": f"Welcome to Matcha! {company_name} is Approved",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent business approved email to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        _subject = f"Welcome to Matcha! {company_name} is Approved"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
     async def send_candidate_reach_out_email(
         self,
@@ -2589,44 +2188,7 @@ Welcome to Matcha! We're excited to have you on board.
 </html>
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": from_name or self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": subject,
-            "html": html_content,
-            "text": body,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent reach-out email to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        return await self._send_with_fallback(to_email, to_name, subject, html_content, text_content)
 
     async def send_business_rejected_email(
         self,
@@ -2706,44 +2268,8 @@ If you believe this was a mistake or have additional information to provide, ple
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": to_email,
-                    "name": to_name,
-                }
-            ],
-            "subject": f"Registration Update: {company_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent business rejected email to %s", to_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", to_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", to_email)
-            return False
+        _subject = f"Registration Update: {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
 
     async def send_admin_interview_invitation_email(
@@ -2821,44 +2347,8 @@ Thank you for going through our process — we were impressed by your background
 - Matcha Recruit
 """
 
-        payload = {
-            "from": {
-                "email": self.from_email,
-                "name": self.from_name,
-            },
-            "to": [
-                {
-                    "email": candidate_email,
-                    "name": candidate_name or candidate_email,
-                }
-            ],
-            "subject": f"You're a top candidate: {position_title} at {company_name}",
-            "html": html_content,
-            "text": text_content,
-        }
-
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.post(
-                    f"{self.base_url}/email",
-                    json=payload,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
-                    timeout=30.0,
-                )
-
-                if response.status_code in (200, 201, 202):
-                    logger.info("Sent admin interview invitation to %s", candidate_email)
-                    return True
-                else:
-                    logger.warning("Failed to send to %s: %s - %s", candidate_email, response.status_code, response.text[:200])
-                    return False
-
-        except Exception as e:
-            logger.exception("Error sending to %s", candidate_email)
-            return False
+        _subject = f"You're a top candidate: {position_title} at {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
 
     async def send_provisioning_welcome_email(
