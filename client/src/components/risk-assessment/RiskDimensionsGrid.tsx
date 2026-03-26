@@ -159,6 +159,24 @@ function CostLineItemRow({ item, barWidth = 0, lowPct = 0 }: { item: CostLineIte
           {item.statute && <CostLineItemDetail label="Legal basis" text={item.statute} />}
           {item.risk_context && <CostLineItemDetail label="Risk context" text={item.risk_context} />}
           {item.benchmark && <CostLineItemDetail label="Benchmarks" text={item.benchmark} />}
+          {item.affected_employees && item.affected_employees.length > 0 && (
+            <div>
+              <p className="text-[9px] text-zinc-500 uppercase tracking-widest font-bold mb-1">Who's affected</p>
+              <div className="space-y-0.5">
+                {item.affected_employees.map((emp: { name: string; detail: string }, i: number) => (
+                  <div key={i} className="flex items-center gap-2 text-[11px]">
+                    <span className="text-zinc-200 font-medium">{emp.name}</span>
+                    <span className="text-zinc-500">{emp.detail}</span>
+                  </div>
+                ))}
+                {item.affected_count > item.affected_employees.length && (
+                  <p className="text-[10px] text-zinc-600 mt-1">
+                    + {item.affected_count - item.affected_employees.length} more
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
