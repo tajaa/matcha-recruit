@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../../api/client'
-import { Badge, Button, Input, Modal, Select } from '../../components/ui'
+import { Badge, Button, Input, Modal } from '../../components/ui'
 import { Plus, Loader2, Accessibility } from 'lucide-react'
 
 type AccommodationCase = {
@@ -137,11 +137,10 @@ export default function Accommodations() {
       </div>
 
       <div className="flex items-center gap-3 mt-5 mb-4">
-        <Select
-          label=""
+        <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="w-48"
+          className="w-48 bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
         >
           <option value="all">All Statuses</option>
           <option value="requested">Requested</option>
@@ -151,7 +150,7 @@ export default function Accommodations() {
           <option value="implemented">Implemented</option>
           <option value="denied">Denied</option>
           <option value="closed">Closed</option>
-        </Select>
+        </select>
       </div>
 
       {loading ? (

@@ -283,12 +283,7 @@ export default function AccommodationDetail() {
 
       {/* Notes tab */}
       {tab === 'notes' && caseId && (
-        <NoteThread
-          entityType="accommodation"
-          entityId={caseId}
-          fetchUrl={`/accommodations/${caseId}/audit-log`}
-          postUrl={`/accommodations/${caseId}/documents`}
-        />
+        <NoteThread endpoint={`/accommodations/${caseId}/audit-log`} />
       )}
     </div>
   )
