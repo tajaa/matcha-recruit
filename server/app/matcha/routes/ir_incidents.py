@@ -853,6 +853,44 @@ async def get_osha_300a_summary(
         )
 
 
+@router.get("/osha/300a/csv")
+async def get_osha_300a_csv(
+    year: int = Query(..., description="Calendar year for the 300A summary CSV"),
+    current_user=Depends(require_admin_or_client),
+):
+    """Export OSHA 300A annual summary as CSV."""
+    summary = await get_osha_300a_summary(year=year, current_user=current_user)
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Field", "Value"])
+    writer.writerow(["Year", summary.year])
+    writer.writerow(["Establishment Name", summary.establishment_name or ""])
+    writer.writerow(["Total Cases", summary.total_cases])
+    writer.writerow(["Total Deaths", summary.total_deaths])
+    writer.writerow(["Total Days Away From Work Cases", summary.total_days_away_cases])
+    writer.writerow(["Total Restricted Duty / Transfer Cases", summary.total_restricted_cases])
+    writer.writerow(["Total Other Recordable Cases", summary.total_other_recordable])
+    writer.writerow(["Total Days Away From Work", summary.total_days_away])
+    writer.writerow(["Total Days Restricted Duty", summary.total_days_restricted])
+    writer.writerow(["Total Injuries", summary.total_injuries])
+    writer.writerow(["Total Skin Disorders", summary.total_skin_disorders])
+    writer.writerow(["Total Respiratory Conditions", summary.total_respiratory])
+    writer.writerow(["Total Poisonings", summary.total_poisonings])
+    writer.writerow(["Total Hearing Loss", summary.total_hearing_loss])
+    writer.writerow(["Total Other Illnesses", summary.total_other_illnesses])
+    writer.writerow(["Average Number of Employees", summary.average_employees or ""])
+    writer.writerow(["Total Hours Worked", summary.total_hours_worked or ""])
+
+    output.seek(0)
+    filename = f"osha_300a_summary_{year}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
 # ===========================================
 # Single Incident Endpoints
 # ===========================================
