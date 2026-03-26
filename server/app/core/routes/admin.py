@@ -3375,6 +3375,10 @@ for _cat in ["health_it", "quality_reporting", "cybersecurity", "environmental_s
              "tax_exempt", "language_access", "records_retention", "marketing_comms",
              "emerging_regulatory"]:
     _CATEGORY_DOMAIN[_cat] = "medical_compliance"
+for _cat in ["process_safety", "environmental_compliance", "chemical_safety", "machine_safety",
+             "industrial_hygiene", "trade_compliance", "product_safety", "labor_relations",
+             "quality_systems", "supply_chain"]:
+    _CATEGORY_DOMAIN[_cat] = "manufacturing"
 
 _DOMAIN_LABELS: dict[str, str] = {
     "labor": "Labor",
@@ -3382,6 +3386,7 @@ _DOMAIN_LABELS: dict[str, str] = {
     "healthcare": "Healthcare",
     "oncology": "Oncology",
     "medical_compliance": "Medical Compliance",
+    "manufacturing": "Manufacturing",
 }
 
 _CATEGORY_LABELS: dict[str, str] = {
@@ -3406,6 +3411,11 @@ _CATEGORY_LABELS: dict[str, str] = {
     "antitrust": "Healthcare Antitrust", "tax_exempt": "Tax-Exempt Compliance",
     "language_access": "Language Access & Civil Rights", "records_retention": "Records Retention",
     "marketing_comms": "Marketing & Communications", "emerging_regulatory": "Emerging Regulatory",
+    "process_safety": "Process Safety Management", "environmental_compliance": "Environmental & Emissions",
+    "chemical_safety": "Chemical & Hazardous Materials", "machine_safety": "Machine & Equipment Safety",
+    "industrial_hygiene": "Industrial Hygiene & Exposure", "trade_compliance": "Import/Export & Trade",
+    "product_safety": "Product Safety & Standards", "labor_relations": "Labor Relations",
+    "quality_systems": "Quality Management Systems", "supply_chain": "Supply Chain & Procurement",
 }
 
 
