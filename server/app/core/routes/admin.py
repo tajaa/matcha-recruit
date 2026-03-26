@@ -3499,6 +3499,92 @@ async def jurisdiction_policy_overview(category: Optional[str] = Query(None)):
     return result
 
 
+@router.get("/jurisdictions/penalty-overview", dependencies=[Depends(require_admin)])
+async def get_penalty_overview():
+    """Get penalty coverage overview across all categories and sample penalty data."""
+    async with get_connection() as conn:
+        # Coverage by category
+        coverage = await conn.fetch("""
+            SELECT category,
+                   COUNT(*) as total,
+                   SUM(CASE WHEN metadata ? 'penalties' THEN 1 ELSE 0 END) as has_penalty
+            FROM jurisdiction_requirements WHERE status = 'active'
+            GROUP BY category ORDER BY total DESC
+        """)
+
+        # Detailed penalty data per category (one sample per category from governing/federal)
+        details = await conn.fetch("""
+            SELECT DISTINCT ON (category)
+                   category, title,
+                   metadata->'penalties'->>'enforcing_agency' as enforcing_agency,
+                   (metadata->'penalties'->>'civil_penalty_min')::text as penalty_min,
+                   (metadata->'penalties'->>'civil_penalty_max')::text as penalty_max,
+                   metadata->'penalties'->>'per_violation' as per_violation,
+                   metadata->'penalties'->>'annual_cap' as annual_cap,
+                   metadata->'penalties'->>'criminal' as criminal,
+                   metadata->'penalties'->>'summary' as summary,
+                   metadata->'penalties'->>'source_url' as source_url,
+                   metadata->'penalties'->>'verified_date' as verified_date
+            FROM jurisdiction_requirements
+            WHERE status = 'active' AND metadata ? 'penalties'
+            ORDER BY category, jurisdiction_level ASC
+        """)
+
+        # Requirements with highest max penalties
+        top_penalties = await conn.fetch("""
+            SELECT category, title, jurisdiction_name, jurisdiction_level,
+                   (metadata->'penalties'->>'civil_penalty_max')::numeric as max_penalty,
+                   metadata->'penalties'->>'summary' as summary,
+                   metadata->'penalties'->>'enforcing_agency' as enforcing_agency
+            FROM jurisdiction_requirements
+            WHERE status = 'active'
+              AND metadata ? 'penalties'
+              AND (metadata->'penalties'->>'civil_penalty_max') IS NOT NULL
+              AND (metadata->'penalties'->>'civil_penalty_max') != 'null'
+            ORDER BY (metadata->'penalties'->>'civil_penalty_max')::numeric DESC
+            LIMIT 20
+        """)
+
+    return {
+        "coverage": [
+            {
+                "category": r["category"],
+                "total": r["total"],
+                "has_penalty": r["has_penalty"],
+                "pct": round(r["has_penalty"] / r["total"] * 100) if r["total"] > 0 else 0,
+            }
+            for r in coverage
+        ],
+        "details": [
+            {
+                "category": r["category"],
+                "title": r["title"],
+                "enforcing_agency": r["enforcing_agency"],
+                "penalty_min": r["penalty_min"],
+                "penalty_max": r["penalty_max"],
+                "per_violation": r["per_violation"],
+                "annual_cap": r["annual_cap"],
+                "criminal": r["criminal"],
+                "summary": r["summary"],
+                "source_url": r["source_url"],
+                "verified_date": r["verified_date"],
+            }
+            for r in details
+        ],
+        "top_penalties": [
+            {
+                "category": r["category"],
+                "title": r["title"],
+                "jurisdiction": f"{r['jurisdiction_name']} ({r['jurisdiction_level']})",
+                "max_penalty": float(r["max_penalty"]) if r["max_penalty"] else None,
+                "summary": r["summary"],
+                "enforcing_agency": r["enforcing_agency"],
+            }
+            for r in top_penalties
+        ],
+    }
+
+
 @router.get("/jurisdictions/api-sources", dependencies=[Depends(require_admin)])
 async def get_api_sources_overview():
     """Get all requirements grouped by research_source with stats."""
