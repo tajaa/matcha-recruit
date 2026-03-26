@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Badge, Button, Input, Modal } from '../../components/ui'
 import { api } from '../../api/client'
+import { Link2 } from 'lucide-react'
 
 type BrokerContract = {
   id: string | null
@@ -61,6 +62,8 @@ type CreateResult = {
   owner: { email: string; password?: string; generated_password: boolean; email_sent: boolean }
 }
 
+type CompanyOption = { id: string; name: string; status: string; industry: string | null }
+
 const statusBadge = (status: string) => {
   if (status === 'active') return <Badge variant="success">Active</Badge>
   if (status === 'suspended') return <Badge variant="warning">Suspended</Badge>
@@ -83,6 +86,15 @@ export default function Brokers() {
   const [editForm, setEditForm] = useState<EditForm>({ status: '', support_routing: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+
+  // Link company state
+  const [linkBroker, setLinkBroker] = useState<Broker | null>(null)
+  const [companies, setCompanies] = useState<CompanyOption[]>([])
+  const [companiesLoading, setCompaniesLoading] = useState(false)
+  const [selectedCompanyId, setSelectedCompanyId] = useState('')
+  const [linkSaving, setLinkSaving] = useState(false)
+  const [linkError, setLinkError] = useState('')
+  const [linkSuccess, setLinkSuccess] = useState('')
 
   function fetchBrokers() {
     setLoading(true)
@@ -163,6 +175,42 @@ export default function Brokers() {
     setResult(null)
   }
 
+  async function openLinkCompany(b: Broker) {
+    setLinkBroker(b)
+    setSelectedCompanyId('')
+    setLinkError('')
+    setLinkSuccess('')
+    setCompaniesLoading(true)
+    try {
+      const res = await api.get<{ registrations: CompanyOption[] }>('/admin/business-registrations')
+      setCompanies(res.registrations)
+    } catch {
+      setCompanies([])
+    }
+    setCompaniesLoading(false)
+  }
+
+  async function handleLinkCompany() {
+    if (!linkBroker || !selectedCompanyId) return
+    setLinkSaving(true)
+    setLinkError('')
+    setLinkSuccess('')
+    try {
+      await api.put(`/admin/brokers/${linkBroker.id}/companies/${selectedCompanyId}`, {
+        status: 'active',
+        permissions: { can_view_compliance: true, can_view_employees: true },
+      })
+      const company = companies.find(c => c.id === selectedCompanyId)
+      setLinkSuccess(`${company?.name ?? 'Company'} linked to ${linkBroker.name}`)
+      setSelectedCompanyId('')
+      fetchBrokers()
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : 'Failed to link company')
+    } finally {
+      setLinkSaving(false)
+    }
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between">
@@ -225,7 +273,11 @@ export default function Brokers() {
                         </span>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3 text-right">
+                    <td className="px-4 py-3 text-right space-x-1">
+                      <Button size="sm" variant="ghost" onClick={() => openLinkCompany(b)}>
+                        <Link2 size={12} className="mr-1" />
+                        Link Company
+                      </Button>
                       <Button size="sm" variant="ghost" onClick={() => openEdit(b)}>
                         Edit
                       </Button>
@@ -392,6 +444,49 @@ export default function Brokers() {
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* Link Company Modal */}
+      <Modal open={!!linkBroker} onClose={() => setLinkBroker(null)} title={`Link Company to ${linkBroker?.name ?? ''}`} width="md">
+        <div className="space-y-4">
+          {companiesLoading ? (
+            <p className="text-sm text-zinc-500">Loading companies...</p>
+          ) : (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-zinc-300 mb-1">Select Company</label>
+                <select
+                  value={selectedCompanyId}
+                  onChange={(e) => setSelectedCompanyId(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg text-zinc-300 text-sm px-3 py-2 focus:border-zinc-500"
+                >
+                  <option value="">Choose a company...</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name} — {c.status}{c.industry ? ` (${c.industry})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {linkError && <p className="text-sm text-red-400">{linkError}</p>}
+              {linkSuccess && (
+                <div className="text-sm text-emerald-400 bg-emerald-900/20 border border-emerald-800/30 rounded px-3 py-2">
+                  {linkSuccess}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 pt-2 border-t border-zinc-800">
+                <Button size="sm" onClick={handleLinkCompany} disabled={linkSaving || !selectedCompanyId}>
+                  {linkSaving ? 'Linking...' : 'Link Company'}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setLinkBroker(null)}>
+                  {linkSuccess ? 'Done' : 'Cancel'}
+                </Button>
+              </div>
+            </>
+          )}
+        </div>
       </Modal>
 
       {/* Success Modal */}
