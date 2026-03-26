@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
-import { Badge, Button, Card } from '../ui'
+import { Badge, Button, Card, Input } from '../ui'
 import { useCredentialDocuments } from '../../hooks/employees/useCredentialDocuments'
+import { api } from '../../api/client'
 import type { CredentialDocument } from '../../types/employee'
 
 const DOC_TYPE_LABELS: Record<string, string> = {
@@ -185,8 +186,57 @@ function UploadZone({
 export function CredentialManager({ employeeId }: { employeeId: string }) {
   const {
     documents, credentials, loading,
-    upload, approve, reject, remove, download,
+    upload, approve, reject, remove, download, refetch,
   } = useCredentialDocuments(employeeId)
+
+  const [editing, setEditing] = useState(false)
+  const [editForm, setEditForm] = useState<Record<string, string>>({})
+  const [confirmWord, setConfirmWord] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+
+  function startEdit() {
+    if (!credentials) return
+    setEditForm({
+      license_type: credentials.license_type ?? '',
+      license_number: credentials.license_number ?? '',
+      license_state: credentials.license_state ?? '',
+      license_expiration: credentials.license_expiration ?? '',
+      npi_number: credentials.npi_number ?? '',
+      dea_number: credentials.dea_number ?? '',
+      dea_expiration: credentials.dea_expiration ?? '',
+      board_certification: credentials.board_certification ?? '',
+      board_certification_expiration: credentials.board_certification_expiration ?? '',
+      malpractice_carrier: credentials.malpractice_carrier ?? '',
+      malpractice_expiration: credentials.malpractice_expiration ?? '',
+      clinical_specialty: credentials.clinical_specialty ?? '',
+    })
+    setConfirmWord('')
+    setEditError('')
+    setEditing(true)
+  }
+
+  async function saveEdit() {
+    if (confirmWord.toLowerCase() !== 'confirm') {
+      setEditError('Type "confirm" to save changes')
+      return
+    }
+    setEditSaving(true)
+    setEditError('')
+    try {
+      const body: Record<string, string | null> = {}
+      for (const [k, v] of Object.entries(editForm)) {
+        body[k] = v.trim() || null
+      }
+      await api.put(`/employees/${employeeId}/credentials`, body)
+      setEditing(false)
+      refetch()
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update credentials')
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading credentials...</p>
 
@@ -232,48 +282,92 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
         </Card>
       )}
 
-      {/* Structured credential data summary */}
-      {credentials && (credentials.license_number || credentials.npi_number || credentials.dea_number) && (
+      {/* Structured credential data summary / edit */}
+      {credentials && (
         <Card className="p-4">
-          <h4 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-3">Verified Credentials</h4>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {credentials.license_type && (
-              <div>
-                <p className="text-[10px] text-zinc-500">License</p>
-                <p className="text-sm text-zinc-200">{credentials.license_type} · {credentials.license_state}</p>
-              </div>
-            )}
-            {credentials.npi_number && (
-              <div>
-                <p className="text-[10px] text-zinc-500">NPI</p>
-                <p className="text-sm text-zinc-200 font-mono">{credentials.npi_number}</p>
-              </div>
-            )}
-            {credentials.dea_number && (
-              <div>
-                <p className="text-[10px] text-zinc-500">DEA</p>
-                <p className="text-sm text-zinc-200 font-mono">{credentials.dea_number}</p>
-              </div>
-            )}
-            {credentials.board_certification && (
-              <div>
-                <p className="text-[10px] text-zinc-500">Board Cert</p>
-                <p className="text-sm text-zinc-200">{credentials.board_certification}</p>
-              </div>
-            )}
-            {credentials.malpractice_carrier && (
-              <div>
-                <p className="text-[10px] text-zinc-500">Malpractice</p>
-                <p className="text-sm text-zinc-200">{credentials.malpractice_carrier}</p>
-              </div>
-            )}
-            {credentials.clinical_specialty && (
-              <div>
-                <p className="text-[10px] text-zinc-500">Specialty</p>
-                <p className="text-sm text-zinc-200">{credentials.clinical_specialty}</p>
-              </div>
+          <div className="flex items-center justify-between mb-3">
+            <h4 className="text-xs font-medium text-zinc-400 uppercase tracking-wider">Verified Credentials</h4>
+            {!editing && (
+              <Button size="sm" variant="ghost" onClick={startEdit}>Edit</Button>
             )}
           </div>
+
+          {editing ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                <Input label="License Type" value={editForm.license_type} onChange={(e) => setEditForm({ ...editForm, license_type: e.target.value })} />
+                <Input label="License Number" value={editForm.license_number} onChange={(e) => setEditForm({ ...editForm, license_number: e.target.value })} />
+                <Input label="License State" value={editForm.license_state} onChange={(e) => setEditForm({ ...editForm, license_state: e.target.value })} />
+                <Input label="License Expiration" type="date" value={editForm.license_expiration} onChange={(e) => setEditForm({ ...editForm, license_expiration: e.target.value })} />
+                <Input label="NPI Number" value={editForm.npi_number} onChange={(e) => setEditForm({ ...editForm, npi_number: e.target.value })} />
+                <Input label="DEA Number" value={editForm.dea_number} onChange={(e) => setEditForm({ ...editForm, dea_number: e.target.value })} />
+                <Input label="DEA Expiration" type="date" value={editForm.dea_expiration} onChange={(e) => setEditForm({ ...editForm, dea_expiration: e.target.value })} />
+                <Input label="Board Certification" value={editForm.board_certification} onChange={(e) => setEditForm({ ...editForm, board_certification: e.target.value })} />
+                <Input label="Board Cert Expiration" type="date" value={editForm.board_certification_expiration} onChange={(e) => setEditForm({ ...editForm, board_certification_expiration: e.target.value })} />
+                <Input label="Malpractice Carrier" value={editForm.malpractice_carrier} onChange={(e) => setEditForm({ ...editForm, malpractice_carrier: e.target.value })} />
+                <Input label="Malpractice Expiration" type="date" value={editForm.malpractice_expiration} onChange={(e) => setEditForm({ ...editForm, malpractice_expiration: e.target.value })} />
+                <Input label="Clinical Specialty" value={editForm.clinical_specialty} onChange={(e) => setEditForm({ ...editForm, clinical_specialty: e.target.value })} />
+              </div>
+              <div className="pt-3 border-t border-zinc-800 space-y-2">
+                <p className="text-xs text-amber-400">Type <span className="font-mono font-bold">confirm</span> to save credential changes:</p>
+                <input
+                  value={confirmWord}
+                  onChange={(e) => setConfirmWord(e.target.value)}
+                  placeholder="Type confirm"
+                  className="bg-zinc-900 border border-zinc-700 rounded text-zinc-200 text-sm px-3 py-1.5 w-40 focus:outline-none focus:border-zinc-500"
+                />
+                {editError && <p className="text-xs text-red-400">{editError}</p>}
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={saveEdit} disabled={editSaving || confirmWord.toLowerCase() !== 'confirm'}>
+                    {editSaving ? 'Saving...' : 'Save Changes'}
+                  </Button>
+                  <Button size="sm" variant="ghost" onClick={() => setEditing(false)}>Cancel</Button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+              {credentials.license_type && (
+                <div>
+                  <p className="text-[10px] text-zinc-500">License</p>
+                  <p className="text-sm text-zinc-200">{credentials.license_type} · {credentials.license_state}</p>
+                </div>
+              )}
+              {credentials.npi_number && (
+                <div>
+                  <p className="text-[10px] text-zinc-500">NPI</p>
+                  <p className="text-sm text-zinc-200 font-mono">{credentials.npi_number}</p>
+                </div>
+              )}
+              {credentials.dea_number && (
+                <div>
+                  <p className="text-[10px] text-zinc-500">DEA</p>
+                  <p className="text-sm text-zinc-200 font-mono">{credentials.dea_number}</p>
+                </div>
+              )}
+              {credentials.board_certification && (
+                <div>
+                  <p className="text-[10px] text-zinc-500">Board Cert</p>
+                  <p className="text-sm text-zinc-200">{credentials.board_certification}</p>
+                </div>
+              )}
+              {credentials.malpractice_carrier && (
+                <div>
+                  <p className="text-[10px] text-zinc-500">Malpractice</p>
+                  <p className="text-sm text-zinc-200">{credentials.malpractice_carrier}</p>
+                </div>
+              )}
+              {credentials.clinical_specialty && (
+                <div>
+                  <p className="text-[10px] text-zinc-500">Specialty</p>
+                  <p className="text-sm text-zinc-200">{credentials.clinical_specialty}</p>
+                </div>
+              )}
+              {!credentials.license_number && !credentials.npi_number && !credentials.dea_number && (
+                <p className="text-xs text-zinc-500 col-span-full">No credentials on file. Click Edit to add or upload a document above.</p>
+              )}
+            </div>
+          )}
         </Card>
       )}
 

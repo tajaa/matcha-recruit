@@ -241,25 +241,6 @@ export default function EmployeeDetail() {
                   {new Date(employee.updated_at).toLocaleDateString()}
                 </dd>
               </div>
-              <div>
-                <dt className="text-zinc-500 text-xs">Invitation</dt>
-                <dd className="flex items-center gap-2 mt-1">
-                  <Badge variant={
-                    employee.invitation_status === 'accepted' ? 'success' :
-                    employee.invitation_status === 'sent' ? 'warning' : 'neutral'
-                  }>
-                    {employee.invitation_status ?? 'Not sent'}
-                  </Badge>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleInvite}
-                    disabled={inviting}
-                  >
-                    {inviting ? 'Sending...' : employee.invitation_status ? 'Resend' : 'Send Invite'}
-                  </Button>
-                </dd>
-              </div>
               {employee.manager_name && (
                 <div>
                   <dt className="text-zinc-500 text-xs">Manager</dt>
