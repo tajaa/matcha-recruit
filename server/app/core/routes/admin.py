@@ -8972,7 +8972,7 @@ async def admin_company_compliance(
     """Company compliance overview: locations with requirement category counts."""
     async with get_connection() as conn:
         company = await conn.fetchrow(
-            "SELECT id, company_name, industry FROM companies WHERE id = $1",
+            "SELECT id, name, industry FROM companies WHERE id = $1",
             company_id,
         )
         if not company:
@@ -8995,7 +8995,7 @@ async def admin_company_compliance(
         loc["category_counts"] = cat_map.get(str(loc["id"]), {})
 
     return {
-        "company": {"id": str(company["id"]), "name": company["company_name"], "industry": company["industry"]},
+        "company": {"id": str(company["id"]), "name": company["name"], "industry": company["industry"]},
         "locations": locations,
     }
 
