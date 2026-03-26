@@ -138,8 +138,8 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | hipaa_privacy_rule | HIPAA Privacy Rule (45 CFR Part 160, 164 Subparts A & E) | HHS OCR | Moderate |
 | hipaa_security_rule | HIPAA Security Rule (45 CFR Part 164 Subpart C) | HHS OCR | Low/None |
 | hitech_act | HITECH Act (Title XIII of ARRA) | HHS OCR / CMS | Low/None |
-| lfpdppp_health_data | Lfpdppp Health Data | - | - |
-| national_health_privacy_law | National Health Privacy Law | - | - |
+| lfpdppp_health_data | LFPDPPP Health Data Provisions (Mexico) | INAI | Moderate |
+| national_health_privacy_law | National Health Data Privacy Law (International) | National DPA / Data protection authority | Moderate |
 | state_biometric_privacy_laws | State Biometric Privacy Laws (e.g., IL BIPA, TX CUBI) | State AGs / Private action in IL | High |
 | state_health_privacy_laws | State Health Privacy Laws | State AGs / Health Depts | High |
 
@@ -158,7 +158,7 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | medicaid_billing_requirements | Medicaid Billing Requirements | CMS / State Medicaid | High |
 | medicare_conditions_of_payment_billing_rules | Medicare Conditions of Payment / Billing Rules | CMS / MACs | Low/None |
 | medicare_secondary_payer_rules | Medicare Secondary Payer (MSP) Rules | CMS / BCRC | Low/None |
-| national_anti_corruption_healthcare | National Anti Corruption Healthcare | - | - |
+| national_anti_corruption_healthcare | National Anti-Corruption in Healthcare (International) | National anti-corruption body | Moderate |
 | no_surprises_act | No Surprises Act (Consolidated Appropriations Act 2021) | CMS / State regulators | High |
 | provider_enrollment_revalidation | Provider Enrollment & Revalidation (42 CFR Part 424) | CMS | Low/None |
 | stark_law | Stark Law (42 U.S.C. § 1395nn) | CMS | Low/None |
@@ -177,7 +177,7 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | clia | CLIA (42 CFR Part 493) | CMS / CDC / State | Moderate |
 | cms_conditions_for_coverage | CMS Conditions for Coverage (CfCs) | CMS | Low/None |
 | cms_conditions_of_participation | CMS Conditions of Participation (42 CFR Parts 482–491) | CMS | Low/None |
-| cofepris_facility_standards | Cofepris Facility Standards | - | - |
+| cofepris_facility_standards | COFEPRIS Healthcare Facility Standards (Mexico) | COFEPRIS | Moderate |
 | dnv_gl_healthcare_accreditation | DNV GL Healthcare Accreditation | DNV GL | Low/None |
 | emtala | EMTALA (42 U.S.C. § 1395dd) | CMS / OIG | Low/None |
 | infection_control_prevention_standards | Infection Control & Prevention Standards | CMS / CDC / State | High |
@@ -212,7 +212,7 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | osha_workplace_safety | OSHA Workplace Safety (29 CFR Part 1910) | OSHA | Moderate |
 | osha_workplace_violence_prevention | OSHA Workplace Violence Prevention | OSHA / State OSHA plans | High |
 | physician_residency_gme_requirements | Physician Residency & GME Requirements | ACGME / CMS | Low/None |
-| professional_licensing | Professional Licensing | - | - |
+| professional_licensing | Professional / Occupational Licensing | State licensing boards | Moderate |
 | provider_licensure_scope_of_practice | Provider Licensure & Scope of Practice | State Licensing Boards | High |
 | section_1557_of_aca | Section 1557 of ACA (Nondiscrimination) | HHS OCR | Low/None |
 | title_vii_civil_rights_act | Title VII / Civil Rights Act | EEOC | Moderate |
@@ -230,7 +230,7 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | deficit_reduction_act_of_2005 | Deficit Reduction Act of 2005 (§6032) | CMS / State | Moderate |
 | federal_sentencing_guidelines | Federal Sentencing Guidelines (§8B2.1) | U.S. Sentencing Commission | Low/None |
 | internal_investigations_disclosure_protocols | Internal Investigations & Disclosure Protocols | OIG / CMS / DOJ | Low/None |
-| national_whistleblower_protection | National Whistleblower Protection | - | - |
+| national_whistleblower_protection | National Whistleblower Protection (International) | National labor authority / Anti-corruption body | Moderate |
 | oig_compliance_program_guidance | OIG Compliance Program Guidance | OIG | Low/None |
 | state_whistleblower_protection_laws | State Whistleblower Protection Laws | State AGs / Courts | High |
 | whistleblower_protections | Whistleblower Protections (FCA Qui Tam) | DOJ | Moderate |
@@ -244,13 +244,13 @@ Every policy key, when applied to a jurisdiction, stores this data:
 |-----|------|-----------------|----------------|
 | 21_cfr_part_11_research_consent | 21 CFR Part 11 (E-Records & E-Signatures) | FDA | Low/None |
 | clinicaltrialsgov_registration | ClinicalTrials.gov Registration (42 CFR Part 11) | NIH / FDA | Low/None |
-| cofepris_research_authorization | Cofepris Research Authorization | - | - |
+| cofepris_research_authorization | COFEPRIS Clinical Research Authorization (Mexico) | COFEPRIS | Moderate |
 | common_rule | Common Rule (45 CFR Part 46) | OHRP / HHS | Low/None |
 | fda_human_subject_regs | FDA Human Subject Regs (21 CFR Parts 50, 56) | FDA | Low/None |
 | good_clinical_practice | Good Clinical Practice (ICH E6 R2/R3) | FDA / ICH | Low/None |
 | hipaa_research_provisions | HIPAA Research Provisions | HHS OCR | Low/None |
 | institutional_biosafety_committee | Institutional Biosafety Committee (IBC) | NIH / CDC / USDA | Low/None |
-| national_research_consent_law | National Research Consent Law | - | - |
+| national_research_consent_law | National Research Consent / Bioethics Law (International) | National bioethics committee | Moderate |
 | nih_grants_policy_compliance | NIH Grants Policy & Compliance | NIH | Low/None |
 | state_research_consent_laws | State Research & Consent Laws | State law | High |
 
@@ -262,7 +262,7 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
 | certificate_of_need_programs | Certificate of Need (CON) Programs | State Health Planning | High |
-| cofepris_sanitary_license | Cofepris Sanitary License | - | - |
+| cofepris_sanitary_license | COFEPRIS Sanitary License (Mexico) | COFEPRIS | High |
 | corporate_practice_of_medicine_doctrine | Corporate Practice of Medicine Doctrine | State Medical Boards / Courts | High |
 | feesplitting_prohibitions | Fee-Splitting Prohibitions | State Medical Boards | High |
 | medical_staff_bylaws_selfgovernance | Medical Staff Bylaws & Self-Governance | CMS / State | Moderate |
@@ -281,7 +281,7 @@ Every policy key, when applied to a jurisdiction, stores this data:
 | emtala_emergency_obligations | EMTALA Emergency Obligations | CMS / OIG | Low/None |
 | hospital_preparedness_program | Hospital Preparedness Program (HPP) | ASPR / HHS | Moderate |
 | mass_casualty_active_shooter | Mass Casualty / Active Shooter | Joint Commission / State | Moderate |
-| national_emergency_preparedness | National Emergency Preparedness | - | - |
+| national_emergency_preparedness | National Emergency / Disaster Preparedness (International) | National civil protection authority | Moderate |
 | nims_hics | NIMS / HICS | FEMA / ASPR | Low/None |
 | pandemic_preparedness | Pandemic Preparedness | HHS / CDC / State | High |
 | state_emergency_preparedness_requirements | State Emergency Preparedness Requirements | State Health Depts / EM | High |
@@ -293,16 +293,16 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| apm_participation | Apm Participation | - | - |
-| bundled_payment_compliance | Bundled Payment Compliance | - | - |
-| cms_star_ratings | Cms Star Ratings | - | - |
-| drg_coding_compliance | Drg Coding Compliance | - | - |
-| good_faith_estimates | Good Faith Estimates | - | - |
-| hedis_quality_measures | Hedis Quality Measures | - | - |
-| macra_mips_reporting | Macra Mips Reporting | - | - |
-| no_surprises_act | No Surprises Act | - | - |
-| price_transparency_rule | Price Transparency Rule | - | - |
-| value_based_contract_requirements | Value Based Contract Requirements | - | - |
+| apm_participation | Alternative Payment Model (APM) Participation | CMS | Low/None |
+| bundled_payment_compliance | Bundled Payment Program Compliance (BPCI-A) | CMS | Low/None |
+| cms_star_ratings | CMS Star Ratings Compliance | CMS | Low/None |
+| drg_coding_compliance | DRG/CPT Coding Compliance & Auditing | CMS/OIG | Low/None |
+| good_faith_estimates | Good Faith Estimates | CMS | Low/None |
+| hedis_quality_measures | HEDIS Quality Measures | NCQA | Low/None |
+| macra_mips_reporting | MACRA/MIPS Quality Reporting | CMS | Low/None |
+| no_surprises_act | No Surprises Act (Consolidated Appropriations Act 2021) | CMS / State regulators | High |
+| price_transparency_rule | Hospital Price Transparency Rule | CMS | Low/None |
+| value_based_contract_requirements | Value-Based Contract Requirements | CMS/Payers | Moderate |
 
 ## Labor (12 categories)
 
@@ -312,18 +312,18 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| exempt_salary_threshold | Exempt Salary Threshold | - | - |
-| fast_food_minimum_wage | Fast Food Minimum Wage | - | - |
-| healthcare_minimum_wage | Healthcare Minimum Wage | - | - |
-| large_employer_minimum_wage | Large Employer Minimum Wage | - | - |
-| local_minimum_wage | Local Minimum Wage | - | - |
-| national_minimum_wage | National Minimum Wage | - | - |
-| small_employer_minimum_wage | Small Employer Minimum Wage | - | - |
-| state_minimum_wage | State Minimum Wage | - | - |
-| tip_credit_prohibition | Tip Credit Prohibition | - | - |
-| tipped_minimum_wage | Tipped Minimum Wage | - | - |
-| youth_minimum_wage | Youth Minimum Wage | - | - |
-| zlfn_border_zone_minimum_wage | Zlfn Border Zone Minimum Wage | - | - |
+| exempt_salary_threshold | Exempt Employee Salary Threshold (FLSA + State) | WHD / State labor agencies | High |
+| fast_food_minimum_wage | Fast Food Industry Minimum Wage | State labor agencies | High |
+| healthcare_minimum_wage | Healthcare Worker Minimum Wage | State labor agencies | High |
+| large_employer_minimum_wage | Large Employer Minimum Wage Tier | State / Local government | High |
+| local_minimum_wage | City / County Minimum Wage Ordinances | Local government | High |
+| national_minimum_wage | National Minimum Wage (International) | National government / Labor ministry | Moderate |
+| small_employer_minimum_wage | Small Employer Minimum Wage Tier | State / Local government | High |
+| state_minimum_wage | State Minimum Wage | WHD / State labor agencies | High |
+| tip_credit_prohibition | Tip Credit Prohibition | State legislatures | High |
+| tipped_minimum_wage | Tipped Employee Minimum Wage / Tip Credit | WHD / State labor agencies | High |
+| youth_minimum_wage | Youth / Training Sub-Minimum Wage | WHD / State labor agencies | Moderate |
+| zlfn_border_zone_minimum_wage | Mexico Free Zone Border Minimum Wage (ZLFN) | CONASAMI | High |
 
 ### Overtime (overtime)
 
@@ -331,14 +331,14 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| alternative_workweek | Alternative Workweek | - | - |
-| comp_time | Comp Time | - | - |
-| daily_weekly_overtime | Daily Weekly Overtime | - | - |
-| double_time | Double Time | - | - |
-| exempt_salary_threshold | Exempt Salary Threshold | - | - |
-| healthcare_overtime | Healthcare Overtime | - | - |
-| mandatory_overtime_restrictions | Mandatory Overtime Restrictions | - | - |
-| seventh_day_overtime | Seventh Day Overtime | - | - |
+| alternative_workweek | Alternative Workweek Schedule Elections | State labor agencies | Moderate |
+| comp_time | Compensatory Time Off in Lieu of Overtime Pay | WHD / State labor agencies | Moderate |
+| daily_weekly_overtime | Daily and Weekly Overtime Thresholds and Rates | WHD / State labor agencies | High |
+| double_time | Double-Time Pay Requirements | State labor agencies | High |
+| exempt_salary_threshold | Exempt Employee Salary Threshold (FLSA + State) | WHD / State labor agencies | High |
+| healthcare_overtime | Healthcare Overtime Restrictions | State legislatures | Moderate |
+| mandatory_overtime_restrictions | Restrictions on Mandatory Overtime | State legislatures | High |
+| seventh_day_overtime | Seventh Consecutive Day Overtime | State labor agencies | High |
 
 ### Sick Leave (sick_leave)
 
@@ -346,11 +346,11 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| accrual_and_usage_caps | Accrual And Usage Caps | - | - |
-| imss_sick_leave | Imss Sick Leave | - | - |
-| local_sick_leave | Local Sick Leave | - | - |
-| state_paid_sick_leave | State Paid Sick Leave | - | - |
-| statutory_sick_leave | Statutory Sick Leave | - | - |
+| accrual_and_usage_caps | Sick Leave Accrual Rates and Usage Caps | State / Local government | High |
+| imss_sick_leave | IMSS Social Security Sick Leave (Mexico) | IMSS | Moderate |
+| local_sick_leave | City / County Sick Leave Ordinances | Local government | High |
+| state_paid_sick_leave | State-Mandated Paid Sick Leave | State labor agencies | High |
+| statutory_sick_leave | National Statutory Sick Pay (International) | National government | Moderate |
 
 ### Meal & Rest Breaks (meal_breaks)
 
@@ -358,12 +358,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| healthcare_meal_waiver | Healthcare Meal Waiver | - | - |
-| lactation_break | Lactation Break | - | - |
-| meal_break | Meal Break | - | - |
-| missed_break_penalty | Missed Break Penalty | - | - |
-| on_duty_meal_agreement | On Duty Meal Agreement | - | - |
-| rest_break | Rest Break | - | - |
+| healthcare_meal_waiver | Healthcare Industry Meal Break Waivers | State labor agencies | Moderate |
+| lactation_break | Lactation / Nursing Break Requirements | WHD / State labor agencies | Moderate |
+| meal_break | Meal / Lunch Break Requirements | WHD / State labor agencies | High |
+| missed_break_penalty | Penalty Pay for Missed Breaks (CA Premium Pay) | State labor agencies | High |
+| on_duty_meal_agreement | On-Duty Meal Period Agreements | State labor agencies | Moderate |
+| rest_break | Rest / Coffee Break Requirements | WHD / State labor agencies | High |
 
 ### Pay Frequency (pay_frequency)
 
@@ -371,12 +371,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| exempt_monthly_pay | Exempt Monthly Pay | - | - |
-| final_pay_resignation | Final Pay Resignation | - | - |
-| final_pay_termination | Final Pay Termination | - | - |
-| payday_posting | Payday Posting | - | - |
-| standard_pay_frequency | Standard Pay Frequency | - | - |
-| wage_notice | Wage Notice | - | - |
+| exempt_monthly_pay | Exempt Employee Monthly Pay Option | State labor agencies | Moderate |
+| final_pay_resignation | Final Pay Timing — Voluntary Resignation | State labor agencies | High |
+| final_pay_termination | Final Pay Timing — Involuntary Termination | State labor agencies | High |
+| payday_posting | Payday Posting / Notification Requirements | State labor agencies | Low/None |
+| standard_pay_frequency | Required Pay Frequency (Weekly, Biweekly, etc.) | State labor agencies | Moderate |
+| wage_notice | Wage Theft Prevention Notice Requirements | State labor agencies | Moderate |
 
 ### Final Pay (final_pay)
 
@@ -384,12 +384,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| final_pay_layoff | Final Pay Layoff | - | - |
-| final_pay_resignation | Final Pay Resignation | - | - |
-| final_pay_termination | Final Pay Termination | - | - |
-| finiquito | Finiquito | - | - |
-| liquidacion | Liquidacion | - | - |
-| waiting_time_penalty | Waiting Time Penalty | - | - |
+| final_pay_layoff | Final Pay Timing — Layoff / Reduction in Force | State labor agencies | High |
+| final_pay_resignation | Final Pay Timing — Voluntary Resignation | State labor agencies | High |
+| final_pay_termination | Final Pay Timing — Involuntary Termination | State labor agencies | High |
+| finiquito | Voluntary Separation Settlement (Mexico Finiquito) | STPS / Conciliation centers | Moderate |
+| liquidacion | Involuntary Termination Settlement (Mexico Liquidacion) | Labor courts | Moderate |
+| waiting_time_penalty | Penalty for Late Final Pay (CA Waiting Time Penalties) | State labor agencies | High |
 
 ### Minor Work Permits (minor_work_permit)
 
@@ -397,12 +397,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| entertainment_permits | Entertainment Permits | - | - |
-| hour_limits_14_15 | Hour Limits 14 15 | - | - |
-| hour_limits_16_17 | Hour Limits 16 17 | - | - |
-| prohibited_occupations | Prohibited Occupations | - | - |
-| recordkeeping | Recordkeeping | - | - |
-| work_permit | Work Permit | - | - |
+| entertainment_permits | Entertainment Industry Permits for Minors | State labor agencies | Moderate |
+| hour_limits_14_15 | Working Hour Limits Ages 14-15 | WHD / State labor agencies | Moderate |
+| hour_limits_16_17 | Working Hour Limits Ages 16-17 | WHD / State labor agencies | Moderate |
+| prohibited_occupations | Hazardous Occupations for Minors | WHD / State labor agencies | Moderate |
+| recordkeeping | Youth Employment Recordkeeping Requirements | WHD / State labor agencies | Low/None |
+| work_permit | Youth Employment Work Permit / Certificate | State labor agencies | Moderate |
 
 ### Scheduling & Reporting Time (scheduling_reporting)
 
@@ -410,13 +410,13 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| maximum_working_hours | Maximum Working Hours | - | - |
-| on_call_pay | On Call Pay | - | - |
-| predictive_scheduling | Predictive Scheduling | - | - |
-| reporting_time_pay | Reporting Time Pay | - | - |
-| split_shift_premium | Split Shift Premium | - | - |
-| spread_of_hours | Spread Of Hours | - | - |
-| sunday_premium | Sunday Premium | - | - |
+| maximum_working_hours | Maximum Daily / Weekly Working Hours (International) | National government / Labor ministry | Moderate |
+| on_call_pay | On-Call Compensation Requirements | State labor agencies | Moderate |
+| predictive_scheduling | Fair Workweek / Predictive Scheduling | State / Local government | High |
+| reporting_time_pay | Reporting / Show-Up Time Pay | State labor agencies | High |
+| split_shift_premium | Split Shift Premium Pay | State labor agencies | High |
+| spread_of_hours | Spread of Hours Premium (NY) | State labor agencies | High |
+| sunday_premium | Sunday Premium Pay (Mexico 25%) | STPS | Moderate |
 
 ### Leave (leave)
 
@@ -424,32 +424,32 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| adoption_leave | Adoption Leave | - | - |
-| aguinaldo_christmas_bonus | Aguinaldo Christmas Bonus | - | - |
-| annual_leave_entitlement | Annual Leave Entitlement | - | - |
-| bereavement_leave | Bereavement Leave | - | - |
-| bone_marrow_donor_leave | Bone Marrow Donor Leave | - | - |
-| domestic_violence_leave | Domestic Violence Leave | - | - |
-| fmla | Fmla | - | - |
-| jury_duty_leave | Jury Duty Leave | - | - |
-| military_leave | Military Leave | - | - |
-| organ_donor_leave | Organ Donor Leave | - | - |
-| paid_sick_leave | Paid Sick Leave | - | - |
-| pregnancy_disability_leave | Pregnancy Disability Leave | - | - |
-| ptu_profit_sharing | Ptu Profit Sharing | - | - |
-| reproductive_loss_leave | Reproductive Loss Leave | - | - |
-| school_activity_leave | School Activity Leave | - | - |
-| seniority_premium | Seniority Premium | - | - |
-| severance_pay | Severance Pay | - | - |
-| shared_parental_leave | Shared Parental Leave | - | - |
-| state_disability_insurance | State Disability Insurance | - | - |
-| state_family_leave | State Family Leave | - | - |
-| state_paid_family_leave | State Paid Family Leave | - | - |
-| statutory_maternity_leave | Statutory Maternity Leave | - | - |
-| statutory_notice_period_employer | Statutory Notice Period Employer | - | - |
-| statutory_paternity_leave | Statutory Paternity Leave | - | - |
-| vacation_premium | Vacation Premium | - | - |
-| voting_leave | Voting Leave | - | - |
+| adoption_leave | Statutory Adoption Leave (International) | National government | Moderate |
+| aguinaldo_christmas_bonus | Christmas Bonus / 13th Month Pay (Mexico Aguinaldo) | STPS | Moderate |
+| annual_leave_entitlement | Statutory Annual Leave (International) | National government / Labor ministry | Moderate |
+| bereavement_leave | Bereavement / Funeral Leave | State legislatures | Moderate |
+| bone_marrow_donor_leave | Bone Marrow Donation Leave | State legislatures | Moderate |
+| domestic_violence_leave | Leave for Domestic Violence / Sexual Assault Victims | State legislatures | Moderate |
+| fmla | FMLA (Family and Medical Leave Act) | DOL | High |
+| jury_duty_leave | Jury Duty Leave Protections | State legislatures | Low/None |
+| military_leave | Military / USERRA Leave | DOL / State labor agencies | Low/None |
+| organ_donor_leave | Organ / Bone Marrow Donor Leave | State legislatures | Moderate |
+| paid_sick_leave | Paid Sick Leave Mandates | State / Local government | High |
+| pregnancy_disability_leave | Pregnancy Disability Leave | State / EEOC | High |
+| ptu_profit_sharing | Worker Profit Sharing (Mexico PTU 10%) | STPS | Moderate |
+| reproductive_loss_leave | Reproductive Loss Leave | State legislatures | Moderate |
+| school_activity_leave | School Activity / Parent Involvement Leave | State legislatures | Moderate |
+| seniority_premium | Seniority Premium on Separation (Mexico) | STPS | Moderate |
+| severance_pay | Statutory Severance Pay (International) | National labor courts / Labor ministry | Moderate |
+| shared_parental_leave | Shared Parental Leave (UK) | HMRC / ACAS | Moderate |
+| state_disability_insurance | State Temporary Disability Insurance (CA SDI, NJ TDI, etc.) | State agencies | High |
+| state_family_leave | State Family / Medical Leave Beyond FMLA | State labor agencies | High |
+| state_paid_family_leave | State Paid Family Leave Insurance Programs | State agencies | High |
+| statutory_maternity_leave | Statutory Maternity Leave (International) | National government / ILO | Moderate |
+| statutory_notice_period_employer | Statutory Notice Period (International) | National labor law / Labor courts | Moderate |
+| statutory_paternity_leave | Statutory Paternity Leave (International) | National government | Moderate |
+| vacation_premium | Vacation Premium Pay (Mexico 25%) | STPS | Moderate |
+| voting_leave | Time Off to Vote | State legislatures | Moderate |
 
 ### Workplace Safety (workplace_safety)
 
@@ -457,12 +457,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| hazard_communication | Hazard Communication | - | - |
-| heat_illness_prevention | Heat Illness Prevention | - | - |
-| injury_illness_recordkeeping | Injury Illness Recordkeeping | - | - |
-| osha_general_duty | Osha General Duty | - | - |
-| stps_nom_standards | Stps Nom Standards | - | - |
-| workplace_violence_prevention | Workplace Violence Prevention | - | - |
+| hazard_communication | HazCom / GHS Right-to-Know | OSHA | Low/None |
+| heat_illness_prevention | Heat Illness Prevention Programs | OSHA / State plan states | High |
+| injury_illness_recordkeeping | OSHA 300/300A Injury and Illness Recordkeeping | OSHA | Moderate |
+| osha_general_duty | OSHA General Duty Clause (Section 5(a)(1)) | OSHA / State plan states | Moderate |
+| stps_nom_standards | STPS NOM Occupational Safety Standards (Mexico) | STPS | Moderate |
+| workplace_violence_prevention | Workplace Violence Prevention Plans | OSHA / State plan states (CA SB 553) | Moderate |
 
 ### Workers' Comp (workers_comp)
 
@@ -470,19 +470,19 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| anti_retaliation | Anti Retaliation | - | - |
-| claim_filing | Claim Filing | - | - |
-| cpf_employer_contribution | Cpf Employer Contribution | - | - |
-| foreign_worker_levy | Foreign Worker Levy | - | - |
-| imss_employer_contribution | Imss Employer Contribution | - | - |
-| infonavit_contribution | Infonavit Contribution | - | - |
-| mandatory_coverage | Mandatory Coverage | - | - |
-| posting_requirements | Posting Requirements | - | - |
-| return_to_work | Return To Work | - | - |
-| sar_retirement_contribution | Sar Retirement Contribution | - | - |
-| social_insurance_employee | Social Insurance Employee | - | - |
-| social_insurance_employer | Social Insurance Employer | - | - |
-| uk_auto_enrolment_pension | Uk Auto Enrolment Pension | - | - |
+| anti_retaliation | Anti-Retaliation for Workers' Comp Claims | State WC boards | Moderate |
+| claim_filing | Workers' Comp Claim Filing Procedures / Deadlines | State WC boards | Moderate |
+| cpf_employer_contribution | CPF Employer Contribution Rates (Singapore) | CPF Board | High |
+| foreign_worker_levy | Foreign Worker Levy (Singapore) | MOM Singapore | High |
+| imss_employer_contribution | IMSS Employer Contribution Rates (Mexico) | IMSS | High |
+| infonavit_contribution | INFONAVIT Housing Fund Contribution (Mexico) | INFONAVIT | Moderate |
+| mandatory_coverage | Mandatory Workers' Compensation Coverage | State WC boards | High |
+| posting_requirements | Workers' Comp Posting Requirements | State WC boards | Low/None |
+| return_to_work | Return-to-Work Programs | State WC boards | Moderate |
+| sar_retirement_contribution | SAR Retirement Savings Contribution (Mexico) | CONSAR | Moderate |
+| social_insurance_employee | Employee Social Insurance Deductions (International) | National social security authority | Moderate |
+| social_insurance_employer | Employer Social Insurance Contributions (International) | National social security authority | Moderate |
+| uk_auto_enrolment_pension | UK Auto-Enrolment Pension (Workplace Pension) | The Pensions Regulator | High |
 
 ### Anti-Discrimination (anti_discrimination)
 
@@ -490,13 +490,13 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| harassment_prevention_training | Harassment Prevention Training | - | - |
-| nom_035_psychosocial_risk | Nom 035 Psychosocial Risk | - | - |
-| pay_transparency | Pay Transparency | - | - |
-| protected_classes | Protected Classes | - | - |
-| reasonable_accommodation | Reasonable Accommodation | - | - |
-| salary_history_ban | Salary History Ban | - | - |
-| whistleblower_protection | Whistleblower Protection | - | - |
+| harassment_prevention_training | Sexual Harassment Prevention Training Mandates | State labor agencies | Moderate |
+| nom_035_psychosocial_risk | NOM-035 Psychosocial Risk Factors (Mexico) | STPS | Moderate |
+| pay_transparency | Pay Transparency / Range Disclosure | State labor agencies | High |
+| protected_classes | State Protected Classes Beyond Federal | State civil rights agencies | High |
+| reasonable_accommodation | Reasonable Accommodation Requirements | EEOC / State civil rights agencies | Moderate |
+| salary_history_ban | Salary History Inquiry Ban | State / Local government | High |
+| whistleblower_protection | Whistleblower / Retaliation Protections | State labor agencies | Moderate |
 
 ## Life Sciences (7 categories)
 
@@ -594,18 +594,18 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| anda_generic_pathway | Anda Generic Pathway | - | - |
-| fda_483_observations | Fda 483 Observations | - | - |
-| fda_breakthrough_accelerated | Fda Breakthrough Accelerated | - | - |
-| fda_priority_review | Fda Priority Review | - | - |
-| nda_bla_submission | Nda Bla Submission | - | - |
-| orphan_drug_exclusivity | Orphan Drug Exclusivity | - | - |
-| patent_exclusivity_orange_book | Patent Exclusivity Orange Book | - | - |
-| pediatric_study_requirements | Pediatric Study Requirements | - | - |
-| pharmacovigilance_safety_reporting | Pharmacovigilance Safety Reporting | - | - |
-| post_market_surveillance_faers | Post Market Surveillance Faers | - | - |
-| product_labeling_pi_medication_guide | Product Labeling Pi Medication Guide | - | - |
-| rems_lifecycle | Rems Lifecycle | - | - |
+| anda_generic_pathway | ANDA Generic Drug Pathway (Hatch-Waxman) | FDA/CDER | Low/None |
+| fda_483_observations | FDA 483 Observations & CAPA Management | FDA | Low/None |
+| fda_breakthrough_accelerated | Breakthrough/Fast Track/Accelerated Approval | FDA | Low/None |
+| fda_priority_review | Priority Review & Voucher Programs | FDA | Low/None |
+| nda_bla_submission | NDA/BLA Submission Requirements | FDA/CDER/CBER | Low/None |
+| orphan_drug_exclusivity | Orphan Drug Designation & Exclusivity | FDA | Low/None |
+| patent_exclusivity_orange_book | Patent/Exclusivity Listings (Orange Book/Purple Book) | FDA | Low/None |
+| pediatric_study_requirements | Pediatric Study Requirements (PREA/BPCA) | FDA | Low/None |
+| pharmacovigilance_safety_reporting | Pharmacovigilance & Safety Reporting | FDA/EMA | Low/None |
+| post_market_surveillance_faers | Post-Market Surveillance (FAERS/MedWatch) | FDA | Low/None |
+| product_labeling_pi_medication_guide | Product Labeling (PI, Medication Guides, Black Box) | FDA | Low/None |
+| rems_lifecycle | REMS (Risk Evaluation & Mitigation Strategies) | FDA | Low/None |
 
 ## Manufacturing (10 categories)
 
@@ -616,12 +616,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| emergency_action_plan | Emergency Action Plan | - | - |
-| management_of_change | Management Of Change | - | - |
-| mechanical_integrity | Mechanical Integrity | - | - |
-| osha_psm | Osha Psm | - | - |
-| pre_startup_review | Pre Startup Review | - | - |
-| process_hazard_analysis | Process Hazard Analysis | - | - |
+| emergency_action_plan | Emergency Action Plan | OSHA | Low/None |
+| management_of_change | Management of Change (MOC) | OSHA | Low/None |
+| mechanical_integrity | Mechanical Integrity | OSHA | Low/None |
+| osha_psm | OSHA Process Safety Management | OSHA | Moderate |
+| pre_startup_review | Pre-Startup Safety Review | OSHA | Low/None |
+| process_hazard_analysis | Process Hazard Analysis | OSHA | Low/None |
 
 ### Environmental & Emissions (environmental_compliance)
 
@@ -630,20 +630,20 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| air_quality_permit | Air Quality Permit | - | - |
-| cercla_superfund_liability | Cercla Superfund Liability | - | - |
-| clean_air_act_title_v | Clean Air Act Title V | - | - |
-| clean_water_act_npdes | Clean Water Act Npdes | - | - |
-| emissions_reporting | Emissions Reporting | - | - |
-| epa_risk_management_program | Epa Risk Management Program | - | - |
-| epcra_tri_reporting | Epcra Tri Reporting | - | - |
-| hazardous_waste_rcra | Hazardous Waste Rcra | - | - |
-| neshap_compliance | Neshap Compliance | - | - |
-| rcra_hazardous_waste | Rcra Hazardous Waste | - | - |
-| spcc_oil_spill_prevention | Spcc Oil Spill Prevention | - | - |
-| stormwater_permit | Stormwater Permit | - | - |
-| tsca_toxic_substances | Tsca Toxic Substances | - | - |
-| wastewater_discharge | Wastewater Discharge | - | - |
+| air_quality_permit | Air Quality Operating Permit | EPA/State | High |
+| cercla_superfund_liability | CERCLA/Superfund Liability | EPA | Moderate |
+| clean_air_act_title_v | Clean Air Act Title V Permitting | EPA/State | High |
+| clean_water_act_npdes | Clean Water Act NPDES Permitting | EPA/State | High |
+| emissions_reporting | Emissions Reporting Requirements | EPA/State | Moderate |
+| epa_risk_management_program | EPA Risk Management Program (RMP) | EPA | Moderate |
+| epcra_tri_reporting | EPCRA/TRI Reporting | EPA | Moderate |
+| hazardous_waste_rcra | Hazardous Waste Management (RCRA) | EPA/State | High |
+| neshap_compliance | NESHAP Compliance | EPA | Moderate |
+| rcra_hazardous_waste | RCRA Hazardous Waste Generator Requirements | EPA/State | High |
+| spcc_oil_spill_prevention | SPCC Oil Spill Prevention | EPA | Low/None |
+| stormwater_permit | Stormwater Discharge Permit | EPA/State | High |
+| tsca_toxic_substances | TSCA Toxic Substances Control Act | EPA | Moderate |
+| wastewater_discharge | Wastewater Discharge Permit | EPA/State | High |
 
 ### Chemical & Hazardous Materials (chemical_safety)
 
@@ -652,12 +652,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| chemical_inventory_reporting | Chemical Inventory Reporting | - | - |
-| hazardous_substance_storage | Hazardous Substance Storage | - | - |
-| hazcom_ghs | Hazcom Ghs | - | - |
-| pfas_restrictions | Pfas Restrictions | - | - |
-| right_to_know | Right To Know | - | - |
-| sds_management | Sds Management | - | - |
+| chemical_inventory_reporting | Chemical Inventory Reporting | EPA/State | Moderate |
+| hazardous_substance_storage | Hazardous Substance Storage Requirements | EPA/OSHA/State | High |
+| hazcom_ghs | Hazard Communication / GHS | OSHA | Low/None |
+| pfas_restrictions | PFAS Restrictions | EPA/State | High |
+| right_to_know | Right-to-Know Laws | OSHA/State | High |
+| sds_management | Safety Data Sheet Management | OSHA | Low/None |
 
 ### Machine & Equipment Safety (machine_safety)
 
@@ -666,12 +666,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| confined_space | Confined Space | - | - |
-| crane_hoist_safety | Crane Hoist Safety | - | - |
-| electrical_safety | Electrical Safety | - | - |
-| lockout_tagout | Lockout Tagout | - | - |
-| machine_guarding | Machine Guarding | - | - |
-| powered_industrial_trucks | Powered Industrial Trucks | - | - |
+| confined_space | Confined Space Entry | OSHA | Low/None |
+| crane_hoist_safety | Crane & Hoist Safety | OSHA | Low/None |
+| electrical_safety | Electrical Safety | OSHA/NFPA | Low/None |
+| lockout_tagout | Lockout/Tagout (LOTO) | OSHA | Low/None |
+| machine_guarding | Machine Guarding | OSHA | Low/None |
+| powered_industrial_trucks | Powered Industrial Trucks | OSHA | Low/None |
 
 ### Industrial Hygiene & Exposure (industrial_hygiene)
 
@@ -680,12 +680,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| ergonomics | Ergonomics | - | - |
-| heat_illness_prevention | Heat Illness Prevention | - | - |
-| noise_exposure | Noise Exposure | - | - |
-| permissible_exposure_limits | Permissible Exposure Limits | - | - |
-| personal_protective_equipment | Personal Protective Equipment | - | - |
-| respiratory_protection | Respiratory Protection | - | - |
+| ergonomics | Ergonomics Programs | OSHA/State (CA) | Moderate |
+| heat_illness_prevention | Industrial Heat Illness Prevention | OSHA/State | High |
+| noise_exposure | Noise Exposure / Hearing Conservation | OSHA | Low/None |
+| permissible_exposure_limits | Permissible Exposure Limits (PELs) | OSHA | Low/None |
+| personal_protective_equipment | Personal Protective Equipment (PPE) | OSHA | Low/None |
+| respiratory_protection | Respiratory Protection Program | OSHA | Low/None |
 
 ### Import/Export & Trade (trade_compliance)
 
@@ -694,12 +694,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| anti_dumping_duties | Anti Dumping Duties | - | - |
-| country_of_origin | Country Of Origin | - | - |
-| customs_tariff | Customs Tariff | - | - |
-| export_controls | Export Controls | - | - |
-| sanctions_screening | Sanctions Screening | - | - |
-| trade_agreements | Trade Agreements | - | - |
+| anti_dumping_duties | Anti-Dumping & Countervailing Duties | ITC/Commerce | Moderate |
+| country_of_origin | Country of Origin Marking | CBP | Low/None |
+| customs_tariff | Customs & Tariff Classification | CBP | Moderate |
+| export_controls | Export Controls (EAR/ITAR) | BIS/DDTC | Low/None |
+| sanctions_screening | Sanctions Screening | OFAC/Treasury | Low/None |
+| trade_agreements | Trade Agreement Compliance | USTR/CBP | Moderate |
 
 ### Product Safety & Standards (product_safety)
 
@@ -708,12 +708,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| consumer_safety_standards | Consumer Safety Standards | - | - |
-| labeling_requirements | Labeling Requirements | - | - |
-| product_certification | Product Certification | - | - |
-| quality_system_requirements | Quality System Requirements | - | - |
-| recall_procedures | Recall Procedures | - | - |
-| type_approval | Type Approval | - | - |
+| consumer_safety_standards | Consumer Safety Standards | CPSC | Moderate |
+| labeling_requirements | Product Labeling Requirements | CPSC/FTC | Moderate |
+| product_certification | Product Certification | CPSC/NRTL | Moderate |
+| quality_system_requirements | Product Quality System Requirements | Various | Moderate |
+| recall_procedures | Product Recall Procedures | CPSC/FDA | Low/None |
+| type_approval | Type Approval / Conformity Assessment | National regulators | Moderate |
 
 ### Labor Relations (labor_relations)
 
@@ -722,12 +722,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| collective_bargaining | Collective Bargaining | - | - |
-| employee_representation | Employee Representation | - | - |
-| right_to_work | Right To Work | - | - |
-| strike_lockout_rules | Strike Lockout Rules | - | - |
-| union_notification | Union Notification | - | - |
-| works_council | Works Council | - | - |
+| collective_bargaining | Collective Bargaining Agreements | NLRB | Low/None |
+| employee_representation | Employee Representation Rights | NLRB/National | Low/None |
+| right_to_work | Right-to-Work Laws | State legislatures | High |
+| strike_lockout_rules | Strike & Lockout Rules | NLRB | Low/None |
+| union_notification | Union Notification Requirements | DOL/NLRB | Low/None |
+| works_council | Works Council / Employee Representation | National labor ministry | Moderate |
 
 ### Quality Management Systems (quality_systems)
 
@@ -736,15 +736,15 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| cap_accreditation | Cap Accreditation | - | - |
-| clia_lab_certification | Clia Lab Certification | - | - |
-| iso_13485_medical_devices | Iso 13485 Medical Devices | - | - |
-| iso_14001_environmental | Iso 14001 Environmental | - | - |
-| iso_15189_clinical_labs | Iso 15189 Clinical Labs | - | - |
-| iso_27001_information_security | Iso 27001 Information Security | - | - |
-| iso_45001_ohs | Iso 45001 Ohs | - | - |
-| iso_9001_general_qms | Iso 9001 General Qms | - | - |
-| joint_commission_accreditation | Joint Commission Accreditation | - | - |
+| cap_accreditation | CAP (College of American Pathologists) Accreditation | CAP | Low/None |
+| clia_lab_certification | CLIA Laboratory Certification | CMS/CDC | Moderate |
+| iso_13485_medical_devices | ISO 13485 Medical Device QMS | Notified Bodies/Registrars | Low/None |
+| iso_14001_environmental | ISO 14001 Environmental Management System | Registrars | Low/None |
+| iso_15189_clinical_labs | ISO 15189 Clinical Laboratory QMS | Accreditation Bodies | Low/None |
+| iso_27001_information_security | ISO 27001 Information Security Management | Registrars | Low/None |
+| iso_45001_ohs | ISO 45001 Occupational Health & Safety | Registrars | Low/None |
+| iso_9001_general_qms | ISO 9001 General Quality Management System | Registrars | Low/None |
+| joint_commission_accreditation | Joint Commission Accreditation | The Joint Commission | Low/None |
 
 ### Supply Chain & Procurement (supply_chain)
 
@@ -753,14 +753,14 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| antibribery_fcpa_uk_bribery | Antibribery Fcpa Uk Bribery | - | - |
-| conflict_minerals_dodd_frank | Conflict Minerals Dodd Frank | - | - |
-| gpp_green_procurement | Gpp Green Procurement | - | - |
-| reach_regulation | Reach Regulation | - | - |
-| rohs_directive | Rohs Directive | - | - |
-| supplier_qualification_audit | Supplier Qualification Audit | - | - |
-| track_trace_serialization | Track Trace Serialization | - | - |
-| uyghur_forced_labor_prevention | Uyghur Forced Labor Prevention | - | - |
+| antibribery_fcpa_uk_bribery | Anti-Bribery (FCPA / UK Bribery Act) | DOJ/SFO | Low/None |
+| conflict_minerals_dodd_frank | Conflict Minerals (Dodd-Frank §1502) | SEC | Low/None |
+| gpp_green_procurement | Green Procurement / Environmentally Preferable Purchasing | EPA/GSA | Low/None |
+| reach_regulation | REACH Chemical Registration (EU) | ECHA | Low/None |
+| rohs_directive | RoHS Directive | EU Member States | Low/None |
+| supplier_qualification_audit | Supplier Qualification & Audit Requirements | FDA/ISO | Moderate |
+| track_trace_serialization | Track & Trace / Serialization | FDA | Low/None |
+| uyghur_forced_labor_prevention | Uyghur Forced Labor Prevention Act (UFLPA) | CBP/DHS | Low/None |
 
 ## Medical Compliance (17 categories)
 
@@ -1065,13 +1065,13 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| brachytherapy_safety | Brachytherapy Safety | - | - |
-| linear_accelerator_qa | Linear Accelerator Qa | - | - |
-| national_radiation_control | National Radiation Control | - | - |
-| radiation_oncology_safety_team | Radiation Oncology Safety Team | - | - |
-| radiation_safety_officer | Radiation Safety Officer | - | - |
-| radioactive_materials_license | Radioactive Materials License | - | - |
-| state_radiation_control_programs | State Radiation Control Programs | - | - |
+| brachytherapy_safety | Brachytherapy Safety Standards | NRC/State | Moderate |
+| linear_accelerator_qa | Linear Accelerator QA Requirements | NRC/State | Moderate |
+| national_radiation_control | National Radiation Control (International) | National nuclear authority | Moderate |
+| radiation_oncology_safety_team | Radiation Oncology Safety Team | ACR/ASTRO | Moderate |
+| radiation_safety_officer | Radiation Safety Officer Requirements | NRC/State | Moderate |
+| radioactive_materials_license | Radioactive Materials License | NRC/Agreement States | High |
+| state_radiation_control_programs | State Radiation Control Programs | State Radiation Control | High |
 
 ### Chemotherapy & Hazardous Drugs (chemotherapy_handling)
 
@@ -1080,12 +1080,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| closed_system_transfer | Closed System Transfer | - | - |
-| hazardous_drug_assessment | Hazardous Drug Assessment | - | - |
-| hazardous_waste_disposal | Hazardous Waste Disposal | - | - |
-| national_hazardous_drug_handling | National Hazardous Drug Handling | - | - |
-| spill_management | Spill Management | - | - |
-| usp_compounding_standards | Usp Compounding Standards | - | - |
+| closed_system_transfer | Closed System Transfer Devices | NIOSH/USP | Moderate |
+| hazardous_drug_assessment | Hazardous Drug Assessment | NIOSH | Low/None |
+| hazardous_waste_disposal | Hazardous Drug Waste Disposal | EPA/State | Moderate |
+| national_hazardous_drug_handling | National Hazardous Drug Handling (International) | National health authority | Moderate |
+| spill_management | Hazardous Drug Spill Management | OSHA/USP | Low/None |
+| usp_compounding_standards | USP Compounding Standards (<795>, <797>, <800>) | State Pharmacy Boards / CMS | Moderate |
 
 ### Tumor Registry Reporting (tumor_registry)
 
@@ -1094,11 +1094,11 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| cancer_registry_reporting | Cancer Registry Reporting | - | - |
-| electronic_reporting_format | Electronic Reporting Format | - | - |
-| national_cancer_registry | National Cancer Registry | - | - |
-| registry_data_quality | Registry Data Quality | - | - |
-| reporting_timelines | Reporting Timelines | - | - |
+| cancer_registry_reporting | Cancer Registry Reporting | State cancer registries/CDC | High |
+| electronic_reporting_format | Electronic Reporting Format | NAACCR | Moderate |
+| national_cancer_registry | National Cancer Registry (International) | National health authority | Moderate |
+| registry_data_quality | Registry Data Quality | NAACCR/State | Moderate |
+| reporting_timelines | Registry Reporting Timelines | State cancer registries | High |
 
 ### Oncology Clinical Trials (oncology_clinical_trials)
 
@@ -1107,11 +1107,11 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| adverse_event_reporting | Adverse Event Reporting | - | - |
-| clinical_trial_coverage_mandates | Clinical Trial Coverage Mandates | - | - |
-| investigational_drug_access | Investigational Drug Access | - | - |
-| protocol_deviation_reporting | Protocol Deviation Reporting | - | - |
-| right_to_try | Right To Try | - | - |
+| adverse_event_reporting | Adverse Event Reporting | FDA | Low/None |
+| clinical_trial_coverage_mandates | Clinical Trial Coverage Mandates | State legislatures | High |
+| investigational_drug_access | Investigational Drug Access | FDA | Low/None |
+| protocol_deviation_reporting | Protocol Deviation Reporting | FDA/IRB | Low/None |
+| right_to_try | Right to Try Act | FDA | Low/None |
 
 ### Oncology Patient Rights (oncology_patient_rights)
 
@@ -1120,12 +1120,12 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| advance_directives | Advance Directives | - | - |
-| cancer_treatment_consent | Cancer Treatment Consent | - | - |
-| fertility_preservation_counseling | Fertility Preservation Counseling | - | - |
-| hospice_palliative_care | Hospice Palliative Care | - | - |
-| palliative_care_access | Palliative Care Access | - | - |
-| patient_rights_declarations | Patient Rights Declarations | - | - |
+| advance_directives | Advance Directives (Patient Self-Determination Act) | CMS / State law | High |
+| cancer_treatment_consent | Cancer Treatment Consent | State/TJC | Moderate |
+| fertility_preservation_counseling | Fertility Preservation Counseling | ASCO/State | Moderate |
+| hospice_palliative_care | Hospice & Palliative Care | CMS/State | Moderate |
+| palliative_care_access | Palliative Care Access (International) | National health authority | Moderate |
+| patient_rights_declarations | Patient Rights Declarations | State/TJC | Moderate |
 
 ## Supplementary (3 categories)
 
@@ -1135,10 +1135,10 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| dba_registration | Dba Registration | - | - |
-| local_business_license | Local Business License | - | - |
-| professional_licensing | Professional Licensing | - | - |
-| state_business_registration | State Business Registration | - | - |
+| dba_registration | DBA / Fictitious Business Name Registration | County clerk / Secretary of State | Low/None |
+| local_business_license | City / County Business License / Tax Registration | Local government | High |
+| professional_licensing | Professional / Occupational Licensing | State licensing boards | Moderate |
+| state_business_registration | State Business Entity Registration | Secretary of State | Moderate |
 
 ### Tax Rate (tax_rate)
 
@@ -1146,13 +1146,13 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| corporate_income_tax | Corporate Income Tax | - | - |
-| disability_insurance_tax | Disability Insurance Tax | - | - |
-| employment_training_tax | Employment Training Tax | - | - |
-| franchise_tax | Franchise Tax | - | - |
-| local_tax | Local Tax | - | - |
-| sales_use_tax | Sales Use Tax | - | - |
-| unemployment_insurance_tax | Unemployment Insurance Tax | - | - |
+| corporate_income_tax | State Corporate Income Tax Rates | State revenue department | High |
+| disability_insurance_tax | State Disability Insurance Tax Rates | State workforce agency | High |
+| employment_training_tax | Employment Training Tax / Fund | State workforce agency | Moderate |
+| franchise_tax | Franchise / Privilege Tax | State revenue department | Moderate |
+| local_tax | Local Income / Payroll Taxes | Local government | Moderate |
+| sales_use_tax | State / Local Sales and Use Tax | State revenue department | Moderate |
+| unemployment_insurance_tax | State Unemployment Insurance Tax Rates | State workforce agency | High |
 
 ### Posting Requirements (posting_requirements)
 
@@ -1160,15 +1160,15 @@ Every policy key, when applied to a jurisdiction, stores this data:
 
 | Key | Name | Enforcing Agency | State Variance |
 |-----|------|-----------------|----------------|
-| discrimination_poster | Discrimination Poster | - | - |
-| family_leave_poster | Family Leave Poster | - | - |
-| minimum_wage_poster | Minimum Wage Poster | - | - |
-| osha_poster | Osha Poster | - | - |
-| paid_sick_leave_poster | Paid Sick Leave Poster | - | - |
-| wage_order_poster | Wage Order Poster | - | - |
-| whistleblower_poster | Whistleblower Poster | - | - |
-| workers_comp_poster | Workers Comp Poster | - | - |
-| workplace_violence_poster | Workplace Violence Poster | - | - |
+| discrimination_poster | EEO / Discrimination Poster | EEOC / State civil rights agencies | Low/None |
+| family_leave_poster | FMLA / Family Leave Poster | WHD / State labor agencies | Low/None |
+| minimum_wage_poster | Minimum Wage Poster | WHD / State labor agencies | Low/None |
+| osha_poster | OSHA Safety Poster | OSHA / State plan states | Low/None |
+| paid_sick_leave_poster | Paid Sick Leave Poster | State / Local government | Low/None |
+| wage_order_poster | Wage Order / IWC Poster (CA) | State labor agencies | Low/None |
+| whistleblower_poster | Whistleblower Protection Poster | State labor agencies | Low/None |
+| workers_comp_poster | Workers' Compensation Poster | State WC boards | Low/None |
+| workplace_violence_poster | Workplace Violence Prevention Poster | OSHA / State plan states | Low/None |
 
 ---
 
