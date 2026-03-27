@@ -7403,6 +7403,45 @@ _EXPANSION_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
 }
 EXPECTED_REGULATION_KEYS.update(_EXPANSION_REGULATION_KEYS)
 
+_HEALTHCARE_EXPANSION_KEYS: Dict[str, FrozenSet[str]] = {
+    "billing_integrity": frozenset([
+        "340b_drug_pricing_compliance", "surprise_billing_state_laws",
+        "medicare_advantage_billing", "medicaid_managed_care_billing",
+        "charity_care_financial_assistance",
+    ]),
+    "clinical_safety": frozenset([
+        "blood_bank_transfusion_safety", "surgical_safety_protocols",
+        "patient_identification_standards", "diagnostic_error_reporting",
+        "nursing_home_ltc_safety", "radiation_therapy_safety",
+    ]),
+    "hipaa_privacy": frozenset([
+        "information_blocking", "patient_right_of_access",
+        "research_data_use_agreements",
+    ]),
+    "healthcare_workforce": frozenset([
+        "locum_tenens_temporary_staffing", "physician_noncompete_restrictions",
+        "healthcare_worker_vaccination_requirements", "safe_staffing_legislation",
+    ]),
+    "reimbursement_vbc": frozenset([
+        "mssp_aco_compliance", "medicaid_supplemental_payments",
+        "episode_based_payment", "drug_rebate_program", "site_neutral_payment",
+    ]),
+    "emergency_preparedness": frozenset([
+        "cybersecurity_incident_response", "continuity_of_operations",
+    ]),
+    "state_licensing": frozenset([
+        "ambulatory_surgery_center_licensing", "home_health_hospice_licensing",
+        "behavioral_health_facility_licensing", "clinical_laboratory_licensing",
+    ]),
+    "corporate_integrity": frozenset([
+        "compliance_risk_assessment", "physician_arrangement_tracking",
+    ]),
+}
+EXPECTED_REGULATION_KEYS.update(
+    {k: v | EXPECTED_REGULATION_KEYS.get(k, frozenset())
+     for k, v in _HEALTHCARE_EXPANSION_KEYS.items()}
+)
+
 _INTERNATIONAL_REGULATION_KEYS: Dict[str, FrozenSet[str]] = {
     "minimum_wage": frozenset(["national_minimum_wage", "zlfn_border_zone_minimum_wage"]),
     "sick_leave": frozenset(["statutory_sick_leave", "imss_sick_leave"]),

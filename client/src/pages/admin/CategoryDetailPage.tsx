@@ -15,6 +15,7 @@ interface PolicyKey {
   changed_count: number
   new_count: number
   staleness_level: 'fresh' | 'warning' | 'critical' | 'expired' | 'no_data'
+  created_at: string | null
 }
 
 interface CategoryDetail {
@@ -164,7 +165,12 @@ export default function CategoryDetailPage() {
                 onClick={() => navigate(`/admin/jurisdiction-data/policy/${k.id}`)}
               >
                 <td className="px-3 py-2 font-mono text-xs text-zinc-300">{k.key}</td>
-                <td className="px-3 py-2 text-sm text-zinc-200">{k.name}</td>
+                <td className="px-3 py-2 text-sm text-zinc-200">
+                  {k.name}
+                  {k.created_at && (Date.now() - new Date(k.created_at).getTime()) < 30 * 86400000 && (
+                    <span className="ml-2 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 font-medium">NEW</span>
+                  )}
+                </td>
                 <td className="px-3 py-2"><VarianceBadge variance={k.state_variance} /></td>
                 <td className="px-3 py-2 text-xs text-zinc-400">{k.enforcing_agency || '\u2014'}</td>
                 <td className="px-3 py-2 text-xs text-center font-mono text-zinc-300">{k.jurisdiction_count}</td>

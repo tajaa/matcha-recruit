@@ -4603,7 +4603,7 @@ async def get_category_detail(slug: str, state: str = Query(default=None)):
         keys = await conn.fetch(f"""
             SELECT rkd.id, rkd.key, rkd.name, rkd.description,
                    rkd.state_variance, rkd.enforcing_agency, rkd.base_weight,
-                   rkd.key_group, rkd.staleness_warning_days,
+                   rkd.key_group, rkd.staleness_warning_days, rkd.created_at,
                    COUNT(jr.id) AS jurisdiction_count,
                    COUNT(jr.id) FILTER (WHERE jr.change_status = 'changed') AS changed_count,
                    COUNT(jr.id) FILTER (WHERE jr.change_status = 'new') AS new_count,
@@ -4657,6 +4657,7 @@ async def get_category_detail(slug: str, state: str = Query(default=None)):
                     "changed_count": r["changed_count"],
                     "new_count": r["new_count"],
                     "staleness_level": r["staleness_level"],
+                    "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 }
                 for r in keys
             ],
