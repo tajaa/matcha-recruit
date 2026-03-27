@@ -1,14 +1,14 @@
 """add 31 missing healthcare regulation key definitions
 
-Revision ID: y0z1a2b3c4d5
+Revision ID: zb3c4d5e6f7g
 Revises: x9y0z1a2b3c4
 Create Date: 2026-03-26
 """
 
 from alembic import op
 
-revision = "y0z1a2b3c4d5"
-down_revision = "x9y0z1a2b3c4"
+revision = "zb3c4d5e6f7g"
+down_revision = "za2b3c4d5e6f"
 branch_labels = None
 depends_on = None
 
