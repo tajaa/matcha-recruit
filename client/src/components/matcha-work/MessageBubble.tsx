@@ -31,17 +31,25 @@ function extractPenalties(reasoning: MWMessage['metadata']): { category: string;
   return results
 }
 
-const MessageBubble = React.memo(function MessageBubble({ message: m }: { message: MWMessage }) {
+const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode }: { message: MWMessage; lightMode?: boolean }) {
   const markdownContent = useMemo(() => <Markdown>{m.content}</Markdown>, [m.content])
   const penalties = useMemo(() => extractPenalties(m.metadata), [m.metadata])
+
+  const lm = lightMode
+  const divider  = lm ? 'border-zinc-200'  : 'border-zinc-800'
+  const metaText = lm ? 'text-zinc-400'    : 'text-zinc-500'
 
   return (
     <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div
         className={`max-w-[90%] sm:max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
           m.role === 'user'
-            ? 'bg-zinc-700 text-white whitespace-pre-wrap'
-            : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
+            ? lm
+              ? 'bg-zinc-200 text-zinc-900 whitespace-pre-wrap'
+              : 'bg-zinc-700 text-white whitespace-pre-wrap'
+            : lm
+              ? 'bg-zinc-50 text-zinc-800 border border-zinc-200 prose prose-sm prose-zinc max-w-none overflow-x-auto'
+              : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
         }`}
       >
         {m.role === 'assistant' ? (
@@ -56,15 +64,19 @@ const MessageBubble = React.memo(function MessageBubble({ message: m }: { messag
               />
             )}
             {m.metadata?.affected_employees && m.metadata.affected_employees.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-zinc-800">
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wide">
+              <div className={`mt-2 pt-2 border-t ${divider}`}>
+                <span className={`text-[10px] ${metaText} uppercase tracking-wide`}>
                   Affected Employees ({m.metadata.affected_employees.reduce((s, a) => s + a.count, 0)})
                 </span>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {m.metadata.affected_employees.map((ae, i) => (
-                    <span key={i} className="inline-flex items-center gap-1.5 text-[11px] bg-purple-900/30 text-purple-300 border border-purple-700/40 px-2 py-0.5 rounded">
+                    <span key={i} className={`inline-flex items-center gap-1.5 text-[11px] px-2 py-0.5 rounded border ${
+                      lm
+                        ? 'bg-purple-50 text-purple-700 border-purple-300'
+                        : 'bg-purple-900/30 text-purple-300 border-purple-700/40'
+                    }`}>
                       <span className="font-medium">{ae.count}</span>
-                      <span className="text-purple-400/70">in</span>
+                      <span className={lm ? 'text-purple-500' : 'text-purple-400/70'}>in</span>
                       <span>{ae.location}</span>
                     </span>
                   ))}
@@ -78,13 +90,17 @@ const MessageBubble = React.memo(function MessageBubble({ message: m }: { messag
                 : m.metadata.compliance_gaps
               if (filtered.length === 0) return null
               return (
-              <div className="mt-2 pt-2 border-t border-zinc-800">
-                <span className="text-[10px] text-amber-500/80 uppercase tracking-wide">
+              <div className={`mt-2 pt-2 border-t ${divider}`}>
+                <span className={`text-[10px] ${lm ? 'text-amber-600' : 'text-amber-500/80'} uppercase tracking-wide`}>
                   Policy Gaps ({filtered.length})
                 </span>
                 <div className="mt-1 space-y-1">
                   {filtered.map((g, i) => (
-                    <div key={i} className="text-[11px] text-amber-400/80 bg-amber-900/20 border border-amber-700/30 px-2 py-1 rounded">
+                    <div key={i} className={`text-[11px] px-2 py-1 rounded border ${
+                      lm
+                        ? 'text-amber-700 bg-amber-50 border-amber-300'
+                        : 'text-amber-400/80 bg-amber-900/20 border-amber-700/30'
+                    }`}>
                       No written policy found for <span className="font-medium">{g.label}</span> — required by governing jurisdiction
                     </div>
                   ))}
@@ -92,29 +108,35 @@ const MessageBubble = React.memo(function MessageBubble({ message: m }: { messag
               </div>
               )})()}
             {penalties.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-zinc-800">
-                <span className="text-[10px] text-red-400/70 uppercase tracking-wide">
+              <div className={`mt-2 pt-2 border-t ${divider}`}>
+                <span className={`text-[10px] ${lm ? 'text-red-500' : 'text-red-400/70'} uppercase tracking-wide`}>
                   Enforcement Risk ({penalties.length})
                 </span>
                 <div className="mt-1 space-y-1">
                   {penalties.map((p, i) => (
-                    <div key={i} className="text-[11px] bg-red-900/15 border border-red-800/30 rounded px-2 py-1">
-                      <span className="text-red-300 font-medium capitalize">{p.category}</span>
-                      <span className="text-red-400/70"> — {p.summary}</span>
-                      {p.agency && <span className="text-zinc-500"> ({p.agency})</span>}
+                    <div key={i} className={`text-[11px] rounded px-2 py-1 border ${
+                      lm
+                        ? 'bg-red-50 border-red-200'
+                        : 'bg-red-900/15 border-red-800/30'
+                    }`}>
+                      <span className={`font-medium capitalize ${lm ? 'text-red-700' : 'text-red-300'}`}>{p.category}</span>
+                      <span className={lm ? 'text-red-600' : 'text-red-400/70'}> — {p.summary}</span>
+                      {p.agency && <span className={metaText}> ({p.agency})</span>}
                     </div>
                   ))}
                 </div>
               </div>
             )}
             {m.metadata?.payer_sources && m.metadata.payer_sources.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-zinc-800">
-                <span className="text-[10px] text-zinc-500 uppercase tracking-wide">Sources ({m.metadata.payer_sources.length})</span>
+              <div className={`mt-2 pt-2 border-t ${divider}`}>
+                <span className={`text-[10px] ${metaText} uppercase tracking-wide`}>Sources ({m.metadata.payer_sources.length})</span>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {m.metadata.payer_sources.map((s, si) => (
-                    <span key={si} className="inline-flex items-center gap-1 text-[11px] bg-zinc-800 text-zinc-400 px-2 py-0.5 rounded">
-                      <span className="text-emerald-400">{s.payer_name}</span>
-                      {s.policy_number && <span className="text-zinc-600">|</span>}
+                    <span key={si} className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded ${
+                      lm ? 'bg-zinc-100 text-zinc-600' : 'bg-zinc-800 text-zinc-400'
+                    }`}>
+                      <span className="text-emerald-500">{s.payer_name}</span>
+                      {s.policy_number && <span className={lm ? 'text-zinc-400' : 'text-zinc-600'}>|</span>}
                       {s.policy_number && <span>{s.policy_number}</span>}
                       {s.source_url && (
                         <a href={s.source_url} target="_blank" rel="noopener noreferrer" className="text-emerald-500 hover:text-emerald-400 ml-0.5">

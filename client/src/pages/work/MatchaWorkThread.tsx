@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
@@ -25,6 +25,7 @@ export default function MatchaWorkThread() {
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [lightMode, setLightMode] = useState(() => localStorage.getItem('mw-chat-theme') === 'light')
   const [error, setError] = useState('')
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
 
@@ -174,6 +175,35 @@ export default function MatchaWorkThread() {
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
 
+  function toggleLightMode() {
+    setLightMode((prev) => {
+      const next = !prev
+      localStorage.setItem('mw-chat-theme', next ? 'light' : 'dark')
+      return next
+    })
+  }
+
+  const lm = lightMode
+  const th = {
+    border:      lm ? 'border-zinc-200'  : 'border-zinc-800',
+    panelBg:     lm ? 'bg-white'         : '',
+    backArrow:   lm ? 'text-zinc-500 hover:text-zinc-900' : 'text-zinc-400 hover:text-white',
+    titleInput:  lm ? 'bg-zinc-100 text-zinc-900 border border-zinc-300' : 'bg-zinc-800 text-white border border-zinc-600',
+    titleText:   lm ? 'text-zinc-900'    : 'text-white',
+    editBtn:     lm ? 'text-zinc-400 hover:text-zinc-900' : 'text-zinc-500 hover:text-white',
+    badge:       lm ? 'bg-zinc-100 text-zinc-600' : 'bg-zinc-700 text-zinc-300',
+    modeOff:     lm ? 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700' : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200',
+    jurisdBar:   lm ? 'bg-zinc-50/50'   : 'bg-zinc-900/50',
+    jurisdLabel: lm ? 'text-zinc-400'   : 'text-zinc-500',
+    emptyText:   lm ? 'text-zinc-400'   : 'text-zinc-500',
+    streamBg:    lm ? 'bg-zinc-100/80 border border-zinc-200' : 'bg-zinc-800/60 border border-zinc-700/50',
+    streamText:  lm ? 'text-zinc-500'   : 'text-zinc-400',
+    textarea:    lm
+      ? 'bg-zinc-100 text-zinc-900 border-zinc-300 focus:border-emerald-600 placeholder-zinc-400'
+      : 'bg-zinc-800 text-white border-zinc-700 focus:border-emerald-600 placeholder-zinc-500',
+    finText:     lm ? 'text-zinc-500'   : 'text-zinc-500',
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center items-center h-[calc(100vh-49px)]">
@@ -196,10 +226,10 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`flex flex-col ${pdfUrl ? 'w-full md:w-1/2' : 'w-full'} border-r border-zinc-800`}>
+      <div className={`flex flex-col ${pdfUrl ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
         {/* Header */}
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-zinc-800">
-          <Link to="/work" className="text-zinc-400 hover:text-white transition-colors">
+        <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
+          <Link to="/work" className={`${th.backArrow} transition-colors`}>
             <ArrowLeft size={18} />
           </Link>
 
@@ -209,7 +239,7 @@ export default function MatchaWorkThread() {
                 value={titleDraft}
                 onChange={(e) => setTitleDraft(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleTitleSave()}
-                className="bg-zinc-800 text-white text-sm px-2 py-2 rounded border border-zinc-600 flex-1"
+                className={`${th.titleInput} text-sm px-2 py-2 rounded flex-1`}
                 autoFocus
               />
               <button onClick={handleTitleSave} className="text-emerald-400 hover:text-emerald-300">
@@ -221,13 +251,13 @@ export default function MatchaWorkThread() {
             </div>
           ) : (
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              <h2 className="text-white font-medium truncate">{thread?.title}</h2>
+              <h2 className={`${th.titleText} font-medium truncate`}>{thread?.title}</h2>
               <button
                 onClick={() => {
                   setTitleDraft(thread?.title ?? '')
                   setEditingTitle(true)
                 }}
-                className="text-zinc-500 hover:text-white transition-colors shrink-0"
+                className={`${th.editBtn} transition-colors shrink-0`}
               >
                 <Pencil size={14} />
               </button>
@@ -235,7 +265,7 @@ export default function MatchaWorkThread() {
           )}
 
           {thread?.task_type && (
-            <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-700 text-zinc-300">
+            <span className={`shrink-0 px-2 py-0.5 text-xs font-medium rounded-full ${th.badge}`}>
               {TASK_LABELS[thread.task_type] ?? thread.task_type}
             </span>
           )}
@@ -247,7 +277,7 @@ export default function MatchaWorkThread() {
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               nodeMode
                 ? 'bg-purple-600 text-white hover:bg-purple-500'
-                : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200'
+                : th.modeOff
             }`}
           >
             <Database size={12} />
@@ -261,7 +291,7 @@ export default function MatchaWorkThread() {
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               complianceMode
                 ? 'bg-cyan-600 text-white hover:bg-cyan-500'
-                : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200'
+                : th.modeOff
             }`}
           >
             <Shield size={12} />
@@ -275,19 +305,27 @@ export default function MatchaWorkThread() {
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               payerMode
                 ? 'bg-emerald-600 text-white hover:bg-emerald-500'
-                : 'bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-zinc-200'
+                : th.modeOff
             }`}
           >
             <Stethoscope size={12} />
             Payer
           </button>
+
+          <button
+            onClick={toggleLightMode}
+            title={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
+            className={`shrink-0 p-1.5 rounded-full transition-colors ${th.backArrow}`}
+          >
+            {lightMode ? <Moon size={14} /> : <Sun size={14} />}
+          </button>
         </div>
 
         {/* Jurisdiction bar — shows when compliance mode is on */}
         {complianceMode && locations.length > 0 && (
-          <div className="px-4 py-2 border-b border-zinc-800 bg-zinc-900/50 flex items-center gap-2 overflow-x-auto">
+          <div className={`px-4 py-2 border-b ${th.border} ${th.jurisdBar} flex items-center gap-2 overflow-x-auto`}>
             <MapPin size={12} className="text-cyan-500 shrink-0" />
-            <span className="text-[10px] text-zinc-500 uppercase tracking-wider font-medium shrink-0">Your jurisdictions:</span>
+            <span className={`text-[10px] ${th.jurisdLabel} uppercase tracking-wider font-medium shrink-0`}>Your jurisdictions:</span>
             <div className="flex gap-1.5 flex-wrap">
               {locations.map((loc) => (
                 <span
@@ -304,19 +342,19 @@ export default function MatchaWorkThread() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && (
-            <div className="flex items-center justify-center h-full text-zinc-500 text-sm">
+            <div className={`flex items-center justify-center h-full ${th.emptyText} text-sm`}>
               Start a conversation — ask about offer letters, reviews, handbooks, and more.
             </div>
           )}
           {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} />
+            <MessageBubble key={m.id} message={m} lightMode={lightMode} />
           ))}
 
           {streaming && (
             <div className="flex justify-start">
-              <div className="bg-zinc-800/60 border border-zinc-700/50 rounded-lg px-4 py-2.5 flex items-center gap-2">
-                <Loader2 size={14} className="animate-spin text-zinc-500" />
-                <span className="text-sm text-zinc-400">{statusMessage || 'Thinking...'}</span>
+              <div className={`${th.streamBg} rounded-lg px-4 py-2.5 flex items-center gap-2`}>
+                <Loader2 size={14} className={`animate-spin ${th.streamText}`} />
+                <span className={`text-sm ${th.streamText}`}>{statusMessage || 'Thinking...'}</span>
               </div>
             </div>
           )}
@@ -335,7 +373,7 @@ export default function MatchaWorkThread() {
         )}
 
         {/* Input */}
-        <div className="px-4 py-3 border-t border-zinc-800 pb-[env(safe-area-inset-bottom)]">
+        <div className={`px-4 py-3 border-t ${th.border} pb-[env(safe-area-inset-bottom)]`}>
           {isFinalized ? (
             <div className="text-center text-sm text-zinc-500 py-2">
               This thread has been finalized.
@@ -354,7 +392,7 @@ export default function MatchaWorkThread() {
                 placeholder="Type a message..."
                 rows={1}
                 disabled={inputDisabled}
-                className="flex-1 bg-zinc-800 text-white text-sm rounded-lg px-3 py-2.5 border border-zinc-700 focus:border-emerald-600 focus:outline-none resize-none disabled:opacity-50 placeholder-zinc-500 min-h-[44px]"
+                className={`flex-1 text-sm rounded-lg px-3 py-2.5 border focus:outline-none resize-none disabled:opacity-50 min-h-[44px] ${th.textarea}`}
               />
               <button
                 onClick={handleSend}
