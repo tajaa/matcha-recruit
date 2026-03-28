@@ -52,6 +52,8 @@ export interface DashboardStats {
   warning_compliance_alerts: number
   er_case_summary: ERCaseSummary | null
   stale_policies: StalePolicySummary | null
+  escalated_queries_open: number
+  escalated_queries_high: number
 }
 
 // ── Credential Expirations (from /dashboard/credential-expirations) ──
@@ -91,6 +93,36 @@ export interface UpcomingItem {
 
 export interface UpcomingResponse {
   items: UpcomingItem[]
+  total: number
+}
+
+// ── Escalated Queries (from /dashboard/escalated-queries) ──
+
+export interface EscalatedQuery {
+  id: string
+  status: 'open' | 'in_review' | 'resolved' | 'dismissed'
+  severity: 'high' | 'medium' | 'low'
+  title: string
+  user_query: string
+  ai_reply: string | null
+  ai_mode: string | null
+  ai_confidence: number | null
+  missing_fields: string[] | null
+  resolution_note: string | null
+  resolved_by: string | null
+  resolved_at: string | null
+  thread_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface EscalatedQueryDetail extends EscalatedQuery {
+  thread_title: string | null
+  context_messages: { id: string; role: string; content: string; created_at: string }[]
+}
+
+export interface EscalatedQueryListResponse {
+  items: EscalatedQuery[]
   total: number
 }
 

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '../../components/ui'
 import {
   Shield, Briefcase, AlertTriangle, FileText,
-  Plus, FileSignature, Zap,
+  Plus, FileSignature, Zap, MessageSquareWarning,
 } from 'lucide-react'
 
 import { useMe } from '../../hooks/useMe'
@@ -164,7 +164,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stat cards */}
-      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4 mb-8">
+      <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5 mb-8">
         <StatCard
           label="Compliance Alerts"
           value={(stats?.critical_compliance_alerts ?? 0) + (stats?.warning_compliance_alerts ?? 0)}
@@ -210,6 +210,18 @@ export default function Dashboard() {
           }
           icon={FileText}
           href="/app/handbooks"
+        />
+        <StatCard
+          label="Escalated Queries"
+          value={stats?.escalated_queries_open ?? 0}
+          subtitle={
+            (stats?.escalated_queries_open ?? 0) > 0
+              ? `${stats?.escalated_queries_high ?? 0} high severity`
+              : 'No open escalations'
+          }
+          icon={MessageSquareWarning}
+          href="/app/escalated-queries"
+          urgent={(stats?.escalated_queries_high ?? 0) > 0}
         />
       </div>
 
@@ -263,6 +275,8 @@ export default function Dashboard() {
                 credentialSummary={credentials?.summary}
                 complianceAlerts={stats?.critical_compliance_alerts ?? 0}
                 compliancePendingActions={compliancePendingActions}
+                escalatedQueries={stats?.escalated_queries_open ?? 0}
+                escalatedQueriesHigh={stats?.escalated_queries_high ?? 0}
               />
               <ComplianceWidget />
               {isHealthcare && credentials && (

@@ -31,6 +31,7 @@ import HandbookForm from './pages/app/HandbookForm'
 import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
 import CredentialTemplates from './pages/app/CredentialTemplates'
+import EscalatedQueries from './pages/app/EscalatedQueries'
 import Accommodations from './pages/app/Accommodations'
 import AccommodationDetail from './pages/app/AccommodationDetail'
 import CompanySettings from './pages/app/CompanySettings'
@@ -88,6 +89,7 @@ export default function App() {
         <Route path="compliance" element={<Compliance />} />
         <Route path="ir" element={<IRList />} />
         <Route path="ir/:incidentId" element={<IRDetail />} />
+        <Route path="escalated-queries" element={<EscalatedQueries />} />
         <Route path="accommodations" element={<Accommodations />} />
         <Route path="accommodations/:caseId" element={<AccommodationDetail />} />
         <Route path="policies" element={<Policies />} />

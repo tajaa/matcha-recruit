@@ -14,6 +14,8 @@ interface PendingActionsProps {
   credentialSummary?: CredentialExpirationSummary | null
   complianceAlerts: number
   compliancePendingActions: ComplianceDashboardItem[]
+  escalatedQueries?: number
+  escalatedQueriesHigh?: number
 }
 
 const SEV_DOT: Record<string, string> = {
@@ -39,6 +41,8 @@ export function PendingActions({
   credentialSummary,
   complianceAlerts,
   compliancePendingActions,
+  escalatedQueries = 0,
+  escalatedQueriesHigh = 0,
 }: PendingActionsProps) {
   const navigate = useNavigate()
 
@@ -116,6 +120,19 @@ export function PendingActions({
         href: '/app/employees',
       })
     }
+  }
+
+  // Escalated AI queries
+  if (escalatedQueries > 0) {
+    rows.push({
+      key: 'escalated',
+      severity: escalatedQueriesHigh > 0 ? 'high' : 'medium',
+      title: `${escalatedQueries} escalated quer${escalatedQueries > 1 ? 'ies' : 'y'}`,
+      subtitle: escalatedQueriesHigh > 0
+        ? `${escalatedQueriesHigh} high severity`
+        : 'Needs human review',
+      href: '/app/escalated-queries',
+    })
   }
 
   return (

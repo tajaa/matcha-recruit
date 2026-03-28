@@ -6,7 +6,7 @@ from typing import List, Literal, Optional
 from uuid import UUID
 
 import asyncpg
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from ...database import get_connection
@@ -77,6 +77,8 @@ class DashboardStats(BaseModel):
     warning_compliance_alerts: int = 0
     er_case_summary: Optional[ERCaseSummary] = None
     stale_policies: Optional[StalePolicySummary] = None
+    escalated_queries_open: int = 0
+    escalated_queries_high: int = 0
 
 
 @router.get("/stats", response_model=DashboardStats)
@@ -306,6 +308,27 @@ async def get_dashboard_stats(
     except Exception:
         logger.exception("Failed to compute wage alerts for dashboard")
 
+    # Escalated Matcha Work queries
+    escalated_queries_open = 0
+    escalated_queries_high = 0
+    try:
+        async with get_connection() as conn6:
+            esc_rows = await conn6.fetch(
+                """SELECT severity, COUNT(*) AS cnt
+                   FROM mw_escalated_queries
+                   WHERE company_id = $1 AND status IN ('open', 'in_review')
+                   GROUP BY severity""",
+                company_id,
+            )
+            for row in esc_rows:
+                escalated_queries_open += row["cnt"]
+                if row["severity"] == "high":
+                    escalated_queries_high = row["cnt"]
+    except asyncpg.UndefinedTableError:
+        pass  # table not yet migrated
+    except Exception:
+        logger.exception("Failed to fetch escalated queries for dashboard")
+
     result = DashboardStats(
         active_policies=active_policies,
         pending_signatures=pending_signatures,
@@ -319,6 +342,8 @@ async def get_dashboard_stats(
         warning_compliance_alerts=warning_compliance_alerts,
         er_case_summary=er_case_summary,
         stale_policies=stale_policies,
+        escalated_queries_open=escalated_queries_open,
+        escalated_queries_high=escalated_queries_high,
     )
 
     if redis:
@@ -1009,3 +1034,230 @@ async def get_upcoming_deadlines(
         await cache_set(redis, dashboard_upcoming_key(company_id, days), result.model_dump(), ttl=300)
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Escalated Queries — low-confidence Matcha Work queries for human review
+# ---------------------------------------------------------------------------
+
+
+class EscalatedQueryItem(BaseModel):
+    id: str
+    status: str
+    severity: str
+    title: str
+    user_query: str
+    ai_reply: Optional[str] = None
+    ai_mode: Optional[str] = None
+    ai_confidence: Optional[float] = None
+    missing_fields: Optional[list] = None
+    resolution_note: Optional[str] = None
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
+    thread_id: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class EscalatedQueryListResponse(BaseModel):
+    items: list[EscalatedQueryItem]
+    total: int
+
+
+class EscalatedQueryDetail(EscalatedQueryItem):
+    thread_title: Optional[str] = None
+    context_messages: list[dict] = []
+
+
+class ResolveBody(BaseModel):
+    resolution_note: str
+
+
+class DismissBody(BaseModel):
+    reason: Optional[str] = None
+
+
+class StatusBody(BaseModel):
+    status: Literal["in_review"]
+
+
+@router.get("/escalated-queries", response_model=EscalatedQueryListResponse)
+async def list_escalated_queries(
+    status_filter: Optional[str] = Query(None, alias="status"),
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List escalated queries for the user's company."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return EscalatedQueryListResponse(items=[], total=0)
+
+    where = "WHERE company_id = $1"
+    params: list = [company_id]
+    if status_filter:
+        where += f" AND status = ${len(params) + 1}"
+        params.append(status_filter)
+
+    async with get_connection() as conn:
+        total = await conn.fetchval(
+            f"SELECT COUNT(*) FROM mw_escalated_queries {where}", *params
+        ) or 0
+
+        rows = await conn.fetch(
+            f"""SELECT id, status, severity, title, user_query, ai_reply,
+                       ai_mode, ai_confidence, missing_fields, resolution_note,
+                       resolved_by::text, resolved_at, thread_id::text, created_at, updated_at
+                FROM mw_escalated_queries {where}
+                ORDER BY
+                  CASE severity WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END,
+                  created_at DESC
+                LIMIT ${len(params) + 1} OFFSET ${len(params) + 2}""",
+            *params, limit, offset,
+        )
+
+    items = [
+        EscalatedQueryItem(
+            id=str(r["id"]),
+            status=r["status"],
+            severity=r["severity"],
+            title=r["title"],
+            user_query=r["user_query"],
+            ai_reply=r["ai_reply"],
+            ai_mode=r["ai_mode"],
+            ai_confidence=r["ai_confidence"],
+            missing_fields=r["missing_fields"],
+            resolution_note=r["resolution_note"],
+            resolved_by=r["resolved_by"],
+            resolved_at=r["resolved_at"],
+            thread_id=r["thread_id"],
+            created_at=r["created_at"],
+            updated_at=r["updated_at"],
+        )
+        for r in rows
+    ]
+    return EscalatedQueryListResponse(items=items, total=total)
+
+
+@router.get("/escalated-queries/{query_id}", response_model=EscalatedQueryDetail)
+async def get_escalated_query(
+    query_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get an escalated query with surrounding thread context."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT eq.*, t.title AS thread_title
+               FROM mw_escalated_queries eq
+               LEFT JOIN mw_threads t ON t.id = eq.thread_id
+               WHERE eq.id = $1 AND eq.company_id = $2""",
+            query_id, company_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Escalated query not found")
+
+        # Fetch surrounding messages for context
+        messages = await conn.fetch(
+            """SELECT id::text, role, content, created_at
+               FROM mw_messages
+               WHERE thread_id = $1
+               ORDER BY created_at ASC
+               LIMIT 20""",
+            row["thread_id"],
+        )
+
+    return EscalatedQueryDetail(
+        id=str(row["id"]),
+        status=row["status"],
+        severity=row["severity"],
+        title=row["title"],
+        user_query=row["user_query"],
+        ai_reply=row["ai_reply"],
+        ai_mode=row["ai_mode"],
+        ai_confidence=row["ai_confidence"],
+        missing_fields=row["missing_fields"],
+        resolution_note=row["resolution_note"],
+        resolved_by=str(row["resolved_by"]) if row["resolved_by"] else None,
+        resolved_at=row["resolved_at"],
+        thread_id=str(row["thread_id"]),
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+        thread_title=row["thread_title"],
+        context_messages=[dict(m) for m in messages],
+    )
+
+
+@router.put("/escalated-queries/{query_id}/resolve")
+async def resolve_escalated_query(
+    query_id: UUID,
+    body: ResolveBody,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Resolve an escalated query with a resolution note."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """UPDATE mw_escalated_queries
+               SET status = 'resolved',
+                   resolution_note = $3,
+                   resolved_by = $4,
+                   resolved_at = NOW(),
+                   updated_at = NOW()
+               WHERE id = $1 AND company_id = $2 AND status != 'resolved'""",
+            query_id, company_id, body.resolution_note, current_user.id,
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status_code=404, detail="Escalated query not found or already resolved")
+
+    return {"status": "resolved"}
+
+
+@router.put("/escalated-queries/{query_id}/dismiss")
+async def dismiss_escalated_query(
+    query_id: UUID,
+    body: DismissBody,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Dismiss an escalated query."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """UPDATE mw_escalated_queries
+               SET status = 'dismissed',
+                   resolution_note = $3,
+                   resolved_by = $4,
+                   resolved_at = NOW(),
+                   updated_at = NOW()
+               WHERE id = $1 AND company_id = $2 AND status NOT IN ('resolved', 'dismissed')""",
+            query_id, company_id, body.reason, current_user.id,
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status_code=404, detail="Escalated query not found or already closed")
+
+    return {"status": "dismissed"}
+
+
+@router.put("/escalated-queries/{query_id}/status")
+async def update_escalated_query_status(
+    query_id: UUID,
+    body: StatusBody,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Transition an escalated query to in_review."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """UPDATE mw_escalated_queries
+               SET status = $3, updated_at = NOW()
+               WHERE id = $1 AND company_id = $2 AND status = 'open'""",
+            query_id, company_id, body.status,
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status_code=404, detail="Escalated query not found or not in open status")
+
+    return {"status": body.status}

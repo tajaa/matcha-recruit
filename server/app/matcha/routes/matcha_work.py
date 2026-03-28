@@ -18,6 +18,7 @@ from ...core.services.compliance_service import get_location_requirements, get_l
 from ...core.services.storage import get_storage
 from ...database import get_connection
 from ..dependencies import require_admin_or_client, get_client_company_id, require_feature
+from ..services.escalation_service import should_escalate, create_escalation
 from ..services.model_pricing import calculate_call_cost
 from ..models.matcha_work import (
     CreateThreadRequest,
@@ -1984,6 +1985,20 @@ async def send_message(
         metadata=msg_metadata,
     )
 
+    # Escalate low-confidence queries for human review
+    if should_escalate(ai_resp):
+        try:
+            await create_escalation(
+                company_id=company_id,
+                thread_id=thread_id,
+                user_message_id=user_msg["id"],
+                assistant_message_id=assistant_msg["id"],
+                user_query=body.content,
+                ai_resp=ai_resp,
+            )
+        except Exception:
+            logger.exception("Failed to create escalation for thread %s", thread_id)
+
     cost = calculate_call_cost(
         model=str((final_usage or {}).get("model") or "unknown"),
         prompt_tokens=(final_usage or {}).get("prompt_tokens"),
@@ -2239,6 +2254,20 @@ async def send_message_stream(
                 version_created=current_version if changed else None,
                 metadata=msg_metadata,
             )
+
+            # Escalate low-confidence queries for human review
+            if should_escalate(ai_resp):
+                try:
+                    await create_escalation(
+                        company_id=company_id,
+                        thread_id=thread_id,
+                        user_message_id=user_msg["id"],
+                        assistant_message_id=assistant_msg["id"],
+                        user_query=body.content,
+                        ai_resp=ai_resp,
+                    )
+                except Exception:
+                    logger.exception("Failed to create escalation for thread %s", thread_id)
 
             final_usage = ai_resp.token_usage or estimated_usage
             stream_cost = calculate_call_cost(
