@@ -19,9 +19,7 @@ const FEATURE_LABELS: Record<string, string> = {
   i9: 'I-9 Verification',
   cobra: 'COBRA',
   separation_agreements: 'Separation Agreements',
-  vibe_checks: 'Vibe Checks',
-  enps: 'eNPS',
-  performance_reviews: 'Performance Reviews',
+  inventory: 'Inventory',
 }
 
 type CompanyFeatures = {
