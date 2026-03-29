@@ -2,15 +2,18 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
-import { getThread, sendMessageStream, uploadResumes, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import PresentationPanel from '../../components/matcha-work/PresentationPanel'
 import ResumeBatchPanel from '../../components/matcha-work/ResumeBatchPanel'
+import InventoryPanel from '../../components/matcha-work/InventoryPanel'
 
 const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 const RESUME_MAX_SIZE = 10 * 1024 * 1024
+const INVENTORY_EXTENSIONS = ['.csv', '.xlsx', '.xls']
+const ALL_UPLOAD_EXTENSIONS = [...RESUME_EXTENSIONS, ...INVENTORY_EXTENSIONS]
 
 const MODEL_OPTIONS = [
   { id: 'gemini-3.1-flash-lite-preview', label: 'Flash Lite 3.1' },
@@ -28,6 +31,7 @@ const TASK_LABELS: Record<string, string> = {
   handbook: 'Handbook',
   policy: 'Policy',
   resume_batch: 'Resume Batch',
+  inventory: 'Inventory',
 }
 
 export default function MatchaWorkThread() {
@@ -224,6 +228,73 @@ export default function MatchaWorkThread() {
     })
   }
 
+  function handleInventoryUpload(files: File[]) {
+    if (!threadId || streaming) return
+
+    for (const file of files) {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+      if (![...RESUME_EXTENSIONS, ...INVENTORY_EXTENSIONS].includes(ext)) {
+        setError(`Unsupported file type: ${file.name}`)
+        return
+      }
+      if (file.size > 15 * 1024 * 1024) {
+        setError(`File exceeds 15 MB limit: ${file.name}`)
+        return
+      }
+    }
+
+    setStreaming(true)
+    setError('')
+
+    const tempMsg: MWMessage = {
+      id: crypto.randomUUID(),
+      thread_id: threadId,
+      role: 'user',
+      content: `[Inventory batch: ${files.length} file${files.length !== 1 ? 's' : ''}]`,
+      metadata: null,
+      version_created: null,
+      created_at: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, tempMsg])
+
+    abortRef.current = uploadInventory(threadId, files, {
+      onEvent: (event: MWStreamEvent) => {
+        if (event.type === 'status') setStatusMessage(event.message)
+      },
+      onComplete: (data: MWSendResponse) => {
+        setStatusMessage('')
+        setMessages((prev) => {
+          const withoutTemp = prev.filter((m) => m.id !== tempMsg.id)
+          return [...withoutTemp, data.user_message, data.assistant_message]
+        })
+        setThread((prev) =>
+          prev
+            ? { ...prev, current_state: data.current_state, version: data.version, task_type: data.task_type ?? prev.task_type }
+            : prev
+        )
+        setPdfUrl(null)
+        setStreaming(false)
+      },
+      onError: (err) => {
+        setStatusMessage('')
+        setError(err)
+        setStreaming(false)
+      },
+    })
+  }
+
+  function handleFileUpload(files: File | File[]) {
+    const fileList = Array.isArray(files) ? files : [files]
+    const isInventoryThread = thread?.task_type === 'inventory'
+    const hasSpreadsheets = fileList.some((f) => INVENTORY_EXTENSIONS.some((ext) => f.name.toLowerCase().endsWith(ext)))
+
+    if (isInventoryThread || hasSpreadsheets) {
+      handleInventoryUpload(fileList)
+    } else {
+      handleResumeUpload(fileList)
+    }
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -266,6 +337,8 @@ export default function MatchaWorkThread() {
   const showPresentationPanel = isPresentation && thread?.current_state
   const isResumeBatch = thread?.task_type === 'resume_batch'
   const showResumeBatchPanel = isResumeBatch && thread?.current_state
+  const isInventory = thread?.task_type === 'inventory'
+  const showInventoryPanel = isInventory && thread?.current_state
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -321,7 +394,7 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`flex flex-col ${pdfUrl || showPresentationPanel || showResumeBatchPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
+      <div className={`flex flex-col ${pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
         {/* Header */}
         <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
           <Link to="/work" className={`${th.backArrow} transition-colors`}>
@@ -462,13 +535,13 @@ export default function MatchaWorkThread() {
             e.preventDefault()
             setIsDragOver(false)
             const files = Array.from(e.dataTransfer.files)
-            if (files.length > 0) handleResumeUpload(files)
+            if (files.length > 0) handleFileUpload(files)
           }}
         >
           {isDragOver && (
             <div className="absolute inset-0 z-10 bg-emerald-600/10 border-2 border-dashed border-emerald-500 rounded-lg flex items-center justify-center pointer-events-none">
               <p className={`text-sm font-medium ${lightMode ? 'text-emerald-700' : 'text-emerald-400'}`}>
-                Drop resume here (PDF or DOCX)
+                Drop files here (resumes, invoices, spreadsheets)
               </p>
             </div>
           )}
@@ -519,19 +592,19 @@ export default function MatchaWorkThread() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.doc,.docx,.txt"
+                accept=".pdf,.doc,.docx,.txt,.csv,.xlsx,.xls"
                 className="hidden"
                 multiple
                 onChange={(e) => {
                   const files = e.target.files ? Array.from(e.target.files) : []
-                  if (files.length > 0) handleResumeUpload(files)
+                  if (files.length > 0) handleFileUpload(files)
                   e.target.value = ''
                 }}
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
                 disabled={inputDisabled}
-                title="Upload resume (PDF/DOCX)"
+                title="Upload files (resumes, invoices, spreadsheets)"
                 className={`p-3 rounded-lg transition-colors disabled:opacity-40 ${
                   lightMode ? 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
                 }`}
@@ -585,8 +658,18 @@ export default function MatchaWorkThread() {
         />
       )}
 
+      {/* Inventory panel */}
+      {showInventoryPanel && (
+        <InventoryPanel
+          state={thread!.current_state}
+          threadId={threadId!}
+          lightMode={lightMode}
+          streaming={streaming}
+        />
+      )}
+
       {/* PDF preview panel (offer letters, etc.) */}
-      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && (
+      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && (
         <div className="hidden md:block md:w-1/2 bg-zinc-900">
           <iframe
             src={pdfUrl}

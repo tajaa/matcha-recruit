@@ -55,6 +55,7 @@ from ..models.matcha_work import (
     SendHandbookSignaturesResponse,
     GeneratePresentationResponse,
     ResumeBatchDocument,
+    InventoryDocument,
     WorkbookDocument,
 )
 from ..services import matcha_work_document as doc_svc
@@ -135,6 +136,7 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
 VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys()) - HANDBOOK_UPLOAD_MANAGED_FIELDS
 VALID_POLICY_FIELDS = set(PolicyDocument.model_fields.keys())
 VALID_RESUME_BATCH_FIELDS = set(ResumeBatchDocument.model_fields.keys())
+VALID_INVENTORY_FIELDS = set(InventoryDocument.model_fields.keys())
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 HANDBOOK_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx"}
@@ -142,6 +144,9 @@ HANDBOOK_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 RESUME_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
 RESUME_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
 RESUME_TEXT_CAP = 15_000
+INVENTORY_UPLOAD_EXTENSIONS = {".pdf", ".csv", ".xlsx", ".xls", ".doc", ".docx", ".txt"}
+INVENTORY_UPLOAD_MAX_BYTES = 15 * 1024 * 1024
+INVENTORY_TEXT_CAP = 15_000
 
 
 def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
@@ -162,6 +167,8 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
         valid_fields = VALID_POLICY_FIELDS
     elif skill == "resume_batch":
         valid_fields = VALID_RESUME_BATCH_FIELDS
+    elif skill == "inventory":
+        valid_fields = VALID_INVENTORY_FIELDS
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -2015,6 +2022,215 @@ async def upload_thread_resume(
         except Exception as e:
             logger.error("Resume batch failed for thread %s: %s", thread_id, e, exc_info=True)
             yield _sse_data({"type": "error", "message": "Failed to process resumes. Please try again."})
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+INVENTORY_EXTRACT_PROMPT = """Extract inventory line items from this document (vendor invoice, inventory count, or order sheet).
+Return ONLY valid JSON — an array of items:
+[{"product_name":"...","sku":"...","category":"protein|produce|dairy|dry_goods|beverages|supplies|equipment|other","quantity":0,"unit":"case|lb|each|gal|oz|bag|box|doz|pack","unit_cost":0.00,"total_cost":0.00,"vendor":"..."}]
+
+If this is a vendor invoice, extract the vendor name from the header or line items.
+If quantities or costs are missing, use null. Compute total_cost as quantity * unit_cost when possible.
+
+Document text:
+---
+%s
+---"""
+
+
+@router.post("/threads/{thread_id}/inventory/upload")
+async def upload_thread_inventory(
+    thread_id: UUID,
+    files: list[UploadFile] = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload invoices/spreadsheets, extract structured inventory items, and stream batch insights."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread["status"] in ("finalized", "archived"):
+        raise HTTPException(status_code=400, detail=f"Cannot upload to a {thread['status']} thread")
+
+    if current_user.role != "admin":
+        await billing_service.check_credits(company_id)
+
+    parsed_files: list[tuple[str, bytes, str]] = []
+    for f in files:
+        fname = f.filename or "document"
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in INVENTORY_UPLOAD_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {fname}")
+        raw = await f.read()
+        if len(raw) > INVENTORY_UPLOAD_MAX_BYTES:
+            raise HTTPException(status_code=400, detail=f"File exceeds 15 MB limit: {fname}")
+        parsed_files.append((fname, raw, f.content_type or "application/octet-stream"))
+
+    file_count = len(parsed_files)
+    filenames = [pf[0] for pf in parsed_files]
+    user_content = f"[Inventory batch: {file_count} file{'s' if file_count != 1 else ''}]\n" + "\n".join(f"- {fn}" for fn in filenames)
+    user_msg = await doc_svc.add_message(thread_id, "user", user_content)
+
+    async def event_stream():
+        try:
+            from google import genai as _genai
+            from google.genai import types as _types
+
+            api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
+            client = _genai.Client(api_key=api_key)
+            extract_model = "gemini-3.1-flash-lite-preview"
+
+            parser = ERDocumentParser()
+            existing_items = list((thread.get("current_state") or {}).get("inventory_items") or [])
+            new_items = []
+
+            for idx, (fname, raw, ct) in enumerate(parsed_files, 1):
+                yield _sse_data({"type": "status", "message": f"Reading {fname} ({idx}/{file_count})..."})
+
+                # Extract text — CSV/TXT read directly, PDF/DOCX via parser
+                ext = os.path.splitext(fname)[1].lower()
+                try:
+                    if ext == ".csv":
+                        text = raw.decode("utf-8", errors="replace")
+                    elif ext in (".xlsx", ".xls"):
+                        # Excel files are binary — extract cell values via openpyxl
+                        import io as _io
+                        try:
+                            import openpyxl
+                            wb = openpyxl.load_workbook(_io.BytesIO(raw), read_only=True, data_only=True)
+                            rows = []
+                            ws = wb.active
+                            for row in ws.iter_rows(values_only=True):
+                                rows.append(",".join(str(c) if c is not None else "" for c in row))
+                            wb.close()
+                            text = "\n".join(rows)
+                        except ImportError:
+                            logger.warning("openpyxl not installed — cannot read Excel files")
+                            yield _sse_data({"type": "status", "message": f"Cannot read Excel files (openpyxl not installed), skipping {fname}..."})
+                            continue
+                    else:
+                        text, _ = parser.extract_text_from_bytes(raw, fname)
+                except Exception:
+                    yield _sse_data({"type": "status", "message": f"Could not read {fname}, skipping..."})
+                    continue
+
+                if not text or len(text.strip()) < 10:
+                    continue
+
+                # Upload to S3
+                try:
+                    await get_storage().upload_file(
+                        raw, fname,
+                        prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "inventory"),
+                        content_type=ct,
+                    )
+                except Exception:
+                    pass
+
+                # AI extraction
+                yield _sse_data({"type": "status", "message": f"Extracting items from {fname} ({idx}/{file_count})..."})
+                capped = text[:INVENTORY_TEXT_CAP]
+
+                try:
+                    resp = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            lambda t=capped: client.models.generate_content(
+                                model=extract_model,
+                                contents=[_types.Content(role="user", parts=[_types.Part.from_text(text=INVENTORY_EXTRACT_PROMPT % t)])],
+                                config=_types.GenerateContentConfig(temperature=0.1),
+                            )
+                        ),
+                        timeout=60,
+                    )
+                    raw_json = (resp.text or "").strip()
+                    if raw_json.startswith("```"):
+                        raw_json = raw_json.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                    items_data = json.loads(raw_json)
+                    if not isinstance(items_data, list):
+                        items_data = [items_data]
+
+                    for item in items_data:
+                        new_items.append({
+                            "id": os.urandom(8).hex(),
+                            "filename": fname,
+                            "product_name": item.get("product_name"),
+                            "sku": item.get("sku"),
+                            "category": item.get("category"),
+                            "quantity": item.get("quantity"),
+                            "unit": item.get("unit"),
+                            "unit_cost": item.get("unit_cost"),
+                            "total_cost": item.get("total_cost"),
+                            "vendor": item.get("vendor"),
+                            "status": "extracted",
+                        })
+                    yield _sse_data({"type": "status", "message": f"Extracted {len(items_data)} items from {fname}"})
+                except Exception as e:
+                    logger.warning("Inventory AI extraction failed for %s: %s", fname, e)
+                    yield _sse_data({"type": "status", "message": f"Could not extract items from {fname}"})
+
+            # Accumulate
+            all_items = existing_items + new_items
+            total_cost = sum(i.get("total_cost") or 0 for i in all_items)
+            vendors = sorted(set(i.get("vendor") for i in all_items if i.get("vendor")))
+
+            result = await doc_svc.apply_update(thread_id, {
+                "inventory_items": all_items,
+                "inventory_status": "ready",
+                "inventory_total_count": len(all_items),
+                "inventory_total_cost": round(total_cost, 2),
+                "inventory_vendors": vendors,
+            })
+            current_state = result["current_state"]
+            current_version = result["version"]
+
+            # Batch summary
+            yield _sse_data({"type": "status", "message": "Generating inventory insights..."})
+            if new_items:
+                # Build vendor breakdown
+                vendor_totals: dict[str, float] = {}
+                cat_totals: dict[str, int] = {}
+                for i in new_items:
+                    v = i.get("vendor") or "Unknown"
+                    vendor_totals[v] = vendor_totals.get(v, 0) + (i.get("total_cost") or 0)
+                    c = i.get("category") or "other"
+                    cat_totals[c] = cat_totals.get(c, 0) + 1
+
+                vendor_lines = ", ".join(f"{v}: ${t:,.2f}" for v, t in sorted(vendor_totals.items(), key=lambda x: -x[1]))
+                cat_lines = ", ".join(f"{c}: {n}" for c, n in sorted(cat_totals.items(), key=lambda x: -x[1]))
+                new_cost = sum(i.get("total_cost") or 0 for i in new_items)
+
+                batch_reply = (
+                    f"**Processed {len(new_items)} items** from {file_count} file{'s' if file_count != 1 else ''}\n\n"
+                    f"**Total cost:** ${new_cost:,.2f}\n\n"
+                    f"**By vendor:** {vendor_lines}\n\n"
+                    f"**By category:** {cat_lines}"
+                )
+                if len(all_items) > len(new_items):
+                    batch_reply += f"\n\n*Running total: {len(all_items)} items, ${total_cost:,.2f} across all uploads.*"
+            else:
+                batch_reply = f"Processed {file_count} file{'s' if file_count != 1 else ''} but could not extract any line items."
+
+            assistant_msg = await doc_svc.add_message(thread_id, "assistant", batch_reply)
+
+            response = SendMessageResponse(
+                user_message=_row_to_message(user_msg),
+                assistant_message=_row_to_message(assistant_msg),
+                current_state=current_state,
+                version=current_version,
+                task_type=_infer_skill_from_state(current_state),
+                pdf_url=None,
+                token_usage=None,
+            )
+            yield _sse_data({"type": "complete", "data": response.model_dump(mode="json")})
+        except Exception as e:
+            logger.error("Inventory batch failed for thread %s: %s", thread_id, e, exc_info=True)
+            yield _sse_data({"type": "error", "message": "Failed to process inventory files. Please try again."})
         finally:
             yield "data: [DONE]\n\n"
 

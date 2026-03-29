@@ -1,0 +1,19 @@
+Product,SKU,Quantity,Unit,Unit Price,Total,Vendor
+Chicken Thighs Boneless,SYS-40218,50,case,42.00,2100.00,Sysco
+Ground Beef 80/20,SYS-40312,30,case,68.50,2055.00,Sysco
+Atlantic Salmon Fillet,SYS-51044,20,case,89.00,1780.00,Sysco
+Romaine Hearts,SYS-60102,48,each,3.50,168.00,Sysco
+Yellow Onions 50lb,SYS-60218,12,bag,18.75,225.00,Sysco
+Russet Potatoes 50lb,SYS-60301,15,bag,22.00,330.00,Sysco
+Heavy Cream Qt,SYS-70108,24,each,4.25,102.00,Sysco
+Shredded Mozzarella 5lb,SYS-70215,18,bag,14.50,261.00,Sysco
+Olive Oil Extra Virgin 1gal,SYS-80044,6,gal,28.00,168.00,Sysco
+All Purpose Flour 25lb,SYS-80112,8,bag,12.50,100.00,Sysco
+Kosher Salt 3lb Box,SYS-80205,10,box,4.00,40.00,Sysco
+Black Pepper Ground 1lb,SYS-80301,4,each,8.50,34.00,Sysco
+Bud Light Draft 1/2 Keg,SYS-90102,6,each,112.00,672.00,Sysco
+House Red Wine Cab 750ml,SYS-90218,24,each,8.75,210.00,Sysco
+Coca-Cola Syrup 5gal BIB,SYS-90305,4,each,75.00,300.00,Sysco
+To-Go Containers 9x6,SYS-95012,500,each,0.32,160.00,Sysco
+Latex Gloves Medium,SYS-95108,10,box,7.50,75.00,Sysco
+Sanitizer Tablets,SYS-95205,4,each,12.00,48.00,Sysco

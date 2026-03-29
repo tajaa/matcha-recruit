@@ -8,6 +8,7 @@ export type MWTaskType =
   | 'handbook'
   | 'policy'
   | 'resume_batch'
+  | 'inventory'
 
 export interface ResumeCandidate {
   id: string
@@ -25,6 +26,21 @@ export interface ResumeCandidate {
   summary: string | null
   strengths: string[] | null
   flags: string[] | null
+  status: string
+}
+
+export interface InventoryItem {
+  id: string
+  filename: string
+  product_name: string | null
+  sku: string | null
+  category: string | null
+  quantity: number | null
+  unit: string | null
+  unit_cost: number | null
+  total_cost: number | null
+  vendor: string | null
+  par_level: number | null
   status: string
 }
 

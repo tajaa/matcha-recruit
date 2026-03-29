@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { FileText } from 'lucide-react'
+import { FileText, Package } from 'lucide-react'
 import Markdown from 'react-markdown'
 import type { MWMessage } from '../../types/matcha-work'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
@@ -54,8 +54,18 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode 
               : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
         }`}
       >
-        {m.role === 'user' && (m.content.startsWith('[Resume uploaded:') || m.content.startsWith('[Resume batch:')) ? (
+        {m.role === 'user' && (m.content.startsWith('[Resume uploaded:') || m.content.startsWith('[Resume batch:') || m.content.startsWith('[Inventory batch:')) ? (
           (() => {
+            if (m.content.startsWith('[Inventory batch:')) {
+              const countMatch = m.content.match(/\[Inventory batch: (\d+) files?\]/)
+              const count = countMatch?.[1] ?? '?'
+              return (
+                <div className={`flex items-center gap-2 ${lm ? 'text-amber-700' : 'text-amber-300'}`}>
+                  <Package size={16} className="shrink-0" />
+                  <span>Uploaded <strong>{count} invoice{count !== '1' ? 's' : ''}</strong></span>
+                </div>
+              )
+            }
             if (m.content.startsWith('[Resume batch:')) {
               const countMatch = m.content.match(/\[Resume batch: (\d+) files?\]/)
               const count = countMatch?.[1] ?? '?'

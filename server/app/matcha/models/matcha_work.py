@@ -229,6 +229,34 @@ class ResumeBatchDocument(BaseModel):
     analyzed_count: Optional[int] = None
 
 
+class InventoryItem(BaseModel):
+    """Structured line item extracted from a vendor invoice or inventory sheet."""
+
+    id: str
+    filename: str
+    product_name: Optional[str] = None
+    sku: Optional[str] = None
+    category: Optional[str] = None  # protein, produce, dairy, dry_goods, beverages, supplies, equipment, other
+    quantity: Optional[float] = None
+    unit: Optional[str] = None  # case, lb, each, gal, oz, bag, box, doz, pack
+    unit_cost: Optional[float] = None
+    total_cost: Optional[float] = None
+    vendor: Optional[str] = None
+    par_level: Optional[float] = None
+    status: str = "extracted"  # extracted, verified, flagged
+
+
+class InventoryDocument(BaseModel):
+    """Inventory batch state — line items accumulated via invoice/spreadsheet uploads."""
+
+    inventory_title: Optional[str] = None
+    inventory_status: Optional[str] = None  # uploading, analyzing, ready
+    inventory_items: Optional[list[InventoryItem]] = None
+    inventory_total_count: Optional[int] = None
+    inventory_total_cost: Optional[float] = None
+    inventory_vendors: Optional[list[str]] = None
+
+
 class PolicyDocument(BaseModel):
     """Incremental policy draft state — builds turn by turn via conversation."""
 
