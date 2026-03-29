@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react'
+import { FileText } from 'lucide-react'
 import Markdown from 'react-markdown'
 import type { MWMessage } from '../../types/matcha-work'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
@@ -53,7 +54,17 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode 
               : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
         }`}
       >
-        {m.role === 'assistant' ? (
+        {m.role === 'user' && m.content.startsWith('[Resume uploaded:') ? (
+          (() => {
+            const filename = m.content.match(/\[Resume uploaded: (.+?)\]/)?.[1] ?? 'resume'
+            return (
+              <div className={`flex items-center gap-2 ${lm ? 'text-emerald-700' : 'text-emerald-300'}`}>
+                <FileText size={16} className="shrink-0" />
+                <span>Uploaded resume: <strong>{filename}</strong></span>
+              </div>
+            )
+          })()
+        ) : m.role === 'assistant' ? (
           <>
             {markdownContent}
             {m.metadata?.compliance_reasoning && (m.metadata.referenced_categories?.length || m.metadata.ai_reasoning_steps?.length) && (

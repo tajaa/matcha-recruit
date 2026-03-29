@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
-import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResume, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import PresentationPanel from '../../components/matcha-work/PresentationPanel'
+
+const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx']
+const RESUME_MAX_SIZE = 10 * 1024 * 1024
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -29,6 +32,10 @@ export default function MatchaWorkThread() {
   const [lightMode, setLightMode] = useState(() => localStorage.getItem('mw-chat-theme') === 'light')
   const [error, setError] = useState('')
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+
+  // Resume drag-and-drop
+  const [isDragOver, setIsDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Mode toggles — derived from thread, only toggling state is local
   const [togglingMode, setTogglingMode] = useState<'node' | 'compliance' | 'payer' | null>(null)
@@ -146,6 +153,59 @@ export default function MatchaWorkThread() {
         setStreaming(false)
       },
     }, streamOpts)
+  }
+
+  function handleResumeUpload(file: File) {
+    if (!threadId || streaming) return
+
+    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+    if (!RESUME_EXTENSIONS.includes(ext)) {
+      setError('Unsupported file type. Please upload a PDF or DOCX.')
+      return
+    }
+    if (file.size > RESUME_MAX_SIZE) {
+      setError('File exceeds 10 MB limit.')
+      return
+    }
+
+    setStreaming(true)
+    setError('')
+
+    // Optimistic user message
+    const tempMsg: MWMessage = {
+      id: crypto.randomUUID(),
+      thread_id: threadId,
+      role: 'user',
+      content: `[Resume uploaded: ${file.name}]`,
+      metadata: null,
+      version_created: null,
+      created_at: new Date().toISOString(),
+    }
+    setMessages((prev) => [...prev, tempMsg])
+
+    abortRef.current = uploadResume(threadId, file, {
+      onEvent: (event: MWStreamEvent) => {
+        if (event.type === 'status') setStatusMessage(event.message)
+      },
+      onComplete: (data: MWSendResponse) => {
+        setStatusMessage('')
+        setMessages((prev) => {
+          const withoutTemp = prev.filter((m) => m.id !== tempMsg.id)
+          return [...withoutTemp, data.user_message, data.assistant_message]
+        })
+        setThread((prev) =>
+          prev
+            ? { ...prev, current_state: data.current_state, version: data.version, task_type: data.task_type ?? prev.task_type }
+            : prev
+        )
+        setStreaming(false)
+      },
+      onError: (err) => {
+        setStatusMessage('')
+        setError(err)
+        setStreaming(false)
+      },
+    })
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -356,8 +416,30 @@ export default function MatchaWorkThread() {
           </div>
         )}
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {/* Messages — drop zone for resumes */}
+        <div
+          className="flex-1 overflow-y-auto px-4 py-4 space-y-4 relative"
+          onDragOver={(e) => { e.preventDefault(); if (!streaming) setIsDragOver(true) }}
+          onDragLeave={(e) => {
+            // Only hide overlay when leaving the container (not entering a child)
+            if (e.currentTarget.contains(e.relatedTarget as Node)) return
+            setIsDragOver(false)
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            setIsDragOver(false)
+            const file = e.dataTransfer.files[0]
+            if (file) handleResumeUpload(file)
+          }}
+        >
+          {isDragOver && (
+            <div className="absolute inset-0 z-10 bg-emerald-600/10 border-2 border-dashed border-emerald-500 rounded-lg flex items-center justify-center pointer-events-none">
+              <p className={`text-sm font-medium ${lightMode ? 'text-emerald-700' : 'text-emerald-400'}`}>
+                Drop resume here (PDF or DOCX)
+              </p>
+            </div>
+          )}
+
           {messages.length === 0 && (
             <div className={`flex items-center justify-center h-full ${th.emptyText} text-sm`}>
               Start a conversation — ask about offer letters, reviews, handbooks, and more.
@@ -401,6 +483,27 @@ export default function MatchaWorkThread() {
             </div>
           ) : (
             <div className="flex items-end gap-2">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.doc,.docx"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) handleResumeUpload(f)
+                  e.target.value = ''
+                }}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={inputDisabled}
+                title="Upload resume (PDF/DOCX)"
+                className={`p-3 rounded-lg transition-colors disabled:opacity-40 ${
+                  lightMode ? 'text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100' : 'text-zinc-400 hover:text-white hover:bg-zinc-800'
+                }`}
+              >
+                <Paperclip size={16} />
+              </button>
               <textarea
                 ref={textareaRef}
                 value={input}

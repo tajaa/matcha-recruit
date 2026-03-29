@@ -137,6 +137,9 @@ VALID_POLICY_FIELDS = set(PolicyDocument.model_fields.keys())
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 HANDBOOK_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx"}
 HANDBOOK_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+RESUME_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt"}
+RESUME_UPLOAD_MAX_BYTES = 10 * 1024 * 1024
+RESUME_TEXT_CAP = 15_000
 
 
 def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
@@ -1803,6 +1806,152 @@ async def remove_thread_image(
         pass
 
     return {"images": updated_images}
+
+
+@router.post("/threads/{thread_id}/resume/upload")
+async def upload_thread_resume(
+    thread_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload a resume (PDF/DOCX/TXT), extract text, and stream AI analysis of the candidate."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if thread["status"] in ("finalized", "archived"):
+        raise HTTPException(status_code=400, detail=f"Cannot upload to a {thread['status']} thread")
+
+    if current_user.role != "admin":
+        await billing_service.check_credits(company_id)
+
+    # Validate file
+    filename = file.filename or "resume"
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in RESUME_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(sorted(RESUME_UPLOAD_EXTENSIONS))}")
+
+    content = await file.read()
+    if len(content) > RESUME_UPLOAD_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
+
+    # Extract text
+    try:
+        extracted_text, page_count = ERDocumentParser().extract_text_from_bytes(content, filename)
+    except Exception as e:
+        logger.error("Failed to extract text from resume %s: %s", filename, e, exc_info=True)
+        raise HTTPException(status_code=400, detail="Could not extract text from this file. Please try a different format.")
+
+    if not extracted_text or len(extracted_text.strip()) < 50:
+        raise HTTPException(status_code=400, detail="Could not extract enough text from this file. It may be image-based or empty.")
+
+    # Upload original file to S3
+    resume_url = None
+    try:
+        resume_url = await get_storage().upload_file(
+            content,
+            filename,
+            prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "resumes"),
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except Exception as e:
+        logger.warning("Failed to upload resume to S3 for thread %s: %s", thread_id, e)
+
+    # Build user message with resume text
+    capped_text = extracted_text[:RESUME_TEXT_CAP]
+    user_content = (
+        f"[Resume uploaded: {filename}]\n\n"
+        "Please analyze this resume and extract the candidate's key information in a structured format:\n"
+        "- Full name and contact details\n"
+        "- Professional summary\n"
+        "- Skills and competencies\n"
+        "- Work experience (company, title, dates, key accomplishments)\n"
+        "- Education and certifications\n"
+        "- Any notable highlights or red flags\n\n"
+        f"---\n{capped_text}\n---"
+    )
+
+    # Save user message (server-side, bypasses SendMessageRequest 4000 char limit)
+    user_msg = await doc_svc.add_message(thread_id, "user", user_content)
+
+    async def event_stream():
+        try:
+            yield _sse_data({"type": "status", "message": "Analyzing resume..."})
+
+            messages, profile = await asyncio.gather(
+                doc_svc.get_thread_messages(thread_id, limit=20),
+                doc_svc.get_company_profile_for_ai(company_id),
+            )
+            msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
+
+            ai_provider = get_ai_provider()
+            ctx = _build_company_context(profile)
+
+            yield _sse_data({"type": "status", "message": "Extracting candidate details..."})
+            ai_resp = await ai_provider.generate(
+                msg_dicts, thread["current_state"], company_context=ctx,
+            )
+
+            assistant_msg = await doc_svc.add_message(
+                thread_id, "assistant", ai_resp.assistant_reply,
+            )
+
+            # Token usage + billing
+            final_usage = ai_resp.token_usage
+            stream_cost = calculate_call_cost(
+                model=str((final_usage or {}).get("model") or "unknown"),
+                prompt_tokens=(final_usage or {}).get("prompt_tokens"),
+                completion_tokens=(final_usage or {}).get("completion_tokens"),
+            )
+            if final_usage is not None:
+                final_usage["cost_dollars"] = float(stream_cost)
+
+            try:
+                await doc_svc.log_token_usage_event(
+                    company_id=company_id,
+                    user_id=current_user.id,
+                    thread_id=thread_id,
+                    token_usage=final_usage,
+                    operation="resume_upload",
+                )
+            except Exception as e:
+                logger.warning("Failed to log resume upload usage for thread %s: %s", thread_id, e)
+
+            if current_user.role != "admin":
+                try:
+                    async with get_connection() as conn:
+                        async with conn.transaction():
+                            await billing_service.deduct_credit(
+                                conn,
+                                company_id=company_id,
+                                thread_id=thread_id,
+                                user_id=current_user.id,
+                                cost=stream_cost,
+                                model=str((final_usage or {}).get("model") or "unknown"),
+                            )
+                except Exception as exc:
+                    logger.warning("Failed to deduct credit for resume upload thread %s: %s", thread_id, exc)
+
+            response = SendMessageResponse(
+                user_message=_row_to_message(user_msg),
+                assistant_message=_row_to_message(assistant_msg),
+                current_state=thread["current_state"],
+                version=thread["version"],
+                task_type=_infer_skill_from_state(thread["current_state"]),
+                pdf_url=None,
+                token_usage=final_usage,
+            )
+            yield _sse_data({"type": "complete", "data": response.model_dump(mode="json")})
+        except Exception as e:
+            logger.error("Resume analysis failed for thread %s: %s", thread_id, e, exc_info=True)
+            yield _sse_data({"type": "error", "message": "Failed to analyze resume. Please try again."})
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/threads", response_model=list[ThreadListItem])
