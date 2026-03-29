@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
@@ -6,6 +6,7 @@ import { getThread, sendMessageStream, updateTitle, getPdfProxyUrl, setNodeMode,
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
+import PresentationPanel from '../../components/matcha-work/PresentationPanel'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -66,8 +67,8 @@ export default function MatchaWorkThread() {
       .then((data) => {
         setThread(data)
         setMessages(data.messages)
-        // Check if there's already a PDF-worthy task type
-        if (data.task_type === 'offer_letter' || data.task_type === 'presentation') {
+        // Check if there's already a PDF-worthy task type (presentations use the panel instead)
+        if (data.task_type === 'offer_letter') {
           setPdfUrl(getPdfProxyUrl(threadId, data.version))
         }
       })
@@ -85,10 +86,10 @@ export default function MatchaWorkThread() {
     prevLenRef.current = messages.length
   }, [messages.length])
 
-  function handleSend() {
-    if (!threadId || !input.trim() || streaming) return
+  function handleSend(overrideContent?: string, slideIndex?: number) {
+    const content = (overrideContent ?? input).trim()
+    if (!threadId || !content || streaming) return
 
-    const content = input.trim()
     setInput('')
     setStreaming(true)
     setError('')
@@ -104,6 +105,8 @@ export default function MatchaWorkThread() {
       created_at: new Date().toISOString(),
     }
     setMessages((prev) => [...prev, tempUserMsg])
+
+    const streamOpts = slideIndex != null ? { slide_index: slideIndex } : undefined
 
     abortRef.current = sendMessageStream(threadId, content, {
       onEvent: (event: MWStreamEvent) => {
@@ -127,10 +130,12 @@ export default function MatchaWorkThread() {
               }
             : prev
         )
-        // Show PDF if returned
-        if (data.pdf_url) {
+        // Show PDF if returned (for offer letters — presentations use the panel)
+        if (data.task_type === 'presentation') {
+          setPdfUrl(null) // presentation panel handles display
+        } else if (data.pdf_url) {
           setPdfUrl(data.pdf_url)
-        } else if (data.task_type === 'offer_letter' || data.task_type === 'presentation') {
+        } else if (data.task_type === 'offer_letter') {
           setPdfUrl(getPdfProxyUrl(threadId, data.version))
         }
         setStreaming(false)
@@ -140,7 +145,7 @@ export default function MatchaWorkThread() {
         setError(err)
         setStreaming(false)
       },
-    })
+    }, streamOpts)
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -171,6 +176,18 @@ export default function MatchaWorkThread() {
     setTogglingMode(null)
   }
 
+  const handleSendRef = useRef(handleSend)
+  handleSendRef.current = handleSend
+
+  const handleEditSlide = useCallback(
+    (slideIndex: number, instruction: string) => {
+      handleSendRef.current(instruction, slideIndex)
+    },
+    []
+  )
+
+  const isPresentation = thread?.task_type === 'presentation'
+  const showPresentationPanel = isPresentation && thread?.current_state
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -226,7 +243,7 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`flex flex-col ${pdfUrl ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
+      <div className={`flex flex-col ${pdfUrl || showPresentationPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
         {/* Header */}
         <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
           <Link to="/work" className={`${th.backArrow} transition-colors`}>
@@ -395,7 +412,7 @@ export default function MatchaWorkThread() {
                 className={`flex-1 text-sm rounded-lg px-3 py-2.5 border focus:outline-none resize-none disabled:opacity-50 min-h-[44px] ${th.textarea}`}
               />
               <button
-                onClick={handleSend}
+                onClick={() => handleSend()}
                 disabled={inputDisabled || !input.trim()}
                 className="p-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors disabled:opacity-40 disabled:hover:bg-emerald-600"
               >
@@ -410,8 +427,19 @@ export default function MatchaWorkThread() {
         </div>
       </div>
 
-      {/* PDF preview panel */}
-      {pdfUrl && (
+      {/* Presentation panel */}
+      {showPresentationPanel && (
+        <PresentationPanel
+          state={thread!.current_state}
+          threadId={threadId!}
+          onEditSlide={handleEditSlide}
+          lightMode={lightMode}
+          streaming={streaming}
+        />
+      )}
+
+      {/* PDF preview panel (offer letters, etc.) */}
+      {pdfUrl && !showPresentationPanel && (
         <div className="hidden md:block md:w-1/2 bg-zinc-900">
           <iframe
             src={pdfUrl}

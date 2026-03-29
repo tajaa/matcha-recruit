@@ -67,6 +67,39 @@ export function getPdfProxyUrl(id: string, version?: number) {
   return `${BASE}/matcha-work/threads/${id}/pdf/proxy${qs}`
 }
 
+// ── Presentation ──
+
+export function generatePresentation(threadId: string) {
+  return api.post<{
+    thread_id: string
+    version: number
+    current_state: Record<string, unknown>
+    slide_count: number
+    generated_at: string
+  }>(`/matcha-work/threads/${threadId}/presentation/generate`)
+}
+
+export function getPresentationPdf(threadId: string) {
+  return api.get<{ pdf_url: string }>(
+    `/matcha-work/threads/${threadId}/presentation/pdf`
+  )
+}
+
+export function uploadPresentationImages(threadId: string, files: File[]) {
+  const form = new FormData()
+  files.forEach((f) => form.append('files', f))
+  return api.upload<{ images: string[]; uploaded_count: number }>(
+    `/matcha-work/threads/${threadId}/images`,
+    form
+  )
+}
+
+export function removePresentationImage(threadId: string, url: string) {
+  return api.delete<{ images: string[] }>(
+    `/matcha-work/threads/${threadId}/images?url=${encodeURIComponent(url)}`
+  )
+}
+
 // ── SSE streaming ──
 
 export function sendMessageStream(
@@ -77,6 +110,7 @@ export function sendMessageStream(
     onComplete: (data: MWSendResponse) => void
     onError: (err: string) => void
   },
+  options?: { slide_index?: number },
 ): AbortController {
   const ctrl = new AbortController()
   const timeout = setTimeout(() => ctrl.abort('timeout'), 90_000)
@@ -90,7 +124,7 @@ export function sendMessageStream(
         'Content-Type': 'application/json',
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, ...options }),
       signal: ctrl.signal,
     })
       .then(async (res) => {

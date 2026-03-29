@@ -8,6 +8,21 @@ export type MWTaskType =
   | 'handbook'
   | 'policy'
 
+export interface PresentationSlide {
+  title: string
+  bullets: string[] | null
+  speaker_notes: string | null
+}
+
+export interface PresentationState {
+  presentation_title: string | null
+  subtitle: string | null
+  theme: string | null
+  slides: PresentationSlide[] | null
+  cover_image_url: string | null
+  generated_at: string | null
+}
+
 export interface MWThread {
   id: string
   title: string
