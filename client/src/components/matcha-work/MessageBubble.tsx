@@ -7,6 +7,8 @@ function extractPenalties(reasoning: MWMessage['metadata']): { category: string;
   if (!reasoning?.compliance_reasoning) return []
   const refCats = new Set(reasoning.referenced_categories ?? [])
   const refLocs = new Set(reasoning.referenced_locations ?? [])
+  // Only show enforcement risk when the AI actually referenced compliance categories
+  if (refCats.size === 0) return []
   const seen = new Set<string>()
   const results: { category: string; summary: string; agency: string }[] = []
   for (const loc of reasoning.compliance_reasoning) {
@@ -15,8 +17,7 @@ function extractPenalties(reasoning: MWMessage['metadata']): { category: string;
         !Array.from(refLocs).some(r => loc.location_label.includes(r) || r.includes(loc.location_label.split('(')[0]?.trim() ?? ''))) continue
     for (const cat of loc.categories) {
       if (seen.has(cat.category)) continue
-      // Skip categories not referenced in the answer
-      if (refCats.size > 0 && !refCats.has(cat.category)) continue
+      if (!refCats.has(cat.category)) continue
       const gov = cat.all_levels.find(l => l.is_governing)
       if (gov?.penalty_summary) {
         seen.add(cat.category)
@@ -55,7 +56,7 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode 
         {m.role === 'assistant' ? (
           <>
             {markdownContent}
-            {m.metadata?.compliance_reasoning && (
+            {m.metadata?.compliance_reasoning && (m.metadata.referenced_categories?.length || m.metadata.ai_reasoning_steps?.length) && (
               <ComplianceReasoningPanel
                 locations={m.metadata.compliance_reasoning}
                 aiSteps={m.metadata.ai_reasoning_steps}
@@ -85,9 +86,8 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode 
             )}
             {m.metadata?.compliance_gaps && (() => {
               const refCats = new Set(m.metadata.referenced_categories ?? [])
-              const filtered = refCats.size > 0
-                ? m.metadata.compliance_gaps.filter(g => refCats.has(g.category))
-                : m.metadata.compliance_gaps
+              if (refCats.size === 0) return null
+              const filtered = m.metadata.compliance_gaps.filter(g => refCats.has(g.category))
               if (filtered.length === 0) return null
               return (
               <div className={`mt-2 pt-2 border-t ${divider}`}>
