@@ -126,6 +126,11 @@ struct ThreadListView: View {
                         Button(thread.isPinned ? "Unpin" : "Pin") {
                             Task { await viewModel.togglePin(thread: thread) }
                         }
+                        if thread.status != "archived" {
+                            Button("Archive") {
+                                Task { await viewModel.archiveThread(thread: thread) }
+                            }
+                        }
                         Divider()
                         Button("Delete", role: .destructive) {
                             threadToDelete = thread
@@ -204,11 +209,38 @@ struct ThreadRowView: View {
                         .foregroundColor(.matcha500)
                 }
             }
-            HStack(spacing: 6) {
-                Text("\(thread.resolvedTaskType.label) · v\(thread.version) · Updated \(formatThreadDate(thread.lastActivityAt))")
+            HStack(spacing: 4) {
+                Text("\(thread.resolvedTaskType.label) · v\(thread.version) · \(formatThreadDate(thread.lastActivityAt))")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
+                if thread.nodeMode {
+                    Text("Node")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.15))
+                        .cornerRadius(3)
+                }
+                if thread.complianceMode {
+                    Text("Compliance")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.cyan)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.cyan.opacity(0.15))
+                        .cornerRadius(3)
+                }
+                if thread.payerMode {
+                    Text("Payer")
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundColor(.green)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Color.green.opacity(0.15))
+                        .cornerRadius(3)
+                }
             }
         }
         .padding(.vertical, 2)

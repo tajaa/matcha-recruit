@@ -2,14 +2,21 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
-import { getThread, sendMessageStream, uploadResume, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResumes, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import PresentationPanel from '../../components/matcha-work/PresentationPanel'
+import ResumeBatchPanel from '../../components/matcha-work/ResumeBatchPanel'
 
-const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx']
+const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 const RESUME_MAX_SIZE = 10 * 1024 * 1024
+
+const MODEL_OPTIONS = [
+  { id: 'gemini-3.1-flash-lite-preview', label: 'Flash Lite 3.1' },
+  { id: 'gemini-3-flash-preview', label: 'Flash 3.0' },
+  { id: 'gemini-3.1-pro-preview', label: 'Pro 3.1' },
+] as const
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -20,6 +27,7 @@ const TASK_LABELS: Record<string, string> = {
   presentation: 'Presentation',
   handbook: 'Handbook',
   policy: 'Policy',
+  resume_batch: 'Resume Batch',
 }
 
 export default function MatchaWorkThread() {
@@ -32,6 +40,9 @@ export default function MatchaWorkThread() {
   const [lightMode, setLightMode] = useState(() => localStorage.getItem('mw-chat-theme') === 'light')
   const [error, setError] = useState('')
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+
+  // Model selector
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3-flash-preview')
 
   // Resume drag-and-drop
   const [isDragOver, setIsDragOver] = useState(false)
@@ -113,7 +124,9 @@ export default function MatchaWorkThread() {
     }
     setMessages((prev) => [...prev, tempUserMsg])
 
-    const streamOpts = slideIndex != null ? { slide_index: slideIndex } : undefined
+    const streamOpts: Record<string, unknown> = {}
+    if (slideIndex != null) streamOpts.slide_index = slideIndex
+    if (selectedModel) streamOpts.model = selectedModel
 
     abortRef.current = sendMessageStream(threadId, content, {
       onEvent: (event: MWStreamEvent) => {
@@ -155,35 +168,37 @@ export default function MatchaWorkThread() {
     }, streamOpts)
   }
 
-  function handleResumeUpload(file: File) {
+  function handleResumeUpload(files: File | File[]) {
     if (!threadId || streaming) return
+    const fileList = Array.isArray(files) ? files : [files]
 
-    const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
-    if (!RESUME_EXTENSIONS.includes(ext)) {
-      setError('Unsupported file type. Please upload a PDF or DOCX.')
-      return
-    }
-    if (file.size > RESUME_MAX_SIZE) {
-      setError('File exceeds 10 MB limit.')
-      return
+    for (const file of fileList) {
+      const ext = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+      if (!RESUME_EXTENSIONS.includes(ext)) {
+        setError(`Unsupported file type: ${file.name}. Please upload PDF, DOCX, or TXT files.`)
+        return
+      }
+      if (file.size > RESUME_MAX_SIZE) {
+        setError(`File exceeds 10 MB limit: ${file.name}`)
+        return
+      }
     }
 
     setStreaming(true)
     setError('')
 
-    // Optimistic user message
     const tempMsg: MWMessage = {
       id: crypto.randomUUID(),
       thread_id: threadId,
       role: 'user',
-      content: `[Resume uploaded: ${file.name}]`,
+      content: `[Resume batch: ${fileList.length} files]`,
       metadata: null,
       version_created: null,
       created_at: new Date().toISOString(),
     }
     setMessages((prev) => [...prev, tempMsg])
 
-    abortRef.current = uploadResume(threadId, file, {
+    abortRef.current = uploadResumes(threadId, fileList, {
       onEvent: (event: MWStreamEvent) => {
         if (event.type === 'status') setStatusMessage(event.message)
       },
@@ -198,6 +213,7 @@ export default function MatchaWorkThread() {
             ? { ...prev, current_state: data.current_state, version: data.version, task_type: data.task_type ?? prev.task_type }
             : prev
         )
+        setPdfUrl(null)
         setStreaming(false)
       },
       onError: (err) => {
@@ -248,6 +264,8 @@ export default function MatchaWorkThread() {
 
   const isPresentation = thread?.task_type === 'presentation'
   const showPresentationPanel = isPresentation && thread?.current_state
+  const isResumeBatch = thread?.task_type === 'resume_batch'
+  const showResumeBatchPanel = isResumeBatch && thread?.current_state
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -303,7 +321,7 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`flex flex-col ${pdfUrl || showPresentationPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
+      <div className={`flex flex-col ${pdfUrl || showPresentationPanel || showResumeBatchPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
         {/* Header */}
         <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
           <Link to="/work" className={`${th.backArrow} transition-colors`}>
@@ -389,6 +407,21 @@ export default function MatchaWorkThread() {
             Payer
           </button>
 
+          <select
+            value={selectedModel}
+            onChange={(e) => {
+              setSelectedModel(e.target.value)
+              localStorage.setItem('mw-model', e.target.value)
+            }}
+            className={`hidden sm:block shrink-0 text-[11px] font-medium rounded-full px-2.5 py-1 appearance-none cursor-pointer transition-colors ${th.modeOff} ${
+              lightMode ? 'bg-zinc-100 text-zinc-600' : 'bg-zinc-700 text-zinc-300'
+            }`}
+          >
+            {MODEL_OPTIONS.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+
           <button
             onClick={toggleLightMode}
             title={lightMode ? 'Switch to dark mode' : 'Switch to light mode'}
@@ -428,8 +461,8 @@ export default function MatchaWorkThread() {
           onDrop={(e) => {
             e.preventDefault()
             setIsDragOver(false)
-            const file = e.dataTransfer.files[0]
-            if (file) handleResumeUpload(file)
+            const files = Array.from(e.dataTransfer.files)
+            if (files.length > 0) handleResumeUpload(files)
           }}
         >
           {isDragOver && (
@@ -486,11 +519,12 @@ export default function MatchaWorkThread() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.doc,.docx"
+                accept=".pdf,.doc,.docx,.txt"
                 className="hidden"
+                multiple
                 onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) handleResumeUpload(f)
+                  const files = e.target.files ? Array.from(e.target.files) : []
+                  if (files.length > 0) handleResumeUpload(files)
                   e.target.value = ''
                 }}
               />
@@ -541,8 +575,18 @@ export default function MatchaWorkThread() {
         />
       )}
 
+      {/* Resume batch panel */}
+      {showResumeBatchPanel && (
+        <ResumeBatchPanel
+          state={thread!.current_state}
+          threadId={threadId!}
+          lightMode={lightMode}
+          streaming={streaming}
+        />
+      )}
+
       {/* PDF preview panel (offer letters, etc.) */}
-      {pdfUrl && !showPresentationPanel && (
+      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && (
         <div className="hidden md:block md:w-1/2 bg-zinc-900">
           <iframe
             src={pdfUrl}

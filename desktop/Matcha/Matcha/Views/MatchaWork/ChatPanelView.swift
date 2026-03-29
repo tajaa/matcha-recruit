@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 struct ChatPanelView: View {
     @Bindable var viewModel: ThreadDetailViewModel
+    var lightMode: Bool = false
     @State private var inputText = ""
     @State private var previewURL: String? = nil
 
@@ -64,7 +65,7 @@ struct ChatPanelView: View {
                     ScrollView {
                         LazyVStack(spacing: 12) {
                             ForEach(viewModel.messages) { message in
-                                MessageBubbleView(message: message)
+                                MessageBubbleView(message: message, lightMode: lightMode)
                                     .id(message.id)
                             }
                             if viewModel.isStreaming {
@@ -159,6 +160,46 @@ struct ChatPanelView: View {
                             .foregroundColor(Color.matcha500.opacity(0.2)),
                         alignment: .top
                     )
+                }
+
+                // Jurisdiction bar (compliance mode)
+                if viewModel.thread?.complianceMode == true {
+                    HStack(spacing: 6) {
+                        Image(systemName: "mappin")
+                            .font(.system(size: 11))
+                            .foregroundColor(.cyan)
+                        Text("JURISDICTIONS")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+
+                        // Show locations from compliance reasoning in recent messages
+                        if let meta = viewModel.messages.last(where: { $0.role == "assistant" })?.metadata,
+                           let locs = meta.complianceReasoning, !locs.isEmpty {
+                            ForEach(locs, id: \.locationId) { loc in
+                                Text(loc.locationLabel)
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.cyan)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.cyan.opacity(0.1))
+                                    .cornerRadius(4)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .stroke(Color.cyan.opacity(0.25), lineWidth: 1)
+                                    )
+                            }
+                        } else {
+                            Text("Active — locations will appear with responses")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .background(lightMode ? Color(white: 0.97) : Color.zinc900.opacity(0.5))
                 }
 
                 // Input area

@@ -198,6 +198,37 @@ class PresentationDocument(BaseModel):
     generated_at: Optional[str] = None
 
 
+class ResumeCandidate(BaseModel):
+    """Structured candidate data extracted from a resume."""
+
+    id: str
+    filename: str
+    resume_url: Optional[str] = None
+    name: Optional[str] = None
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    current_title: Optional[str] = None
+    experience_years: Optional[float] = None
+    skills: Optional[list[str]] = None
+    education: Optional[str] = None
+    certifications: Optional[list[str]] = None
+    summary: Optional[str] = None
+    strengths: Optional[list[str]] = None
+    flags: Optional[list[str]] = None
+    status: str = "pending"
+
+
+class ResumeBatchDocument(BaseModel):
+    """Resume batch state — candidates accumulated via uploads."""
+
+    batch_title: Optional[str] = None
+    batch_status: Optional[str] = None  # uploading, analyzing, ready
+    candidates: Optional[list[ResumeCandidate]] = None
+    total_count: Optional[int] = None
+    analyzed_count: Optional[int] = None
+
+
 class PolicyDocument(BaseModel):
     """Incremental policy draft state — builds turn by turn via conversation."""
 
@@ -235,6 +266,7 @@ class CreateThreadResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=4000)
     slide_index: Optional[int] = Field(None, ge=0, description="0-based index of slide to focus edits on")
+    model: Optional[str] = Field(None, description="Model override (e.g. gemini-3.1-flash-lite-preview, gemini-3-flash-preview, gemini-3.1-pro-preview)")
 
 
 class MWMessageOut(BaseModel):

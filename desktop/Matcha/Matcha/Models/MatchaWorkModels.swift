@@ -74,6 +74,9 @@ struct MWThread: Codable, Identifiable {
     var status: String
     var version: Int
     var isPinned: Bool
+    var nodeMode: Bool
+    var complianceMode: Bool
+    var payerMode: Bool
     let createdAt: String
     var updatedAt: String?
 
@@ -89,6 +92,9 @@ struct MWThread: Codable, Identifiable {
         case id, title, status, version
         case taskType = "task_type"
         case isPinned = "is_pinned"
+        case nodeMode = "node_mode"
+        case complianceMode = "compliance_mode"
+        case payerMode = "payer_mode"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -102,6 +108,9 @@ struct MWCreateThreadResponse: Codable {
     let currentState: [String: AnyCodable]
     let version: Int
     let isPinned: Bool
+    let nodeMode: Bool?
+    let complianceMode: Bool?
+    let payerMode: Bool?
     let createdAt: String
     let assistantReply: String?
     let pdfUrl: String?
@@ -111,6 +120,9 @@ struct MWCreateThreadResponse: Codable {
         case taskType = "task_type"
         case currentState = "current_state"
         case isPinned = "is_pinned"
+        case nodeMode = "node_mode"
+        case complianceMode = "compliance_mode"
+        case payerMode = "payer_mode"
         case createdAt = "created_at"
         case assistantReply = "assistant_reply"
         case pdfUrl = "pdf_url"
@@ -118,7 +130,9 @@ struct MWCreateThreadResponse: Codable {
 
     func toThread() -> MWThread {
         MWThread(id: id, title: title, taskType: taskType, status: status,
-                 version: version, isPinned: isPinned, createdAt: createdAt, updatedAt: nil)
+                 version: version, isPinned: isPinned,
+                 nodeMode: nodeMode ?? false, complianceMode: complianceMode ?? false, payerMode: payerMode ?? false,
+                 createdAt: createdAt, updatedAt: nil)
     }
 }
 
@@ -128,10 +142,11 @@ struct MWMessage: Codable, Identifiable {
     let role: String
     let content: String
     let versionCreated: Int?
+    let metadata: MWMessageMetadata?
     let createdAt: String
 
     enum CodingKeys: String, CodingKey {
-        case id, role, content
+        case id, role, content, metadata
         case threadId = "thread_id"
         case versionCreated = "version_created"
         case createdAt = "created_at"
@@ -146,6 +161,9 @@ struct MWThreadDetail: Codable {
     let status: String
     let version: Int
     let isPinned: Bool
+    let nodeMode: Bool?
+    let complianceMode: Bool?
+    let payerMode: Bool?
     let createdAt: String
     let updatedAt: String
     let messages: [MWMessage]
@@ -157,13 +175,18 @@ struct MWThreadDetail: Codable {
 
     var thread: MWThread {
         MWThread(id: id, title: title, taskType: taskType, status: status,
-                 version: version, isPinned: isPinned, createdAt: createdAt, updatedAt: updatedAt)
+                 version: version, isPinned: isPinned,
+                 nodeMode: nodeMode ?? false, complianceMode: complianceMode ?? false, payerMode: payerMode ?? false,
+                 createdAt: createdAt, updatedAt: updatedAt)
     }
 
     enum CodingKeys: String, CodingKey {
         case id, title, status, version, messages
         case taskType = "task_type"
         case isPinned = "is_pinned"
+        case nodeMode = "node_mode"
+        case complianceMode = "compliance_mode"
+        case payerMode = "payer_mode"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case currentState = "current_state"
@@ -262,6 +285,167 @@ struct MWFinalizeResponse: Codable {
         case pdfUrl = "pdf_url"
         case linkedOfferLetterId = "linked_offer_letter_id"
     }
+}
+
+// MARK: - Compliance Metadata Types
+
+struct MWMessageMetadata: Codable {
+    let complianceReasoning: [MWComplianceReasoningLocation]?
+    let aiReasoningSteps: [MWAIReasoningStep]?
+    let referencedCategories: [String]?
+    let referencedLocations: [String]?
+    let payerSources: [MWPayerPolicySource]?
+    let affectedEmployees: [MWAffectedEmployeeGroup]?
+    let complianceGaps: [MWComplianceGap]?
+
+    enum CodingKeys: String, CodingKey {
+        case complianceReasoning = "compliance_reasoning"
+        case aiReasoningSteps = "ai_reasoning_steps"
+        case referencedCategories = "referenced_categories"
+        case referencedLocations = "referenced_locations"
+        case payerSources = "payer_sources"
+        case affectedEmployees = "affected_employees"
+        case complianceGaps = "compliance_gaps"
+    }
+}
+
+struct MWComplianceReasoningLocation: Codable {
+    let locationId: String
+    let locationLabel: String
+    let facilityAttributes: [String: AnyCodable]?
+    let activatedProfiles: [MWActivatedProfile]
+    let categories: [MWComplianceReasoningCategory]
+
+    enum CodingKeys: String, CodingKey {
+        case locationId = "location_id"
+        case locationLabel = "location_label"
+        case facilityAttributes = "facility_attributes"
+        case activatedProfiles = "activated_profiles"
+        case categories
+    }
+}
+
+struct MWActivatedProfile: Codable {
+    let label: String
+    let categories: [String]
+}
+
+struct MWComplianceReasoningCategory: Codable {
+    let category: String
+    let governingLevel: String?
+    let precedenceType: String?
+    let reasoningText: String?
+    let legalCitation: String?
+    let allLevels: [MWComplianceReasoningLevel]
+
+    enum CodingKeys: String, CodingKey {
+        case category
+        case governingLevel = "governing_level"
+        case precedenceType = "precedence_type"
+        case reasoningText = "reasoning_text"
+        case legalCitation = "legal_citation"
+        case allLevels = "all_levels"
+    }
+}
+
+struct MWComplianceReasoningLevel: Codable {
+    let jurisdictionLevel: String
+    let jurisdictionName: String
+    let title: String?
+    let currentValue: String?
+    let numericValue: Double?
+    let sourceUrl: String?
+    let statuteCitation: String?
+    let isGoverning: Bool
+    let effectiveDate: String?
+    let lastVerifiedAt: String?
+    let previousValue: String?
+    let lastChangedAt: String?
+    let expirationDate: String?
+    let requiresWrittenPolicy: Bool?
+    let penaltySummary: String?
+    let enforcingAgency: String?
+
+    enum CodingKeys: String, CodingKey {
+        case jurisdictionLevel = "jurisdiction_level"
+        case jurisdictionName = "jurisdiction_name"
+        case title
+        case currentValue = "current_value"
+        case numericValue = "numeric_value"
+        case sourceUrl = "source_url"
+        case statuteCitation = "statute_citation"
+        case isGoverning = "is_governing"
+        case effectiveDate = "effective_date"
+        case lastVerifiedAt = "last_verified_at"
+        case previousValue = "previous_value"
+        case lastChangedAt = "last_changed_at"
+        case expirationDate = "expiration_date"
+        case requiresWrittenPolicy = "requires_written_policy"
+        case penaltySummary = "penalty_summary"
+        case enforcingAgency = "enforcing_agency"
+    }
+}
+
+struct MWAIReasoningStep: Codable {
+    let step: Int
+    let question: String
+    let answer: String
+    let conclusion: String
+    let sources: [String]?
+}
+
+struct MWAffectedEmployeeGroup: Codable {
+    let location: String
+    let count: Int
+    let matchType: String?
+
+    enum CodingKeys: String, CodingKey {
+        case location, count
+        case matchType = "match_type"
+    }
+}
+
+struct MWComplianceGap: Codable {
+    let category: String
+    let label: String
+    let status: String
+}
+
+struct MWPayerPolicySource: Codable {
+    let payerName: String
+    let policyTitle: String?
+    let policyNumber: String?
+    let sourceUrl: String?
+    let similarity: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case payerName = "payer_name"
+        case policyTitle = "policy_title"
+        case policyNumber = "policy_number"
+        case sourceUrl = "source_url"
+        case similarity
+    }
+}
+
+// MARK: - Mode Toggle Request Types
+
+struct MWNodeModeRequest: Codable {
+    let nodeMode: Bool
+    enum CodingKeys: String, CodingKey { case nodeMode = "node_mode" }
+}
+
+struct MWComplianceModeRequest: Codable {
+    let complianceMode: Bool
+    enum CodingKeys: String, CodingKey { case complianceMode = "compliance_mode" }
+}
+
+struct MWPayerModeRequest: Codable {
+    let payerMode: Bool
+    enum CodingKeys: String, CodingKey { case payerMode = "payer_mode" }
+}
+
+struct MWUpdateTitleRequest: Codable {
+    let title: String
 }
 
 // AnyCodable for flexible JSON

@@ -54,6 +54,7 @@ from ..models.matcha_work import (
     SendHandbookSignaturesRequest,
     SendHandbookSignaturesResponse,
     GeneratePresentationResponse,
+    ResumeBatchDocument,
     WorkbookDocument,
 )
 from ..services import matcha_work_document as doc_svc
@@ -133,6 +134,7 @@ HANDBOOK_UPLOAD_MANAGED_FIELDS = {
 }
 VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys()) - HANDBOOK_UPLOAD_MANAGED_FIELDS
 VALID_POLICY_FIELDS = set(PolicyDocument.model_fields.keys())
+VALID_RESUME_BATCH_FIELDS = set(ResumeBatchDocument.model_fields.keys())
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 HANDBOOK_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx"}
@@ -158,6 +160,8 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
         valid_fields = VALID_HANDBOOK_FIELDS
     elif skill == "policy":
         valid_fields = VALID_POLICY_FIELDS
+    elif skill == "resume_batch":
+        valid_fields = VALID_RESUME_BATCH_FIELDS
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -1808,13 +1812,22 @@ async def remove_thread_image(
     return {"images": updated_images}
 
 
+RESUME_EXTRACT_PROMPT = """Extract candidate information from this resume. Return ONLY valid JSON with these fields:
+{"name":"...","email":"...","phone":"...","location":"...","current_title":"...","experience_years":0,"skills":["..."],"education":"highest degree - school","certifications":["..."],"summary":"1-2 sentence professional summary","strengths":["top 3 strengths"],"flags":["any concerns or gaps"]}
+
+Resume text:
+---
+%s
+---"""
+
+
 @router.post("/threads/{thread_id}/resume/upload")
 async def upload_thread_resume(
     thread_id: UUID,
-    file: UploadFile = File(...),
+    files: list[UploadFile] = File(...),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Upload a resume (PDF/DOCX/TXT), extract text, and stream AI analysis of the candidate."""
+    """Upload one or more resumes, extract structured candidate data, and stream batch insights."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -1828,126 +1841,180 @@ async def upload_thread_resume(
     if current_user.role != "admin":
         await billing_service.check_credits(company_id)
 
-    # Validate file
-    filename = file.filename or "resume"
-    ext = os.path.splitext(filename)[1].lower()
-    if ext not in RESUME_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type. Allowed: {', '.join(sorted(RESUME_UPLOAD_EXTENSIONS))}")
+    # Validate all files upfront
+    parsed_files: list[tuple[str, bytes, str]] = []  # (filename, content, content_type)
+    for f in files:
+        fname = f.filename or "resume"
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in RESUME_UPLOAD_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {fname}")
+        raw = await f.read()
+        if len(raw) > RESUME_UPLOAD_MAX_BYTES:
+            raise HTTPException(status_code=400, detail=f"File exceeds 10 MB limit: {fname}")
+        parsed_files.append((fname, raw, f.content_type or "application/octet-stream"))
 
-    content = await file.read()
-    if len(content) > RESUME_UPLOAD_MAX_BYTES:
-        raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
+    file_count = len(parsed_files)
+    filenames = [f[0] for f in parsed_files]
 
-    # Extract text
-    try:
-        extracted_text, page_count = ERDocumentParser().extract_text_from_bytes(content, filename)
-    except Exception as e:
-        logger.error("Failed to extract text from resume %s: %s", filename, e, exc_info=True)
-        raise HTTPException(status_code=400, detail="Could not extract text from this file. Please try a different format.")
-
-    if not extracted_text or len(extracted_text.strip()) < 50:
-        raise HTTPException(status_code=400, detail="Could not extract enough text from this file. It may be image-based or empty.")
-
-    # Upload original file to S3
-    resume_url = None
-    try:
-        resume_url = await get_storage().upload_file(
-            content,
-            filename,
-            prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "resumes"),
-            content_type=file.content_type or "application/octet-stream",
-        )
-    except Exception as e:
-        logger.warning("Failed to upload resume to S3 for thread %s: %s", thread_id, e)
-
-    # Build user message with resume text
-    capped_text = extracted_text[:RESUME_TEXT_CAP]
-    user_content = (
-        f"[Resume uploaded: {filename}]\n\n"
-        "Please analyze this resume and extract the candidate's key information in a structured format:\n"
-        "- Full name and contact details\n"
-        "- Professional summary\n"
-        "- Skills and competencies\n"
-        "- Work experience (company, title, dates, key accomplishments)\n"
-        "- Education and certifications\n"
-        "- Any notable highlights or red flags\n\n"
-        f"---\n{capped_text}\n---"
-    )
-
-    # Save user message (server-side, bypasses SendMessageRequest 4000 char limit)
+    # Save a single user message for the batch
+    user_content = f"[Resume batch: {file_count} files]\n" + "\n".join(f"- {fn}" for fn in filenames)
     user_msg = await doc_svc.add_message(thread_id, "user", user_content)
 
     async def event_stream():
         try:
-            yield _sse_data({"type": "status", "message": "Analyzing resume..."})
+            from google import genai as _genai
+            from google.genai import types as _types
 
-            messages, profile = await asyncio.gather(
-                doc_svc.get_thread_messages(thread_id, limit=20),
-                doc_svc.get_company_profile_for_ai(company_id),
-            )
-            msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
+            api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
+            client = _genai.Client(api_key=api_key)
+            extract_model = "gemini-3.1-flash-lite-preview"
 
-            ai_provider = get_ai_provider()
-            ctx = _build_company_context(profile)
+            parser = ERDocumentParser()
+            existing_candidates = list((thread.get("current_state") or {}).get("candidates") or [])
+            new_candidates = []
+            errors = []
 
-            yield _sse_data({"type": "status", "message": "Extracting candidate details..."})
-            ai_resp = await ai_provider.generate(
-                msg_dicts, thread["current_state"], company_context=ctx,
-            )
+            for idx, (fname, raw, ct) in enumerate(parsed_files, 1):
+                yield _sse_data({"type": "status", "message": f"Extracting text from {fname} ({idx}/{file_count})..."})
 
-            assistant_msg = await doc_svc.add_message(
-                thread_id, "assistant", ai_resp.assistant_reply,
-            )
-
-            # Token usage + billing
-            final_usage = ai_resp.token_usage
-            stream_cost = calculate_call_cost(
-                model=str((final_usage or {}).get("model") or "unknown"),
-                prompt_tokens=(final_usage or {}).get("prompt_tokens"),
-                completion_tokens=(final_usage or {}).get("completion_tokens"),
-            )
-            if final_usage is not None:
-                final_usage["cost_dollars"] = float(stream_cost)
-
-            try:
-                await doc_svc.log_token_usage_event(
-                    company_id=company_id,
-                    user_id=current_user.id,
-                    thread_id=thread_id,
-                    token_usage=final_usage,
-                    operation="resume_upload",
-                )
-            except Exception as e:
-                logger.warning("Failed to log resume upload usage for thread %s: %s", thread_id, e)
-
-            if current_user.role != "admin":
+                # Extract text
                 try:
-                    async with get_connection() as conn:
-                        async with conn.transaction():
-                            await billing_service.deduct_credit(
-                                conn,
-                                company_id=company_id,
-                                thread_id=thread_id,
-                                user_id=current_user.id,
-                                cost=stream_cost,
-                                model=str((final_usage or {}).get("model") or "unknown"),
+                    text, _ = parser.extract_text_from_bytes(raw, fname)
+                except Exception:
+                    errors.append(fname)
+                    continue
+                if not text or len(text.strip()) < 50:
+                    errors.append(fname)
+                    continue
+
+                # Upload to S3
+                resume_url = None
+                try:
+                    resume_url = await get_storage().upload_file(
+                        raw, fname,
+                        prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "resumes"),
+                        content_type=ct,
+                    )
+                except Exception:
+                    pass
+
+                # Structured extraction via lightweight model
+                yield _sse_data({"type": "status", "message": f"Analyzing {fname} ({idx}/{file_count})..."})
+                capped = text[:RESUME_TEXT_CAP]
+                candidate_id = os.urandom(8).hex()
+
+                try:
+                    resp = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            lambda t=capped: client.models.generate_content(
+                                model=extract_model,
+                                contents=[_types.Content(role="user", parts=[_types.Part.from_text(text=RESUME_EXTRACT_PROMPT % t)])],
+                                config=_types.GenerateContentConfig(temperature=0.1),
                             )
-                except Exception as exc:
-                    logger.warning("Failed to deduct credit for resume upload thread %s: %s", thread_id, exc)
+                        ),
+                        timeout=60,
+                    )
+                    raw_json = (resp.text or "").strip()
+                    # Strip markdown code fences if present
+                    if raw_json.startswith("```"):
+                        raw_json = raw_json.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                    data = json.loads(raw_json)
+                    candidate = {
+                        "id": candidate_id,
+                        "filename": fname,
+                        "resume_url": resume_url,
+                        "name": data.get("name"),
+                        "email": data.get("email"),
+                        "phone": data.get("phone"),
+                        "location": data.get("location"),
+                        "current_title": data.get("current_title"),
+                        "experience_years": data.get("experience_years"),
+                        "skills": data.get("skills"),
+                        "education": data.get("education"),
+                        "certifications": data.get("certifications"),
+                        "summary": data.get("summary"),
+                        "strengths": data.get("strengths"),
+                        "flags": data.get("flags"),
+                        "status": "analyzed",
+                    }
+                except Exception as e:
+                    logger.warning("AI extraction failed for %s: %s", fname, e)
+                    candidate = {
+                        "id": candidate_id,
+                        "filename": fname,
+                        "resume_url": resume_url,
+                        "status": "error",
+                    }
+
+                new_candidates.append(candidate)
+
+                # Update name in status if available
+                name = candidate.get("name") or fname
+                yield _sse_data({"type": "status", "message": f"Analyzed {name} ({idx}/{file_count})"})
+
+            # Accumulate into state
+            all_candidates = existing_candidates + new_candidates
+            analyzed = sum(1 for c in all_candidates if c.get("status") == "analyzed")
+            result = await doc_svc.apply_update(thread_id, {
+                "candidates": all_candidates,
+                "batch_status": "ready",
+                "total_count": len(all_candidates),
+                "analyzed_count": analyzed,
+            })
+            current_state = result["current_state"]
+            current_version = result["version"]
+
+            # Generate batch summary
+            yield _sse_data({"type": "status", "message": "Generating batch insights..."})
+            summaries = []
+            for c in new_candidates:
+                if c.get("status") != "analyzed":
+                    continue
+                summaries.append(
+                    f"- {c.get('name', 'Unknown')}: {c.get('current_title', 'N/A')}, "
+                    f"{c.get('experience_years', '?')} yrs, {c.get('location', 'N/A')}. "
+                    f"{c.get('summary', '')}"
+                )
+
+            if summaries:
+                batch_prompt = (
+                    f"I just uploaded {len(new_candidates)} resumes. Here are the candidates:\n\n"
+                    + "\n".join(summaries)
+                    + "\n\nProvide a brief batch overview:\n"
+                    "1. Quick summary of the candidate pool (experience range, common skills, locations)\n"
+                    "2. Top standout candidates and why\n"
+                    "3. Any common gaps or concerns\n"
+                    "Keep it concise — 2-3 short paragraphs max."
+                )
+                ai_provider = get_ai_provider()
+                profile = await doc_svc.get_company_profile_for_ai(company_id)
+                ctx = _build_company_context(profile)
+                ai_resp = await ai_provider.generate(
+                    [{"role": "user", "content": batch_prompt}],
+                    current_state,
+                    company_context=ctx,
+                )
+                batch_reply = ai_resp.assistant_reply
+            else:
+                batch_reply = f"Uploaded {file_count} files."
+                if errors:
+                    batch_reply += f" Could not process: {', '.join(errors)}."
+
+            assistant_msg = await doc_svc.add_message(thread_id, "assistant", batch_reply)
 
             response = SendMessageResponse(
                 user_message=_row_to_message(user_msg),
                 assistant_message=_row_to_message(assistant_msg),
-                current_state=thread["current_state"],
-                version=thread["version"],
-                task_type=_infer_skill_from_state(thread["current_state"]),
+                current_state=current_state,
+                version=current_version,
+                task_type=_infer_skill_from_state(current_state),
                 pdf_url=None,
-                token_usage=final_usage,
+                token_usage=None,
             )
             yield _sse_data({"type": "complete", "data": response.model_dump(mode="json")})
         except Exception as e:
-            logger.error("Resume analysis failed for thread %s: %s", thread_id, e, exc_info=True)
-            yield _sse_data({"type": "error", "message": "Failed to analyze resume. Please try again."})
+            logger.error("Resume batch failed for thread %s: %s", thread_id, e, exc_info=True)
+            yield _sse_data({"type": "error", "message": "Failed to process resumes. Please try again."})
         finally:
             yield "data: [DONE]\n\n"
 
@@ -2358,6 +2425,7 @@ async def send_message_stream(
                 msg_dicts, thread["current_state"], company_context=ctx,
                 slide_index=body.slide_index, context_summary=context_summary,
                 payer_mode_prompt=stream_payer_prompt,
+                model_override=body.model,
             )
             _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 

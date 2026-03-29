@@ -102,9 +102,9 @@ export function removePresentationImage(threadId: string, url: string) {
 
 // ── Resume upload ──
 
-export function uploadResume(
+export function uploadResumes(
   threadId: string,
-  file: File,
+  files: File[],
   callbacks: {
     onEvent: (event: MWStreamEvent) => void
     onComplete: (data: MWSendResponse) => void
@@ -112,12 +112,12 @@ export function uploadResume(
   },
 ): AbortController {
   const ctrl = new AbortController()
-  const timeout = setTimeout(() => ctrl.abort('timeout'), 120_000)
+  const timeout = setTimeout(() => ctrl.abort('timeout'), 300_000) // 5 min for large batches
 
   ;(async () => {
     const token = await ensureFreshToken()
     const form = new FormData()
-    form.append('file', file)
+    files.forEach((f) => form.append('files', f))
 
     fetch(`${BASE}/matcha-work/threads/${threadId}/resume/upload`, {
       method: 'POST',
@@ -206,7 +206,7 @@ export function sendMessageStream(
     onComplete: (data: MWSendResponse) => void
     onError: (err: string) => void
   },
-  options?: { slide_index?: number },
+  options?: { slide_index?: number; model?: string },
 ): AbortController {
   const ctrl = new AbortController()
   const timeout = setTimeout(() => ctrl.abort('timeout'), 90_000)

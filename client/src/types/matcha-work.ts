@@ -7,6 +7,26 @@ export type MWTaskType =
   | 'presentation'
   | 'handbook'
   | 'policy'
+  | 'resume_batch'
+
+export interface ResumeCandidate {
+  id: string
+  filename: string
+  resume_url: string | null
+  name: string | null
+  email: string | null
+  phone: string | null
+  location: string | null
+  current_title: string | null
+  experience_years: number | null
+  skills: string[] | null
+  education: string | null
+  certifications: string[] | null
+  summary: string | null
+  strengths: string[] | null
+  flags: string[] | null
+  status: string
+}
 
 export interface PresentationSlide {
   title: string

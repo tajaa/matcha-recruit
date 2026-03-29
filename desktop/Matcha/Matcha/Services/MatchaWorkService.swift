@@ -219,6 +219,59 @@ class MatchaWorkService {
         return images
     }
 
+    // MARK: - Mode Toggles
+
+    func setNodeMode(threadId: String, enabled: Bool) async throws -> MWThread {
+        let body = MWNodeModeRequest(nodeMode: enabled)
+        let thread: MWThread = try await client.request(
+            method: "POST",
+            path: "\(basePath)/threads/\(threadId)/node-mode",
+            body: body
+        )
+        invalidateThread(threadId: threadId)
+        return thread
+    }
+
+    func setComplianceMode(threadId: String, enabled: Bool) async throws -> MWThread {
+        let body = MWComplianceModeRequest(complianceMode: enabled)
+        let thread: MWThread = try await client.request(
+            method: "POST",
+            path: "\(basePath)/threads/\(threadId)/compliance-mode",
+            body: body
+        )
+        invalidateThread(threadId: threadId)
+        return thread
+    }
+
+    func setPayerMode(threadId: String, enabled: Bool) async throws -> MWThread {
+        let body = MWPayerModeRequest(payerMode: enabled)
+        let thread: MWThread = try await client.request(
+            method: "POST",
+            path: "\(basePath)/threads/\(threadId)/payer-mode",
+            body: body
+        )
+        invalidateThread(threadId: threadId)
+        return thread
+    }
+
+    // MARK: - Title & Archive
+
+    func updateTitle(threadId: String, title: String) async throws -> MWThread {
+        let body = MWUpdateTitleRequest(title: title)
+        let thread: MWThread = try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/threads/\(threadId)",
+            body: body
+        )
+        invalidateThread(threadId: threadId)
+        return thread
+    }
+
+    func archiveThread(id: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/threads/\(id)")
+        invalidateThread(threadId: id)
+    }
+
     func removeImage(threadId: String, imageUrl: String) async throws -> [String] {
         let encoded = imageUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? imageUrl
         let path = "\(basePath)/threads/\(threadId)/images?url=\(encoded)"

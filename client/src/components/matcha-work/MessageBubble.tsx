@@ -54,8 +54,18 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode 
               : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
         }`}
       >
-        {m.role === 'user' && m.content.startsWith('[Resume uploaded:') ? (
+        {m.role === 'user' && (m.content.startsWith('[Resume uploaded:') || m.content.startsWith('[Resume batch:')) ? (
           (() => {
+            if (m.content.startsWith('[Resume batch:')) {
+              const countMatch = m.content.match(/\[Resume batch: (\d+) files?\]/)
+              const count = countMatch?.[1] ?? '?'
+              return (
+                <div className={`flex items-center gap-2 ${lm ? 'text-emerald-700' : 'text-emerald-300'}`}>
+                  <FileText size={16} className="shrink-0" />
+                  <span>Uploaded <strong>{count} resumes</strong></span>
+                </div>
+              )
+            }
             const filename = m.content.match(/\[Resume uploaded: (.+?)\]/)?.[1] ?? 'resume'
             return (
               <div className={`flex items-center gap-2 ${lm ? 'text-emerald-700' : 'text-emerald-300'}`}>

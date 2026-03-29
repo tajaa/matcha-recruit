@@ -45,7 +45,7 @@ HANDBOOK_FIELDS = [
 POLICY_FIELDS = list(PolicyDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "none"}
+SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -295,6 +295,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "policy"
     if "sections" in current_state or "workbook_title" in current_state:
         return "workbook"
+    if "candidates" in current_state:
+        return "resume_batch"
     if any(k in current_state for k in ("employees", "batch_status")):
         return "onboarding"
     if any(k in current_state for k in ("presentation_title", "slides")):
@@ -302,7 +304,15 @@ def _infer_skill_from_state(current_state: dict) -> str:
     return "chat"
 
 
-async def _get_model(settings) -> str:
+SUPPORTED_MODELS = {
+    "gemini-3.1-flash-lite-preview",
+    "gemini-3-flash-preview",
+    "gemini-3.1-pro-preview",
+}
+
+async def _get_model(settings, model_override: str | None = None) -> str:
+    if model_override and model_override in SUPPORTED_MODELS:
+        return model_override
     mode = await get_matcha_work_model_mode()
     if mode == "heavy":
         return "gemini-3.1-pro-preview"
@@ -331,6 +341,7 @@ class MatchaWorkAIProvider:
         current_state: dict,
         company_context: str = "",
         slide_index: Optional[int] = None,
+        model_override: Optional[str] = None,
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -364,6 +375,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         slide_index: Optional[int] = None,
         context_summary: Optional[str] = None,
         payer_mode_prompt: Optional[str] = None,
+        model_override: Optional[str] = None,
     ) -> AIResponse:
         if payer_mode_prompt:
             # Payer mode: dedicated medical policy prompt, plain text response (no JSON)
@@ -381,7 +393,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             if context_summary:
                 full_prompt += f"\n\nPrior conversation summary:\n{context_summary}"
 
-            model = await _get_model(self.settings)
+            model = await _get_model(self.settings, model_override)
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -409,7 +421,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             messages, current_state, company_context=company_context, slide_index=slide_index,
             context_summary=context_summary,
         )
-        model = await _get_model(self.settings)
+        model = await _get_model(self.settings, model_override)
 
         try:
             response = await asyncio.wait_for(

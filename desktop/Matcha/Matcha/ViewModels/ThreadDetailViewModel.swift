@@ -15,6 +15,7 @@ class ThreadDetailViewModel {
     var tokenUsage: MWTokenUsage?
     var errorMessage: String?
     var selectedSlideIndex: Int?
+    var togglingMode: String?
     private var streamingTask: Task<Void, Never>?
 
     var currentTaskType: MWTaskType {
@@ -287,6 +288,47 @@ class ThreadDetailViewModel {
         do {
             _ = try await service.finalizeThread(id: threadId)
             await reloadThreadData(id: threadId, forceRefresh: true)
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    // MARK: - Mode Toggles
+
+    func toggleMode(_ mode: String) async {
+        guard let threadId = thread?.id, togglingMode == nil else { return }
+        await MainActor.run { togglingMode = mode }
+        do {
+            let updated: MWThread
+            switch mode {
+            case "node":
+                updated = try await service.setNodeMode(threadId: threadId, enabled: !(thread?.nodeMode ?? false))
+            case "compliance":
+                updated = try await service.setComplianceMode(threadId: threadId, enabled: !(thread?.complianceMode ?? false))
+            case "payer":
+                updated = try await service.setPayerMode(threadId: threadId, enabled: !(thread?.payerMode ?? false))
+            default:
+                return
+            }
+            await MainActor.run {
+                thread = updated
+                togglingMode = nil
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                togglingMode = nil
+            }
+        }
+    }
+
+    // MARK: - Title Update
+
+    func updateTitle(_ newTitle: String) async {
+        guard let threadId = thread?.id else { return }
+        do {
+            let updated = try await service.updateTitle(threadId: threadId, title: newTitle)
+            await MainActor.run { thread = updated }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
