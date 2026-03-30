@@ -2400,38 +2400,142 @@ async def export_project(
 
     if fmt == "pdf":
         import html as _html
-        try:
-            import markdown as _md
-        except ImportError:
-            _md = None
+        import markdown as _md
 
         sections_html = []
-        for s in sections:
-            heading = f"<h2>{_html.escape(s.get('title') or '')}</h2>" if s.get("title") else ""
+        for idx, s in enumerate(sections):
+            heading = ""
+            if s.get("title"):
+                heading = f'<h2><span class="section-num">{idx + 1}.</span> {_html.escape(s["title"])}</h2>'
             content = s.get("content", "")
-            if _md:
-                content_html = _md.markdown(content, extensions=["tables", "fenced_code"])
-            else:
-                content_html = f"<pre>{_html.escape(content)}</pre>"
-            sections_html.append(f"{heading}\n{content_html}")
+            content_html = _md.markdown(content, extensions=["tables", "fenced_code", "nl2br"])
+            sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
 
-        body_html = "\n<hr>\n".join(sections_html)
+        body_html = "\n".join(sections_html)
         full_html = f"""<!DOCTYPE html>
 <html><head><meta charset="UTF-8">
 <style>
-body {{ font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; line-height: 1.7; color: #1a1a1a; max-width: 800px; margin: 40px auto; padding: 0 20px; }}
-h1 {{ font-size: 28px; border-bottom: 2px solid #22c55e; padding-bottom: 8px; }}
-h2 {{ font-size: 20px; color: #334155; margin-top: 32px; }}
-hr {{ border: none; border-top: 1px solid #e5e7eb; margin: 24px 0; }}
-pre {{ background: #f8fafc; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }}
-code {{ background: #f1f5f9; padding: 2px 6px; border-radius: 3px; font-size: 13px; }}
-table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
-th, td {{ border: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; }}
-th {{ background: #f8fafc; }}
+  @page {{ size: A4; margin: 50px 60px; }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.6;
+    color: #1a1a1a;
+    margin: 0;
+  }}
+  h1 {{
+    font-size: 22pt;
+    font-weight: 700;
+    color: #0f172a;
+    margin: 0 0 6px 0;
+    letter-spacing: -0.5px;
+  }}
+  .subtitle {{
+    font-size: 9pt;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 20px;
+  }}
+  .title-rule {{
+    border: none;
+    border-top: 3px solid #22c55e;
+    margin: 0 0 30px 0;
+  }}
+  h2 {{
+    font-size: 14pt;
+    font-weight: 600;
+    color: #0f172a;
+    margin: 28px 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e2e8f0;
+  }}
+  .section-num {{
+    color: #22c55e;
+    font-weight: 700;
+  }}
+  .section-body {{
+    margin-bottom: 16px;
+  }}
+  .section-body p {{
+    margin: 6px 0;
+    color: #334155;
+  }}
+  .section-body ul, .section-body ol {{
+    margin: 6px 0;
+    padding-left: 22px;
+    color: #334155;
+  }}
+  .section-body li {{
+    margin: 3px 0;
+  }}
+  .section-body strong {{
+    color: #0f172a;
+  }}
+  .section-body em {{
+    color: #475569;
+  }}
+  pre {{
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-size: 9pt;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+    color: #334155;
+  }}
+  code {{
+    background: #f1f5f9;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 9pt;
+    font-family: 'SF Mono', 'Menlo', monospace;
+    color: #b45309;
+  }}
+  table {{
+    border-collapse: collapse;
+    width: 100%;
+    margin: 12px 0;
+    font-size: 9.5pt;
+  }}
+  th, td {{
+    border: 1px solid #e2e8f0;
+    padding: 6px 10px;
+    text-align: left;
+  }}
+  th {{
+    background: #f8fafc;
+    font-weight: 600;
+    color: #0f172a;
+  }}
+  blockquote {{
+    border-left: 3px solid #22c55e;
+    margin: 12px 0;
+    padding: 8px 16px;
+    background: #f0fdf4;
+    color: #334155;
+  }}
+  a {{
+    color: #2563eb;
+    text-decoration: none;
+  }}
+  .footer {{
+    margin-top: 40px;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+    font-size: 8pt;
+    color: #94a3b8;
+    text-align: center;
+  }}
 </style>
 </head><body>
 <h1>{_html.escape(title)}</h1>
+<hr class="title-rule">
 {body_html}
+<div class="footer">Generated with Matcha Work</div>
 </body></html>"""
 
         try:
