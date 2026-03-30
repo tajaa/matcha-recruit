@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, X, FileText, Users, Video, Star } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, X, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
 import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
@@ -302,6 +302,15 @@ export default function ProjectView() {
             <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: '#6a737d', background: '#2a2d2e' }}>
               {activeThread.title}
             </span>
+          )}
+          {project.project_type === 'recruiting' && (
+            <button
+              onClick={() => { setWizardStep(0); setShowWizard(true) }}
+              title="How it works"
+              className="ml-auto p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
+            >
+              <HelpCircle size={14} />
+            </button>
           )}
         </div>
 
