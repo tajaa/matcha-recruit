@@ -2819,6 +2819,100 @@ async def upload_thread_inventory(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+# ── Agent endpoints (email) ──
+
+
+@router.get("/agent/email/status")
+async def agent_email_status(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Check if Gmail is connected."""
+    from ..services.gmail_service import get_gmail_service
+    gmail = get_gmail_service()
+    return await gmail.get_status()
+
+
+@router.post("/agent/email/fetch")
+async def agent_email_fetch(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Fetch unread emails."""
+    from ..services.gmail_service import get_gmail_service
+    gmail = get_gmail_service()
+    if not gmail.is_configured:
+        raise HTTPException(status_code=400, detail="Gmail not connected")
+    emails = await gmail.fetch_unread(max_results=25)
+    return {"emails": emails}
+
+
+@router.post("/agent/email/draft")
+async def agent_email_draft(
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Draft a reply to an email using AI."""
+    from ..services.gmail_service import get_gmail_service
+    gmail = get_gmail_service()
+    if not gmail.is_configured:
+        raise HTTPException(status_code=400, detail="Gmail not connected")
+
+    email_id = body.get("email_id")
+    instructions = body.get("instructions", "Write a helpful, concise reply.")
+    if not email_id:
+        raise HTTPException(status_code=400, detail="email_id is required")
+
+    email = await gmail.get_message(email_id)
+
+    # Generate reply with Gemini
+    ai_provider = get_ai_provider()
+    prompt = (
+        f"Draft a professional reply to this email. Return ONLY the reply body text, no subject line.\n"
+        f"Instructions: {instructions}\n\n"
+        f"Original email:\nFrom: {email['from']}\nSubject: {email['subject']}\nBody:\n{email['body'][:3000]}"
+    )
+    ai_resp = await ai_provider.generate(
+        [{"role": "user", "content": prompt}], {}, company_context=""
+    )
+    draft_body = ai_resp.assistant_reply
+
+    result = await gmail.create_draft(
+        to=email["from"],
+        subject=f"Re: {email['subject']}" if not email["subject"].startswith("Re:") else email["subject"],
+        body=draft_body,
+        reply_to_id=email_id,
+    )
+
+    return {
+        "draft_id": result.get("id"),
+        "to": email["from"],
+        "subject": email["subject"],
+        "body": draft_body,
+    }
+
+
+@router.post("/agent/email/send")
+async def agent_email_send(
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Send an email via Gmail."""
+    from ..services.gmail_service import get_gmail_service
+    gmail = get_gmail_service()
+    if not gmail.is_configured:
+        raise HTTPException(status_code=400, detail="Gmail not connected")
+
+    to = body.get("to")
+    subject = body.get("subject")
+    email_body = body.get("body")
+    reply_to_id = body.get("reply_to_id")
+
+    if not all([to, subject, email_body]):
+        raise HTTPException(status_code=400, detail="to, subject, and body are required")
+
+    result = await gmail.send_email(to=to, subject=subject, body=email_body, reply_to_id=reply_to_id)
+    return {"message_id": result.get("id"), "to": to, "subject": subject}
+
+
 @router.get("/threads", response_model=list[ThreadListItem])
 async def list_threads(
     status: Optional[str] = Query(None, pattern="^(active|finalized|archived)$"),

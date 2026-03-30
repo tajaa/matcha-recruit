@@ -34,6 +34,14 @@ export interface ResumeCandidate {
   interview_summary?: string | null
 }
 
+export interface AgentEmail {
+  id: string
+  subject: string
+  from: string
+  date: string
+  body: string
+}
+
 export interface ProjectSection {
   id: string
   title: string | null

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip, Bot } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
@@ -10,6 +10,7 @@ import PresentationPanel from '../../components/matcha-work/PresentationPanel'
 import ResumeBatchPanel from '../../components/matcha-work/ResumeBatchPanel'
 import InventoryPanel from '../../components/matcha-work/InventoryPanel'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
+import AgentPanel from '../../components/matcha-work/AgentPanel'
 
 const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 const RESUME_MAX_SIZE = 10 * 1024 * 1024
@@ -46,6 +47,9 @@ export default function MatchaWorkThread() {
   const [lightMode, setLightMode] = useState(() => localStorage.getItem('mw-chat-theme') === 'light')
   const [error, setError] = useState('')
   const [pdfUrl, setPdfUrl] = useState<string | null>(null)
+
+  // Agent mode (local toggle, no backend persistence)
+  const [agentMode, setAgentMode] = useState(false)
 
   // Model selector
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3-flash-preview')
@@ -415,7 +419,7 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`flex flex-col ${pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
+      <div className={`flex flex-col ${pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || agentMode ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
         {/* Header */}
         <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
           <Link to="/work" className={`${th.backArrow} transition-colors`}>
@@ -499,6 +503,20 @@ export default function MatchaWorkThread() {
           >
             <Stethoscope size={12} />
             Payer
+          </button>
+
+          <button
+            onClick={() => setAgentMode(!agentMode)}
+            title={agentMode ? 'Agent ON — email inbox and AI drafting' : 'Agent OFF — click to open email agent'}
+            className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors ${
+              agentMode
+                ? 'text-white hover:bg-orange-500'
+                : th.modeOff
+            }`}
+            style={agentMode ? { background: '#ce9178' } : {}}
+          >
+            <Bot size={12} />
+            Agent
           </button>
 
           <select
@@ -728,8 +746,13 @@ export default function MatchaWorkThread() {
         />
       )}
 
+      {/* Agent panel */}
+      {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && (
+        <AgentPanel lightMode={lightMode} />
+      )}
+
       {/* PDF preview panel (offer letters, etc.) */}
-      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && (
+      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !agentMode && (
         <div className="hidden md:block md:w-1/2 bg-zinc-900">
           <iframe
             src={pdfUrl}
