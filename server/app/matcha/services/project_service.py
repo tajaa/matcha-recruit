@@ -225,45 +225,54 @@ async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID,
 
 
 async def update_project_data(project_id: UUID, updates: dict) -> dict:
-    """Merge updates into project_data JSONB."""
+    """Merge updates into project_data JSONB with row lock."""
     async with get_connection() as conn:
-        current = await conn.fetchval("SELECT project_data FROM mw_projects WHERE id = $1", project_id)
-        data = json.loads(current) if isinstance(current, str) else (current or {})
-        data.update(updates)
-        row = await conn.fetchrow(
-            "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
-            json.dumps(data), project_id,
-        )
-    return _parse_project(row)
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+            )
+            data = row["project_data"] if isinstance(row["project_data"], dict) else json.loads(row["project_data"] or "{}")
+            data.update(updates)
+            result = await conn.fetchrow(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+                json.dumps(data), project_id,
+            )
+    return _parse_project(result)
 
 
 async def add_candidates_to_project(project_id: UUID, new_candidates: list[dict]) -> dict:
-    """Append candidates to project_data.candidates."""
+    """Append candidates to project_data.candidates with row lock."""
     async with get_connection() as conn:
-        current = await conn.fetchval("SELECT project_data FROM mw_projects WHERE id = $1", project_id)
-        data = json.loads(current) if isinstance(current, str) else (current or {})
-        existing = data.get("candidates") or []
-        data["candidates"] = existing + new_candidates
-        row = await conn.fetchrow(
-            "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
-            json.dumps(data), project_id,
-        )
-    return _parse_project(row)
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+            )
+            data = row["project_data"] if isinstance(row["project_data"], dict) else json.loads(row["project_data"] or "{}")
+            existing = data.get("candidates") or []
+            data["candidates"] = existing + new_candidates
+            result = await conn.fetchrow(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+                json.dumps(data), project_id,
+            )
+    return _parse_project(result)
 
 
 async def toggle_shortlist(project_id: UUID, candidate_id: str) -> dict:
-    """Add or remove a candidate from the shortlist."""
+    """Add or remove a candidate from the shortlist with row lock."""
     async with get_connection() as conn:
-        current = await conn.fetchval("SELECT project_data FROM mw_projects WHERE id = $1", project_id)
-        data = json.loads(current) if isinstance(current, str) else (current or {})
-        shortlist = set(data.get("shortlist_ids") or [])
-        if candidate_id in shortlist:
-            shortlist.discard(candidate_id)
-        else:
-            shortlist.add(candidate_id)
-        data["shortlist_ids"] = list(shortlist)
-        row = await conn.fetchrow(
-            "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
-            json.dumps(data), project_id,
-        )
-    return _parse_project(row)
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+            )
+            data = row["project_data"] if isinstance(row["project_data"], dict) else json.loads(row["project_data"] or "{}")
+            shortlist = set(data.get("shortlist_ids") or [])
+            if candidate_id in shortlist:
+                shortlist.discard(candidate_id)
+            else:
+                shortlist.add(candidate_id)
+            data["shortlist_ids"] = list(shortlist)
+            result = await conn.fetchrow(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+                json.dumps(data), project_id,
+            )
+    return _parse_project(result)

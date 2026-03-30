@@ -2296,6 +2296,10 @@ async def update_project_endpoint(
 ):
     """Update project title, pin, or status."""
     from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    project = await proj_svc.get_project(project_id, company_id) if company_id else None
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     return await proj_svc.update_project(project_id, body)
 
 
@@ -2306,6 +2310,10 @@ async def archive_project_endpoint(
 ):
     """Archive a project."""
     from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    project = await proj_svc.get_project(project_id, company_id) if company_id else None
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     await proj_svc.archive_project(project_id)
     return {"status": "archived"}
 
@@ -2380,6 +2388,9 @@ async def update_project_posting(
 ):
     """Update the job posting data for a recruiting project."""
     from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    if not company_id or not await proj_svc.get_project(project_id, company_id):
+        raise HTTPException(status_code=404, detail="Project not found")
     return await proj_svc.update_project_data(project_id, {"posting": body})
 
 
@@ -2391,6 +2402,9 @@ async def toggle_project_shortlist(
 ):
     """Toggle a candidate on/off the shortlist."""
     from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    if not company_id or not await proj_svc.get_project(project_id, company_id):
+        raise HTTPException(status_code=404, detail="Project not found")
     return await proj_svc.toggle_shortlist(project_id, candidate_id)
 
 
@@ -2405,6 +2419,9 @@ async def upload_project_resumes(
 
     company_id = await get_client_company_id(current_user)
     if company_id is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = await proj_svc.get_project(project_id, company_id)
+    if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Validate files
