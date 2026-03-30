@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, ImagePlus } from 'lucide-react'
+import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2 } from 'lucide-react'
 import type { ProjectSection } from '../../types/matcha-work'
 import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage } from '../../api/matchaWork'
+import SectionEditor from './SectionEditor'
 
 interface ProjectPanelProps {
   state: Record<string, unknown>
@@ -11,41 +12,55 @@ interface ProjectPanelProps {
   onStateUpdate: (state: Record<string, unknown>, version: number) => void
 }
 
-/** Strip common markdown syntax so users see clean plain text. */
-function stripMarkdown(text: string): string {
-  return text
-    // Bold: **text** or __text__
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/__(.+?)__/g, '$1')
-    // Italic: *text* or _text_
-    .replace(/(?<!\w)\*(.+?)\*(?!\w)/g, '$1')
-    .replace(/(?<!\w)_(.+?)_(?!\w)/g, '$1')
-    // Headings: ## text
-    .replace(/^#{1,6}\s+/gm, '')
-    // Inline code: `text`
-    .replace(/`(.+?)`/g, '$1')
-    // Links: [text](url) → text
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    // Images: ![alt](url) → (keep as-is for now)
-    // Bullet markers: - text or * text → • text
-    .replace(/^[\s]*[-*]\s+/gm, '• ')
-    // Numbered list cleanup (keep numbers)
-    // Horizontal rules
-    .replace(/^---+$/gm, '')
-    .replace(/^\*\*\*+$/gm, '')
-    // Blockquotes: > text → text
-    .replace(/^>\s*/gm, '')
-    .trim()
+/** Convert markdown to simple HTML for TipTap initialization */
+function markdownToHtml(md: string): string {
+  let html = md
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/__(.+?)__/g, '<strong>$1</strong>')
+    .replace(/(?<!\w)\*(.+?)\*(?!\w)/g, '<em>$1</em>')
+    .replace(/(?<!\w)_(.+?)_(?!\w)/g, '<em>$1</em>')
+    .replace(/^#{2}\s+(.+)$/gm, '<h2>$1</h2>')
+    .replace(/^#{3}\s+(.+)$/gm, '<h3>$1</h3>')
+    .replace(/^#{1}\s+(.+)$/gm, '<h2>$1</h2>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/^---+$/gm, '<hr>')
+    .replace(/^>\s*(.+)$/gm, '<blockquote>$1</blockquote>')
+
+  // Convert bullet lists (- or *)
+  const lines = html.split('\n')
+  const result: string[] = []
+  let inUl = false
+  let inOl = false
+  for (const line of lines) {
+    const bulletMatch = line.match(/^[\s]*[-*]\s+(.+)/)
+    const numMatch = line.match(/^[\s]*\d+\.\s+(.+)/)
+    if (bulletMatch) {
+      if (!inUl) { result.push('<ul>'); inUl = true }
+      result.push(`<li>${bulletMatch[1]}</li>`)
+    } else if (numMatch) {
+      if (!inOl) { result.push('<ol>'); inOl = true }
+      result.push(`<li>${numMatch[1]}</li>`)
+    } else {
+      if (inUl) { result.push('</ul>'); inUl = false }
+      if (inOl) { result.push('</ol>'); inOl = false }
+      if (line.trim() && !line.startsWith('<h') && !line.startsWith('<hr') && !line.startsWith('<blockquote')) {
+        result.push(`<p>${line}</p>`)
+      } else {
+        result.push(line)
+      }
+    }
+  }
+  if (inUl) result.push('</ul>')
+  if (inOl) result.push('</ol>')
+
+  return result.join('\n')
 }
 
 export default function ProjectPanel({ state, threadId, streaming, onStateUpdate }: ProjectPanelProps) {
   const title = (state.project_title as string) ?? 'Untitled Project'
   const sections = (state.project_sections as ProjectSection[]) ?? []
 
-  // Per-section local content — always editable, no read/edit toggle
-  const [localContent, setLocalContent] = useState<Record<string, string>>({})
-  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
-  const [activeSection, setActiveSection] = useState<string | null>(null) // which section shows toolbar
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(title)
   const [sectionTitleEditing, setSectionTitleEditing] = useState<string | null>(null)
@@ -53,28 +68,9 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
   const [showExport, setShowExport] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [saving, setSaving] = useState(false)
-  const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
-  const exportRef = useRef<HTMLDivElement>(null)
-  const imageInputRef = useRef<HTMLInputElement>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
-
-  // Sync local content when sections change from server (new section added, etc.)
-  useEffect(() => {
-    setLocalContent((prev) => {
-      const next = { ...prev }
-      for (const s of sections) {
-        if (!(s.id in next)) next[s.id] = stripMarkdown(s.content)
-      }
-      return next
-    })
-  }, [sections])
-
-  // Auto-resize all visible textareas
-  useEffect(() => {
-    for (const ta of Object.values(textareaRefs.current)) {
-      if (ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px' }
-    }
-  }, [localContent])
+  const exportRef = useRef<HTMLDivElement>(null)
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -84,12 +80,10 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
-  function updateSectionContent(sectionId: string, content: string) {
-    setLocalContent((prev) => ({ ...prev, [sectionId]: content }))
-    // Debounce save — 1 second after last keystroke
+  function handleSectionContentUpdate(sectionId: string, html: string) {
     clearTimeout(saveTimers.current[sectionId])
     saveTimers.current[sectionId] = setTimeout(() => {
-      flushSave(sectionId, content)
+      flushSave(sectionId, html)
     }, 1000)
   }
 
@@ -131,26 +125,19 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
     try {
       const result = await addProjectSection(threadId, { content: '', title: 'New Section' })
       onStateUpdate(result.current_state, result.version)
-      setActiveSection(result.section.id)
     } catch {}
   }
 
-  async function handleImageUpload(file: File) {
-    if (!file.type.startsWith('image/') || !activeSection) return
+  async function handleImageUpload(file: File): Promise<string | null> {
     setUploadingImage(true)
     try {
-      const { url, filename } = await uploadProjectImage(threadId, file)
-      const tag = `![${filename}](${url})`
-      const ta = textareaRefs.current[activeSection]
-      const current = localContent[activeSection] || ''
-      if (ta) {
-        const pos = ta.selectionStart
-        updateSectionContent(activeSection, current.slice(0, pos) + tag + current.slice(pos))
-      } else {
-        updateSectionContent(activeSection, current + '\n' + tag)
-      }
-    } catch {}
-    setUploadingImage(false)
+      const { url } = await uploadProjectImage(threadId, file)
+      return url
+    } catch {
+      return null
+    } finally {
+      setUploadingImage(false)
+    }
   }
 
   async function handleExport(fmt: 'pdf' | 'md' | 'docx') {
@@ -177,6 +164,16 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
       }
     } catch {}
     setExporting(false)
+  }
+
+  /** Convert section content to HTML for the editor — handles both raw markdown and HTML */
+  function sectionToHtml(s: ProjectSection): string {
+    const c = s.content
+    if (!c) return ''
+    // If it already looks like HTML, use as-is
+    if (c.startsWith('<') && (c.includes('</p>') || c.includes('</h') || c.includes('</ul>'))) return c
+    // Otherwise convert from markdown
+    return markdownToHtml(c)
   }
 
   return (
@@ -248,14 +245,11 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
           </div>
         )}
 
-        {sections.map((s, sIdx) => (
+        {sections.map((s) => (
           <div key={s.id} style={{ borderBottom: '1px solid #333' }}>
             {/* Section header */}
             <div className="flex items-center gap-1.5 px-4 py-1.5" style={{ background: '#252526' }}>
               <GripVertical size={12} className="shrink-0 cursor-grab" style={{ color: '#6a737d' }} />
-              <span style={{ color: '#ce9178', fontSize: '12px', fontWeight: 600, fontFamily: 'ui-monospace, monospace' }}>
-                ##
-              </span>
               {sectionTitleEditing === s.id ? (
                 <input
                   value={sectionTitleDraft}
@@ -264,13 +258,13 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
                   onKeyDown={(e) => { if (e.key === 'Enter') saveSectionTitle(s.id, sectionTitleDraft) }}
                   autoFocus
                   className="flex-1 text-xs font-semibold rounded px-1.5 py-0.5 border focus:outline-none"
-                  style={{ background: '#1e1e1e', color: '#e8e8e8', borderColor: '#555', fontFamily: 'ui-monospace, monospace' }}
+                  style={{ background: '#1e1e1e', color: '#e8e8e8', borderColor: '#555' }}
                 />
               ) : (
                 <span
                   onClick={() => { setSectionTitleEditing(s.id); setSectionTitleDraft(s.title || '') }}
                   className="flex-1 text-xs font-semibold truncate cursor-pointer"
-                  style={{ color: s.title ? '#e8e8e8' : '#6a737d', fontFamily: 'ui-monospace, monospace' }}
+                  style={{ color: s.title ? '#e8e8e8' : '#6a737d' }}
                 >
                   {s.title || 'Untitled section'}
                 </span>
@@ -284,46 +278,13 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
               </button>
             </div>
 
-            {/* Section content — always editable, plain text */}
-            <div className="px-4 py-2">
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0]
-                  if (f) handleImageUpload(f)
-                  e.target.value = ''
-                }}
-              />
-              <textarea
-                ref={(el) => { textareaRefs.current[s.id] = el }}
-                value={localContent[s.id] ?? s.content}
-                onChange={(e) => updateSectionContent(s.id, e.target.value)}
-                onFocus={() => setActiveSection(s.id)}
-                onPaste={(e) => {
-                  const items = e.clipboardData.items
-                  for (const item of items) {
-                    if (item.type.startsWith('image/')) {
-                      e.preventDefault()
-                      const file = item.getAsFile()
-                      if (file) handleImageUpload(file)
-                      return
-                    }
-                  }
-                }}
-                placeholder="Start typing..."
-                className="w-full text-xs rounded border p-2 focus:outline-none resize-none min-h-[60px]"
-                style={{
-                  background: '#1a1a1a',
-                  color: '#d4d4d4',
-                  borderColor: activeSection === s.id ? '#555' : '#333',
-                  fontFamily: 'ui-monospace, monospace',
-                  lineHeight: 1.65,
-                }}
-              />
-            </div>
+            {/* Rich text editor */}
+            <SectionEditor
+              content={sectionToHtml(s)}
+              onUpdate={(html) => handleSectionContentUpdate(s.id, html)}
+              onImageUpload={handleImageUpload}
+              uploadingImage={uploadingImage}
+            />
           </div>
         ))}
 
