@@ -12,7 +12,7 @@ from google.genai import types
 
 from ...config import get_settings
 from ...core.services.platform_settings import get_matcha_work_model_mode
-from ..models.matcha_work import HandbookDocument, OfferLetterDocument, OnboardingDocument, PolicyDocument, PresentationDocument, ReviewDocument, WorkbookDocument
+from ..models.matcha_work import HandbookDocument, OfferLetterDocument, OnboardingDocument, PolicyDocument, PresentationDocument, ProjectDocument, ReviewDocument, WorkbookDocument
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ HANDBOOK_FIELDS = [
     if field_name not in HANDBOOK_UPLOAD_MANAGED_FIELDS
 ]
 POLICY_FIELDS = list(PolicyDocument.model_fields.keys())
+PROJECT_FIELDS = list(ProjectDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
 SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "none"}
@@ -94,6 +95,11 @@ Supported skills:
 - offer_letter: create/update offer letter content, save_draft, send_draft, finalize
 - review: create/update anonymized review content, collect recipient_emails, send review requests, track responses
 - workbook: create/update HR workbook documents and section content, generate_presentation
+- project: create a project document for the user to build reports, plans, or briefs.
+  Use this when the user says "create a project", "start a project", "make a plan", "leadership plan", "research report", etc.
+  Fields: project_title (string), project_sections (array of {id, title, content}), project_status ("drafting").
+  The user will add content to the project from chat messages via the side panel. Just set the title and an empty sections array to initialize.
+  Do NOT confuse with workbook — projects are user-edited documents, not AI-generated workbooks.
 - presentation: create standalone slide decks, reports, or presentations that are NOT workbooks.
   Use this when the user asks for a "presentation", "report", "slide deck", "deck", or "slides".
   Fields: presentation_title (string), subtitle (string), theme (string: professional/minimal/bold),
@@ -610,9 +616,11 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields = HANDBOOK_FIELDS
         elif current_skill == "policy":
             valid_fields = POLICY_FIELDS
+        elif current_skill == "project":
+            valid_fields = PROJECT_FIELDS
         else:
             # No active skill yet — allow any skill to be initiated
-            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS + POLICY_FIELDS
+            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS + POLICY_FIELDS + PROJECT_FIELDS
 
         system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
             today=date.today().isoformat(),
