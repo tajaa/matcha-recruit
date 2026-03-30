@@ -2487,6 +2487,13 @@ async def export_project(
     color: #22c55e;
     font-weight: 700;
   }}
+  img {{
+    max-width: 100%;
+    height: auto;
+    page-break-inside: avoid;
+    margin: 12px 0;
+    border-radius: 4px;
+  }}
   .section-body {{
     margin-bottom: 16px;
   }}
