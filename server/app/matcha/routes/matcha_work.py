@@ -2224,6 +2224,23 @@ async def sync_resume_batch_interviews(
     return {"updated": updated}
 
 
+def _strip_markdown(text: str) -> str:
+    """Strip common markdown syntax to produce clean plain text for project sections."""
+    import re as _re
+    t = text
+    t = _re.sub(r'\*\*(.+?)\*\*', r'\1', t)       # **bold**
+    t = _re.sub(r'__(.+?)__', r'\1', t)             # __bold__
+    t = _re.sub(r'(?<!\w)\*(.+?)\*(?!\w)', r'\1', t)  # *italic*
+    t = _re.sub(r'(?<!\w)_(.+?)_(?!\w)', r'\1', t)    # _italic_
+    t = _re.sub(r'^#{1,6}\s+', '', t, flags=_re.MULTILINE)  # ## headings
+    t = _re.sub(r'`(.+?)`', r'\1', t)               # `code`
+    t = _re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', t) # [text](url) → text
+    t = _re.sub(r'^[\s]*[-*]\s+', '• ', t, flags=_re.MULTILINE)  # - list → • list
+    t = _re.sub(r'^---+$', '', t, flags=_re.MULTILINE)  # ---
+    t = _re.sub(r'^>\s*', '', t, flags=_re.MULTILINE)   # > blockquote
+    return t.strip()
+
+
 # ── Project endpoints ──
 
 
@@ -2266,10 +2283,15 @@ async def add_project_section(
     current_state = thread.get("current_state") or {}
     sections = list(current_state.get("project_sections") or [])
 
+    raw_content = body.get("content", "")
+    # Strip markdown when content comes from chat AI responses
+    if body.get("source_message_id"):
+        raw_content = _strip_markdown(raw_content)
+
     new_section = {
         "id": os.urandom(8).hex(),
         "title": body.get("title"),
-        "content": body.get("content", ""),
+        "content": raw_content,
         "source_message_id": body.get("source_message_id"),
     }
     sections.append(new_section)
