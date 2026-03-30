@@ -1,4 +1,4 @@
-# Policy Registry Expansion Plan
+4# Policy Registry Expansion Plan
 
 Current state: 7 groups, 59 categories, 483 keys, 396 seeded to DB.
 Target state: 10+ groups, ~80 categories, ~750+ keys, full penalty/risk metadata, international frameworks, dependency graph.
