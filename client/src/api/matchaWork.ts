@@ -235,8 +235,8 @@ export function listProjects(status?: string) {
   return api.get<import('../types/matcha-work').MWProject[]>(`/matcha-work/projects${qs}`)
 }
 
-export function createProjectNew(title: string) {
-  return api.post<import('../types/matcha-work').MWProject>('/matcha-work/projects', { title })
+export function createProjectNew(title: string, projectType: string = 'general') {
+  return api.post<import('../types/matcha-work').MWProject>('/matcha-work/projects', { title, project_type: projectType })
 }
 
 export function getProjectDetail(id: string) {

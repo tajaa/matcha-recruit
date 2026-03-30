@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Pin, Archive, Loader2, FolderOpen } from 'lucide-react'
+import { Plus, Pin, Archive, Loader2, FolderOpen, FileText, Presentation, Users, X } from 'lucide-react'
 import type { MWThread, MWProject } from '../../types/matcha-work'
 import { listThreads, createThread, pinThread, archiveThread, listProjects, createProjectNew } from '../../api/matchaWork'
 
@@ -23,6 +23,7 @@ export default function MatchaWorkList() {
   const [projects, setProjects] = useState<MWProject[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
+  const [showTypePicker, setShowTypePicker] = useState(false)
   const [tab, setTab] = useState<Tab>('all')
   const [error, setError] = useState('')
 
@@ -50,15 +51,31 @@ export default function MatchaWorkList() {
   const filtered = tab === 'pinned' ? threads.filter((t) => t.is_pinned) : threads
 
   async function handleCreate() {
+    if (tab === 'projects') {
+      setShowTypePicker(true)
+      return
+    }
     setCreating(true)
     try {
-      if (tab === 'projects') {
-        const res = await createProjectNew('Untitled Project')
-        navigate(`/work/projects/${res.id}`)
-      } else {
-        const res = await createThread()
-        navigate(`/work/${res.id}`)
-      }
+      const res = await createThread()
+      navigate(`/work/${res.id}`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create')
+      setCreating(false)
+    }
+  }
+
+  async function handleCreateProject(type: 'general' | 'presentation' | 'recruiting') {
+    setShowTypePicker(false)
+    setCreating(true)
+    const titles: Record<string, string> = {
+      general: 'New Project',
+      presentation: 'New Presentation',
+      recruiting: 'New Job Posting',
+    }
+    try {
+      const res = await createProjectNew(titles[type], type)
+      navigate(`/work/projects/${res.id}`)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to create')
       setCreating(false)
@@ -224,6 +241,39 @@ export default function MatchaWorkList() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {/* Project type picker modal */}
+      {showTypePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-sm mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-white font-semibold">New Project</h2>
+              <button onClick={() => setShowTypePicker(false)} className="text-zinc-500 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-zinc-400 text-sm mb-4">What kind of project?</p>
+            <div className="space-y-2">
+              {[
+                { type: 'general' as const, icon: FileText, label: 'Research / Report', desc: 'Build documents and plans from chat' },
+                { type: 'presentation' as const, icon: Presentation, label: 'Presentation', desc: 'Create slide decks and pitch materials' },
+                { type: 'recruiting' as const, icon: Users, label: 'Job Posting', desc: 'Recruiting pipeline with resumes and interviews' },
+              ].map((opt) => (
+                <button
+                  key={opt.type}
+                  onClick={() => handleCreateProject(opt.type)}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-zinc-700 hover:border-emerald-600 hover:bg-zinc-800/50 transition-colors text-left"
+                >
+                  <opt.icon size={20} className="text-emerald-500 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-white">{opt.label}</p>
+                    <p className="text-xs text-zinc-400">{opt.desc}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
