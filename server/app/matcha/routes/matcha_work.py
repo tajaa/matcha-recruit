@@ -2268,7 +2268,8 @@ async def create_project_endpoint(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
     title = body.get("title", "Untitled Project")
-    return await proj_svc.create_project(company_id, current_user.id, title)
+    project_type = body.get("project_type", "general")
+    return await proj_svc.create_project(company_id, current_user.id, title, project_type)
 
 
 @router.get("/projects/{project_id}")
@@ -2369,6 +2370,125 @@ async def create_project_chat_endpoint(
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
     return await proj_svc.create_project_chat(project_id, company_id, current_user.id, body.get("title"))
+
+
+@router.put("/projects/{project_id}/posting")
+async def update_project_posting(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update the job posting data for a recruiting project."""
+    from ..services import project_service as proj_svc
+    return await proj_svc.update_project_data(project_id, {"posting": body})
+
+
+@router.post("/projects/{project_id}/shortlist/{candidate_id}")
+async def toggle_project_shortlist(
+    project_id: UUID,
+    candidate_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Toggle a candidate on/off the shortlist."""
+    from ..services import project_service as proj_svc
+    return await proj_svc.toggle_shortlist(project_id, candidate_id)
+
+
+@router.post("/projects/{project_id}/resume/upload")
+async def upload_project_resumes(
+    project_id: UUID,
+    files: list[UploadFile] = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload resumes to a recruiting project — extract candidates into project_data."""
+    from ..services import project_service as proj_svc
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Validate files
+    parsed_files: list[tuple[str, bytes, str]] = []
+    for f in files:
+        fname = f.filename or "resume"
+        ext = os.path.splitext(fname)[1].lower()
+        if ext not in RESUME_UPLOAD_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"Unsupported file type: {fname}")
+        raw = await f.read()
+        if len(raw) > RESUME_UPLOAD_MAX_BYTES:
+            raise HTTPException(status_code=400, detail=f"File exceeds 10 MB limit: {fname}")
+        parsed_files.append((fname, raw, f.content_type or "application/octet-stream"))
+
+    async def event_stream():
+        try:
+            from google import genai as _genai
+            from google.genai import types as _types
+
+            api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
+            client = _genai.Client(api_key=api_key)
+            extract_model = "gemini-3.1-flash-lite-preview"
+            parser = ERDocumentParser()
+            new_candidates = []
+
+            for idx, (fname, raw, ct) in enumerate(parsed_files, 1):
+                yield _sse_data({"type": "status", "message": f"Extracting text from {fname} ({idx}/{len(parsed_files)})..."})
+                try:
+                    text, _ = parser.extract_text_from_bytes(raw, fname)
+                except Exception:
+                    continue
+                if not text or len(text.strip()) < 50:
+                    continue
+
+                yield _sse_data({"type": "status", "message": f"Analyzing {fname} ({idx}/{len(parsed_files)})..."})
+                capped = text[:RESUME_TEXT_CAP]
+                try:
+                    resp = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            lambda t=capped: client.models.generate_content(
+                                model=extract_model,
+                                contents=[_types.Content(role="user", parts=[_types.Part.from_text(text=RESUME_EXTRACT_PROMPT % t)])],
+                                config=_types.GenerateContentConfig(temperature=0.1),
+                            )
+                        ),
+                        timeout=60,
+                    )
+                    raw_json = (resp.text or "").strip()
+                    if raw_json.startswith("```"):
+                        raw_json = raw_json.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                    data = json.loads(raw_json)
+                    new_candidates.append({
+                        "id": os.urandom(8).hex(),
+                        "filename": fname,
+                        "name": data.get("name"),
+                        "email": data.get("email"),
+                        "phone": data.get("phone"),
+                        "location": data.get("location"),
+                        "current_title": data.get("current_title"),
+                        "experience_years": data.get("experience_years"),
+                        "skills": data.get("skills"),
+                        "education": data.get("education"),
+                        "certifications": data.get("certifications"),
+                        "summary": data.get("summary"),
+                        "strengths": data.get("strengths"),
+                        "flags": data.get("flags"),
+                        "status": "analyzed",
+                    })
+                except Exception as e:
+                    logger.warning("Resume extraction failed for %s: %s", fname, e)
+
+            if new_candidates:
+                yield _sse_data({"type": "status", "message": f"Adding {len(new_candidates)} candidates to project..."})
+                result = await proj_svc.add_candidates_to_project(project_id, new_candidates)
+                yield _sse_data({"type": "complete", "data": {"candidates_added": len(new_candidates), "project": result}})
+            else:
+                yield _sse_data({"type": "complete", "data": {"candidates_added": 0}})
+        except Exception as e:
+            logger.error("Project resume upload failed: %s", e, exc_info=True)
+            yield _sse_data({"type": "error", "message": "Failed to process resumes."})
+        finally:
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.get("/projects/{project_id}/export/{fmt}")

@@ -11,15 +11,15 @@ from ...database import get_connection
 logger = logging.getLogger(__name__)
 
 
-async def create_project(company_id: UUID, user_id: UUID, title: str = "Untitled Project") -> dict:
+async def create_project(company_id: UUID, user_id: UUID, title: str = "Untitled Project", project_type: str = "general") -> dict:
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            INSERT INTO mw_projects (company_id, created_by, title)
-            VALUES ($1, $2, $3)
-            RETURNING id, company_id, created_by, title, sections, status, is_pinned, version, created_at, updated_at
+            INSERT INTO mw_projects (company_id, created_by, title, project_type)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
             """,
-            company_id, user_id, title,
+            company_id, user_id, title, project_type,
         )
         # Auto-create a first chat in the project
         chat = await conn.fetchrow(
@@ -30,11 +30,22 @@ async def create_project(company_id: UUID, user_id: UUID, title: str = "Untitled
             """,
             company_id, user_id, "Chat 1", row["id"],
         )
-    project = dict(row)
-    project["sections"] = json.loads(project["sections"]) if isinstance(project["sections"], str) else project["sections"]
+    project = _parse_project(row)
     project["chats"] = [dict(chat)]
     project["chat_count"] = 1
     return project
+
+
+def _parse_project(row) -> dict:
+    """Convert a DB row to a project dict with parsed JSONB."""
+    d = dict(row)
+    for key in ("sections", "project_data"):
+        if key in d and isinstance(d[key], str):
+            d[key] = json.loads(d[key])
+        elif key not in d:
+            d[key] = [] if key == "sections" else {}
+    d.setdefault("project_type", "general")
+    return d
 
 
 async def get_project(project_id: UUID, company_id: UUID) -> Optional[dict]:
@@ -45,8 +56,7 @@ async def get_project(project_id: UUID, company_id: UUID) -> Optional[dict]:
         )
         if not row:
             return None
-        project = dict(row)
-        project["sections"] = json.loads(project["sections"]) if isinstance(project["sections"], str) else project["sections"]
+        project = _parse_project(row)
 
         chats = await conn.fetch(
             """
@@ -86,9 +96,7 @@ async def list_projects(company_id: UUID, status: Optional[str] = None) -> list[
             )
     results = []
     for r in rows:
-        d = dict(r)
-        d["sections"] = json.loads(d["sections"]) if isinstance(d["sections"], str) else d["sections"]
-        results.append(d)
+        results.append(_parse_project(r))
     return results
 
 
@@ -111,9 +119,7 @@ async def update_project(project_id: UUID, updates: dict) -> dict:
             f"UPDATE mw_projects SET {', '.join(sets)}, updated_at = NOW() WHERE id = ${idx} RETURNING *",
             *vals,
         )
-    result = dict(row)
-    result["sections"] = json.loads(result["sections"]) if isinstance(result["sections"], str) else result["sections"]
-    return result
+    return _parse_project(row)
 
 
 async def archive_project(project_id: UUID):
@@ -138,9 +144,7 @@ async def _update_sections(project_id: UUID, sections: list) -> dict:
             """,
             json.dumps(sections), project_id,
         )
-    result = dict(row)
-    result["sections"] = json.loads(result["sections"]) if isinstance(result["sections"], str) else result["sections"]
-    return result
+    return _parse_project(row)
 
 
 async def get_sections(project_id: UUID) -> list:
@@ -215,3 +219,51 @@ async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID,
             "UPDATE mw_projects SET updated_at = NOW() WHERE id = $1", project_id
         )
     return dict(row)
+
+
+# ── Recruiting-specific operations ──
+
+
+async def update_project_data(project_id: UUID, updates: dict) -> dict:
+    """Merge updates into project_data JSONB."""
+    async with get_connection() as conn:
+        current = await conn.fetchval("SELECT project_data FROM mw_projects WHERE id = $1", project_id)
+        data = json.loads(current) if isinstance(current, str) else (current or {})
+        data.update(updates)
+        row = await conn.fetchrow(
+            "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+            json.dumps(data), project_id,
+        )
+    return _parse_project(row)
+
+
+async def add_candidates_to_project(project_id: UUID, new_candidates: list[dict]) -> dict:
+    """Append candidates to project_data.candidates."""
+    async with get_connection() as conn:
+        current = await conn.fetchval("SELECT project_data FROM mw_projects WHERE id = $1", project_id)
+        data = json.loads(current) if isinstance(current, str) else (current or {})
+        existing = data.get("candidates") or []
+        data["candidates"] = existing + new_candidates
+        row = await conn.fetchrow(
+            "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+            json.dumps(data), project_id,
+        )
+    return _parse_project(row)
+
+
+async def toggle_shortlist(project_id: UUID, candidate_id: str) -> dict:
+    """Add or remove a candidate from the shortlist."""
+    async with get_connection() as conn:
+        current = await conn.fetchval("SELECT project_data FROM mw_projects WHERE id = $1", project_id)
+        data = json.loads(current) if isinstance(current, str) else (current or {})
+        shortlist = set(data.get("shortlist_ids") or [])
+        if candidate_id in shortlist:
+            shortlist.discard(candidate_id)
+        else:
+            shortlist.add(candidate_id)
+        data["shortlist_ids"] = list(shortlist)
+        row = await conn.fetchrow(
+            "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+            json.dumps(data), project_id,
+        )
+    return _parse_project(row)

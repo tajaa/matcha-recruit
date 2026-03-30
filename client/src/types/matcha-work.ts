@@ -34,10 +34,27 @@ export interface ResumeCandidate {
   interview_summary?: string | null
 }
 
+export interface RecruitingPosting {
+  title?: string
+  description?: string
+  requirements?: string
+  compensation?: string
+  location?: string
+  employment_type?: string
+}
+
+export interface RecruitingData {
+  posting?: RecruitingPosting
+  candidates?: ResumeCandidate[]
+  shortlist_ids?: string[]
+}
+
 export interface MWProject {
   id: string
   title: string
+  project_type: 'general' | 'presentation' | 'recruiting'
   sections: ProjectSection[]
+  project_data: RecruitingData | Record<string, unknown>
   status: string
   is_pinned: boolean
   version: number
