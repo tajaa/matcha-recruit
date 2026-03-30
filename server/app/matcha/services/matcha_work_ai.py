@@ -97,7 +97,7 @@ Supported skills:
 - workbook: create/update HR workbook documents and section content, generate_presentation
 - project: create a project document for the user to build reports, plans, or briefs.
   Use this when the user says "create a project", "start a project", "make a plan", "leadership plan", "research report", etc.
-  Fields: project_title (string), project_sections (array of {id, title, content}), project_status ("drafting").
+  Fields: project_title (string), project_sections (array of objects with id, title, content), project_status ("drafting").
   The user will add content to the project from chat messages via the side panel. Just set the title and an empty sections array to initialize.
   Do NOT confuse with workbook — projects are user-edited documents, not AI-generated workbooks.
 - presentation: create standalone slide decks, reports, or presentations that are NOT workbooks.
