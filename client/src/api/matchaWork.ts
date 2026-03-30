@@ -214,6 +214,12 @@ export async function sendCandidateInterviews(
   })
 }
 
+export async function syncInterviewStatuses(threadId: string) {
+  return api.post<{ updated: number }>(
+    `/matcha-work/threads/${threadId}/resume/sync-interviews`
+  )
+}
+
 // ── Inventory upload ──
 
 export function uploadInventory(

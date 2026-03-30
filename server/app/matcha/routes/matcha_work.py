@@ -2141,6 +2141,82 @@ async def send_resume_batch_interviews(
     return {"sent": sent, "failed": failed}
 
 
+@router.post("/threads/{thread_id}/resume/sync-interviews")
+async def sync_resume_batch_interviews(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Sync interview statuses back into the resume batch candidates."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    current_state = thread.get("current_state") or {}
+    candidates = current_state.get("candidates") or []
+
+    # Collect interview IDs from candidates
+    interview_ids = [c.get("interview_id") for c in candidates if c.get("interview_id")]
+    if not interview_ids:
+        return {"updated": 0}
+
+    # Fetch interview statuses + screening analysis
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, status, screening_analysis
+            FROM interviews
+            WHERE id = ANY($1::uuid[])
+            """,
+            interview_ids,
+        )
+
+    interview_map = {str(r["id"]): r for r in rows}
+    updated = 0
+    updated_candidates = list(candidates)
+
+    for idx, c in enumerate(updated_candidates):
+        iid = c.get("interview_id")
+        if not iid or iid not in interview_map:
+            continue
+        row = interview_map[iid]
+        new_status = c.get("status")
+        interview_status = row["status"]
+
+        if interview_status in ("completed", "analyzed") and c.get("status") != "interview_completed":
+            new_status = "interview_completed"
+        elif interview_status == "in_progress" and c.get("status") == "interview_sent":
+            new_status = "interview_in_progress"
+
+        # Extract score from screening_analysis if available
+        score = None
+        summary = None
+        analysis = row.get("screening_analysis")
+        if analysis:
+            if isinstance(analysis, str):
+                analysis = json.loads(analysis)
+            score = analysis.get("overall_score") or analysis.get("score")
+            summary = analysis.get("summary") or analysis.get("overall_assessment")
+
+        if new_status != c.get("status") or score or summary:
+            updated_candidates[idx] = {
+                **c,
+                "status": new_status,
+                "interview_status": interview_status,
+                "interview_score": score,
+                "interview_summary": summary,
+            }
+            updated += 1
+
+    if updated > 0:
+        await doc_svc.apply_update(thread_id, {"candidates": updated_candidates})
+
+    return {"updated": updated}
+
+
 INVENTORY_EXTRACT_PROMPT = """Extract inventory line items from this document (vendor invoice, inventory count, or order sheet).
 Return ONLY valid JSON — an array of items:
 [{"product_name":"...","sku":"...","category":"protein|produce|dairy|dry_goods|beverages|supplies|equipment|other","quantity":0,"unit":"case|lb|each|gal|oz|bag|box|doz|pack","unit_cost":0.00,"total_cost":0.00,"vendor":"..."}]

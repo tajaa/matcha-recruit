@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
-import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
@@ -658,12 +658,18 @@ export default function MatchaWorkThread() {
           onSendInterviews={async (ids, positionTitle) => {
             const result = await sendCandidateInterviews(threadId!, ids, positionTitle)
             if (result.sent.length > 0) {
-              // Refresh thread to get updated candidate statuses
               const refreshed = await getThread(threadId!)
               setThread(refreshed)
             }
             if (result.failed.length > 0) {
               setError(`Failed to send ${result.failed.length} interview(s): ${result.failed.map(f => f.error).join(', ')}`)
+            }
+          }}
+          onSyncInterviews={async () => {
+            const { updated } = await syncInterviewStatuses(threadId!)
+            if (updated > 0) {
+              const refreshed = await getThread(threadId!)
+              setThread(refreshed)
             }
           }}
         />

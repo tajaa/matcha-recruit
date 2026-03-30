@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Search, ChevronDown, ChevronUp, MapPin, Briefcase, AlertTriangle, CheckCircle2, Loader2, Send, Video, Square, CheckSquare } from 'lucide-react'
+import { Search, ChevronDown, ChevronUp, MapPin, Briefcase, AlertTriangle, CheckCircle2, Loader2, Send, Video, Square, CheckSquare, RefreshCw } from 'lucide-react'
 import type { ResumeCandidate } from '../../types/matcha-work'
 
 type SortKey = 'name' | 'experience_years' | 'current_title' | 'location'
@@ -10,9 +10,10 @@ interface ResumeBatchPanelProps {
   lightMode: boolean
   streaming: boolean
   onSendInterviews?: (candidateIds: string[], positionTitle?: string) => Promise<void>
+  onSyncInterviews?: () => Promise<void>
 }
 
-export default function ResumeBatchPanel({ state, lightMode, streaming, onSendInterviews }: ResumeBatchPanelProps) {
+export default function ResumeBatchPanel({ state, lightMode, streaming, onSendInterviews, onSyncInterviews }: ResumeBatchPanelProps) {
   const candidates = (state.candidates as ResumeCandidate[] | undefined) ?? []
   const totalCount = (state.total_count as number) ?? candidates.length
   const analyzedCount = (state.analyzed_count as number) ?? candidates.filter((c) => c.status === 'analyzed').length
@@ -41,6 +42,8 @@ export default function ResumeBatchPanel({ state, lightMode, streaming, onSendIn
     candidates.filter((c) => c.status === 'analyzed' && c.email).map((c) => c.id),
     [candidates]
   )
+
+  const hasInterviews = candidates.some((c) => c.interview_id)
 
   function toggleSelectAll() {
     if (selectedIds.size >= selectableIds.length) setSelectedIds(new Set())
@@ -137,6 +140,15 @@ export default function ResumeBatchPanel({ state, lightMode, streaming, onSendIn
             </p>
           </div>
           <div className="flex items-center gap-1.5">
+            {hasInterviews && onSyncInterviews && (
+              <button
+                onClick={onSyncInterviews}
+                title="Refresh interview statuses"
+                className={`p-1 rounded transition-colors ${th.sortBtn}`}
+              >
+                <RefreshCw size={12} />
+              </button>
+            )}
             {selectableIds.length > 0 && (
               <button
                 onClick={toggleSelectAll}
@@ -243,6 +255,16 @@ export default function ResumeBatchPanel({ state, lightMode, streaming, onSendIn
                         Interview Sent
                       </span>
                     )}
+                    {c.status === 'interview_in_progress' && (
+                      <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-amber-900/30 text-amber-400 border border-amber-700/40">
+                        In Progress
+                      </span>
+                    )}
+                    {c.status === 'interview_completed' && (
+                      <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-emerald-900/30 text-emerald-400 border border-emerald-700/40">
+                        Interviewed{c.interview_score != null ? ` · ${c.interview_score}%` : ''}
+                      </span>
+                    )}
                   </div>
                   <p className={`text-xs ${th.sub} truncate`}>
                     {c.current_title ?? 'N/A'}
@@ -306,6 +328,15 @@ export default function ResumeBatchPanel({ state, lightMode, streaming, onSendIn
                           <AlertTriangle size={10} className="inline mr-1" />{f}
                         </p>
                       ))}
+                    </div>
+                  )}
+                  {c.interview_summary && (
+                    <div className={`mt-1 pt-1 border-t border-dashed`} style={{ borderColor: lm ? '#e4e4e7' : '#27272a' }}>
+                      <p className={`text-[10px] font-medium mb-0.5 ${lm ? 'text-blue-600' : 'text-blue-400'}`}>
+                        <Video size={10} className="inline mr-1" />Interview Results
+                        {c.interview_score != null && ` — ${c.interview_score}%`}
+                      </p>
+                      <p className={`text-xs leading-relaxed ${th.sub}`}>{c.interview_summary}</p>
                     </div>
                   )}
                 </div>

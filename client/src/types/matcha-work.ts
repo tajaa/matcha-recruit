@@ -27,6 +27,10 @@ export interface ResumeCandidate {
   strengths: string[] | null
   flags: string[] | null
   status: string
+  interview_id?: string | null
+  interview_status?: string | null
+  interview_score?: number | null
+  interview_summary?: string | null
 }
 
 export interface InventoryItem {
