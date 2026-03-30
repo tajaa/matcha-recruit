@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, X, FileText, Users, Video, Star } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
 import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
@@ -18,6 +18,10 @@ export default function ProjectView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  // Recruiting wizard
+  const [showWizard, setShowWizard] = useState(false)
+  const [wizardStep, setWizardStep] = useState(0)
+
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -31,6 +35,14 @@ export default function ProjectView() {
         setProject(p)
         if (p.chats && p.chats.length > 0) {
           setActiveChatId(p.chats[0].id)
+        }
+        // Show wizard for new recruiting projects (no candidates yet)
+        if (p.project_type === 'recruiting') {
+          const data = p.project_data as Record<string, unknown>
+          const candidates = (data?.candidates as unknown[]) || []
+          if (candidates.length === 0 && !localStorage.getItem(`wizard-dismissed-${projectId}`)) {
+            setShowWizard(true)
+          }
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load project'))
@@ -133,6 +145,112 @@ export default function ProjectView() {
   }
 
   const chats = project.chats || []
+
+  const WIZARD_STEPS = [
+    {
+      icon: FileText,
+      title: 'Draft your job posting',
+      desc: 'Use the chat to describe the role. The AI will help you write a job description, requirements, and compensation details.',
+    },
+    {
+      icon: Users,
+      title: 'Upload candidate resumes',
+      desc: 'Drag and drop resume files (PDF, DOCX, TXT) into the chat. The AI extracts key candidate info automatically and adds them to your pipeline.',
+    },
+    {
+      icon: Star,
+      title: 'Review and shortlist',
+      desc: 'Browse candidates in the right panel. Star your top picks to build a shortlist. Search and sort by experience, skills, or location.',
+    },
+    {
+      icon: Video,
+      title: 'Send to AI interview',
+      desc: 'Select candidates and send them a Gemini Live voice interview. They get an email link — no account needed. Results sync back with scores and summaries.',
+    },
+  ]
+
+  function dismissWizard() {
+    setShowWizard(false)
+    if (projectId) localStorage.setItem(`wizard-dismissed-${projectId}`, '1')
+  }
+
+  if (showWizard) {
+    const step = WIZARD_STEPS[wizardStep]
+    const StepIcon = step.icon
+    const isLast = wizardStep === WIZARD_STEPS.length - 1
+
+    return (
+      <div className="flex items-center justify-center h-[calc(100vh-49px)]" style={{ background: '#1e1e1e' }}>
+        <div className="w-full max-w-md mx-4 rounded-xl border p-6" style={{ background: '#252526', borderColor: '#333' }}>
+          {/* Progress dots */}
+          <div className="flex items-center justify-center gap-2 mb-6">
+            {WIZARD_STEPS.map((_, i) => (
+              <div
+                key={i}
+                className="rounded-full transition-colors"
+                style={{
+                  width: i === wizardStep ? 24 : 8,
+                  height: 8,
+                  background: i === wizardStep ? '#ce9178' : i < wizardStep ? '#22c55e' : '#444',
+                  borderRadius: 4,
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Icon */}
+          <div className="flex justify-center mb-4">
+            <div className="p-3 rounded-full" style={{ background: '#ce9178' + '20' }}>
+              <StepIcon size={28} style={{ color: '#ce9178' }} />
+            </div>
+          </div>
+
+          {/* Content */}
+          <h2 className="text-center text-lg font-semibold mb-2" style={{ color: '#e8e8e8' }}>
+            {step.title}
+          </h2>
+          <p className="text-center text-sm leading-relaxed mb-6" style={{ color: '#9ca3af' }}>
+            {step.desc}
+          </p>
+
+          {/* Step indicator */}
+          <p className="text-center text-[10px] mb-4" style={{ color: '#6a737d' }}>
+            Step {wizardStep + 1} of {WIZARD_STEPS.length}
+          </p>
+
+          {/* Buttons */}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={dismissWizard}
+              className="text-xs transition-colors"
+              style={{ color: '#6a737d' }}
+            >
+              Skip
+            </button>
+            <div className="flex gap-2">
+              {wizardStep > 0 && (
+                <button
+                  onClick={() => setWizardStep(wizardStep - 1)}
+                  className="px-4 py-2 text-xs font-medium rounded-lg transition-colors"
+                  style={{ color: '#d4d4d4', background: '#333' }}
+                >
+                  Back
+                </button>
+              )}
+              <button
+                onClick={() => isLast ? dismissWizard() : setWizardStep(wizardStep + 1)}
+                className="px-4 py-2 text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+                style={{ background: '#22c55e', color: '#fff' }}
+              >
+                {isLast ? 'Get Started' : 'Next'}
+                {!isLast && <ChevronRight size={12} />}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="flex h-[calc(100vh-49px)]" style={{ background: '#1e1e1e' }}>
