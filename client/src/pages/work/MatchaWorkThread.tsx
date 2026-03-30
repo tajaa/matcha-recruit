@@ -2,13 +2,14 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
-import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import PresentationPanel from '../../components/matcha-work/PresentationPanel'
 import ResumeBatchPanel from '../../components/matcha-work/ResumeBatchPanel'
 import InventoryPanel from '../../components/matcha-work/InventoryPanel'
+import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 
 const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 const RESUME_MAX_SIZE = 10 * 1024 * 1024
@@ -32,6 +33,7 @@ const TASK_LABELS: Record<string, string> = {
   policy: 'Policy',
   resume_batch: 'Resume Batch',
   inventory: 'Inventory',
+  project: 'Project',
 }
 
 export default function MatchaWorkThread() {
@@ -339,6 +341,8 @@ export default function MatchaWorkThread() {
   const showResumeBatchPanel = isResumeBatch && thread?.current_state
   const isInventory = thread?.task_type === 'inventory'
   const showInventoryPanel = isInventory && thread?.current_state
+  const isProject = thread?.task_type === 'project'
+  const showProjectPanel = isProject && thread?.current_state
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -394,7 +398,7 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`flex flex-col ${pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
+      <div className={`flex flex-col ${pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
         {/* Header */}
         <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
           <Link to="/work" className={`${th.backArrow} transition-colors`}>
@@ -552,7 +556,16 @@ export default function MatchaWorkThread() {
             </div>
           )}
           {messages.map((m) => (
-            <MessageBubble key={m.id} message={m} lightMode={lightMode} />
+            <MessageBubble
+              key={m.id}
+              message={m}
+              lightMode={lightMode}
+              isProjectThread={isProject}
+              onAddToProject={isProject ? async (msgId, content) => {
+                const result = await addProjectSection(threadId!, { content, source_message_id: msgId })
+                setThread((prev) => prev ? { ...prev, current_state: result.current_state, version: result.version } : prev)
+              } : undefined}
+            />
           ))}
 
           {streaming && (
@@ -685,8 +698,21 @@ export default function MatchaWorkThread() {
         />
       )}
 
+      {/* Project panel */}
+      {showProjectPanel && (
+        <ProjectPanel
+          state={thread!.current_state}
+          threadId={threadId!}
+          lightMode={lightMode}
+          streaming={streaming}
+          onStateUpdate={(newState, newVersion) => {
+            setThread((prev) => prev ? { ...prev, current_state: newState, version: newVersion } : prev)
+          }}
+        />
+      )}
+
       {/* PDF preview panel (offer letters, etc.) */}
-      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && (
+      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && (
         <div className="hidden md:block md:w-1/2 bg-zinc-900">
           <iframe
             src={pdfUrl}

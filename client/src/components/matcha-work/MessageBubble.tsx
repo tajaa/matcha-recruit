@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react'
-import { FileText, Package } from 'lucide-react'
+import { FileText, Package, PlusCircle } from 'lucide-react'
 import Markdown from 'react-markdown'
 import type { MWMessage } from '../../types/matcha-work'
 import ComplianceReasoningPanel from './ComplianceReasoningPanel'
@@ -33,7 +33,12 @@ function extractPenalties(reasoning: MWMessage['metadata']): { category: string;
   return results
 }
 
-const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode }: { message: MWMessage; lightMode?: boolean }) {
+const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode, isProjectThread, onAddToProject }: {
+  message: MWMessage
+  lightMode?: boolean
+  isProjectThread?: boolean
+  onAddToProject?: (messageId: string, content: string) => void
+}) {
   const markdownContent = useMemo(() => <Markdown>{m.content}</Markdown>, [m.content])
   const penalties = useMemo(() => extractPenalties(m.metadata), [m.metadata])
 
@@ -87,6 +92,17 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode 
         ) : m.role === 'assistant' ? (
           <>
             {markdownContent}
+            {isProjectThread && onAddToProject && (
+              <button
+                onClick={() => onAddToProject(m.id, m.content)}
+                className={`mt-2 flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors ${
+                  lm ? 'text-emerald-600 hover:bg-emerald-50' : 'text-emerald-400 hover:bg-emerald-900/20'
+                }`}
+              >
+                <PlusCircle size={10} />
+                Add to Project
+              </button>
+            )}
             {m.metadata?.compliance_reasoning && (m.metadata.referenced_categories?.length || m.metadata.ai_reasoning_steps?.length) && (
               <ComplianceReasoningPanel
                 locations={m.metadata.compliance_reasoning}

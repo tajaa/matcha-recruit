@@ -257,6 +257,23 @@ class InventoryDocument(BaseModel):
     inventory_vendors: Optional[list[str]] = None
 
 
+class ProjectSection(BaseModel):
+    """A section within a project document."""
+
+    id: str
+    title: Optional[str] = None
+    content: str  # markdown
+    source_message_id: Optional[str] = None
+
+
+class ProjectDocument(BaseModel):
+    """Project document state — user-editable sections built from chat content."""
+
+    project_title: Optional[str] = None
+    project_sections: Optional[list[ProjectSection]] = None
+    project_status: Optional[str] = None  # drafting, finalized
+
+
 class PolicyDocument(BaseModel):
     """Incremental policy draft state — builds turn by turn via conversation."""
 

@@ -56,6 +56,7 @@ from ..models.matcha_work import (
     GeneratePresentationResponse,
     ResumeBatchDocument,
     InventoryDocument,
+    ProjectDocument,
     SendInterviewsRequest,
     WorkbookDocument,
 )
@@ -138,6 +139,7 @@ VALID_HANDBOOK_FIELDS = set(HandbookDocument.model_fields.keys()) - HANDBOOK_UPL
 VALID_POLICY_FIELDS = set(PolicyDocument.model_fields.keys())
 VALID_RESUME_BATCH_FIELDS = set(ResumeBatchDocument.model_fields.keys())
 VALID_INVENTORY_FIELDS = set(InventoryDocument.model_fields.keys())
+VALID_PROJECT_FIELDS = set(ProjectDocument.model_fields.keys())
 
 EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b")
 HANDBOOK_UPLOAD_EXTENSIONS = {".pdf", ".doc", ".docx"}
@@ -170,6 +172,8 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
         valid_fields = VALID_RESUME_BATCH_FIELDS
     elif skill == "inventory":
         valid_fields = VALID_INVENTORY_FIELDS
+    elif skill == "project":
+        valid_fields = VALID_PROJECT_FIELDS
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -2215,6 +2219,261 @@ async def sync_resume_batch_interviews(
         await doc_svc.apply_update(thread_id, {"candidates": updated_candidates})
 
     return {"updated": updated}
+
+
+# ── Project endpoints ──
+
+
+@router.post("/threads/{thread_id}/project/init")
+async def init_project(
+    thread_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Initialize a project document with a title."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    result = await doc_svc.apply_update(thread_id, {
+        "project_title": body.get("title", "Untitled Project"),
+        "project_sections": (thread.get("current_state") or {}).get("project_sections") or [],
+        "project_status": "drafting",
+    })
+    return {"current_state": result["current_state"], "version": result["version"]}
+
+
+@router.post("/threads/{thread_id}/project/sections")
+async def add_project_section(
+    thread_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Add a section to the project."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    current_state = thread.get("current_state") or {}
+    sections = list(current_state.get("project_sections") or [])
+
+    new_section = {
+        "id": os.urandom(8).hex(),
+        "title": body.get("title"),
+        "content": body.get("content", ""),
+        "source_message_id": body.get("source_message_id"),
+    }
+    sections.append(new_section)
+
+    # Auto-init project if not already
+    updates = {"project_sections": sections}
+    if not current_state.get("project_title"):
+        updates["project_title"] = "Untitled Project"
+        updates["project_status"] = "drafting"
+
+    result = await doc_svc.apply_update(thread_id, updates)
+    return {"section": new_section, "current_state": result["current_state"], "version": result["version"]}
+
+
+@router.put("/threads/{thread_id}/project/sections/reorder")
+async def reorder_project_sections(
+    thread_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Reorder project sections by providing an ordered list of section IDs."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    sections = list((thread.get("current_state") or {}).get("project_sections") or [])
+    section_map = {s["id"]: s for s in sections}
+    ordered_ids = body.get("section_ids", [])
+
+    reordered = [section_map[sid] for sid in ordered_ids if sid in section_map]
+    # Append any sections not in the ordered list
+    seen = set(ordered_ids)
+    for s in sections:
+        if s["id"] not in seen:
+            reordered.append(s)
+
+    result = await doc_svc.apply_update(thread_id, {"project_sections": reordered})
+    return {"current_state": result["current_state"], "version": result["version"]}
+
+
+@router.put("/threads/{thread_id}/project/sections/{section_id}")
+async def update_project_section(
+    thread_id: UUID,
+    section_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update a project section's title or content."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    sections = list((thread.get("current_state") or {}).get("project_sections") or [])
+    found = False
+    for i, s in enumerate(sections):
+        if s.get("id") == section_id:
+            if "title" in body:
+                sections[i] = {**s, "title": body["title"]}
+            if "content" in body:
+                sections[i] = {**sections[i], "content": body["content"]}
+            found = True
+            break
+
+    if not found:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    result = await doc_svc.apply_update(thread_id, {"project_sections": sections})
+    return {"current_state": result["current_state"], "version": result["version"]}
+
+
+@router.delete("/threads/{thread_id}/project/sections/{section_id}")
+async def delete_project_section(
+    thread_id: UUID,
+    section_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Remove a section from the project."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    sections = list((thread.get("current_state") or {}).get("project_sections") or [])
+    sections = [s for s in sections if s.get("id") != section_id]
+
+    result = await doc_svc.apply_update(thread_id, {"project_sections": sections})
+    return {"current_state": result["current_state"], "version": result["version"]}
+
+
+@router.get("/threads/{thread_id}/project/export/{fmt}")
+async def export_project(
+    thread_id: UUID,
+    fmt: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Export project as PDF, DOCX, or Markdown."""
+    if fmt not in ("pdf", "md", "docx"):
+        raise HTTPException(status_code=400, detail="Supported formats: pdf, md, docx")
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    state = thread.get("current_state") or {}
+    title = state.get("project_title") or "Project"
+    sections = state.get("project_sections") or []
+
+    if fmt == "md":
+        md_lines = [f"# {title}\n"]
+        for s in sections:
+            if s.get("title"):
+                md_lines.append(f"## {s['title']}\n")
+            md_lines.append(s.get("content", "") + "\n")
+        md_content = "\n".join(md_lines)
+        return Response(
+            content=md_content,
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{title}.md"'},
+        )
+
+    if fmt == "pdf":
+        import html as _html
+        try:
+            import markdown as _md
+        except ImportError:
+            _md = None
+
+        sections_html = []
+        for s in sections:
+            heading = f"<h2>{_html.escape(s.get('title') or '')}</h2>" if s.get("title") else ""
+            content = s.get("content", "")
+            if _md:
+                content_html = _md.markdown(content, extensions=["tables", "fenced_code"])
+            else:
+                content_html = f"<pre>{_html.escape(content)}</pre>"
+            sections_html.append(f"{heading}\n{content_html}")
+
+        body_html = "\n<hr>\n".join(sections_html)
+        full_html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+body {{ font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif; line-height: 1.7; color: #1a1a1a; max-width: 800px; margin: 40px auto; padding: 0 20px; }}
+h1 {{ font-size: 28px; border-bottom: 2px solid #22c55e; padding-bottom: 8px; }}
+h2 {{ font-size: 20px; color: #334155; margin-top: 32px; }}
+hr {{ border: none; border-top: 1px solid #e5e7eb; margin: 24px 0; }}
+pre {{ background: #f8fafc; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; }}
+code {{ background: #f1f5f9; padding: 2px 6px; border-radius: 3px; font-size: 13px; }}
+table {{ border-collapse: collapse; width: 100%; margin: 16px 0; }}
+th, td {{ border: 1px solid #e5e7eb; padding: 8px 12px; text-align: left; }}
+th {{ background: #f8fafc; }}
+</style>
+</head><body>
+<h1>{_html.escape(title)}</h1>
+{body_html}
+</body></html>"""
+
+        try:
+            from weasyprint import HTML
+            pdf_bytes = await asyncio.to_thread(lambda: HTML(string=full_html).write_pdf())
+        except ImportError:
+            raise HTTPException(status_code=500, detail="PDF generation not available (WeasyPrint not installed)")
+
+        prefix = doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "project-exports")
+        pdf_url = await get_storage().upload_file(
+            pdf_bytes, f"{title}.pdf", prefix=prefix, content_type="application/pdf"
+        )
+        return {"pdf_url": pdf_url}
+
+    if fmt == "docx":
+        try:
+            from docx import Document as DocxDocument
+            from docx.shared import Pt
+        except ImportError:
+            raise HTTPException(status_code=500, detail="DOCX generation not available (python-docx not installed)")
+
+        def _build_docx():
+            doc = DocxDocument()
+            doc.add_heading(title, level=0)
+            for s in sections:
+                if s.get("title"):
+                    doc.add_heading(s["title"], level=1)
+                for para in (s.get("content") or "").split("\n"):
+                    if para.strip():
+                        doc.add_paragraph(para)
+            import io
+            buf = io.BytesIO()
+            doc.save(buf)
+            return buf.getvalue()
+
+        docx_bytes = await asyncio.to_thread(_build_docx)
+        prefix = doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "project-exports")
+        docx_url = await get_storage().upload_file(
+            docx_bytes, f"{title}.docx", prefix=prefix,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        return {"docx_url": docx_url}
 
 
 INVENTORY_EXTRACT_PROMPT = """Extract inventory line items from this document (vendor invoice, inventory count, or order sheet).

@@ -45,7 +45,7 @@ HANDBOOK_FIELDS = [
 POLICY_FIELDS = list(PolicyDocument.model_fields.keys())
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "none"}
+SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -295,6 +295,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
         return "policy"
     if "sections" in current_state or "workbook_title" in current_state:
         return "workbook"
+    if "project_sections" in current_state or "project_title" in current_state:
+        return "project"
     if "inventory_items" in current_state:
         return "inventory"
     if "candidates" in current_state:

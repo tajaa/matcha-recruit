@@ -9,6 +9,7 @@ export type MWTaskType =
   | 'policy'
   | 'resume_batch'
   | 'inventory'
+  | 'project'
 
 export interface ResumeCandidate {
   id: string
@@ -31,6 +32,13 @@ export interface ResumeCandidate {
   interview_status?: string | null
   interview_score?: number | null
   interview_summary?: string | null
+}
+
+export interface ProjectSection {
+  id: string
+  title: string | null
+  content: string
+  source_message_id: string | null
 }
 
 export interface InventoryItem {
