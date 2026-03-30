@@ -202,6 +202,14 @@ export function agentEmailStatus() {
   return api.get<{ connected: boolean; email: string | null }>('/matcha-work/agent/email/status')
 }
 
+export function agentConnectGmail() {
+  return api.post<{ auth_url: string }>('/matcha-work/agent/email/connect')
+}
+
+export function agentDisconnectGmail() {
+  return api.delete<{ status: string }>('/matcha-work/agent/email/disconnect')
+}
+
 export function agentFetchEmails() {
   return api.post<{ emails: import('../types/matcha-work').AgentEmail[] }>('/matcha-work/agent/email/fetch')
 }

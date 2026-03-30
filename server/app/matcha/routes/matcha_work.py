@@ -5,6 +5,9 @@ import json
 import logging
 import math
 import os
+import urllib.parse
+
+import httpx
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -2826,19 +2829,124 @@ async def upload_thread_inventory(
 async def agent_email_status(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Check if Gmail is connected."""
-    from ..services.gmail_service import get_gmail_service
-    gmail = get_gmail_service()
+    """Check if the current user has Gmail connected."""
+    from ..services.gmail_service import GmailService
+    gmail = GmailService(current_user.id)
     return await gmail.get_status()
+
+
+@router.post("/agent/email/connect")
+async def agent_email_connect(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Start Google OAuth flow. Returns an auth_url to open in a popup."""
+    from ..services.gmail_service import get_oauth_credentials, GMAIL_SCOPES
+    import urllib.parse
+
+    creds = get_oauth_credentials()
+    if not creds:
+        raise HTTPException(status_code=500, detail="Google OAuth credentials not configured on the server")
+
+    settings = get_settings()
+    redirect_uri = f"{settings.app_base_url}/api/matcha-work/agent/email/callback"
+
+    # Encode user ID in state so callback knows who to store the token for
+    from ...core.services.secret_crypto import encrypt_secret
+    state = encrypt_secret(str(current_user.id))
+
+    params = {
+        "client_id": creds["client_id"],
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": " ".join(GMAIL_SCOPES),
+        "access_type": "offline",
+        "prompt": "consent",
+        "state": state,
+    }
+    auth_url = f"https://accounts.google.com/o/oauth2/v2/auth?{urllib.parse.urlencode(params)}"
+    return {"auth_url": auth_url}
+
+
+@router.get("/agent/email/callback")
+async def agent_email_callback(
+    code: str = Query(...),
+    state: str = Query(...),
+):
+    """OAuth callback — exchange code for tokens, store encrypted in DB, close popup."""
+    from ..services.gmail_service import GmailService, get_oauth_credentials, GMAIL_SCOPES
+    from ...core.services.secret_crypto import decrypt_secret as _decrypt
+
+    # Recover user ID from state
+    try:
+        user_id_str = _decrypt(state)
+        from uuid import UUID as _UUID
+        user_id = _UUID(user_id_str)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    creds = get_oauth_credentials()
+    if not creds:
+        raise HTTPException(status_code=500, detail="Google OAuth credentials not configured")
+
+    settings = get_settings()
+    redirect_uri = f"{settings.app_base_url}/api/matcha-work/agent/email/callback"
+
+    # Exchange authorization code for tokens
+    async with httpx.AsyncClient() as client:
+        resp = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": creds["client_id"],
+                "client_secret": creds["client_secret"],
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            logger.error("Gmail OAuth token exchange failed: %s", resp.text)
+            raise HTTPException(status_code=400, detail="Failed to exchange authorization code")
+        tokens = resp.json()
+
+    # Store encrypted token in DB
+    gmail = GmailService(user_id)
+    await gmail.save_token({
+        "token": tokens["access_token"],
+        "refresh_token": tokens.get("refresh_token"),
+        "client_id": creds["client_id"],
+        "client_secret": creds["client_secret"],
+        "scopes": GMAIL_SCOPES,
+    })
+
+    # Return HTML that closes the popup
+    return Response(
+        content="""<!DOCTYPE html><html><body>
+<script>window.opener && window.opener.postMessage('gmail-connected', '*'); window.close();</script>
+<p>Gmail connected. You can close this window.</p>
+</body></html>""",
+        media_type="text/html",
+    )
+
+
+@router.delete("/agent/email/disconnect")
+async def agent_email_disconnect(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Remove the current user's Gmail connection."""
+    async with get_connection() as conn:
+        await conn.execute("UPDATE users SET gmail_token=NULL WHERE id=$1", current_user.id)
+    return {"status": "disconnected"}
 
 
 @router.post("/agent/email/fetch")
 async def agent_email_fetch(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Fetch unread emails."""
-    from ..services.gmail_service import get_gmail_service
-    gmail = get_gmail_service()
+    """Fetch unread emails for the current user."""
+    from ..services.gmail_service import GmailService
+    gmail = GmailService(current_user.id)
+    await gmail.load_token()
     if not gmail.is_configured:
         raise HTTPException(status_code=400, detail="Gmail not connected")
     emails = await gmail.fetch_unread(max_results=25)
@@ -2851,8 +2959,9 @@ async def agent_email_draft(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Draft a reply to an email using AI."""
-    from ..services.gmail_service import get_gmail_service
-    gmail = get_gmail_service()
+    from ..services.gmail_service import GmailService
+    gmail = GmailService(current_user.id)
+    await gmail.load_token()
     if not gmail.is_configured:
         raise HTTPException(status_code=400, detail="Gmail not connected")
 
@@ -2863,7 +2972,6 @@ async def agent_email_draft(
 
     email = await gmail.get_message(email_id)
 
-    # Generate reply with Gemini
     ai_provider = get_ai_provider()
     prompt = (
         f"Draft a professional reply to this email. Return ONLY the reply body text, no subject line.\n"
@@ -2896,8 +3004,9 @@ async def agent_email_send(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Send an email via Gmail."""
-    from ..services.gmail_service import get_gmail_service
-    gmail = get_gmail_service()
+    from ..services.gmail_service import GmailService
+    gmail = GmailService(current_user.id)
+    await gmail.load_token()
     if not gmail.is_configured:
         raise HTTPException(status_code=400, detail="Gmail not connected")
 

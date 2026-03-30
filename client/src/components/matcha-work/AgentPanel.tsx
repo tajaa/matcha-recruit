@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
 import { ArrowLeft, Mail, RefreshCw, Loader2, Send, PenLine } from 'lucide-react'
 import type { AgentEmail } from '../../types/matcha-work'
-import { agentEmailStatus, agentFetchEmails, agentDraftReply, agentSendEmail } from '../../api/matchaWork'
+import { agentEmailStatus, agentConnectGmail, agentDisconnectGmail, agentFetchEmails, agentDraftReply, agentSendEmail } from '../../api/matchaWork'
 
 export default function AgentPanel() {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [emailAddr, setEmailAddr] = useState<string | null>(null)
   const [emails, setEmails] = useState<AgentEmail[]>([])
   const [loading, setLoading] = useState(false)
+  const [connecting, setConnecting] = useState(false)
   const [selectedEmail, setSelectedEmail] = useState<AgentEmail | null>(null)
 
   // Draft state
@@ -17,7 +18,7 @@ export default function AgentPanel() {
   const [sending, setSending] = useState(false)
   const [sentMessage, setSentMessage] = useState<string | null>(null)
 
-  useEffect(() => {
+  function checkStatus() {
     agentEmailStatus()
       .then((s) => {
         setConnected(s.connected)
@@ -25,7 +26,39 @@ export default function AgentPanel() {
         if (s.connected) fetchEmails()
       })
       .catch(() => setConnected(false))
+  }
+
+  useEffect(() => {
+    checkStatus()
+
+    // Listen for OAuth popup completion
+    function handleMessage(e: MessageEvent) {
+      if (e.data === 'gmail-connected') {
+        checkStatus()
+      }
+    }
+    window.addEventListener('message', handleMessage)
+    return () => window.removeEventListener('message', handleMessage)
   }, [])
+
+  async function handleConnect() {
+    setConnecting(true)
+    try {
+      const { auth_url } = await agentConnectGmail()
+      window.open(auth_url, 'gmail-oauth', 'width=600,height=700')
+    } catch {}
+    setConnecting(false)
+  }
+
+  async function handleDisconnect() {
+    try {
+      await agentDisconnectGmail()
+      setConnected(false)
+      setEmailAddr(null)
+      setEmails([])
+      setSelectedEmail(null)
+    } catch {}
+  }
 
   async function fetchEmails() {
     setLoading(true)
@@ -85,11 +118,16 @@ export default function AgentPanel() {
     return (
       <div className="hidden md:flex md:w-1/2 items-center justify-center" style={{ background: c.bg }}>
         <div className="text-center">
-          <Mail size={24} className="mx-auto mb-2" style={{ color: c.muted }} />
-          <p className="text-xs" style={{ color: c.muted }}>Gmail not connected</p>
-          <p className="text-[10px] mt-1" style={{ color: c.muted }}>
-            Connect via the agent setup first
-          </p>
+          <Mail size={24} className="mx-auto mb-3" style={{ color: c.muted }} />
+          <p className="text-xs mb-3" style={{ color: c.muted }}>Connect your Gmail to get started</p>
+          <button
+            onClick={handleConnect}
+            disabled={connecting}
+            className="text-xs font-medium px-4 py-2 rounded transition-colors disabled:opacity-50"
+            style={{ background: c.accent, color: '#fff' }}
+          >
+            {connecting ? 'Opening...' : 'Connect Gmail'}
+          </button>
         </div>
       </div>
     )
@@ -198,6 +236,9 @@ export default function AgentPanel() {
           </h3>
           <p className="text-[10px] mt-0.5" style={{ color: c.muted }}>
             {emailAddr ?? 'Connected'} &middot; {emails.length} unread
+            <button onClick={handleDisconnect} className="ml-2 underline opacity-60 hover:opacity-100">
+              disconnect
+            </button>
           </p>
         </div>
         <button

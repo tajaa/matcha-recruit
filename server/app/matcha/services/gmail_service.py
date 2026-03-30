@@ -1,7 +1,7 @@
-"""Gmail service for matcha-work agent features.
+"""Per-user Gmail service for matcha-work agent features.
 
-Adapted from agent/sandbox.py:SandboxedGmail. Uses OAuth2 tokens to
-fetch, draft, and send emails via the Gmail API.
+Each user connects their own Gmail via OAuth. Tokens are stored
+encrypted in the users.gmail_token JSONB column.
 """
 
 import base64
@@ -12,42 +12,99 @@ import os
 import re
 import time
 from pathlib import Path
+from typing import Optional
+from uuid import UUID
 
 import httpx
+
+from ...core.services.secret_crypto import encrypt_secret, decrypt_secret
+from ...database import get_connection
 
 logger = logging.getLogger(__name__)
 
 GMAIL_API_BASE = "https://gmail.googleapis.com/gmail/v1"
 TOKEN_URI = "https://oauth2.googleapis.com/token"
+TOKEN_CACHE_TTL = 300  # 5 min
 
-# Default to the agent workspace token if no override
-DEFAULT_TOKEN_PATH = os.path.join(
-    os.path.dirname(__file__), "..", "..", "..", "agent", "workspace", "token.json"
+# Google OAuth client credentials path
+GOOGLE_OAUTH_CREDENTIALS_PATH = os.getenv(
+    "GOOGLE_OAUTH_CREDENTIALS_PATH",
+    os.path.join(os.path.dirname(__file__), "..", "..", "..", "agent", "workspace", "credentials.json"),
 )
 
+GMAIL_SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.compose",
+]
 
-TOKEN_CACHE_TTL = 300  # 5 minutes — skip validation if token was used recently
+
+def get_oauth_credentials() -> dict | None:
+    """Load Google OAuth client credentials from credentials.json."""
+    path = Path(GOOGLE_OAUTH_CREDENTIALS_PATH)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text())
+        # credentials.json has either "web" or "installed" key
+        return data.get("web") or data.get("installed") or data
+    except Exception:
+        return None
 
 
 class GmailService:
-    """Gmail client using OAuth2 tokens — fetch, draft, send emails."""
+    """Per-user Gmail client. Loads/saves encrypted tokens from the database."""
 
-    def __init__(self, token_path: str | None = None):
-        self._token_path = Path(token_path or os.getenv("GMAIL_TOKEN_PATH", DEFAULT_TOKEN_PATH))
+    def __init__(self, user_id: UUID):
+        self.user_id = user_id
         self._token_data: dict | None = None
+        self._loaded = False
         self._send_timestamps: list[float] = []
         self._token_validated_at: float = 0
-        if self._token_path.exists():
+
+    async def load_token(self):
+        """Load and decrypt token from users.gmail_token."""
+        if self._loaded:
+            return
+        async with get_connection() as conn:
+            row = await conn.fetchrow("SELECT gmail_token FROM users WHERE id=$1", self.user_id)
+        if row and row["gmail_token"]:
+            raw = row["gmail_token"] if isinstance(row["gmail_token"], dict) else json.loads(row["gmail_token"])
             try:
-                self._token_data = json.loads(self._token_path.read_text())
+                self._token_data = {
+                    "token": decrypt_secret(raw.get("token")) if raw.get("token") else None,
+                    "refresh_token": decrypt_secret(raw["refresh_token"]),
+                    "client_id": raw["client_id"],
+                    "client_secret": decrypt_secret(raw["client_secret"]),
+                    "scopes": raw.get("scopes", []),
+                }
             except Exception:
-                logger.warning("Failed to read Gmail token.json at %s", self._token_path)
+                logger.warning("Failed to decrypt Gmail token for user %s", self.user_id)
+                self._token_data = None
+        self._loaded = True
+
+    async def save_token(self, token_data: dict):
+        """Encrypt and save token to DB."""
+        self._token_data = token_data
+        encrypted = {
+            "token": encrypt_secret(token_data.get("token")),
+            "refresh_token": encrypt_secret(token_data["refresh_token"]),
+            "client_id": token_data["client_id"],
+            "client_secret": encrypt_secret(token_data["client_secret"]),
+            "scopes": token_data.get("scopes", []),
+        }
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE users SET gmail_token=$1 WHERE id=$2",
+                json.dumps(encrypted), self.user_id,
+            )
+        self._loaded = True
 
     @property
     def is_configured(self) -> bool:
-        return self._token_data is not None and "refresh_token" in self._token_data
+        return self._token_data is not None and bool(self._token_data.get("refresh_token"))
 
     async def get_status(self) -> dict:
+        await self.load_token()
         if not self.is_configured:
             return {"connected": False, "email": None}
         try:
@@ -66,15 +123,13 @@ class GmailService:
 
     async def _get_access_token(self) -> str:
         if not self._token_data:
-            raise ValueError("Gmail token.json not found")
+            raise ValueError("Gmail not connected")
 
         token = self._token_data.get("token")
 
-        # Skip validation if token was confirmed valid recently
         if token and (time.time() - self._token_validated_at) < TOKEN_CACHE_TTL:
             return token
 
-        # Validate token with a lightweight request
         if token:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
@@ -86,14 +141,13 @@ class GmailService:
                     self._token_validated_at = time.time()
                     return token
 
-        # Refresh the token
-        logger.info("Refreshing Gmail access token")
+        logger.info("Refreshing Gmail access token for user %s", self.user_id)
         refresh_token = self._token_data.get("refresh_token")
         client_id = self._token_data.get("client_id")
         client_secret = self._token_data.get("client_secret")
 
         if not all([refresh_token, client_id, client_secret]):
-            raise ValueError("Incomplete token.json — re-run OAuth flow")
+            raise ValueError("Incomplete Gmail token — reconnect your email")
 
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -111,23 +165,23 @@ class GmailService:
 
         self._token_data["token"] = new_tokens["access_token"]
         self._token_validated_at = time.time()
-        self._token_path.write_text(json.dumps(self._token_data, indent=2))
-        self._token_path.chmod(0o600)
+        # Persist refreshed token to DB
+        await self.save_token(self._token_data)
         return self._token_data["token"]
 
-    async def _get_client_headers(self) -> dict:
+    async def _get_headers(self) -> dict:
         token = await self._get_access_token()
         return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     async def _gmail_get(self, path: str, params=None) -> dict:
-        headers = await self._get_client_headers()
+        headers = await self._get_headers()
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{GMAIL_API_BASE}{path}", headers=headers, params=params, timeout=30.0)
             resp.raise_for_status()
             return resp.json()
 
     async def _gmail_post(self, path: str, body: dict) -> dict:
-        headers = await self._get_client_headers()
+        headers = await self._get_headers()
         async with httpx.AsyncClient() as client:
             resp = await client.post(f"{GMAIL_API_BASE}{path}", headers=headers, json=body, timeout=30.0)
             resp.raise_for_status()
@@ -135,6 +189,7 @@ class GmailService:
 
     async def fetch_unread(self, max_results: int = 25) -> list[dict]:
         import asyncio as _aio
+        await self.load_token()
         data = await self._gmail_get("/users/me/messages", params=[
             ("maxResults", str(max_results)),
             ("q", "is:unread"),
@@ -178,9 +233,7 @@ class GmailService:
         if reply_to_id:
             draft_body["message"]["threadId"] = reply_to_id
 
-        data = await self._gmail_post("/users/me/drafts", draft_body)
-        logger.info("Draft created: %s", data.get("id"))
-        return data
+        return await self._gmail_post("/users/me/drafts", draft_body)
 
     async def send_email(self, to: str, subject: str, body: str, reply_to_id: str | None = None) -> dict:
         self._check_send_rate()
@@ -201,7 +254,6 @@ class GmailService:
 
         data = await self._gmail_post("/users/me/messages/send", send_body)
         self._send_timestamps.append(time.time())
-        logger.info("Email sent to %s: %s", to, data.get("id"))
         return data
 
     def _check_send_rate(self):
@@ -229,7 +281,7 @@ class GmailService:
                 html_text = base64.urlsafe_b64decode(body_data).decode("utf-8", errors="replace")
             elif mime.startswith("multipart/"):
                 nested = self._extract_body(part)
-                if nested:
+                if nested and nested != "(no readable body)":
                     return nested
 
         if plain_text:
@@ -242,14 +294,3 @@ class GmailService:
             return re.sub(r"\s+", " ", text).strip()
 
         return "(no readable body)"
-
-
-# Singleton
-_gmail_service: GmailService | None = None
-
-
-def get_gmail_service() -> GmailService:
-    global _gmail_service
-    if _gmail_service is None:
-        _gmail_service = GmailService()
-    return _gmail_service
