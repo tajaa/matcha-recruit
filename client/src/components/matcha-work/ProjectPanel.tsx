@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Bold, Italic, Heading2, List, ListOrdered, Code, Link } from 'lucide-react'
+import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Bold, Italic, Heading2, List, ListOrdered, Code, Link, ImagePlus } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ProjectSection } from '../../types/matcha-work'
-import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject } from '../../api/matchaWork'
+import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage } from '../../api/matchaWork'
 
 interface ProjectPanelProps {
   state: Record<string, unknown>
@@ -83,6 +83,8 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
   const [saving, setSaving] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const exportRef = useRef<HTMLDivElement>(null)
+  const imageInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingImage, setUploadingImage] = useState(false)
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -145,6 +147,24 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
       onStateUpdate(result.current_state, result.version)
       startEditing({ id: result.section.id, content: '', title: 'New Section', source_message_id: null })
     } catch {}
+  }
+
+  async function handleImageUpload(file: File) {
+    if (!file.type.startsWith('image/')) return
+    setUploadingImage(true)
+    try {
+      const { url, filename } = await uploadProjectImage(threadId, file)
+      const tag = `![${filename}](${url})`
+      if (textareaRef.current) {
+        const ta = textareaRef.current
+        const pos = ta.selectionStart
+        const newContent = editContent.slice(0, pos) + tag + editContent.slice(pos)
+        setEditContent(newContent)
+      } else {
+        setEditContent((prev) => prev + '\n' + tag)
+      }
+    } catch {}
+    setUploadingImage(false)
   }
 
   async function handleExport(fmt: 'pdf' | 'md' | 'docx') {
@@ -313,7 +333,7 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
                           key={label}
                           title={label}
                           onMouseDown={(e) => {
-                            e.preventDefault() // prevent blur on textarea
+                            e.preventDefault()
                             if (textareaRef.current) applyFormat(textareaRef.current, action, editContent, setEditContent)
                           }}
                           className="p-1 rounded transition-colors"
@@ -324,12 +344,48 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
                           <Icon size={13} />
                         </button>
                       ))}
+                      <div className="w-px h-3 mx-1" style={{ background: '#333' }} />
+                      <input
+                        ref={imageInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0]
+                          if (f) handleImageUpload(f)
+                          e.target.value = ''
+                        }}
+                      />
+                      <button
+                        title="Insert image"
+                        onMouseDown={(e) => {
+                          e.preventDefault()
+                          imageInputRef.current?.click()
+                        }}
+                        className="p-1 rounded transition-colors"
+                        style={{ color: uploadingImage ? '#ce9178' : '#6a737d' }}
+                        onMouseEnter={(e) => { if (!uploadingImage) e.currentTarget.style.color = '#ce9178' }}
+                        onMouseLeave={(e) => { if (!uploadingImage) e.currentTarget.style.color = '#6a737d' }}
+                      >
+                        {uploadingImage ? <Loader2 size={13} className="animate-spin" /> : <ImagePlus size={13} />}
+                      </button>
                     </div>
                     <textarea
                       ref={textareaRef}
                       value={editContent}
                       onChange={(e) => setEditContent(e.target.value)}
                       onBlur={() => saveSection(s.id, editContent)}
+                      onPaste={(e) => {
+                        const items = e.clipboardData.items
+                        for (const item of items) {
+                          if (item.type.startsWith('image/')) {
+                            e.preventDefault()
+                            const file = item.getAsFile()
+                            if (file) handleImageUpload(file)
+                            return
+                          }
+                        }
+                      }}
                       className="w-full text-xs rounded border p-2 focus:outline-none resize-none min-h-[80px]"
                       style={{
                         background: '#1a1a1a',

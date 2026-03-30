@@ -2580,6 +2580,36 @@ async def export_project(
         return {"docx_url": docx_url}
 
 
+@router.post("/threads/{thread_id}/project/images")
+async def upload_project_image(
+    thread_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload an image for use in a project section. Returns the URL to embed as markdown."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Image exceeds 10 MB limit")
+
+    filename = file.filename or "image.png"
+    url = await get_storage().upload_file(
+        content,
+        filename,
+        prefix=doc_svc.build_matcha_work_thread_storage_prefix(company_id, thread_id, "project-images"),
+        content_type=file.content_type,
+    )
+    return {"url": url, "filename": filename}
+
+
 INVENTORY_EXTRACT_PROMPT = """Extract inventory line items from this document (vendor invoice, inventory count, or order sheet).
 Return ONLY valid JSON — an array of items:
 [{"product_name":"...","sku":"...","category":"protein|produce|dairy|dry_goods|beverages|supplies|equipment|other","quantity":0,"unit":"case|lb|each|gal|oz|bag|box|doz|pack","unit_cost":0.00,"total_cost":0.00,"vendor":"..."}]

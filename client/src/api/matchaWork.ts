@@ -238,6 +238,15 @@ export function exportProject(threadId: string, format: 'pdf' | 'md' | 'docx') {
   )
 }
 
+export function uploadProjectImage(threadId: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return api.upload<{ url: string; filename: string }>(
+    `/matcha-work/threads/${threadId}/project/images`,
+    form
+  )
+}
+
 // ── Candidate interviews ──
 
 export async function sendCandidateInterviews(
