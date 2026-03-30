@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2 } from 'lucide-react'
+import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine } from 'lucide-react'
 import type { ProjectSection } from '../../types/matcha-work'
 import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
@@ -69,6 +69,9 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
   const [exporting, setExporting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [previewMode, setPreviewMode] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
@@ -140,6 +143,21 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
     }
   }
 
+  async function togglePreview() {
+    if (previewMode) {
+      setPreviewMode(false)
+      setPreviewUrl(null)
+      return
+    }
+    setLoadingPreview(true)
+    setPreviewMode(true)
+    try {
+      const result = await exportProject(threadId, 'pdf')
+      if (result.pdf_url) setPreviewUrl(result.pdf_url)
+    } catch {}
+    setLoadingPreview(false)
+  }
+
   async function handleExport(fmt: 'pdf' | 'md' | 'docx') {
     setExporting(true)
     setShowExport(false)
@@ -206,7 +224,18 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
           </p>
         </div>
 
-        <div className="relative" ref={exportRef}>
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={togglePreview}
+            disabled={sections.length === 0 || loadingPreview}
+            className="flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded transition-colors disabled:opacity-40"
+            style={{ color: previewMode ? '#e8e8e8' : '#6a737d', background: previewMode ? '#2a2d2e' : 'transparent' }}
+          >
+            {loadingPreview ? <Loader2 size={10} className="animate-spin" /> : previewMode ? <PenLine size={10} /> : <Eye size={10} />}
+            {previewMode ? 'Edit' : 'Preview'}
+          </button>
+
+          <div className="relative" ref={exportRef}>
           <button
             onClick={() => setShowExport(!showExport)}
             disabled={sections.length === 0 || exporting}
@@ -232,10 +261,29 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
               ))}
             </div>
           )}
+          </div>
         </div>
       </div>
 
-      {/* Sections */}
+      {/* Preview mode — show PDF iframe */}
+      {previewMode && (
+        <div className="flex-1 overflow-hidden" style={{ background: '#252526' }}>
+          {loadingPreview ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 size={20} className="animate-spin" style={{ color: '#6a737d' }} />
+            </div>
+          ) : previewUrl ? (
+            <iframe src={previewUrl} className="w-full h-full border-0" title="PDF Preview" />
+          ) : (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-xs" style={{ color: '#6a737d' }}>Could not generate preview</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Sections — hidden when preview is active */}
+      {!previewMode && (
       <div className="flex-1 overflow-y-auto py-2">
         {sections.length === 0 && !streaming && (
           <div className="text-center py-12" style={{ color: '#6a737d' }}>
@@ -302,6 +350,7 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
           </button>
         </div>
       </div>
+      )}
     </div>
   )
 }
