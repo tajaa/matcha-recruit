@@ -355,8 +355,25 @@ export default function MatchaWorkThread() {
     })
   }
 
-  const lm = lightMode
-  const th = {
+  // Project threads always use the dark editor theme; others respect lightMode
+  const lm = isProject ? false : lightMode
+  const th = isProject ? {
+    border:      'border-[#333]',
+    panelBg:     'bg-[#1e1e1e]',
+    backArrow:   'text-[#6a737d] hover:text-[#e8e8e8]',
+    titleInput:  'bg-[#252526] text-[#e8e8e8] border border-[#555]',
+    titleText:   'text-[#e8e8e8]',
+    editBtn:     'text-[#6a737d] hover:text-[#e8e8e8]',
+    badge:       'bg-[#ce9178]/20 text-[#ce9178]',
+    modeOff:     'bg-[#2a2d2e] text-[#6a737d] hover:bg-[#333] hover:text-[#d4d4d4]',
+    jurisdBar:   'bg-[#252526]',
+    jurisdLabel: 'text-[#6a737d]',
+    emptyText:   'text-[#6a737d]',
+    streamBg:    'bg-[#252526] border border-[#333]',
+    streamText:  'text-[#6a737d]',
+    textarea:    'bg-[#1a1a1a] text-[#d4d4d4] border-[#555] focus:border-[#ce9178] placeholder-[#6a737d]',
+    finText:     'text-[#6a737d]',
+  } : {
     border:      lm ? 'border-zinc-200'  : 'border-zinc-800',
     panelBg:     lm ? 'bg-white'         : '',
     backArrow:   lm ? 'text-zinc-500 hover:text-zinc-900' : 'text-zinc-400 hover:text-white',

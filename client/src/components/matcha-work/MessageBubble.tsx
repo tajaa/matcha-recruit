@@ -42,20 +42,24 @@ const MessageBubble = React.memo(function MessageBubble({ message: m, lightMode,
   const markdownContent = useMemo(() => <Markdown>{m.content}</Markdown>, [m.content])
   const penalties = useMemo(() => extractPenalties(m.metadata), [m.metadata])
 
-  const lm = lightMode
-  const divider  = lm ? 'border-zinc-200'  : 'border-zinc-800'
-  const metaText = lm ? 'text-zinc-400'    : 'text-zinc-500'
+  const lm = isProjectThread ? false : lightMode
+  const divider  = isProjectThread ? 'border-[#333]' : lm ? 'border-zinc-200' : 'border-zinc-800'
+  const metaText = isProjectThread ? 'text-[#6a737d]' : lm ? 'text-zinc-400' : 'text-zinc-500'
 
   return (
     <div className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
       <div
         className={`max-w-[90%] sm:max-w-[80%] rounded-lg px-4 py-2.5 text-sm ${
           m.role === 'user'
-            ? lm
-              ? 'bg-zinc-200 text-zinc-900 whitespace-pre-wrap'
-              : 'bg-zinc-700 text-white whitespace-pre-wrap'
-            : lm
-              ? 'bg-zinc-50 text-zinc-800 border border-zinc-200 prose prose-sm prose-zinc max-w-none overflow-x-auto'
+            ? isProjectThread
+              ? 'bg-[#2a2d2e] text-[#d4d4d4] whitespace-pre-wrap'
+              : lm
+                ? 'bg-zinc-200 text-zinc-900 whitespace-pre-wrap'
+                : 'bg-zinc-700 text-white whitespace-pre-wrap'
+            : isProjectThread
+              ? 'bg-[#252526] text-[#d4d4d4] border border-[#333] prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
+              : lm
+                ? 'bg-zinc-50 text-zinc-800 border border-zinc-200 prose prose-sm prose-zinc max-w-none overflow-x-auto'
               : 'bg-zinc-800/60 text-zinc-200 border border-zinc-700/50 prose prose-sm prose-invert prose-zinc max-w-none overflow-x-auto'
         }`}
       >
