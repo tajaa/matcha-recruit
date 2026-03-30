@@ -8,6 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Request, status
+from pydantic import BaseModel, EmailStr
 
 from ...database import get_connection
 from uuid import UUID
@@ -2536,3 +2537,147 @@ async def get_candidate_sessions(user_id: UUID):
             ))
 
         return sessions
+
+
+# ── Individual registration ──
+
+
+class IndividualRegister(BaseModel):
+    email: EmailStr
+    password: str
+    name: str
+
+
+@router.post("/register/individual", response_model=TokenResponse)
+async def register_individual(request: IndividualRegister):
+    """Register an individual user with a personal workspace for matcha-work."""
+    from ..feature_flags import DEFAULT_COMPANY_FEATURES
+    from ...core.services.stripe_service import FREE_SIGNUP_CREDITS
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", request.email)
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already registered")
+
+            # Create personal workspace company
+            personal_features = {**DEFAULT_COMPANY_FEATURES, "matcha_work": True}
+            company = await conn.fetchrow(
+                """INSERT INTO companies (name, status, approved_at, is_personal, enabled_features)
+                   VALUES ($1, 'approved', NOW(), true, $2::jsonb)
+                   RETURNING id""",
+                f"{request.name}'s Workspace",
+                json.dumps(personal_features),
+            )
+            company_id = company["id"]
+
+            # Grant free credits
+            await conn.execute(
+                """
+                INSERT INTO mw_credit_balances (company_id, credits_remaining, total_credits_purchased, total_credits_granted)
+                VALUES ($1, $2, 0, $2)
+                ON CONFLICT (company_id) DO NOTHING
+                """,
+                company_id, FREE_SIGNUP_CREDITS,
+            )
+
+            # Create user with 'individual' role
+            password_hash = hash_password(request.password)
+            user = await conn.fetchrow(
+                """INSERT INTO users (email, password_hash, role)
+                   VALUES ($1, $2, 'individual')
+                   RETURNING id, email, role""",
+                request.email, password_hash,
+            )
+
+            # Create client record linking user → personal company
+            await conn.execute(
+                "INSERT INTO clients (user_id, company_id, name) VALUES ($1, $2, $3)",
+                user["id"], company_id, request.name,
+            )
+
+            # Set owner
+            await conn.execute("UPDATE companies SET owner_id = $1 WHERE id = $2", user["id"], company_id)
+
+    access_token = create_access_token(user["id"], user["email"], user["role"])
+    refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+    )
+
+
+class GoogleAuthRequest(BaseModel):
+    id_token: str
+
+
+@router.post("/google", response_model=TokenResponse)
+async def google_auth(request: GoogleAuthRequest):
+    """Sign in or register with Google. Creates an individual account if the user is new."""
+    from google.oauth2 import id_token as google_id_token
+    from google.auth.transport import requests as google_requests
+    from ..feature_flags import DEFAULT_COMPANY_FEATURES
+    from ...core.services.stripe_service import FREE_SIGNUP_CREDITS
+
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            request.id_token,
+            google_requests.Request(),
+        )
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid Google ID token")
+
+    email = idinfo.get("email")
+    name = idinfo.get("name", email.split("@")[0])
+
+    if not email:
+        raise HTTPException(status_code=400, detail="No email in Google token")
+
+    async with get_connection() as conn:
+        # Check if user exists
+        existing = await conn.fetchrow("SELECT id, email, role FROM users WHERE email = $1", email)
+
+        if existing:
+            # Login existing user
+            access_token = create_access_token(existing["id"], existing["email"], existing["role"])
+            refresh_token = create_refresh_token(existing["id"], existing["email"], existing["role"])
+            return TokenResponse(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
+
+        # Register new individual user
+        async with conn.transaction():
+            personal_features = {**DEFAULT_COMPANY_FEATURES, "matcha_work": True}
+            company = await conn.fetchrow(
+                """INSERT INTO companies (name, status, approved_at, is_personal, enabled_features)
+                   VALUES ($1, 'approved', NOW(), true, $2::jsonb)
+                   RETURNING id""",
+                f"{name}'s Workspace",
+                json.dumps(personal_features),
+            )
+            company_id = company["id"]
+
+            await conn.execute(
+                """INSERT INTO mw_credit_balances (company_id, credits_remaining, total_credits_purchased, total_credits_granted)
+                   VALUES ($1, $2, 0, $2) ON CONFLICT (company_id) DO NOTHING""",
+                company_id, FREE_SIGNUP_CREDITS,
+            )
+
+            # Use a random password since Google users don't need one
+            import os as _os
+            user = await conn.fetchrow(
+                """INSERT INTO users (email, password_hash, role)
+                   VALUES ($1, $2, 'individual')
+                   RETURNING id, email, role""",
+                email, hash_password(_os.urandom(32).hex()),
+            )
+
+            await conn.execute(
+                "INSERT INTO clients (user_id, company_id, name) VALUES ($1, $2, $3)",
+                user["id"], company_id, name,
+            )
+            await conn.execute("UPDATE companies SET owner_id = $1 WHERE id = $2", user["id"], company_id)
+
+    access_token = create_access_token(user["id"], user["email"], user["role"])
+    refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token, token_type="bearer")

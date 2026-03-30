@@ -12,7 +12,7 @@ from ..database import get_connection, set_tenant_id
 # Matcha role dependencies
 require_client = require_roles("client")
 require_employee = require_roles("employee")
-require_admin_or_client = require_roles("admin", "client")
+require_admin_or_client = require_roles("admin", "client", "individual")
 require_admin_or_client_or_broker = require_roles("admin", "client", "broker")
 require_admin_or_employee = require_roles("admin", "employee")
 require_broker = require_roles("broker")
@@ -398,6 +398,10 @@ def require_feature(feature_name: str):
     async def checker(current_user=Depends(get_current_user)):
         # Admin bypasses all feature checks
         if current_user.role == "admin":
+            return current_user
+
+        # Individual users always have matcha_work access (personal workspace)
+        if current_user.role == "individual" and feature_name == "matcha_work":
             return current_user
 
         # Platform-level visibility check (non-admins blocked if feature is a known
