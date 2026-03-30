@@ -1,7 +1,6 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Bold, Italic, Heading2, List, ListOrdered, Code, Link, ImagePlus } from 'lucide-react'
-import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+// Markdown preview removed — always-editable textareas are more usable
 import type { ProjectSection } from '../../types/matcha-work'
 import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage } from '../../api/matchaWork'
 
@@ -11,18 +10,6 @@ interface ProjectPanelProps {
   lightMode: boolean
   streaming: boolean
   onStateUpdate: (state: Record<string, unknown>, version: number) => void
-}
-
-/** Render line numbers alongside content */
-function LineNumbers({ content }: { content: string }) {
-  const count = (content.match(/\n/g) || []).length + 1
-  return (
-    <div className="select-none text-right pr-3 pt-[1px]" style={{ color: '#6a737d', fontSize: '11px', lineHeight: '1.65' }}>
-      {Array.from({ length: count }, (_, i) => (
-        <div key={i}>{i + 1}</div>
-      ))}
-    </div>
-  )
 }
 
 type FormatAction = { prefix: string; suffix?: string; block?: boolean; placeholder?: string }
@@ -72,8 +59,10 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
   const title = (state.project_title as string) ?? 'Untitled Project'
   const sections = (state.project_sections as ProjectSection[]) ?? []
 
-  const [editingSection, setEditingSection] = useState<string | null>(null)
-  const [editContent, setEditContent] = useState('')
+  // Per-section local content — always editable, no read/edit toggle
+  const [localContent, setLocalContent] = useState<Record<string, string>>({})
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const [activeSection, setActiveSection] = useState<string | null>(null) // which section shows toolbar
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(title)
   const [sectionTitleEditing, setSectionTitleEditing] = useState<string | null>(null)
@@ -81,17 +70,28 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
   const [showExport, setShowExport] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [saving, setSaving] = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const textareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({})
   const exportRef = useRef<HTMLDivElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const [uploadingImage, setUploadingImage] = useState(false)
 
+  // Sync local content when sections change from server (new section added, etc.)
   useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px'
+    setLocalContent((prev) => {
+      const next = { ...prev }
+      for (const s of sections) {
+        if (!(s.id in next)) next[s.id] = s.content
+      }
+      return next
+    })
+  }, [sections])
+
+  // Auto-resize all visible textareas
+  useEffect(() => {
+    for (const ta of Object.values(textareaRefs.current)) {
+      if (ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px' }
     }
-  }, [editContent])
+  }, [localContent])
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -101,19 +101,22 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
-  function startEditing(section: ProjectSection) {
-    setEditingSection(section.id)
-    setEditContent(section.content)
+  function updateSectionContent(sectionId: string, content: string) {
+    setLocalContent((prev) => ({ ...prev, [sectionId]: content }))
+    // Debounce save — 1 second after last keystroke
+    clearTimeout(saveTimers.current[sectionId])
+    saveTimers.current[sectionId] = setTimeout(() => {
+      flushSave(sectionId, content)
+    }, 1000)
   }
 
-  const saveSection = useCallback(async (sectionId: string, content: string) => {
+  const flushSave = useCallback(async (sectionId: string, content: string) => {
     setSaving(true)
     try {
       const result = await updateProjectSection(threadId, sectionId, { content })
       onStateUpdate(result.current_state, result.version)
     } catch {}
     setSaving(false)
-    setEditingSection(null)
   }, [threadId, onStateUpdate])
 
   async function saveSectionTitle(sectionId: string, newTitle: string) {
@@ -145,23 +148,23 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
     try {
       const result = await addProjectSection(threadId, { content: '', title: 'New Section' })
       onStateUpdate(result.current_state, result.version)
-      startEditing({ id: result.section.id, content: '', title: 'New Section', source_message_id: null })
+      setActiveSection(result.section.id)
     } catch {}
   }
 
   async function handleImageUpload(file: File) {
-    if (!file.type.startsWith('image/')) return
+    if (!file.type.startsWith('image/') || !activeSection) return
     setUploadingImage(true)
     try {
       const { url, filename } = await uploadProjectImage(threadId, file)
       const tag = `![${filename}](${url})`
-      if (textareaRef.current) {
-        const ta = textareaRef.current
+      const ta = textareaRefs.current[activeSection]
+      const current = localContent[activeSection] || ''
+      if (ta) {
         const pos = ta.selectionStart
-        const newContent = editContent.slice(0, pos) + tag + editContent.slice(pos)
-        setEditContent(newContent)
+        updateSectionContent(activeSection, current.slice(0, pos) + tag + current.slice(pos))
       } else {
-        setEditContent((prev) => prev + '\n' + tag)
+        updateSectionContent(activeSection, current + '\n' + tag)
       }
     } catch {}
     setUploadingImage(false)
@@ -192,23 +195,6 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
     } catch {}
     setExporting(false)
   }
-
-  // Custom markdown components for the dark editor theme
-  const mdComponents = useMemo(() => ({
-    h1: ({ children, ...props }: React.ComponentProps<'h1'>) => <h1 style={{ color: '#e8e8e8', fontSize: '16px', fontWeight: 700, margin: '16px 0 8px', lineHeight: 1.4 }} {...props}>{children}</h1>,
-    h2: ({ children, ...props }: React.ComponentProps<'h2'>) => <h2 style={{ color: '#e8e8e8', fontSize: '14px', fontWeight: 600, margin: '14px 0 6px', lineHeight: 1.4 }} {...props}>{children}</h2>,
-    h3: ({ children, ...props }: React.ComponentProps<'h3'>) => <h3 style={{ color: '#e8e8e8', fontSize: '13px', fontWeight: 600, margin: '12px 0 4px', lineHeight: 1.4 }} {...props}>{children}</h3>,
-    p: ({ children, ...props }: React.ComponentProps<'p'>) => <p style={{ color: '#d4d4d4', fontSize: '12px', lineHeight: 1.65, margin: '4px 0' }} {...props}>{children}</p>,
-    strong: ({ children, ...props }: React.ComponentProps<'strong'>) => <strong style={{ color: '#dcdcaa', fontWeight: 600 }} {...props}>{children}</strong>,
-    code: ({ children, ...props }: React.ComponentProps<'code'>) => <code style={{ color: '#ce9178', background: '#2a2d2e', padding: '1px 5px', borderRadius: '3px', fontSize: '11px', fontFamily: 'ui-monospace, monospace' }} {...props}>{children}</code>,
-    pre: ({ children, ...props }: React.ComponentProps<'pre'>) => <pre style={{ background: '#1a1a1a', border: '1px solid #333', borderRadius: '4px', padding: '10px', overflow: 'auto', margin: '8px 0', fontSize: '11px' }} {...props}>{children}</pre>,
-    li: ({ children, ...props }: React.ComponentProps<'li'>) => <li style={{ color: '#d4d4d4', fontSize: '12px', lineHeight: 1.65 }} {...props}>{children}</li>,
-    a: ({ children, ...props }: React.ComponentProps<'a'>) => <a style={{ color: '#ce9178' }} {...props}>{children}</a>,
-    hr: (props: React.ComponentProps<'hr'>) => <hr style={{ border: 'none', borderTop: '1px solid #333', margin: '12px 0' }} {...props} />,
-    table: ({ children, ...props }: React.ComponentProps<'table'>) => <table style={{ borderCollapse: 'collapse', width: '100%', margin: '8px 0', fontSize: '11px' }} {...props}>{children}</table>,
-    th: ({ children, ...props }: React.ComponentProps<'th'>) => <th style={{ border: '1px solid #333', padding: '4px 8px', color: '#dcdcaa', background: '#252526', textAlign: 'left', fontWeight: 600 }} {...props}>{children}</th>,
-    td: ({ children, ...props }: React.ComponentProps<'td'>) => <td style={{ border: '1px solid #333', padding: '4px 8px', color: '#d4d4d4' }} {...props}>{children}</td>,
-  }), [])
 
   return (
     <div className="hidden md:flex md:w-1/2 flex-col" style={{ background: '#1e1e1e' }}>
@@ -315,103 +301,81 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
               </button>
             </div>
 
-            {/* Section content */}
-            <div className="flex">
-              {/* Line numbers */}
-              {editingSection !== s.id && s.content && (
-                <LineNumbers content={s.content} />
-              )}
-
-              {/* Content area */}
-              <div className="flex-1 px-4 py-2 min-w-0">
-                {editingSection === s.id ? (
-                  <div>
-                    {/* Formatting toolbar */}
-                    <div className="flex items-center gap-0.5 mb-1.5 pb-1.5" style={{ borderBottom: '1px solid #333' }}>
-                      {FORMAT_ACTIONS.map(({ icon: Icon, label, action }) => (
-                        <button
-                          key={label}
-                          title={label}
-                          onMouseDown={(e) => {
-                            e.preventDefault()
-                            if (textareaRef.current) applyFormat(textareaRef.current, action, editContent, setEditContent)
-                          }}
-                          className="p-1 rounded transition-colors"
-                          style={{ color: '#6a737d' }}
-                          onMouseEnter={(e) => (e.currentTarget.style.color = '#ce9178')}
-                          onMouseLeave={(e) => (e.currentTarget.style.color = '#6a737d')}
-                        >
-                          <Icon size={13} />
-                        </button>
-                      ))}
-                      <div className="w-px h-3 mx-1" style={{ background: '#333' }} />
-                      <input
-                        ref={imageInputRef}
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const f = e.target.files?.[0]
-                          if (f) handleImageUpload(f)
-                          e.target.value = ''
-                        }}
-                      />
-                      <button
-                        title="Insert image"
-                        onMouseDown={(e) => {
-                          e.preventDefault()
-                          imageInputRef.current?.click()
-                        }}
-                        className="p-1 rounded transition-colors"
-                        style={{ color: uploadingImage ? '#ce9178' : '#6a737d' }}
-                        onMouseEnter={(e) => { if (!uploadingImage) e.currentTarget.style.color = '#ce9178' }}
-                        onMouseLeave={(e) => { if (!uploadingImage) e.currentTarget.style.color = '#6a737d' }}
-                      >
-                        {uploadingImage ? <Loader2 size={13} className="animate-spin" /> : <ImagePlus size={13} />}
-                      </button>
-                    </div>
-                    <textarea
-                      ref={textareaRef}
-                      value={editContent}
-                      onChange={(e) => setEditContent(e.target.value)}
-                      onBlur={() => saveSection(s.id, editContent)}
-                      onPaste={(e) => {
-                        const items = e.clipboardData.items
-                        for (const item of items) {
-                          if (item.type.startsWith('image/')) {
-                            e.preventDefault()
-                            const file = item.getAsFile()
-                            if (file) handleImageUpload(file)
-                            return
-                          }
-                        }
+            {/* Section content — always editable */}
+            <div className="px-4 py-2">
+              {/* Formatting toolbar — show when this section is focused */}
+              {activeSection === s.id && (
+                <div className="flex items-center gap-0.5 mb-1.5 pb-1.5" style={{ borderBottom: '1px solid #333' }}>
+                  {FORMAT_ACTIONS.map(({ icon: Icon, label, action }) => (
+                    <button
+                      key={label}
+                      title={label}
+                      onMouseDown={(e) => {
+                        e.preventDefault()
+                        const ta = textareaRefs.current[s.id]
+                        if (ta) applyFormat(ta, action, localContent[s.id] || '', (v) => updateSectionContent(s.id, v))
                       }}
-                      className="w-full text-xs rounded border p-2 focus:outline-none resize-none min-h-[80px]"
-                      style={{
-                        background: '#1a1a1a',
-                        color: '#d4d4d4',
-                        borderColor: '#555',
-                        fontFamily: 'ui-monospace, monospace',
-                        lineHeight: 1.65,
-                      }}
-                      autoFocus
-                    />
-                  </div>
-                ) : (
-                  <div
-                    onClick={() => startEditing(s)}
-                    className="cursor-text min-h-[40px]"
+                      className="p-1 rounded transition-colors"
+                      style={{ color: '#6a737d' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = '#ce9178')}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = '#6a737d')}
+                    >
+                      <Icon size={13} />
+                    </button>
+                  ))}
+                  <div className="w-px h-3 mx-1" style={{ background: '#333' }} />
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0]
+                      if (f) handleImageUpload(f)
+                      e.target.value = ''
+                    }}
+                  />
+                  <button
+                    title="Insert image"
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      imageInputRef.current?.click()
+                    }}
+                    className="p-1 rounded transition-colors"
+                    style={{ color: uploadingImage ? '#ce9178' : '#6a737d' }}
+                    onMouseEnter={(e) => { if (!uploadingImage) e.currentTarget.style.color = '#ce9178' }}
+                    onMouseLeave={(e) => { if (!uploadingImage) e.currentTarget.style.color = '#6a737d' }}
                   >
-                    {s.content ? (
-                      <Markdown remarkPlugins={[remarkGfm]} components={mdComponents}>
-                        {s.content}
-                      </Markdown>
-                    ) : (
-                      <p className="italic text-xs" style={{ color: '#6a737d' }}>Click to edit...</p>
-                    )}
-                  </div>
-                )}
-              </div>
+                    {uploadingImage ? <Loader2 size={13} className="animate-spin" /> : <ImagePlus size={13} />}
+                  </button>
+                </div>
+              )}
+              <textarea
+                ref={(el) => { textareaRefs.current[s.id] = el }}
+                value={localContent[s.id] ?? s.content}
+                onChange={(e) => updateSectionContent(s.id, e.target.value)}
+                onFocus={() => setActiveSection(s.id)}
+                onPaste={(e) => {
+                  const items = e.clipboardData.items
+                  for (const item of items) {
+                    if (item.type.startsWith('image/')) {
+                      e.preventDefault()
+                      const file = item.getAsFile()
+                      if (file) handleImageUpload(file)
+                      return
+                    }
+                  }
+                }}
+                placeholder="Start typing..."
+                className="w-full text-xs rounded border p-2 focus:outline-none resize-none min-h-[60px]"
+                style={{
+                  background: '#1a1a1a',
+                  color: '#d4d4d4',
+                  borderColor: activeSection === s.id ? '#555' : '#333',
+                  fontFamily: 'ui-monospace, monospace',
+                  lineHeight: 1.65,
+                }}
+              />
             </div>
           </div>
         ))}
