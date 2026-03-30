@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2 } from 'lucide-react'
+import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Bold, Italic, Heading2, List, ListOrdered, Code, Link } from 'lucide-react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { ProjectSection } from '../../types/matcha-work'
@@ -23,6 +23,49 @@ function LineNumbers({ content }: { content: string }) {
       ))}
     </div>
   )
+}
+
+type FormatAction = { prefix: string; suffix?: string; block?: boolean; placeholder?: string }
+
+const FORMAT_ACTIONS: { icon: typeof Bold; label: string; action: FormatAction }[] = [
+  { icon: Bold, label: 'Bold', action: { prefix: '**', suffix: '**', placeholder: 'bold text' } },
+  { icon: Italic, label: 'Italic', action: { prefix: '_', suffix: '_', placeholder: 'italic text' } },
+  { icon: Heading2, label: 'Heading', action: { prefix: '## ', block: true, placeholder: 'Heading' } },
+  { icon: List, label: 'Bullet list', action: { prefix: '- ', block: true, placeholder: 'List item' } },
+  { icon: ListOrdered, label: 'Numbered list', action: { prefix: '1. ', block: true, placeholder: 'List item' } },
+  { icon: Code, label: 'Code', action: { prefix: '`', suffix: '`', placeholder: 'code' } },
+  { icon: Link, label: 'Link', action: { prefix: '[', suffix: '](url)', placeholder: 'link text' } },
+]
+
+function applyFormat(
+  textarea: HTMLTextAreaElement,
+  action: FormatAction,
+  content: string,
+  setContent: (v: string) => void,
+) {
+  const start = textarea.selectionStart
+  const end = textarea.selectionEnd
+  const selected = content.slice(start, end)
+  const text = selected || action.placeholder || ''
+
+  if (action.block) {
+    // Block-level: insert at start of line
+    const lineStart = content.lastIndexOf('\n', start - 1) + 1
+    const before = content.slice(0, lineStart)
+    const after = content.slice(lineStart)
+    const newContent = before + action.prefix + (after.startsWith(action.prefix) ? after.slice(action.prefix.length) : after)
+    setContent(newContent)
+  } else {
+    const wrapped = `${action.prefix}${text}${action.suffix || ''}`
+    const newContent = content.slice(0, start) + wrapped + content.slice(end)
+    setContent(newContent)
+    // Restore cursor after format markers
+    requestAnimationFrame(() => {
+      textarea.selectionStart = start + action.prefix.length
+      textarea.selectionEnd = start + action.prefix.length + text.length
+      textarea.focus()
+    })
+  }
 }
 
 export default function ProjectPanel({ state, threadId, streaming, onStateUpdate }: ProjectPanelProps) {
@@ -262,21 +305,42 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
               {/* Content area */}
               <div className="flex-1 px-4 py-2 min-w-0">
                 {editingSection === s.id ? (
-                  <textarea
-                    ref={textareaRef}
-                    value={editContent}
-                    onChange={(e) => setEditContent(e.target.value)}
-                    onBlur={() => saveSection(s.id, editContent)}
-                    className="w-full text-xs rounded border p-2 focus:outline-none resize-none min-h-[80px]"
-                    style={{
-                      background: '#1a1a1a',
-                      color: '#d4d4d4',
-                      borderColor: '#555',
-                      fontFamily: 'ui-monospace, monospace',
-                      lineHeight: 1.65,
-                    }}
-                    autoFocus
-                  />
+                  <div>
+                    {/* Formatting toolbar */}
+                    <div className="flex items-center gap-0.5 mb-1.5 pb-1.5" style={{ borderBottom: '1px solid #333' }}>
+                      {FORMAT_ACTIONS.map(({ icon: Icon, label, action }) => (
+                        <button
+                          key={label}
+                          title={label}
+                          onMouseDown={(e) => {
+                            e.preventDefault() // prevent blur on textarea
+                            if (textareaRef.current) applyFormat(textareaRef.current, action, editContent, setEditContent)
+                          }}
+                          className="p-1 rounded transition-colors"
+                          style={{ color: '#6a737d' }}
+                          onMouseEnter={(e) => (e.currentTarget.style.color = '#ce9178')}
+                          onMouseLeave={(e) => (e.currentTarget.style.color = '#6a737d')}
+                        >
+                          <Icon size={13} />
+                        </button>
+                      ))}
+                    </div>
+                    <textarea
+                      ref={textareaRef}
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      onBlur={() => saveSection(s.id, editContent)}
+                      className="w-full text-xs rounded border p-2 focus:outline-none resize-none min-h-[80px]"
+                      style={{
+                        background: '#1a1a1a',
+                        color: '#d4d4d4',
+                        borderColor: '#555',
+                        fontFamily: 'ui-monospace, monospace',
+                        lineHeight: 1.65,
+                      }}
+                      autoFocus
+                    />
+                  </div>
                 ) : (
                   <div
                     onClick={() => startEditing(s)}
