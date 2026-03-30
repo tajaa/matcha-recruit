@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine } from 'lucide-react'
 import type { ProjectSection } from '../../types/matcha-work'
-import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta, uploadProjectImage as uploadProjectImageApi } from '../../api/matchaWork'
+import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta } from '../../api/matchaWork'
 import type { MWProject } from '../../types/matcha-work'
 import SectionEditor from './SectionEditor'
 

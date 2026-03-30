@@ -16,7 +16,7 @@ import AgentPanel from '../../components/matcha-work/AgentPanel'
 const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
 const RESUME_MAX_SIZE = 10 * 1024 * 1024
 const INVENTORY_EXTENSIONS = ['.csv', '.xlsx', '.xls']
-const ALL_UPLOAD_EXTENSIONS = [...RESUME_EXTENSIONS, ...INVENTORY_EXTENSIONS]
+// INVENTORY_EXTENSIONS is used in handleFileUpload for routing detection
 
 const MODEL_OPTIONS = [
   { id: 'gemini-3.1-flash-lite-preview', label: 'Flash Lite 3.1' },
@@ -630,7 +630,7 @@ export default function MatchaWorkThread() {
                       <Icon size={16} className={isProject ? 'text-[#ce9178]' : 'text-emerald-500'} />
                       <span className="text-[11px] font-medium">{skill.label}</span>
                       <span className={`text-[9px] leading-tight ${isProject ? 'text-[#6a737d]' : lightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
-                        {skill.dropHint || skill.desc}
+                        {'dropHint' in skill ? skill.dropHint : skill.desc}
                       </span>
                     </button>
                   )

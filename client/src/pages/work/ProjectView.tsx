@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, PlusCircle } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
 import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'

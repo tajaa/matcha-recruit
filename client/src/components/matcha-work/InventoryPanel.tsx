@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Search, ChevronDown, ChevronUp, Package, Loader2 } from 'lucide-react'
+import { Search, ChevronDown, ChevronUp, Loader2 } from 'lucide-react'
 import type { InventoryItem } from '../../types/matcha-work'
 
 type SortKey = 'product_name' | 'quantity' | 'unit_cost' | 'total_cost' | 'vendor'
