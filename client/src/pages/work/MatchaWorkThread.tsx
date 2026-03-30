@@ -748,7 +748,7 @@ export default function MatchaWorkThread() {
 
       {/* Agent panel */}
       {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && (
-        <AgentPanel lightMode={lightMode} />
+        <AgentPanel />
       )}
 
       {/* PDF preview panel (offer letters, etc.) */}

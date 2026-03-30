@@ -26,6 +26,9 @@ DEFAULT_TOKEN_PATH = os.path.join(
 )
 
 
+TOKEN_CACHE_TTL = 300  # 5 minutes — skip validation if token was used recently
+
+
 class GmailService:
     """Gmail client using OAuth2 tokens — fetch, draft, send emails."""
 
@@ -33,6 +36,7 @@ class GmailService:
         self._token_path = Path(token_path or os.getenv("GMAIL_TOKEN_PATH", DEFAULT_TOKEN_PATH))
         self._token_data: dict | None = None
         self._send_timestamps: list[float] = []
+        self._token_validated_at: float = 0
         if self._token_path.exists():
             try:
                 self._token_data = json.loads(self._token_path.read_text())
@@ -65,6 +69,12 @@ class GmailService:
             raise ValueError("Gmail token.json not found")
 
         token = self._token_data.get("token")
+
+        # Skip validation if token was confirmed valid recently
+        if token and (time.time() - self._token_validated_at) < TOKEN_CACHE_TTL:
+            return token
+
+        # Validate token with a lightweight request
         if token:
             async with httpx.AsyncClient() as client:
                 resp = await client.get(
@@ -73,8 +83,10 @@ class GmailService:
                     timeout=10.0,
                 )
                 if resp.status_code == 200:
+                    self._token_validated_at = time.time()
                     return token
 
+        # Refresh the token
         logger.info("Refreshing Gmail access token")
         refresh_token = self._token_data.get("refresh_token")
         client_id = self._token_data.get("client_id")
@@ -98,48 +110,46 @@ class GmailService:
             new_tokens = resp.json()
 
         self._token_data["token"] = new_tokens["access_token"]
+        self._token_validated_at = time.time()
         self._token_path.write_text(json.dumps(self._token_data, indent=2))
         self._token_path.chmod(0o600)
         return self._token_data["token"]
 
-    async def _gmail_get(self, path: str, params=None) -> dict:
+    async def _get_client_headers(self) -> dict:
         token = await self._get_access_token()
+        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    async def _gmail_get(self, path: str, params=None) -> dict:
+        headers = await self._get_client_headers()
         async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{GMAIL_API_BASE}{path}",
-                headers={"Authorization": f"Bearer {token}"},
-                params=params,
-                timeout=30.0,
-            )
+            resp = await client.get(f"{GMAIL_API_BASE}{path}", headers=headers, params=params, timeout=30.0)
             resp.raise_for_status()
             return resp.json()
 
     async def _gmail_post(self, path: str, body: dict) -> dict:
-        token = await self._get_access_token()
+        headers = await self._get_client_headers()
         async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                f"{GMAIL_API_BASE}{path}",
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json=body,
-                timeout=30.0,
-            )
+            resp = await client.post(f"{GMAIL_API_BASE}{path}", headers=headers, json=body, timeout=30.0)
             resp.raise_for_status()
             return resp.json()
 
     async def fetch_unread(self, max_results: int = 25) -> list[dict]:
+        import asyncio as _aio
         data = await self._gmail_get("/users/me/messages", params=[
             ("maxResults", str(max_results)),
             ("q", "is:unread"),
         ])
         stubs = data.get("messages", [])
-        emails = []
-        for stub in stubs:
+
+        async def _fetch_one(stub: dict) -> dict | None:
             try:
-                email = await self.get_message(stub["id"])
-                emails.append(email)
+                return await self.get_message(stub["id"])
             except Exception as e:
                 logger.warning("Failed to fetch message %s: %s", stub["id"], e)
-        return emails
+                return None
+
+        results = await _aio.gather(*[_fetch_one(s) for s in stubs])
+        return [r for r in results if r is not None]
 
     async def get_message(self, msg_id: str) -> dict:
         data = await self._gmail_get(f"/users/me/messages/{msg_id}", params={"format": "full"})

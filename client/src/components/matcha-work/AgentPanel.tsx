@@ -3,11 +3,7 @@ import { ArrowLeft, Mail, RefreshCw, Loader2, Send, PenLine } from 'lucide-react
 import type { AgentEmail } from '../../types/matcha-work'
 import { agentEmailStatus, agentFetchEmails, agentDraftReply, agentSendEmail } from '../../api/matchaWork'
 
-interface AgentPanelProps {
-  lightMode: boolean
-}
-
-export default function AgentPanel({ lightMode }: AgentPanelProps) {
+export default function AgentPanel() {
   const [connected, setConnected] = useState<boolean | null>(null)
   const [emailAddr, setEmailAddr] = useState<string | null>(null)
   const [emails, setEmails] = useState<AgentEmail[]>([])
