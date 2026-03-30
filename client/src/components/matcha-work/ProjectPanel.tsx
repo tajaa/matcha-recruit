@@ -1,16 +1,33 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine } from 'lucide-react'
 import type { ProjectSection } from '../../types/matcha-work'
-import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage } from '../../api/matchaWork'
+import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta, uploadProjectImage as uploadProjectImageApi } from '../../api/matchaWork'
+import type { MWProject } from '../../types/matcha-work'
 import SectionEditor from './SectionEditor'
 
-interface ProjectPanelProps {
+interface ProjectPanelPropsLegacy {
   state: Record<string, unknown>
   threadId: string
   lightMode: boolean
   streaming: boolean
   onStateUpdate: (state: Record<string, unknown>, version: number) => void
+  projectId?: undefined
+  project?: undefined
+  onProjectUpdate?: undefined
 }
+
+interface ProjectPanelPropsNew {
+  projectId: string
+  project: MWProject
+  onProjectUpdate: (project: MWProject) => void
+  state?: undefined
+  threadId?: undefined
+  lightMode?: boolean
+  streaming?: boolean
+  onStateUpdate?: undefined
+}
+
+type ProjectPanelProps = ProjectPanelPropsLegacy | ProjectPanelPropsNew
 
 /** Convert markdown to simple HTML for TipTap initialization */
 function markdownToHtml(md: string): string {
@@ -57,9 +74,13 @@ function markdownToHtml(md: string): string {
   return result.join('\n')
 }
 
-export default function ProjectPanel({ state, threadId, streaming, onStateUpdate }: ProjectPanelProps) {
-  const title = (state.project_title as string) ?? 'Untitled Project'
-  const sections = (state.project_sections as ProjectSection[]) ?? []
+export default function ProjectPanel(props: ProjectPanelProps) {
+  const isNewMode = !!props.projectId
+  const title = isNewMode ? props.project!.title : ((props.state?.project_title as string) ?? 'Untitled Project')
+  const sections = isNewMode ? (props.project!.sections ?? []) : ((props.state?.project_sections as ProjectSection[]) ?? [])
+  const threadId = props.threadId ?? ''
+  const projectId = props.projectId ?? ''
+  const streaming = props.streaming ?? false
 
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(title)
@@ -93,17 +114,34 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
   const flushSave = useCallback(async (sectionId: string, content: string) => {
     setSaving(true)
     try {
-      const result = await updateProjectSection(threadId, sectionId, { content })
-      onStateUpdate(result.current_state, result.version)
+      if (isNewMode) {
+        await updateProjectSectionNew(projectId, sectionId, { content })
+        if (props.onProjectUpdate) {
+          const { getProjectDetail } = await import('../../api/matchaWork')
+          const updated = await getProjectDetail(projectId)
+          props.onProjectUpdate(updated)
+        }
+      } else {
+        const result = await updateProjectSection(threadId, sectionId, { content })
+        props.onStateUpdate?.(result.current_state, result.version)
+      }
     } catch {}
     setSaving(false)
-  }, [threadId, onStateUpdate])
+  }, [threadId, projectId, isNewMode, props])
 
   async function saveSectionTitle(sectionId: string, newTitle: string) {
     setSaving(true)
     try {
-      const result = await updateProjectSection(threadId, sectionId, { title: newTitle })
-      onStateUpdate(result.current_state, result.version)
+      if (isNewMode) {
+        await updateProjectSectionNew(projectId, sectionId, { title: newTitle })
+        if (props.onProjectUpdate) {
+          const { getProjectDetail } = await import('../../api/matchaWork')
+          props.onProjectUpdate(await getProjectDetail(projectId))
+        }
+      } else {
+        const result = await updateProjectSection(threadId, sectionId, { title: newTitle })
+        props.onStateUpdate?.(result.current_state, result.version)
+      }
     } catch {}
     setSaving(false)
     setSectionTitleEditing(null)
@@ -111,23 +149,47 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
 
   async function saveProjectTitle(newTitle: string) {
     try {
-      const result = await initProject(threadId, newTitle)
-      onStateUpdate(result.current_state, result.version)
+      if (isNewMode) {
+        await updateProjectMeta(projectId, { title: newTitle })
+        if (props.onProjectUpdate) {
+          const { getProjectDetail } = await import('../../api/matchaWork')
+          props.onProjectUpdate(await getProjectDetail(projectId))
+        }
+      } else {
+        const result = await initProject(threadId, newTitle)
+        props.onStateUpdate?.(result.current_state, result.version)
+      }
     } catch {}
     setEditingTitle(false)
   }
 
   async function handleDelete(sectionId: string) {
     try {
-      const result = await deleteProjectSection(threadId, sectionId)
-      onStateUpdate(result.current_state, result.version)
+      if (isNewMode) {
+        await deleteProjectSectionNew(projectId, sectionId)
+        if (props.onProjectUpdate) {
+          const { getProjectDetail } = await import('../../api/matchaWork')
+          props.onProjectUpdate(await getProjectDetail(projectId))
+        }
+      } else {
+        const result = await deleteProjectSection(threadId, sectionId)
+        props.onStateUpdate?.(result.current_state, result.version)
+      }
     } catch {}
   }
 
   async function handleAddBlank() {
     try {
-      const result = await addProjectSection(threadId, { content: '', title: 'New Section' })
-      onStateUpdate(result.current_state, result.version)
+      if (isNewMode) {
+        await addProjectSectionNew(projectId, { content: '', title: 'New Section' })
+        if (props.onProjectUpdate) {
+          const { getProjectDetail } = await import('../../api/matchaWork')
+          props.onProjectUpdate(await getProjectDetail(projectId))
+        }
+      } else {
+        await addProjectSection(threadId, { content: '', title: 'New Section' })
+        // Legacy mode refresh handled by caller
+      }
     } catch {}
   }
 
@@ -152,7 +214,9 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
     setLoadingPreview(true)
     setPreviewMode(true)
     try {
-      const result = await exportProject(threadId, 'pdf')
+      const result = isNewMode
+        ? await exportProjectNew(projectId, 'pdf')
+        : await exportProject(threadId, 'pdf')
       if (result.pdf_url) setPreviewUrl(result.pdf_url)
     } catch {}
     setLoadingPreview(false)
@@ -162,23 +226,40 @@ export default function ProjectPanel({ state, threadId, streaming, onStateUpdate
     setExporting(true)
     setShowExport(false)
     try {
-      if (fmt === 'md') {
-        const BASE = import.meta.env.VITE_API_URL ?? '/api'
-        const token = localStorage.getItem('matcha_access_token')
-        const res = await fetch(`${BASE}/matcha-work/threads/${threadId}/project/export/md`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-        })
-        const blob = await res.blob()
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${title}.md`
-        a.click()
-        URL.revokeObjectURL(url)
+      if (isNewMode) {
+        if (fmt === 'md') {
+          const BASE = import.meta.env.VITE_API_URL ?? '/api'
+          const token = localStorage.getItem('matcha_access_token')
+          const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/export/md`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+          const blob = await res.blob()
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url; a.download = `${title}.md`; a.click()
+          URL.revokeObjectURL(url)
+        } else {
+          const result = await exportProjectNew(projectId, fmt)
+          const url = result.pdf_url || result.docx_url
+          if (url) window.open(url, '_blank')
+        }
       } else {
-        const result = await exportProject(threadId, fmt)
-        const url = result.pdf_url || result.docx_url
-        if (url) window.open(url, '_blank')
+        if (fmt === 'md') {
+          const BASE = import.meta.env.VITE_API_URL ?? '/api'
+          const token = localStorage.getItem('matcha_access_token')
+          const res = await fetch(`${BASE}/matcha-work/threads/${threadId}/project/export/md`, {
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          })
+          const blob = await res.blob()
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url; a.download = `${title}.md`; a.click()
+          URL.revokeObjectURL(url)
+        } else {
+          const result = await exportProject(threadId, fmt)
+          const url = result.pdf_url || result.docx_url
+          if (url) window.open(url, '_blank')
+        }
       }
     } catch {}
     setExporting(false)

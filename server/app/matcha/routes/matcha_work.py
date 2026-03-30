@@ -2241,7 +2241,261 @@ def _strip_markdown(text: str) -> str:
     return t.strip()
 
 
-# ── Project endpoints ──
+# ── Project (top-level) endpoints ──
+
+
+@router.get("/projects")
+async def list_projects_endpoint(
+    status: Optional[str] = Query(None, pattern="^(active|archived)$"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List all projects for the current company."""
+    from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+    return await proj_svc.list_projects(company_id, status)
+
+
+@router.post("/projects", status_code=201)
+async def create_project_endpoint(
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a new project with an auto-created first chat."""
+    from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    title = body.get("title", "Untitled Project")
+    return await proj_svc.create_project(company_id, current_user.id, title)
+
+
+@router.get("/projects/{project_id}")
+async def get_project_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get a project with its chat list."""
+    from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = await proj_svc.get_project(project_id, company_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@router.patch("/projects/{project_id}")
+async def update_project_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update project title, pin, or status."""
+    from ..services import project_service as proj_svc
+    return await proj_svc.update_project(project_id, body)
+
+
+@router.delete("/projects/{project_id}")
+async def archive_project_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Archive a project."""
+    from ..services import project_service as proj_svc
+    await proj_svc.archive_project(project_id)
+    return {"status": "archived"}
+
+
+@router.post("/projects/{project_id}/sections")
+async def add_project_section_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Add a section to the project."""
+    from ..services import project_service as proj_svc
+    raw_content = body.get("content", "")
+    if body.get("source_message_id"):
+        raw_content = _strip_markdown(raw_content)
+    return await proj_svc.add_section(project_id, {**body, "content": raw_content})
+
+
+@router.put("/projects/{project_id}/sections/reorder")
+async def reorder_project_sections_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Reorder project sections."""
+    from ..services import project_service as proj_svc
+    return await proj_svc.reorder_sections(project_id, body.get("section_ids", []))
+
+
+@router.put("/projects/{project_id}/sections/{section_id}")
+async def update_project_section_endpoint(
+    project_id: UUID,
+    section_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update a project section."""
+    from ..services import project_service as proj_svc
+    return await proj_svc.update_section(project_id, section_id, body)
+
+
+@router.delete("/projects/{project_id}/sections/{section_id}")
+async def delete_project_section_endpoint(
+    project_id: UUID,
+    section_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Delete a project section."""
+    from ..services import project_service as proj_svc
+    return await proj_svc.delete_section(project_id, section_id)
+
+
+@router.post("/projects/{project_id}/chats")
+async def create_project_chat_endpoint(
+    project_id: UUID,
+    body: dict = {},
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a new chat within a project."""
+    from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    return await proj_svc.create_project_chat(project_id, company_id, current_user.id, body.get("title"))
+
+
+@router.get("/projects/{project_id}/export/{fmt}")
+async def export_project_endpoint(
+    project_id: UUID,
+    fmt: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Export project as PDF, DOCX, or Markdown."""
+    from ..services import project_service as proj_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = await proj_svc.get_project(project_id, company_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    title = project["title"]
+    sections = project["sections"]
+
+    if fmt not in ("pdf", "md", "docx"):
+        raise HTTPException(status_code=400, detail="Supported formats: pdf, md, docx")
+
+    if fmt == "md":
+        md_lines = [f"# {title}\n"]
+        for s in sections:
+            if s.get("title"):
+                md_lines.append(f"## {s['title']}\n")
+            md_lines.append(s.get("content", "") + "\n")
+        return Response(
+            content="\n".join(md_lines),
+            media_type="text/markdown",
+            headers={"Content-Disposition": f'attachment; filename="{title}.md"'},
+        )
+
+    if fmt == "pdf":
+        import html as _html
+        sections_html = []
+        for idx, s in enumerate(sections):
+            heading = ""
+            if s.get("title"):
+                heading = f'<h2><span class="section-num">{idx + 1}.</span> {_html.escape(s["title"])}</h2>'
+            content = s.get("content", "")
+            if content.lstrip().startswith("<"):
+                content_html = content
+            else:
+                try:
+                    import markdown as _md
+                    content_html = _md.markdown(content, extensions=["tables", "fenced_code", "nl2br"])
+                except ImportError:
+                    content_html = f"<p>{_html.escape(content)}</p>"
+            sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
+
+        body_html = "\n".join(sections_html)
+        full_html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+  @page {{ size: A4; margin: 50px 60px; }}
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; margin: 0; }}
+  h1 {{ font-size: 22pt; font-weight: 700; color: #0f172a; margin: 0 0 6px 0; }}
+  .title-rule {{ border: none; border-top: 3px solid #22c55e; margin: 0 0 30px 0; }}
+  h2 {{ font-size: 14pt; font-weight: 600; color: #0f172a; margin: 28px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }}
+  .section-num {{ color: #22c55e; font-weight: 700; }}
+  img {{ max-width: 100%; height: auto; page-break-inside: avoid; margin: 12px 0; border-radius: 4px; }}
+  .section-body {{ margin-bottom: 16px; }}
+  .section-body p {{ margin: 6px 0; color: #334155; }}
+  .section-body ul, .section-body ol {{ margin: 6px 0; padding-left: 22px; color: #334155; }}
+  .section-body li {{ margin: 3px 0; }}
+  .section-body strong {{ color: #0f172a; }}
+  pre {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px; font-size: 9pt; white-space: pre-wrap; overflow-wrap: break-word; }}
+  code {{ background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 9pt; color: #b45309; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9.5pt; }}
+  th, td {{ border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; }}
+  th {{ background: #f8fafc; font-weight: 600; color: #0f172a; }}
+  a {{ color: #2563eb; text-decoration: none; }}
+  .footer {{ margin-top: 40px; padding-top: 12px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8; text-align: center; }}
+</style>
+</head><body>
+<h1>{_html.escape(title)}</h1>
+<hr class="title-rule">
+{body_html}
+<div class="footer">Generated with Matcha Work</div>
+</body></html>"""
+
+        try:
+            from weasyprint import HTML
+            pdf_bytes = await asyncio.to_thread(lambda: HTML(string=full_html).write_pdf())
+        except ImportError:
+            raise HTTPException(status_code=500, detail="PDF generation not available")
+
+        prefix = doc_svc.build_matcha_work_thread_storage_prefix(company_id, project_id, "project-exports")
+        pdf_url = await get_storage().upload_file(
+            pdf_bytes, f"{title}.pdf", prefix=prefix, content_type="application/pdf"
+        )
+        return {"pdf_url": pdf_url}
+
+    if fmt == "docx":
+        try:
+            from docx import Document as DocxDocument
+        except ImportError:
+            raise HTTPException(status_code=500, detail="DOCX generation not available")
+
+        def _build_docx():
+            doc = DocxDocument()
+            doc.add_heading(title, level=0)
+            for s in sections:
+                if s.get("title"):
+                    doc.add_heading(s["title"], level=1)
+                for para in (s.get("content") or "").split("\n"):
+                    if para.strip():
+                        doc.add_paragraph(para)
+            import io
+            buf = io.BytesIO()
+            doc.save(buf)
+            return buf.getvalue()
+
+        docx_bytes = await asyncio.to_thread(_build_docx)
+        prefix = doc_svc.build_matcha_work_thread_storage_prefix(company_id, project_id, "project-exports")
+        docx_url = await get_storage().upload_file(
+            docx_bytes, f"{title}.docx", prefix=prefix,
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        return {"docx_url": docx_url}
+
+
+# ── Thread-scoped project endpoints (legacy, kept for backward compat) ──
 
 
 @router.post("/threads/{thread_id}/project/init")

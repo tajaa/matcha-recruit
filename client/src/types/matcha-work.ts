@@ -34,6 +34,19 @@ export interface ResumeCandidate {
   interview_summary?: string | null
 }
 
+export interface MWProject {
+  id: string
+  title: string
+  sections: ProjectSection[]
+  status: string
+  is_pinned: boolean
+  version: number
+  chat_count: number
+  chats?: MWThread[]
+  created_at: string
+  updated_at: string
+}
+
 export interface AgentEmail {
   id: string
   subject: string

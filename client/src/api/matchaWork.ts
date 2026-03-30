@@ -228,7 +228,54 @@ export function agentSendEmail(to: string, subject: string, body: string, replyT
   )
 }
 
-// ── Project ──
+// ── Projects (top-level) ──
+
+export function listProjects(status?: string) {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : ''
+  return api.get<import('../types/matcha-work').MWProject[]>(`/matcha-work/projects${qs}`)
+}
+
+export function createProjectNew(title: string) {
+  return api.post<import('../types/matcha-work').MWProject>('/matcha-work/projects', { title })
+}
+
+export function getProjectDetail(id: string) {
+  return api.get<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${id}`)
+}
+
+export function updateProjectMeta(id: string, updates: Record<string, unknown>) {
+  return api.patch<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${id}`, updates)
+}
+
+export function archiveProjectById(id: string) {
+  return api.delete(`/matcha-work/projects/${id}`)
+}
+
+export function addProjectSectionNew(projectId: string, section: { title?: string; content: string; source_message_id?: string }) {
+  return api.post<{ section: { id: string } }>(`/matcha-work/projects/${projectId}/sections`, section)
+}
+
+export function updateProjectSectionNew(projectId: string, sectionId: string, updates: { title?: string; content?: string }) {
+  return api.put(`/matcha-work/projects/${projectId}/sections/${sectionId}`, updates)
+}
+
+export function deleteProjectSectionNew(projectId: string, sectionId: string) {
+  return api.delete(`/matcha-work/projects/${projectId}/sections/${sectionId}`)
+}
+
+export function reorderProjectSectionsNew(projectId: string, sectionIds: string[]) {
+  return api.put(`/matcha-work/projects/${projectId}/sections/reorder`, { section_ids: sectionIds })
+}
+
+export function createProjectChat(projectId: string, title?: string) {
+  return api.post<import('../types/matcha-work').MWThread>(`/matcha-work/projects/${projectId}/chats`, { title })
+}
+
+export function exportProjectNew(projectId: string, format: 'pdf' | 'md' | 'docx') {
+  return api.get<{ pdf_url?: string; docx_url?: string }>(`/matcha-work/projects/${projectId}/export/${format}`)
+}
+
+// ── Project (legacy thread-scoped) ──
 
 export function initProject(threadId: string, title: string) {
   return api.post<{ current_state: Record<string, unknown>; version: number }>(

@@ -45,6 +45,7 @@ import SSOCallback from './pages/SSOCallback'
 import WorkLayout from './layouts/WorkLayout'
 import MatchaWorkList from './pages/work/MatchaWorkList'
 import MatchaWorkThread from './pages/work/MatchaWorkThread'
+import ProjectView from './pages/work/ProjectView'
 
 export default function App() {
   return (
@@ -56,6 +57,7 @@ export default function App() {
       <Route path="/work" element={<WorkLayout />}>
         <Route index element={<MatchaWorkList />} />
         <Route path=":threadId" element={<MatchaWorkThread />} />
+        <Route path="projects/:projectId" element={<ProjectView />} />
       </Route>
       <Route path="/admin" element={<AppLayout sidebar={<AdminSidebar />} />}>
         <Route index element={<Navigate to="companies" replace />} />

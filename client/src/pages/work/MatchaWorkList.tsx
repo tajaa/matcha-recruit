@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Pin, Archive, Loader2 } from 'lucide-react'
-import type { MWThread } from '../../types/matcha-work'
-import { listThreads, createThread, pinThread, archiveThread } from '../../api/matchaWork'
+import { Plus, Pin, Archive, Loader2, FolderOpen } from 'lucide-react'
+import type { MWThread, MWProject } from '../../types/matcha-work'
+import { listThreads, createThread, pinThread, archiveThread, listProjects, createProjectNew } from '../../api/matchaWork'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -15,11 +15,12 @@ const TASK_LABELS: Record<string, string> = {
   policy: 'Policy',
 }
 
-type Tab = 'all' | 'active' | 'pinned' | 'archived'
+type Tab = 'all' | 'active' | 'pinned' | 'archived' | 'projects'
 
 export default function MatchaWorkList() {
   const navigate = useNavigate()
   const [threads, setThreads] = useState<MWThread[]>([])
+  const [projects, setProjects] = useState<MWProject[]>([])
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [tab, setTab] = useState<Tab>('all')
@@ -29,11 +30,16 @@ export default function MatchaWorkList() {
     setLoading(true)
     setError('')
     try {
-      const status = tab === 'active' ? 'active' : tab === 'archived' ? 'archived' : undefined
-      const data = await listThreads(status)
-      setThreads(data)
+      if (tab === 'projects') {
+        const data = await listProjects()
+        setProjects(data)
+      } else {
+        const status = tab === 'active' ? 'active' : tab === 'archived' ? 'archived' : undefined
+        const data = await listThreads(status)
+        setThreads(data)
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load threads')
+      setError(e instanceof Error ? e.message : 'Failed to load')
     } finally {
       setLoading(false)
     }
@@ -46,10 +52,15 @@ export default function MatchaWorkList() {
   async function handleCreate() {
     setCreating(true)
     try {
-      const res = await createThread()
-      navigate(`/work/${res.id}`)
+      if (tab === 'projects') {
+        const res = await createProjectNew('Untitled Project')
+        navigate(`/work/projects/${res.id}`)
+      } else {
+        const res = await createThread()
+        navigate(`/work/${res.id}`)
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create thread')
+      setError(e instanceof Error ? e.message : 'Failed to create')
       setCreating(false)
     }
   }
@@ -77,6 +88,7 @@ export default function MatchaWorkList() {
     { key: 'active', label: 'Active' },
     { key: 'pinned', label: 'Pinned' },
     { key: 'archived', label: 'Archived' },
+    { key: 'projects', label: 'Projects' },
   ]
 
   return (
@@ -89,7 +101,7 @@ export default function MatchaWorkList() {
           className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
         >
           {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-          New Thread
+          {tab === 'projects' ? 'New Project' : 'New Thread'}
         </button>
       </div>
 
@@ -120,6 +132,35 @@ export default function MatchaWorkList() {
         <div className="flex justify-center py-16">
           <Loader2 className="animate-spin text-zinc-500" size={24} />
         </div>
+      ) : tab === 'projects' ? (
+        projects.length === 0 ? (
+          <div className="text-center py-16 text-zinc-500">No projects yet. Create one to get started.</div>
+        ) : (
+          <div className="space-y-2">
+            {projects.map((p) => (
+              <div
+                key={p.id}
+                onClick={() => navigate(`/work/projects/${p.id}`)}
+                className="group flex items-center gap-4 p-4 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-lg cursor-pointer transition-colors"
+              >
+                <FolderOpen size={18} className="text-[#ce9178] shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    {p.is_pinned && <Pin size={12} className="text-amber-400 shrink-0" />}
+                    <span className="text-white font-medium truncate">{p.title}</span>
+                    <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-700 text-zinc-300">
+                      {p.chat_count} chat{p.chat_count !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
+                    <span>{p.sections?.length ?? 0} sections</span>
+                    <span>{new Date(p.updated_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-zinc-500">
           {tab === 'pinned' ? 'No pinned threads' : 'No threads yet. Create one to get started.'}
