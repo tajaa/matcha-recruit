@@ -888,7 +888,7 @@ async def _apply_ai_updates_and_operations(
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
     # inferring from the update keys themselves so workbook/review/etc. updates
     # created on a fresh thread aren't silently dropped.
-    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
         skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
         if skill_from_updates != "chat":
             skill = skill_from_updates
