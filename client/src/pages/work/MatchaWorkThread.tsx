@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip, Bot } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip, Bot, FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
+import { useMe } from '../../hooks/useMe'
 import PresentationPanel from '../../components/matcha-work/PresentationPanel'
 import ResumeBatchPanel from '../../components/matcha-work/ResumeBatchPanel'
 import InventoryPanel from '../../components/matcha-work/InventoryPanel'
@@ -23,6 +24,20 @@ const MODEL_OPTIONS = [
   { id: 'gemini-3.1-pro-preview', label: 'Pro 3.1' },
 ] as const
 
+// Skills available in the chat — requiresCompany gates visibility for individual users
+const SKILLS = [
+  { id: 'chat', icon: MessageSquare, label: 'HR Chat', desc: 'Ask any HR question', prompt: '', requiresCompany: false },
+  { id: 'project', icon: FileText, label: 'Project', desc: 'Build reports & plans from chat', prompt: 'Create a new project called ', requiresCompany: false },
+  { id: 'presentation', icon: Presentation, label: 'Presentation', desc: 'Generate slide decks', prompt: 'Create a presentation about ', requiresCompany: false },
+  { id: 'resume_batch', icon: ClipboardList, label: 'Resume Batch', desc: 'Analyze candidate resumes', prompt: '', requiresCompany: false, dropHint: 'Drop resumes to start' },
+  { id: 'inventory', icon: Package, label: 'Inventory', desc: 'Process invoices & track stock', prompt: '', requiresCompany: false, dropHint: 'Drop invoices to start' },
+  { id: 'offer_letter', icon: FileCheck, label: 'Offer Letter', desc: 'Draft & send offer letters', prompt: 'Create an offer letter for ', requiresCompany: true },
+  { id: 'handbook', icon: BookOpen, label: 'Handbook', desc: 'Generate employee handbooks', prompt: 'Create an employee handbook', requiresCompany: true },
+  { id: 'policy', icon: Scale, label: 'Policy', desc: 'Draft compliance policies', prompt: 'Draft a policy for ', requiresCompany: true },
+  { id: 'onboarding', icon: Users, label: 'Onboarding', desc: 'Create employee records', prompt: 'Onboard a new employee', requiresCompany: true },
+  { id: 'review', icon: Briefcase, label: 'Review', desc: 'Run performance reviews', prompt: 'Create a performance review for ', requiresCompany: true },
+] as const
+
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
   offer_letter: 'Offer Letter',
@@ -38,6 +53,8 @@ const TASK_LABELS: Record<string, string> = {
 }
 
 export default function MatchaWorkThread() {
+  const { me } = useMe()
+  const isIndividual = me?.user?.role === 'individual'
   const { threadId } = useParams<{ threadId: string }>()
   const [thread, setThread] = useState<MWThreadDetail | null>(null)
   const [messages, setMessages] = useState<MWMessage[]>([])
@@ -586,8 +603,39 @@ export default function MatchaWorkThread() {
           )}
 
           {messages.length === 0 && (
-            <div className={`flex items-center justify-center h-full ${th.emptyText} text-sm`}>
-              Start a conversation — ask about offer letters, reviews, handbooks, and more.
+            <div className="flex flex-col items-center justify-center h-full px-4">
+              <p className={`text-sm font-medium mb-4 ${isProject ? 'text-[#e8e8e8]' : th.emptyText}`}>
+                What would you like to work on?
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-md w-full">
+                {SKILLS.filter((s) => !s.requiresCompany || !isIndividual).map((skill) => {
+                  const Icon = skill.icon
+                  return (
+                    <button
+                      key={skill.id}
+                      onClick={() => {
+                        if (skill.prompt) {
+                          setInput(skill.prompt)
+                          textareaRef.current?.focus()
+                        }
+                      }}
+                      className={`flex flex-col items-center gap-1.5 rounded-lg px-3 py-3 text-center transition-colors ${
+                        isProject
+                          ? 'bg-[#252526] hover:bg-[#2a2d2e] text-[#d4d4d4]'
+                          : lightMode
+                            ? 'bg-zinc-100 hover:bg-zinc-200 text-zinc-600'
+                            : 'bg-zinc-800/60 hover:bg-zinc-700/60 text-zinc-400'
+                      }`}
+                    >
+                      <Icon size={16} className={isProject ? 'text-[#ce9178]' : 'text-emerald-500'} />
+                      <span className="text-[11px] font-medium">{skill.label}</span>
+                      <span className={`text-[9px] leading-tight ${isProject ? 'text-[#6a737d]' : lightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+                        {skill.dropHint || skill.desc}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           )}
           {messages.map((m) => (
