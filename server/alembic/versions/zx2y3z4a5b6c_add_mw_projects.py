@@ -25,12 +25,11 @@ def upgrade():
             version INTEGER DEFAULT 0,
             created_at TIMESTAMPTZ DEFAULT NOW(),
             updated_at TIMESTAMPTZ DEFAULT NOW()
-        );
-        CREATE INDEX IF NOT EXISTS idx_mw_projects_company_id ON mw_projects(company_id);
-
-        ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES mw_projects(id) ON DELETE SET NULL;
-        CREATE INDEX IF NOT EXISTS idx_mw_threads_project_id ON mw_threads(project_id);
+        )
     """)
+    op.execute("CREATE INDEX IF NOT EXISTS idx_mw_projects_company_id ON mw_projects(company_id)")
+    op.execute("ALTER TABLE mw_threads ADD COLUMN IF NOT EXISTS project_id UUID REFERENCES mw_projects(id) ON DELETE SET NULL")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_mw_threads_project_id ON mw_threads(project_id)")
 
 
 def downgrade():
