@@ -56,6 +56,7 @@ from ..models.matcha_work import (
     GeneratePresentationResponse,
     ResumeBatchDocument,
     InventoryDocument,
+    SendInterviewsRequest,
     WorkbookDocument,
 )
 from ..services import matcha_work_document as doc_svc
@@ -2026,6 +2027,118 @@ async def upload_thread_resume(
             yield "data: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/threads/{thread_id}/resume/send-interviews")
+async def send_resume_batch_interviews(
+    thread_id: UUID,
+    body: SendInterviewsRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create screening interviews for selected candidates and send invite emails."""
+    import secrets as _secrets
+    from app.core.services.email import EmailService
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    thread = await doc_svc.get_thread(thread_id, company_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    current_state = thread.get("current_state") or {}
+    candidates = current_state.get("candidates") or []
+    if not candidates:
+        raise HTTPException(status_code=400, detail="No candidates in this batch")
+
+    async with get_connection() as conn:
+        company_row = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
+    company_name = company_row["name"] if company_row else "the company"
+
+    position_title = body.position_title or "Open Position"
+    email_svc = EmailService()
+    settings = get_settings()
+
+    sent = []
+    failed = []
+    updated_candidates = list(candidates)
+
+    for cid in body.candidate_ids:
+        candidate = None
+        candidate_idx = None
+        for idx, c in enumerate(updated_candidates):
+            if c.get("id") == cid:
+                candidate = c
+                candidate_idx = idx
+                break
+
+        if candidate is None:
+            failed.append({"id": cid, "error": "Candidate not found in batch"})
+            continue
+
+        email = candidate.get("email")
+        name = candidate.get("name") or candidate.get("filename", "Candidate")
+        if not email:
+            failed.append({"id": cid, "error": f"No email for {name}"})
+            continue
+
+        try:
+            invite_token = _secrets.token_urlsafe(32)
+            interview_data = json.dumps({
+                "invite_token": invite_token,
+                "candidate_name": name,
+                "candidate_email": email,
+                "position_title": position_title,
+                "company_name": company_name,
+                "resume_batch_thread_id": str(thread_id),
+                "resume_batch_candidate_id": cid,
+            })
+
+            async with get_connection() as interview_conn:
+                interview_row = await interview_conn.fetchrow(
+                    """
+                    INSERT INTO interviews (id, company_id, interviewer_name, interview_type, raw_culture_data, status, created_at)
+                    VALUES (gen_random_uuid(), $1, $2, 'screening', $3, 'pending', NOW())
+                    RETURNING id
+                    """,
+                    company_id,
+                    name,
+                    interview_data,
+                )
+            interview_id = interview_row["id"]
+
+            invite_url = f"{settings.app_base_url}/candidate-interview/{invite_token}"
+            email_sent = await email_svc.send_candidate_interview_invite_email(
+                to_email=email,
+                to_name=name,
+                company_name=company_name,
+                position_title=position_title,
+                invite_url=invite_url,
+                custom_message=body.custom_message,
+            )
+
+            updated_candidates[candidate_idx] = {
+                **candidate,
+                "status": "interview_sent",
+                "interview_id": str(interview_id),
+            }
+
+            sent.append({
+                "id": cid,
+                "name": name,
+                "email": email,
+                "interview_id": str(interview_id),
+                "email_sent": email_sent,
+            })
+        except Exception as e:
+            logger.error("Failed to create interview for candidate %s: %s", cid, e, exc_info=True)
+            failed.append({"id": cid, "error": str(e)})
+
+    if sent:
+        await doc_svc.apply_update(thread_id, {"candidates": updated_candidates})
+
+    return {"sent": sent, "failed": failed}
 
 
 INVENTORY_EXTRACT_PROMPT = """Extract inventory line items from this document (vendor invoice, inventory count, or order sheet).

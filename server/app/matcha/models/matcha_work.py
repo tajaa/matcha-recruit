@@ -297,6 +297,12 @@ class SendMessageRequest(BaseModel):
     model: Optional[str] = Field(None, description="Model override (e.g. gemini-3.1-flash-lite-preview, gemini-3-flash-preview, gemini-3.1-pro-preview)")
 
 
+class SendInterviewsRequest(BaseModel):
+    candidate_ids: list[str]
+    position_title: Optional[str] = None
+    custom_message: Optional[str] = None
+
+
 class MWMessageOut(BaseModel):
     id: UUID
     thread_id: UUID

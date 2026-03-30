@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { Search, ChevronDown, ChevronUp, MapPin, Briefcase, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
+import { Search, ChevronDown, ChevronUp, MapPin, Briefcase, AlertTriangle, CheckCircle2, Loader2, Send, Video, Square, CheckSquare } from 'lucide-react'
 import type { ResumeCandidate } from '../../types/matcha-work'
 
 type SortKey = 'name' | 'experience_years' | 'current_title' | 'location'
@@ -9,9 +9,10 @@ interface ResumeBatchPanelProps {
   threadId: string
   lightMode: boolean
   streaming: boolean
+  onSendInterviews?: (candidateIds: string[], positionTitle?: string) => Promise<void>
 }
 
-export default function ResumeBatchPanel({ state, lightMode, streaming }: ResumeBatchPanelProps) {
+export default function ResumeBatchPanel({ state, lightMode, streaming, onSendInterviews }: ResumeBatchPanelProps) {
   const candidates = (state.candidates as ResumeCandidate[] | undefined) ?? []
   const totalCount = (state.total_count as number) ?? candidates.length
   const analyzedCount = (state.analyzed_count as number) ?? candidates.filter((c) => c.status === 'analyzed').length
@@ -21,10 +22,48 @@ export default function ResumeBatchPanel({ state, lightMode, streaming }: Resume
   const [sortKey, setSortKey] = useState<SortKey>('experience_years')
   const [sortAsc, setSortAsc] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [sendingInterviews, setSendingInterviews] = useState(false)
+  const [positionInput, setPositionInput] = useState('')
+  const [showPositionPrompt, setShowPositionPrompt] = useState(false)
+
+  function toggleSelect(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectableIds = useMemo(() =>
+    candidates.filter((c) => c.status === 'analyzed' && c.email).map((c) => c.id),
+    [candidates]
+  )
+
+  function toggleSelectAll() {
+    if (selectedIds.size >= selectableIds.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set(selectableIds))
+  }
+
+  async function handleSendInterviews() {
+    if (!onSendInterviews || selectedIds.size === 0) return
+    setSendingInterviews(true)
+    try {
+      await onSendInterviews(Array.from(selectedIds), positionInput.trim() || undefined)
+      setSelectedIds(new Set())
+      setShowPositionPrompt(false)
+      setPositionInput('')
+    } catch {
+      // error handled by parent
+    }
+    setSendingInterviews(false)
+  }
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
-    let list = candidates.filter((c) => c.status === 'analyzed')
+    let list = candidates.filter((c) => c.status === 'analyzed' || c.status === 'interview_sent')
     if (q) {
       list = list.filter(
         (c) =>
@@ -89,11 +128,61 @@ export default function ResumeBatchPanel({ state, lightMode, streaming }: Resume
     <div className={`hidden md:flex md:w-1/2 flex-col ${th.bg}`}>
       {/* Header */}
       <div className={`px-4 py-3 border-b ${th.border}`}>
-        <h3 className={`text-sm font-semibold ${th.text}`}>{batchTitle}</h3>
-        <p className={`text-xs ${th.muted} mt-0.5`}>
-          {analyzedCount} of {totalCount} analyzed
-          {streaming && <Loader2 size={10} className="inline ml-1.5 animate-spin" />}
-        </p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className={`text-sm font-semibold ${th.text}`}>{batchTitle}</h3>
+            <p className={`text-xs ${th.muted} mt-0.5`}>
+              {analyzedCount} of {totalCount} analyzed
+              {streaming && <Loader2 size={10} className="inline ml-1.5 animate-spin" />}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {selectableIds.length > 0 && (
+              <button
+                onClick={toggleSelectAll}
+                className={`text-[10px] font-medium px-2 py-1 rounded transition-colors ${th.sortBtn}`}
+              >
+                {selectedIds.size >= selectableIds.length ? 'Clear' : 'Select All'}
+              </button>
+            )}
+            {selectedIds.size > 0 && onSendInterviews && !showPositionPrompt && (
+              <button
+                onClick={() => setShowPositionPrompt(true)}
+                disabled={sendingInterviews}
+                className="flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-40"
+              >
+                <Video size={10} />
+                Interview ({selectedIds.size})
+              </button>
+            )}
+          </div>
+        </div>
+        {/* Position title prompt */}
+        {showPositionPrompt && (
+          <div className={`mt-2 flex items-center gap-2`}>
+            <input
+              value={positionInput}
+              onChange={(e) => setPositionInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSendInterviews() }}
+              placeholder="Position title (e.g. Senior Engineer)"
+              autoFocus
+              className={`flex-1 text-xs rounded px-2.5 py-1.5 border focus:outline-none focus:border-emerald-600 ${th.input}`}
+            />
+            <button
+              onClick={handleSendInterviews}
+              disabled={sendingInterviews}
+              className="p-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded transition-colors disabled:opacity-40"
+            >
+              {sendingInterviews ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+            </button>
+            <button
+              onClick={() => { setShowPositionPrompt(false); setPositionInput('') }}
+              className={`text-[10px] ${th.muted} hover:${th.text}`}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Search + Sort */}
@@ -136,9 +225,25 @@ export default function ResumeBatchPanel({ state, lightMode, streaming }: Resume
               className={`rounded-lg border p-3 cursor-pointer transition-colors ${th.card}`}
             >
               {/* Top row */}
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className={`text-sm font-semibold truncate ${th.text}`}>{c.name ?? c.filename}</p>
+              <div className="flex items-start gap-2">
+                {/* Selection checkbox */}
+                {c.email && c.status === 'analyzed' && onSendInterviews && (
+                  <button
+                    onClick={(e) => toggleSelect(c.id, e)}
+                    className={`shrink-0 mt-0.5 ${selectedIds.has(c.id) ? 'text-emerald-500' : th.muted}`}
+                  >
+                    {selectedIds.has(c.id) ? <CheckSquare size={14} /> : <Square size={14} />}
+                  </button>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className={`text-sm font-semibold truncate ${th.text}`}>{c.name ?? c.filename}</p>
+                    {c.status === 'interview_sent' && (
+                      <span className="text-[9px] font-medium px-1.5 py-0.5 rounded-full bg-blue-900/30 text-blue-400 border border-blue-700/40">
+                        Interview Sent
+                      </span>
+                    )}
+                  </div>
                   <p className={`text-xs ${th.sub} truncate`}>
                     {c.current_title ?? 'N/A'}
                     {c.experience_years != null && <span> &middot; {c.experience_years} yrs</span>}

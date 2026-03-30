@@ -481,6 +481,86 @@ Sent on behalf of {company_name} via Matcha
         _subject = f"Workplace Investigation Interview Request from {company_name}"
         return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
+    async def send_candidate_interview_invite_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        position_title: str,
+        invite_url: str,
+        custom_message: Optional[str] = None,
+    ) -> bool:
+        """Send a candidate screening interview invitation via email."""
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping candidate interview invite")
+            return False
+
+        custom_section = ""
+        if custom_message:
+            custom_section = f"<p>{custom_message}</p><br>"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: 600; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+        .highlight {{ background: #ecfdf5; border-left: 4px solid #22c55e; padding: 15px; margin: 20px 0; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            {custom_section}
+
+            <p>You've been invited to interview for the <strong>{position_title}</strong> position at <strong>{company_name}</strong>.</p>
+
+            <div class="highlight">
+                <strong>What to expect:</strong> A brief voice conversation (about 10–15 minutes) with our AI interviewer. No account or download required — just click the link below when you're ready.
+            </div>
+
+            <p>
+                <a href="{invite_url}" class="btn">Begin Interview</a>
+            </p>
+
+            <p style="color: #6b7280; font-size: 14px;">This link is unique to you. Do not share it with others.</p>
+        </div>
+        <div class="footer">
+            <p>Sent on behalf of {company_name} via Matcha</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+{custom_message + chr(10) + chr(10) if custom_message else ''}You've been invited to interview for the {position_title} position at {company_name}.
+
+What to expect: A brief voice conversation (about 10-15 minutes) with our AI interviewer. No account or download required.
+
+Begin your interview here: {invite_url}
+
+This link is unique to you. Do not share it with others.
+
+Sent on behalf of {company_name} via Matcha
+"""
+
+        _subject = f"Interview Invitation: {position_title} at {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
+
     async def send_contact_form_email(
         self,
         sender_name: str,

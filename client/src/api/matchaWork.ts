@@ -196,6 +196,24 @@ export function uploadResumes(
   return ctrl
 }
 
+// ── Candidate interviews ──
+
+export async function sendCandidateInterviews(
+  threadId: string,
+  candidateIds: string[],
+  positionTitle?: string,
+  customMessage?: string,
+) {
+  return api.post<{
+    sent: { id: string; name: string; email: string; interview_id: string; email_sent: boolean }[]
+    failed: { id: string; error: string }[]
+  }>(`/matcha-work/threads/${threadId}/resume/send-interviews`, {
+    candidate_ids: candidateIds,
+    position_title: positionTitle,
+    custom_message: customMessage,
+  })
+}
+
 // ── Inventory upload ──
 
 export function uploadInventory(
