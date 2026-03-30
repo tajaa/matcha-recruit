@@ -2425,7 +2425,6 @@ async def export_project(
 
     if fmt == "pdf":
         import html as _html
-        import markdown as _md
 
         sections_html = []
         for idx, s in enumerate(sections):
@@ -2433,7 +2432,15 @@ async def export_project(
             if s.get("title"):
                 heading = f'<h2><span class="section-num">{idx + 1}.</span> {_html.escape(s["title"])}</h2>'
             content = s.get("content", "")
-            content_html = _md.markdown(content, extensions=["tables", "fenced_code", "nl2br"])
+            # Content may be HTML (from TipTap editor) or legacy markdown
+            if content.lstrip().startswith("<"):
+                content_html = content  # already HTML
+            else:
+                try:
+                    import markdown as _md
+                    content_html = _md.markdown(content, extensions=["tables", "fenced_code", "nl2br"])
+                except ImportError:
+                    content_html = f"<p>{_html.escape(content)}</p>"
             sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
 
         body_html = "\n".join(sections_html)
