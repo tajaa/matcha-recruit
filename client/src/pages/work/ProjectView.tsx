@@ -76,42 +76,69 @@ export default function ProjectView() {
     prevLen.current = messages.length
   }, [messages.length])
 
-  async function replacePlaceholderInSections(placeholder: string, value: string) {
-    if (!project || !projectId) return
+  function makeLocalMsg(role: 'user' | 'assistant', content: string): MWMessage {
+    return {
+      id: crypto.randomUUID(),
+      thread_id: activeChatId || '',
+      role,
+      content,
+      metadata: null,
+      version_created: null,
+      created_at: new Date().toISOString(),
+    }
+  }
+
+  function askNextPlaceholder() {
+    const next = pendingPlaceholders.current[0]
+    if (!next) {
+      setMessages((prev) => [...prev, makeLocalMsg('assistant', 'All fields filled! You can now finalize the posting.')])
+      return
+    }
+    // Make a friendly question from the placeholder name
+    const name = next.replace(/^\[|\]$/g, '')
+    setMessages((prev) => [...prev, makeLocalMsg('assistant', `What's the **${name}**?`)])
+  }
+
+  async function handlePlaceholderAnswer(value: string) {
+    const placeholder = pendingPlaceholders.current.shift()
+    if (!placeholder || !project || !projectId) return
+
+    // Add user message locally
+    setMessages((prev) => [...prev, makeLocalMsg('user', value)])
+
+    // Replace in all sections
     for (const section of project.sections ?? []) {
       if (section.content.includes(placeholder)) {
         const updated = section.content.replaceAll(placeholder, value)
         await updateProjectSectionNew(projectId, section.id, { content: updated })
       }
     }
+
+    // Refresh project so posting panel updates
     const refreshed = await getProjectDetail(projectId)
     setProject(refreshed)
+
+    // Ask next or finish
+    askNextPlaceholder()
+    setTimeout(() => textareaRef.current?.focus(), 50)
   }
 
-  function handleSend(overrideContent?: string) {
-    const content = (overrideContent ?? input).trim()
-    if (!activeChatId || !content || streaming) return
+  function handleSend() {
+    const content = input.trim()
+    if (!content) return
     setInput('')
+
+    // If filling placeholders, handle locally — no AI round-trip
+    if (pendingPlaceholders.current.length > 0) {
+      handlePlaceholderAnswer(content)
+      return
+    }
+
+    if (!activeChatId || streaming) return
     setStreaming(true)
     setError('')
 
-    // If user is answering a placeholder question, replace it in sections
-    const currentPlaceholder = pendingPlaceholders.current.length > 0
-      ? pendingPlaceholders.current.shift()!
-      : null
-    if (currentPlaceholder) {
-      replacePlaceholderInSections(currentPlaceholder, content)
-    }
-
-    const tempMsg: MWMessage = {
-      id: crypto.randomUUID(),
-      thread_id: activeChatId,
-      role: 'user',
-      content,
-      metadata: null,
-      version_created: null,
-      created_at: new Date().toISOString(),
-    }
+    const tempMsg = makeLocalMsg('user', content)
     setMessages((prev) => [...prev, tempMsg])
 
     abortRef.current = sendMessageStream(activeChatId, content, {
@@ -484,10 +511,11 @@ export default function ProjectView() {
                 setError('Failed to sync interview statuses.')
               }
             }}
-            onPromptChat={(message, placeholders) => {
-              handleSend(message)
-              // Set placeholders AFTER send so the initial prompt doesn't consume one
+            onPromptChat={(_message, placeholders) => {
               pendingPlaceholders.current = [...placeholders]
+              setMessages((prev) => [...prev, makeLocalMsg('assistant', `Let's fill in the missing fields for the posting.`)])
+              askNextPlaceholder()
+              setTimeout(() => textareaRef.current?.focus(), 50)
             }}
           />
         ) : (

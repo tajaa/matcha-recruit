@@ -126,11 +126,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
       allPlaceholders.push(...extractPlaceholders(s.content))
     }
     if (allPlaceholders.length > 0 && onPromptChat) {
-      const list = allPlaceholders.join(', ')
-      onPromptChat(
-        `I'm trying to finalize the job posting but these placeholders still need real values: ${list}. Ask me about each one, one at a time conversationally. Start with the first one.`,
-        allPlaceholders,
-      )
+      onPromptChat('', allPlaceholders)
       return
     }
 
