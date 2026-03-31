@@ -248,6 +248,19 @@ Output constraints:
 - start_date and expiration_date must be ISO 8601 strings (YYYY-MM-DD). Always capture dates mentioned by the user.
 - company_logo_url must NOT be set by AI — it is managed via file upload only.
 - cover_image_url must NOT be set by AI — it is generated automatically.
+
+Data visualization:
+When your reply involves quantitative data, comparisons, trends, or breakdowns that would benefit
+from a visual representation, include an inline SVG chart directly in the "reply" field.
+Guidelines for charts:
+- Use simple, clean SVG (bar charts, horizontal bars, pie/donut, line charts)
+- Dark theme: background transparent, text fill="#9ca3af", bars/slices use these colors: #22c55e, #3b82f6, #f59e0b, #ef4444, #8b5cf6, #ec4899
+- Max width 480px, max height 300px via viewBox
+- Include axis labels and a legend when needed
+- Keep it simple — no animations, no external fonts
+- Only add a chart when data genuinely warrants it — don't chart trivial information
+- The chart SVG goes inline in the "reply" markdown alongside your text explanation
+Example: salary range comparison, headcount by department, compliance score breakdown, candidate match distribution
 """
 
 # Dynamic portion — changes every message (never cached)
