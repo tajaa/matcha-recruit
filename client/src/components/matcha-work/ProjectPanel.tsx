@@ -3,7 +3,7 @@ import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, E
 import type { ProjectSection, MWProject } from '../../types/matcha-work'
 import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
-import { markdownToHtml, sectionToHtml } from './markdownToHtml'
+import { sectionToHtml } from './markdownToHtml'
 
 interface ProjectPanelPropsLegacy {
   state: Record<string, unknown>

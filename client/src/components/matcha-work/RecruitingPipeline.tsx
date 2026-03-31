@@ -41,10 +41,12 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   const [positionInput, setPositionInput] = useState('')
   const [showPositionPrompt, setShowPositionPrompt] = useState(false)
 
-  // Section title editing
+  // Section title editing + save feedback
   const [sectionTitleEditing, setSectionTitleEditing] = useState<string | null>(null)
   const [sectionTitleDraft, setSectionTitleDraft] = useState('')
+  const [showSaved, setShowSaved] = useState(false)
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+  const savedTimer = useRef<ReturnType<typeof setTimeout>>(null)
 
   const isFinalized = !!(posting as Record<string, unknown>).finalized
 
@@ -62,11 +64,18 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     }, 1000)
   }
 
+  function flashSaved() {
+    setShowSaved(true)
+    if (savedTimer.current) clearTimeout(savedTimer.current)
+    savedTimer.current = setTimeout(() => setShowSaved(false), 2000)
+  }
+
   const flushSave = useCallback(async (sectionId: string, content: string) => {
     setSaving(true)
     try {
       await updateProjectSectionNew(projectId, sectionId, { content })
       await refreshProject()
+      flashSaved()
     } catch {}
     setSaving(false)
   }, [projectId])
@@ -76,6 +85,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     try {
       await updateProjectSectionNew(projectId, sectionId, { title: newTitle })
       await refreshProject()
+      flashSaved()
     } catch {}
     setSaving(false)
     setSectionTitleEditing(null)
@@ -206,6 +216,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
         ))}
         <div className="flex items-center gap-1.5 ml-auto">
           {saving && <Loader2 size={10} className="animate-spin" style={{ color: c.muted }} />}
+          {!saving && showSaved && <span className="text-[10px] font-medium" style={{ color: c.green }}>Saved</span>}
           {hasInterviews && onSyncInterviews && (
             <button
               onClick={onSyncInterviews}

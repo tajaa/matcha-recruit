@@ -1252,10 +1252,36 @@ async def interview_websocket(
 
         forward_task = asyncio.create_task(forward_responses())
 
+        # Auto-stop timer for screening interviews (test mode: 30 seconds)
+        session_timeout = None
+        if interview_type == "screening":
+            SCREENING_DURATION_SECONDS = 30
+
+            async def auto_stop_session():
+                await asyncio.sleep(SCREENING_DURATION_SECONDS)
+                print(f"[Interview {interview_id}] Screening auto-stop after {SCREENING_DURATION_SECONDS}s")
+                await send_message(MessageType.STATUS, "session_ending")
+                # Tell the model to wrap up
+                if gemini_session:
+                    await gemini_session.send_text("Time is up. Please wrap up the interview now with a brief thank you and goodbye. Keep it to one sentence.")
+                await asyncio.sleep(8)  # Give model time to say goodbye
+                await send_message(MessageType.STATUS, "session_ended")
+
+            session_timeout = asyncio.create_task(auto_stop_session())
+
         # Handle incoming messages
         audio_frame_count = 0
+        timed_out = False
         while True:
-            message = await websocket.receive()
+            # Check if session timed out
+            if session_timeout and session_timeout.done():
+                timed_out = True
+                break
+
+            try:
+                message = await asyncio.wait_for(websocket.receive(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
 
             if "text" in message:
                 cmd = parse_text_message(message["text"])
@@ -1276,6 +1302,9 @@ async def interview_websocket(
                     if audio_frame_count % 50 == 0:
                         print(f"[Interview {interview_id}] Audio frame #{audio_frame_count}: {len(audio_data)} bytes")
                     await gemini_session.send_audio(audio_data)
+
+        if session_timeout and not session_timeout.done():
+            session_timeout.cancel()
 
     except WebSocketDisconnect:
         print(f"[Interview {interview_id}] Client disconnected")

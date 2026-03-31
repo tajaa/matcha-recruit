@@ -79,5 +79,6 @@ async def start_candidate_interview(token: str):
             "interview_id": str(interview_id),
             "websocket_url": f"/api/ws/interview/{interview_id}",
             "ws_auth_token": ws_token,
+            "max_session_duration_seconds": 30,
             "status": "started",
         }

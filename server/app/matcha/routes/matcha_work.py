@@ -2476,6 +2476,12 @@ async def upload_project_resumes(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    # Require finalized posting before accepting resumes
+    data = project.get("project_data") or {}
+    posting = data.get("posting") or {}
+    if not posting.get("finalized"):
+        raise HTTPException(status_code=400, detail="Finalize the job posting before uploading resumes")
+
     # Validate files
     parsed_files: list[tuple[str, bytes, str]] = []
     for f in files:

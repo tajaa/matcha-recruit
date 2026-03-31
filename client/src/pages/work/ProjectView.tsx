@@ -119,8 +119,15 @@ export default function ProjectView() {
     } catch {}
   }
 
+  const isPostingFinalized = project?.project_type === 'recruiting'
+    && !!(((project.project_data || {}) as Record<string, unknown>).posting as Record<string, unknown> | undefined)?.finalized
+
   function handleResumeDropForProject(files: File[]) {
     if (!projectId || streaming) return
+    if (!isPostingFinalized) {
+      setError('Finalize the job posting before uploading resumes.')
+      return
+    }
     setStreaming(true)
     setStatusMessage('Uploading resumes...')
     uploadProjectResumes(projectId, files, {
@@ -352,14 +359,24 @@ export default function ProjectView() {
           }}
         >
           {isDragOver && project?.project_type === 'recruiting' && (
-            <div className="absolute inset-0 z-10 border-2 border-dashed rounded-lg flex items-center justify-center pointer-events-none" style={{ background: '#22c55e10', borderColor: '#22c55e' }}>
-              <p className="text-sm font-medium" style={{ color: '#22c55e' }}>Drop resumes here to add candidates</p>
+            <div
+              className="absolute inset-0 z-10 border-2 border-dashed rounded-lg flex items-center justify-center pointer-events-none"
+              style={{
+                background: isPostingFinalized ? '#22c55e10' : '#f59e0b10',
+                borderColor: isPostingFinalized ? '#22c55e' : '#f59e0b',
+              }}
+            >
+              <p className="text-sm font-medium" style={{ color: isPostingFinalized ? '#22c55e' : '#f59e0b' }}>
+                {isPostingFinalized ? 'Drop resumes here to add candidates' : 'Finalize the posting first before adding resumes'}
+              </p>
             </div>
           )}
           {messages.length === 0 && (
             <div className="flex items-center justify-center h-full text-sm" style={{ color: '#6a737d' }}>
               {project?.project_type === 'recruiting'
-                ? 'Describe the role you\'re hiring for, or drop resumes to add candidates.'
+                ? (isPostingFinalized
+                    ? 'Posting finalized. Drop resumes to add candidates.'
+                    : 'Describe the role you\'re hiring for, then click "Add to Project" to build the posting.')
                 : 'Start chatting \u2014 use "Add to Project" to build your document.'}
             </div>
           )}
