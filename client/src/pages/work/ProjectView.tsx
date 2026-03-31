@@ -108,11 +108,17 @@ export default function ProjectView() {
 
     // Fetch fresh project to get latest section content (avoid stale state)
     const fresh = await getProjectDetail(projectId)
+    let replaced = false
     for (const section of fresh.sections ?? []) {
       if (section.content.includes(placeholder)) {
         const updated = section.content.replaceAll(placeholder, value)
+        console.log(`[placeholder] Replacing "${placeholder}" → "${value}" in section ${section.id}`)
         await updateProjectSectionNew(projectId, section.id, { content: updated })
+        replaced = true
       }
+    }
+    if (!replaced) {
+      console.warn(`[placeholder] "${placeholder}" not found in any section`)
     }
 
     // Refresh again to get the updated content into state
