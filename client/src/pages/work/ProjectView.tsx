@@ -255,7 +255,7 @@ export default function ProjectView() {
   return (
     <div className="flex h-[calc(100vh-49px)]" style={{ background: '#1e1e1e' }}>
       {/* Chat sidebar */}
-      <div className="hidden sm:flex flex-col w-[160px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
+      <div className="hidden sm:flex flex-col w-[130px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #333' }}>
           <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]">
             <ArrowLeft size={14} />
@@ -375,7 +375,7 @@ export default function ProjectView() {
       </div>
 
       {/* Right — Project panel */}
-      <div className="hidden md:flex md:w-[45%] shrink-0">
+      <div className="hidden md:flex md:w-1/2 shrink-0">
         <ProjectPanel
           projectId={projectId!}
           project={project}
