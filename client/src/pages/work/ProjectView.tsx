@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
@@ -18,6 +18,10 @@ export default function ProjectView() {
   const [statusMessage, setStatusMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+
+  // Placeholder fill-in tracking: when user clicks finalize with missing fields,
+  // we track which placeholders need answers. Each user chat message fills the next one.
+  const pendingPlaceholders = useRef<string[]>([])
 
   // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
@@ -72,12 +76,32 @@ export default function ProjectView() {
     prevLen.current = messages.length
   }, [messages.length])
 
-  function handleSend() {
-    const content = input.trim()
+  async function replacePlaceholderInSections(placeholder: string, value: string) {
+    if (!project || !projectId) return
+    for (const section of project.sections ?? []) {
+      if (section.content.includes(placeholder)) {
+        const updated = section.content.replaceAll(placeholder, value)
+        await updateProjectSectionNew(projectId, section.id, { content: updated })
+      }
+    }
+    const refreshed = await getProjectDetail(projectId)
+    setProject(refreshed)
+  }
+
+  function handleSend(overrideContent?: string) {
+    const content = (overrideContent ?? input).trim()
     if (!activeChatId || !content || streaming) return
     setInput('')
     setStreaming(true)
     setError('')
+
+    // If user is answering a placeholder question, replace it in sections
+    const currentPlaceholder = pendingPlaceholders.current.length > 0
+      ? pendingPlaceholders.current.shift()!
+      : null
+    if (currentPlaceholder) {
+      replacePlaceholderInSections(currentPlaceholder, content)
+    }
 
     const tempMsg: MWMessage = {
       id: crypto.randomUUID(),
@@ -460,18 +484,9 @@ export default function ProjectView() {
                 setError('Failed to sync interview statuses.')
               }
             }}
-            onPromptChat={(message) => {
-              setInput(message)
-              setTimeout(() => {
-                const el = textareaRef.current
-                if (el) {
-                  el.focus()
-                  el.style.height = 'auto'
-                  el.style.height = el.scrollHeight + 'px'
-                  // Place cursor at end
-                  el.selectionStart = el.selectionEnd = el.value.length
-                }
-              }, 50)
+            onPromptChat={(message, placeholders) => {
+              pendingPlaceholders.current = [...placeholders]
+              handleSend(message)
             }}
           />
         ) : (

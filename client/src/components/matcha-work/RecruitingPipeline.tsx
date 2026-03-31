@@ -15,7 +15,7 @@ interface RecruitingPipelineProps {
   streaming?: boolean
   onSendInterviews?: (candidateIds: string[], positionTitle?: string) => Promise<void>
   onSyncInterviews?: () => Promise<void>
-  onPromptChat?: (message: string) => void
+  onPromptChat?: (message: string, placeholders: string[]) => void
 }
 
 /** Extract [bracketed] placeholders from section HTML content */
@@ -126,9 +126,10 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
       allPlaceholders.push(...extractPlaceholders(s.content))
     }
     if (allPlaceholders.length > 0 && onPromptChat) {
-      const fields = allPlaceholders.map((p) => `${p}: `).join('\n')
+      const list = allPlaceholders.join(', ')
       onPromptChat(
-        `Fill in these fields for the job posting:\n${fields}`
+        `I'm trying to finalize the job posting but these placeholders still need real values: ${list}. Ask me about each one, one at a time conversationally. Start with the first one.`,
+        allPlaceholders,
       )
       return
     }
