@@ -21,7 +21,7 @@ export default function ProjectView() {
 
   // Placeholder fill-in tracking: when user clicks finalize with missing fields,
   // we track which placeholders need answers. Each user chat message fills the next one.
-  const pendingPlaceholders = useRef<string[]>([])
+  const pendingPlaceholders = useRef<{ placeholder: string; label: string }[]>([])
 
   // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
@@ -94,14 +94,13 @@ export default function ProjectView() {
       setMessages((prev) => [...prev, makeLocalMsg('assistant', 'All fields filled! You can now finalize the posting.')])
       return
     }
-    // Make a friendly question from the placeholder name
-    const name = next.replace(/^\[|\]$/g, '')
-    setMessages((prev) => [...prev, makeLocalMsg('assistant', `What's the **${name}**?`)])
+    setMessages((prev) => [...prev, makeLocalMsg('assistant', `Fill in: ...${next.label}...`)])
   }
 
   async function handlePlaceholderAnswer(value: string) {
-    const placeholder = pendingPlaceholders.current.shift()
-    if (!placeholder || !projectId) return
+    const entry = pendingPlaceholders.current.shift()
+    if (!entry || !projectId) return
+    const placeholder = entry.placeholder
 
     // Add user message locally
     setMessages((prev) => [...prev, makeLocalMsg('user', value)])
@@ -518,7 +517,7 @@ export default function ProjectView() {
                 setError('Failed to sync interview statuses.')
               }
             }}
-            onPromptChat={(_message, placeholders) => {
+            onPromptChat={(placeholders) => {
               pendingPlaceholders.current = [...placeholders]
               setMessages((prev) => [...prev, makeLocalMsg('assistant', `Let's fill in the missing fields for the posting.`)])
               askNextPlaceholder()
