@@ -344,6 +344,12 @@ export function uploadProjectResumes(
   return ctrl
 }
 
+export function generatePlaceholderQuestions(placeholders: { placeholder: string; label: string }[]) {
+  return api.post<{ questions: { placeholder: string; label: string; question: string }[] }>(
+    '/matcha-work/projects/placeholder-questions', { placeholders }
+  )
+}
+
 export function extractPlaceholderValue(input: string, placeholder: string, context: string) {
   return api.post<{ value: string }>('/matcha-work/projects/extract-value', { input, placeholder, context })
 }

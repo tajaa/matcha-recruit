@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, extractPlaceholderValue } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, extractPlaceholderValue, generatePlaceholderQuestions } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
@@ -21,7 +21,7 @@ export default function ProjectView() {
 
   // Placeholder fill-in tracking: when user clicks finalize with missing fields,
   // we track which placeholders need answers. Each user chat message fills the next one.
-  const pendingPlaceholders = useRef<{ placeholder: string; label: string }[]>([])
+  const pendingPlaceholders = useRef<{ placeholder: string; label: string; question: string }[]>([])
 
   // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
@@ -94,7 +94,7 @@ export default function ProjectView() {
       setMessages((prev) => [...prev, makeLocalMsg('assistant', 'All fields filled! You can now finalize the posting.')])
       return
     }
-    setMessages((prev) => [...prev, makeLocalMsg('assistant', `Fill in: ...${next.label}...`)])
+    setMessages((prev) => [...prev, makeLocalMsg('assistant', next.question)])
   }
 
   async function handlePlaceholderAnswer(rawInput: string) {
@@ -520,8 +520,15 @@ export default function ProjectView() {
                 setError('Failed to sync interview statuses.')
               }
             }}
-            onPromptChat={(placeholders) => {
-              pendingPlaceholders.current = [...placeholders]
+            onPromptChat={async (placeholders) => {
+              setMessages((prev) => [...prev, makeLocalMsg('assistant', `Let me figure out what's missing...`)])
+              try {
+                const { questions } = await generatePlaceholderQuestions(placeholders)
+                pendingPlaceholders.current = questions
+              } catch {
+                // Fallback to raw labels
+                pendingPlaceholders.current = placeholders.map((p) => ({ ...p, question: `What's the ${p.placeholder}?` }))
+              }
               setMessages((prev) => [...prev, makeLocalMsg('assistant', `Let's fill in the missing fields for the posting.`)])
               askNextPlaceholder()
               setTimeout(() => textareaRef.current?.focus(), 50)

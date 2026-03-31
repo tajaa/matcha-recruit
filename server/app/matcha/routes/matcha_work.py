@@ -2566,6 +2566,52 @@ async def upload_project_resumes(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@router.post("/projects/placeholder-questions")
+async def generate_placeholder_questions(
+    body: dict,
+    _current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Generate human-friendly questions for each placeholder using AI."""
+    placeholders = body.get("placeholders") or []  # [{placeholder, label}]
+    if not placeholders:
+        return {"questions": []}
+
+    items = "\n".join(
+        f"- Placeholder: {p['placeholder']}, Context: \"{p.get('label', p['placeholder'])}\""
+        for p in placeholders
+    )
+
+    try:
+        from google import genai as _genai
+        from google.genai import types as _types
+
+        api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
+        client = _genai.Client(api_key=api_key)
+        resp = await asyncio.to_thread(
+            lambda: client.models.generate_content(
+                model="gemini-3.1-flash-lite-preview",
+                contents=[_types.Content(role="user", parts=[_types.Part.from_text(
+                    text=f"Generate a short, friendly question for each placeholder below. The question should help someone fill in the blank in a job posting. Return ONE question per line, in order, no numbering or bullets.\n\n{items}"
+                )])],
+                config=_types.GenerateContentConfig(temperature=0.3),
+            )
+        )
+        lines = [l.strip() for l in (resp.text or "").strip().split("\n") if l.strip()]
+        # Pair questions with placeholders
+        questions = []
+        for i, p in enumerate(placeholders):
+            q = lines[i] if i < len(lines) else f"What's the {p['placeholder']}?"
+            questions.append({"placeholder": p["placeholder"], "label": p.get("label", ""), "question": q})
+        return {"questions": questions}
+    except Exception as e:
+        logger.warning("Placeholder question generation failed: %s", e)
+        # Fallback to raw names
+        return {"questions": [
+            {"placeholder": p["placeholder"], "label": p.get("label", ""), "question": f"What's the {p['placeholder']}?"}
+            for p in placeholders
+        ]}
+
+
 @router.post("/projects/extract-value")
 async def extract_placeholder_value(
     body: dict,
