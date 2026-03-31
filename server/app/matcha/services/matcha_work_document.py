@@ -1229,6 +1229,67 @@ async def log_token_usage_event(
         )
 
 
+# Default quota if no row exists in mw_token_quotas
+_DEFAULT_TOKEN_LIMIT = 100_000
+_DEFAULT_WINDOW_HOURS = 12
+
+
+async def check_token_quota(user_id: UUID, company_id: Optional[UUID] = None) -> dict:
+    """Check if the user is within their token quota.
+
+    Returns dict with: allowed, used, limit, window_hours, resets_at
+    """
+    async with get_connection() as conn:
+        # Get quota: user-specific > company-level > global default
+        quota_row = await conn.fetchrow(
+            """
+            SELECT token_limit, window_hours FROM mw_token_quotas
+            WHERE is_active = true
+              AND (user_id = $1 OR user_id IS NULL)
+              AND (company_id = $2 OR company_id IS NULL)
+            ORDER BY user_id NULLS LAST, company_id NULLS LAST
+            LIMIT 1
+            """,
+            user_id, company_id,
+        )
+        token_limit = quota_row["token_limit"] if quota_row else _DEFAULT_TOKEN_LIMIT
+        window_hours = quota_row["window_hours"] if quota_row else _DEFAULT_WINDOW_HOURS
+
+        # Sum tokens used within the window
+        row = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(total_tokens), 0) AS used
+            FROM mw_token_usage_events
+            WHERE user_id = $1 AND created_at > NOW() - make_interval(hours => $2)
+            """,
+            user_id, window_hours,
+        )
+        used = int(row["used"])
+
+        # Calculate when the oldest usage in the window expires
+        oldest = await conn.fetchval(
+            """
+            SELECT MIN(created_at) FROM mw_token_usage_events
+            WHERE user_id = $1 AND created_at > NOW() - make_interval(hours => $2)
+            """,
+            user_id, window_hours,
+        )
+        from datetime import timedelta, timezone, datetime
+        if oldest:
+            resets_at = oldest + timedelta(hours=window_hours)
+        else:
+            resets_at = datetime.now(timezone.utc) + timedelta(hours=window_hours)
+
+    return {
+        "allowed": used < token_limit,
+        "used": used,
+        "limit": token_limit,
+        "window_hours": window_hours,
+        "remaining": max(0, token_limit - used),
+        "resets_at": resets_at.isoformat(),
+    }
+
+
 async def get_token_usage_summary(
     company_id: UUID,
     user_id: UUID,

@@ -4617,6 +4617,21 @@ async def init_db():
             "CREATE INDEX IF NOT EXISTS idx_mw_token_usage_events_user_created ON mw_token_usage_events(user_id, created_at)"
         )
         await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_token_quotas (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+                company_id UUID REFERENCES companies(id) ON DELETE CASCADE,
+                token_limit INTEGER NOT NULL DEFAULT 100000,
+                window_hours INTEGER NOT NULL DEFAULT 12,
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_mw_token_quotas_user ON mw_token_quotas(user_id)"
+        )
+        await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_review_requests (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 thread_id UUID NOT NULL REFERENCES mw_threads(id) ON DELETE CASCADE,

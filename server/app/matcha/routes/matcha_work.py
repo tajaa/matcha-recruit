@@ -4206,6 +4206,14 @@ async def send_message_stream(
     if current_user.role != "admin":
         await billing_service.check_credits(company_id)
 
+    # Check token quota
+    quota = await doc_svc.check_token_quota(current_user.id, company_id)
+    if not quota["allowed"]:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Token limit reached ({quota['used']:,}/{quota['limit']:,} tokens used). Resets at {quota['resets_at']}.",
+        )
+
     # Save user message before streaming
     user_msg = await doc_svc.add_message(thread_id, "user", body.content)
 
