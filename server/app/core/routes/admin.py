@@ -149,6 +149,97 @@ async def get_api_usage():
     return await limiter.get_usage()
 
 
+# ── Token Quota Management ──
+
+@router.get("/token-quotas", dependencies=[Depends(require_admin)])
+async def list_token_quotas():
+    """List all token quotas with user/company info."""
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT q.id, q.user_id, q.company_id, q.token_limit, q.window_hours, q.is_active, q.created_at,
+                   u.email as user_email,
+                   c.name as company_name
+            FROM mw_token_quotas q
+            LEFT JOIN users u ON q.user_id = u.id
+            LEFT JOIN companies c ON q.company_id = c.id
+            ORDER BY q.user_id NULLS LAST, q.created_at DESC
+        """)
+        return [dict(r) for r in rows]
+
+
+@router.get("/token-usage", dependencies=[Depends(require_admin)])
+async def list_token_usage():
+    """Per-user token usage in the current window."""
+    async with get_connection() as conn:
+        rows = await conn.fetch("""
+            SELECT u.id as user_id, u.email, c.name as company_name,
+                   COALESCE(SUM(e.total_tokens), 0)::bigint as tokens_used,
+                   COUNT(e.id)::int as call_count,
+                   COALESCE(SUM(e.cost_dollars), 0)::numeric as cost_dollars,
+                   MAX(e.created_at) as last_active
+            FROM users u
+            LEFT JOIN companies c ON u.company_id = c.id
+            LEFT JOIN mw_token_usage_events e ON e.user_id = u.id AND e.created_at > NOW() - interval '12 hours'
+            WHERE u.is_active = true
+            GROUP BY u.id, u.email, c.name
+            HAVING COALESCE(SUM(e.total_tokens), 0) > 0
+            ORDER BY tokens_used DESC
+        """)
+        return [dict(r) for r in rows]
+
+
+@router.post("/token-quotas", dependencies=[Depends(require_admin)])
+async def create_token_quota(body: dict):
+    """Create a new token quota."""
+    user_id = body.get("user_id")
+    company_id = body.get("company_id")
+    token_limit = body.get("token_limit", 100000)
+    window_hours = body.get("window_hours", 12)
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow("""
+            INSERT INTO mw_token_quotas (user_id, company_id, token_limit, window_hours)
+            VALUES ($1, $2, $3, $4)
+            RETURNING *
+        """, user_id, company_id, token_limit, window_hours)
+        return dict(row)
+
+
+@router.put("/token-quotas/{quota_id}", dependencies=[Depends(require_admin)])
+async def update_token_quota(quota_id: str, body: dict):
+    """Update an existing token quota."""
+    from uuid import UUID
+    async with get_connection() as conn:
+        sets = []
+        vals = []
+        idx = 1
+        for key in ("token_limit", "window_hours", "is_active"):
+            if key in body:
+                sets.append(f"{key} = ${idx}")
+                vals.append(body[key])
+                idx += 1
+        if not sets:
+            return {"detail": "No changes"}
+        vals.append(UUID(quota_id))
+        row = await conn.fetchrow(
+            f"UPDATE mw_token_quotas SET {', '.join(sets)}, updated_at = NOW() WHERE id = ${idx} RETURNING *",
+            *vals,
+        )
+        if not row:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Quota not found")
+        return dict(row)
+
+
+@router.delete("/token-quotas/{quota_id}", dependencies=[Depends(require_admin)])
+async def delete_token_quota(quota_id: str):
+    """Delete a token quota."""
+    from uuid import UUID
+    async with get_connection() as conn:
+        await conn.execute("DELETE FROM mw_token_quotas WHERE id = $1", UUID(quota_id))
+        return {"deleted": True}
+
+
 @router.get("/overview", dependencies=[Depends(require_admin)])
 async def admin_overview():
     """Get platform overview with company and employee stats."""
