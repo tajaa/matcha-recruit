@@ -354,6 +354,12 @@ export function extractPlaceholderValue(input: string, placeholder: string, cont
   return api.post<{ value: string }>('/matcha-work/projects/extract-value', { input, placeholder, context })
 }
 
+export function analyzeProjectCandidates(projectId: string) {
+  return api.post<{ analyzed: number; candidates: import('../types/matcha-work').ResumeCandidate[] }>(
+    `/matcha-work/projects/${projectId}/resume/analyze`
+  )
+}
+
 export function sendProjectInterviews(
   projectId: string,
   candidateIds: string[],

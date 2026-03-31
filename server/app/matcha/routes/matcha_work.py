@@ -2654,6 +2654,123 @@ async def extract_placeholder_value(
         return {"value": user_input}
 
 
+@router.post("/projects/{project_id}/resume/analyze")
+async def analyze_project_candidates(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Rank candidates against the job posting using AI."""
+    from ..services import project_service as proj_svc
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = await proj_svc.get_project(project_id, company_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Build posting text from sections
+    sections = project.get("sections") or []
+    posting_text = "\n\n".join(
+        f"{s.get('title', 'Untitled')}:\n{s.get('content', '')}"
+        for s in sections
+    )
+    if not posting_text.strip():
+        raise HTTPException(status_code=400, detail="No posting content to analyze against")
+
+    data = project.get("project_data") or {}
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise HTTPException(status_code=400, detail="No candidates to analyze")
+
+    # Build candidate summaries for the prompt
+    candidate_entries = []
+    for c in candidates:
+        if c.get("status") not in ("analyzed", "interview_sent", "interview_completed", "interview_in_progress"):
+            continue
+        entry = f"ID: {c['id']}\nName: {c.get('name', 'Unknown')}\n"
+        if c.get("current_title"):
+            entry += f"Title: {c['current_title']}\n"
+        if c.get("experience_years") is not None:
+            entry += f"Experience: {c['experience_years']} years\n"
+        if c.get("skills"):
+            entry += f"Skills: {', '.join(c['skills'][:15])}\n"
+        if c.get("education"):
+            entry += f"Education: {c['education']}\n"
+        if c.get("certifications"):
+            entry += f"Certifications: {', '.join(c['certifications'])}\n"
+        if c.get("summary"):
+            entry += f"Summary: {c['summary']}\n"
+        if c.get("strengths"):
+            entry += f"Strengths: {', '.join(c['strengths'])}\n"
+        if c.get("flags"):
+            entry += f"Flags: {', '.join(c['flags'])}\n"
+        candidate_entries.append(entry)
+
+    if not candidate_entries:
+        raise HTTPException(status_code=400, detail="No analyzed candidates to rank")
+
+    try:
+        from google import genai as _genai
+        from google.genai import types as _types
+
+        api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
+        client = _genai.Client(api_key=api_key)
+
+        prompt = (
+            "You are a recruiting analyst. Given the job posting and candidate profiles below, "
+            "score each candidate on how well they match the posting (0-100). "
+            "Return ONLY valid JSON — an array of objects with these exact fields:\n"
+            '  [{"id": "<candidate_id>", "score": <0-100>, "summary": "<1-2 sentence reason>"}]\n'
+            "Order by score descending (best match first).\n\n"
+            f"=== JOB POSTING ===\n{posting_text}\n\n"
+            f"=== CANDIDATES ===\n" + "\n---\n".join(candidate_entries)
+        )
+
+        resp = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: client.models.generate_content(
+                    model="gemini-3.1-flash-lite-preview",
+                    contents=[_types.Content(role="user", parts=[_types.Part.from_text(text=prompt)])],
+                    config=_types.GenerateContentConfig(temperature=0.1),
+                )
+            ),
+            timeout=60,
+        )
+
+        raw = (resp.text or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+        rankings = json.loads(raw)
+
+        # Merge scores into candidates
+        score_map = {r["id"]: r for r in rankings}
+        updated_candidates = []
+        for c in candidates:
+            match = score_map.get(c["id"])
+            if match:
+                updated_candidates.append({
+                    **c,
+                    "match_score": match.get("score"),
+                    "match_summary": match.get("summary"),
+                })
+            else:
+                updated_candidates.append(c)
+
+        # Sort by match_score descending
+        updated_candidates.sort(key=lambda x: x.get("match_score") or 0, reverse=True)
+
+        await proj_svc.update_project_data(project_id, {"candidates": updated_candidates})
+        return {"analyzed": len(rankings), "candidates": updated_candidates}
+
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse ranking JSON: %s", e)
+        raise HTTPException(status_code=500, detail="Failed to parse AI ranking response")
+    except Exception as e:
+        logger.error("Candidate analysis failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/projects/{project_id}/resume/send-interviews")
 async def send_project_interviews(
     project_id: UUID,

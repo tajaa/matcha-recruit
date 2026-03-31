@@ -15,6 +15,7 @@ interface RecruitingPipelineProps {
   streaming?: boolean
   onSendInterviews?: (candidateIds: string[], positionTitle?: string) => Promise<void>
   onSyncInterviews?: () => Promise<void>
+  onAnalyzeCandidates?: () => Promise<void>
   onPromptChat?: (placeholders: PlaceholderInfo[]) => void
 }
 
@@ -53,7 +54,7 @@ const c = {
   green: '#22c55e', amber: '#f59e0b',
 }
 
-export default function RecruitingPipeline({ project, projectId, onUpdate, onSendInterviews, onSyncInterviews, onPromptChat }: RecruitingPipelineProps) {
+export default function RecruitingPipeline({ project, projectId, onUpdate, onSendInterviews, onSyncInterviews, onAnalyzeCandidates, onPromptChat }: RecruitingPipelineProps) {
   const data = (project.project_data || {}) as RecruitingData
   const posting = data.posting || {}
   const candidates = data.candidates || []
@@ -68,6 +69,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [sendingInterviews, setSendingInterviews] = useState(false)
+  const [analyzing, setAnalyzing] = useState(false)
   const [positionInput, setPositionInput] = useState('')
   const [showPositionPrompt, setShowPositionPrompt] = useState(false)
 
@@ -271,6 +273,21 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
               style={{ color: c.muted }}
             >
               <RefreshCw size={10} />
+            </button>
+          )}
+          {tab === 'candidates' && candidates.length > 0 && onAnalyzeCandidates && (
+            <button
+              onClick={async () => {
+                setAnalyzing(true)
+                try { await onAnalyzeCandidates() } catch {}
+                setAnalyzing(false)
+              }}
+              disabled={analyzing}
+              className="flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded transition-colors disabled:opacity-40"
+              style={{ background: c.accent, color: '#fff' }}
+            >
+              {analyzing ? <Loader2 size={10} className="animate-spin" /> : <Search size={10} />}
+              {analyzing ? 'Analyzing...' : 'Analyze'}
             </button>
           )}
           {tab === 'candidates' && selectableIds.length > 0 && onSendInterviews && (
@@ -496,6 +513,18 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                               Done{cand.interview_score != null ? ` · ${cand.interview_score}%` : ''}
                             </span>
                           )}
+                          {cand.match_score != null && (
+                            <span
+                              className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
+                              style={{
+                                background: cand.match_score >= 75 ? '#22c55e20' : cand.match_score >= 50 ? '#f59e0b20' : '#ef444420',
+                                color: cand.match_score >= 75 ? c.green : cand.match_score >= 50 ? c.amber : '#ef4444',
+                                border: `1px solid ${cand.match_score >= 75 ? c.green : cand.match_score >= 50 ? c.amber : '#ef4444'}40`,
+                              }}
+                            >
+                              {cand.match_score}% match
+                            </span>
+                          )}
                         </div>
                         <p className="text-xs" style={{ color: c.muted }}>
                           {cand.current_title ?? 'N/A'}
@@ -534,6 +563,14 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                         {cand.flags?.map((f, i) => (
                           <p key={i} className="text-xs" style={{ color: c.amber }}><AlertTriangle size={10} className="inline mr-1" />{f}</p>
                         ))}
+                        {cand.match_summary && (
+                          <div className="mt-1 pt-1" style={{ borderTop: `1px dashed ${c.border}` }}>
+                            <p className="text-[10px] font-medium" style={{ color: c.accent }}>
+                              Match Analysis{cand.match_score != null ? ` — ${cand.match_score}%` : ''}
+                            </p>
+                            <p className="text-xs" style={{ color: c.muted }}>{cand.match_summary}</p>
+                          </div>
+                        )}
                         {cand.interview_summary && (
                           <div className="mt-1 pt-1" style={{ borderTop: `1px dashed ${c.border}` }}>
                             <p className="text-[10px] font-medium" style={{ color: '#60a5fa' }}>

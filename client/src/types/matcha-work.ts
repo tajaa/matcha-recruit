@@ -32,6 +32,8 @@ export interface ResumeCandidate {
   interview_status?: string | null
   interview_score?: number | null
   interview_summary?: string | null
+  match_score?: number | null
+  match_summary?: string | null
 }
 
 export interface RecruitingPosting {

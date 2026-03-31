@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, extractPlaceholderValue, generatePlaceholderQuestions } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
@@ -518,6 +518,15 @@ export default function ProjectView() {
                 setProject(updated)
               } catch {
                 setError('Failed to sync interview statuses.')
+              }
+            }}
+            onAnalyzeCandidates={async () => {
+              try {
+                await analyzeProjectCandidates(projectId!)
+                const updated = await getProjectDetail(projectId!)
+                setProject(updated)
+              } catch (e) {
+                setError(e instanceof Error ? e.message : 'Failed to analyze candidates.')
               }
             }}
             onPromptChat={async (placeholders) => {
