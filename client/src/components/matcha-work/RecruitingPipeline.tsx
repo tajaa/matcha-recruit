@@ -35,7 +35,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
 
   // Posting field helpers
   function updateField(field: string, value: string) {
-    clearTimeout(saveTimer.current)
+    if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSaving(true)
       try {
