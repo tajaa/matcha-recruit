@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video } from 'lucide-react'
 import type { MWProject, RecruitingData } from '../../types/matcha-work'
 import { toggleProjectShortlist, updateProjectPosting, getProjectDetail } from '../../api/matchaWork'
@@ -33,8 +33,24 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(null)
 
-  // Posting field helpers
+  // Local posting fields — controlled inputs that sync from server
+  const [localPosting, setLocalPosting] = useState<Record<string, string>>({})
+
+  // Sync when project data changes (e.g., after AI populates fields)
+  useEffect(() => {
+    const p = ((project.project_data || {}) as RecruitingData).posting || {}
+    setLocalPosting((prev) => {
+      const next: Record<string, string> = {}
+      for (const key of ['title', 'location', 'employment_type', 'compensation', 'description', 'requirements']) {
+        // Server value wins if local is empty or server changed
+        next[key] = (p as Record<string, string>)[key] || prev[key] || ''
+      }
+      return next
+    })
+  }, [project.project_data])
+
   function updateField(field: string, value: string) {
+    setLocalPosting((prev) => ({ ...prev, [field]: value }))
     if (saveTimer.current) clearTimeout(saveTimer.current)
     saveTimer.current = setTimeout(async () => {
       setSaving(true)
@@ -147,7 +163,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
                 <label className="text-[10px] font-medium mb-1 block" style={{ color: c.muted }}>{label}</label>
                 {type === 'textarea' ? (
                   <textarea
-                    defaultValue={(posting as Record<string, string>)[key] || ''}
+                    value={localPosting[key] || ''}
                     onChange={(e) => updateField(key, e.target.value)}
                     rows={4}
                     className="w-full text-xs rounded border p-2 focus:outline-none resize-none"
@@ -156,7 +172,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
                   />
                 ) : (
                   <input
-                    defaultValue={(posting as Record<string, string>)[key] || ''}
+                    value={localPosting[key] || ''}
                     onChange={(e) => updateField(key, e.target.value)}
                     className="w-full text-xs rounded border px-2 py-1.5 focus:outline-none"
                     style={{ background: '#1a1a1a', color: c.text, borderColor: c.border }}
@@ -168,7 +184,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
             {!isFinalized && (
               <button
                 onClick={finalizePosting}
-                disabled={saving || !(posting as Record<string, string>).title}
+                disabled={saving || !localPosting.title}
                 className="w-full py-2 text-xs font-medium rounded transition-colors disabled:opacity-40"
                 style={{ background: c.green, color: '#fff' }}
               >
