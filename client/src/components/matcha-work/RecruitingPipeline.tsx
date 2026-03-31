@@ -6,7 +6,7 @@ import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
 
 type Tab = 'posting' | 'candidates' | 'interviews' | 'shortlist'
-type SortKey = 'name' | 'experience_years' | 'location'
+type SortKey = 'name' | 'experience_years' | 'location' | 'match_score'
 
 interface RecruitingPipelineProps {
   project: MWProject
@@ -177,6 +177,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   )
 
   const hasInterviews = candidates.some((c) => c.interview_id)
+  const hasMatchScores = candidates.some((c) => c.match_score != null)
 
   function toggleSelect(id: string, e: React.MouseEvent) {
     e.stopPropagation()
@@ -224,8 +225,10 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     }
     list.sort((a, b) => {
       let av: string | number = '', bv: string | number = ''
-      if (sortKey === 'experience_years') { av = a.experience_years ?? 0; bv = b.experience_years ?? 0 }
-      else { av = (a[sortKey] ?? '').toString().toLowerCase(); bv = (b[sortKey] ?? '').toString().toLowerCase() }
+      if (sortKey === 'experience_years' || sortKey === 'match_score') {
+        av = (sortKey === 'match_score' ? a.match_score : a.experience_years) ?? 0
+        bv = (sortKey === 'match_score' ? b.match_score : b.experience_years) ?? 0
+      } else { av = (a[sortKey] ?? '').toString().toLowerCase(); bv = (b[sortKey] ?? '').toString().toLowerCase() }
       if (av < bv) return sortAsc ? -1 : 1
       if (av > bv) return sortAsc ? 1 : -1
       return 0
@@ -279,7 +282,11 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
             <button
               onClick={async () => {
                 setAnalyzing(true)
-                try { await onAnalyzeCandidates() } catch {}
+                try {
+                  await onAnalyzeCandidates()
+                  setSortKey('match_score')
+                  setSortAsc(false)
+                } catch {}
                 setAnalyzing(false)
               }}
               disabled={analyzing}
@@ -447,8 +454,8 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                   style={{ background: '#1a1a1a', color: c.text, borderColor: c.border }}
                 />
               </div>
-              {['experience_years', 'name', 'location'].map((key) => {
-                const labels: Record<string, string> = { experience_years: 'Exp', name: 'Name', location: 'Loc' }
+              {(hasMatchScores ? ['match_score', 'experience_years', 'name', 'location'] : ['experience_years', 'name', 'location']).map((key) => {
+                const labels: Record<string, string> = { match_score: 'Match', experience_years: 'Exp', name: 'Name', location: 'Loc' }
                 const active = sortKey === key
                 return (
                   <button

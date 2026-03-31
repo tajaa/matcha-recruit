@@ -2669,10 +2669,13 @@ async def analyze_project_candidates(
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    # Build posting text from sections
+    # Build posting text from sections (strip HTML tags for clean AI input)
     sections = project.get("sections") or []
+    def _strip_html(html: str) -> str:
+        return re.sub(r'<[^>]+>', '', html).strip()
+
     posting_text = "\n\n".join(
-        f"{s.get('title', 'Untitled')}:\n{s.get('content', '')}"
+        f"{s.get('title', 'Untitled')}:\n{_strip_html(s.get('content', ''))}"
         for s in sections
     )
     if not posting_text.strip():

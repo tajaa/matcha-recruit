@@ -502,13 +502,17 @@ export default function ProjectView() {
             onUpdate={(updated) => setProject(updated)}
             streaming={streaming}
             onSendInterviews={async (ids, positionTitle) => {
-              const result = await sendProjectInterviews(projectId!, ids, positionTitle)
-              if (result.sent.length > 0) {
-                const updated = await getProjectDetail(projectId!)
-                setProject(updated)
-              }
-              if (result.failed.length > 0) {
-                setError(`Failed to send ${result.failed.length} interview(s): ${result.failed.map((f) => f.error).join(', ')}`)
+              try {
+                const result = await sendProjectInterviews(projectId!, ids, positionTitle)
+                if (result.sent.length > 0) {
+                  const updated = await getProjectDetail(projectId!)
+                  setProject(updated)
+                }
+                if (result.failed.length > 0) {
+                  setError(`Failed to send ${result.failed.length} interview(s): ${result.failed.map((f) => f.error).join(', ')}`)
+                }
+              } catch (e) {
+                setError(e instanceof Error ? e.message : 'Failed to send interviews.')
               }
             }}
             onSyncInterviews={async () => {
