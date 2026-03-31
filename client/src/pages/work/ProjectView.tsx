@@ -477,13 +477,13 @@ export default function ProjectView() {
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
               placeholder="Type a message..."
               rows={1}
-              disabled={streaming || !activeChatId}
+              disabled={streaming || (!activeChatId && pendingPlaceholders.current.length === 0)}
               className="flex-1 text-sm rounded-lg px-3 py-2.5 border focus:outline-none resize-none disabled:opacity-50 min-h-[44px]"
               style={{ background: '#1a1a1a', color: '#d4d4d4', borderColor: '#555' }}
             />
             <button
               onClick={handleSend}
-              disabled={streaming || !input.trim() || !activeChatId}
+              disabled={streaming || !input.trim() || (!activeChatId && pendingPlaceholders.current.length === 0)}
               className="p-3 rounded-lg transition-colors disabled:opacity-40"
               style={{ background: '#22c55e', color: '#fff' }}
             >
