@@ -2380,6 +2380,58 @@ async def create_project_chat_endpoint(
     return await proj_svc.create_project_chat(project_id, company_id, current_user.id, body.get("title"))
 
 
+@router.post("/projects/{project_id}/posting/from-chat")
+async def populate_posting_from_chat(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Extract structured posting fields from a chat message using AI."""
+    from ..services import project_service as proj_svc
+
+    company_id = await get_client_company_id(current_user)
+    if not company_id or not await proj_svc.get_project(project_id, company_id):
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    content = body.get("content", "")
+    if not content:
+        raise HTTPException(status_code=400, detail="No content provided")
+
+    # Use AI to extract structured fields
+    ai_provider = get_ai_provider()
+    prompt = (
+        "Extract job posting fields from this text. Return ONLY valid JSON with these fields "
+        "(use null for missing fields):\n"
+        '{"title":"...","description":"...","requirements":"...","compensation":"...",'
+        '"location":"...","employment_type":"full-time|part-time|contract"}\n\n'
+        f"Text:\n---\n{content[:5000]}\n---"
+    )
+    ai_resp = await ai_provider.generate(
+        [{"role": "user", "content": prompt}], {}, company_context=""
+    )
+
+    # Parse the AI response
+    raw = ai_resp.assistant_reply.strip()
+    if raw.startswith("```"):
+        raw = raw.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+    try:
+        fields = json.loads(raw)
+    except Exception:
+        # Fallback: put everything in description
+        fields = {"description": _strip_markdown(content)}
+
+    # Merge with existing posting (don't overwrite non-null fields with null)
+    project = await proj_svc.get_project(project_id, company_id)
+    existing = (project.get("project_data") or {}).get("posting") or {}
+    merged = {**existing}
+    for k, v in fields.items():
+        if v is not None and str(v).strip():
+            merged[k] = v
+
+    result = await proj_svc.update_project_data(project_id, {"posting": merged})
+    return result
+
+
 @router.put("/projects/{project_id}/posting")
 async def update_project_posting(
     project_id: UUID,

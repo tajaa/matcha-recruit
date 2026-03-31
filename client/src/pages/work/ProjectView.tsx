@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, uploadProjectResumes } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, uploadProjectResumes, populatePostingFromChat } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
@@ -144,10 +144,15 @@ export default function ProjectView() {
   async function handleAddToProject(messageId: string, content: string) {
     if (!projectId) return
     try {
-      await addProjectSectionNew(projectId, { content, source_message_id: messageId })
-      // Refresh project to get updated sections
-      const updated = await getProjectDetail(projectId)
-      setProject(updated)
+      if (project?.project_type === 'recruiting') {
+        // For recruiting projects, parse chat content into posting fields
+        const updated = await populatePostingFromChat(projectId, content)
+        setProject(updated)
+      } else {
+        await addProjectSectionNew(projectId, { content, source_message_id: messageId })
+        const updated = await getProjectDetail(projectId)
+        setProject(updated)
+      }
     } catch {}
   }
 

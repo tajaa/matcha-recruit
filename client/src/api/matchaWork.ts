@@ -352,6 +352,13 @@ export function updateProjectPosting(projectId: string, posting: Record<string, 
   return api.put(`/matcha-work/projects/${projectId}/posting`, posting)
 }
 
+export function populatePostingFromChat(projectId: string, content: string) {
+  return api.post<import('../types/matcha-work').MWProject>(
+    `/matcha-work/projects/${projectId}/posting/from-chat`,
+    { content }
+  )
+}
+
 // ── Project (legacy thread-scoped) ──
 
 export function initProject(threadId: string, title: string) {
