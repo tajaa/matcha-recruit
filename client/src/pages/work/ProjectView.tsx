@@ -101,20 +101,21 @@ export default function ProjectView() {
 
   async function handlePlaceholderAnswer(value: string) {
     const placeholder = pendingPlaceholders.current.shift()
-    if (!placeholder || !project || !projectId) return
+    if (!placeholder || !projectId) return
 
     // Add user message locally
     setMessages((prev) => [...prev, makeLocalMsg('user', value)])
 
-    // Replace in all sections
-    for (const section of project.sections ?? []) {
+    // Fetch fresh project to get latest section content (avoid stale state)
+    const fresh = await getProjectDetail(projectId)
+    for (const section of fresh.sections ?? []) {
       if (section.content.includes(placeholder)) {
         const updated = section.content.replaceAll(placeholder, value)
         await updateProjectSectionNew(projectId, section.id, { content: updated })
       }
     }
 
-    // Refresh project so posting panel updates
+    // Refresh again to get the updated content into state
     const refreshed = await getProjectDetail(projectId)
     setProject(refreshed)
 

@@ -96,15 +96,13 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, upload
     },
   })
 
-  // Sync content from server only when it meaningfully changes (e.g., new section added from chat)
+  // Sync content from server when the prop changes (e.g., placeholder replacement, new section from chat)
   const lastServerContent = useRef(content)
   useEffect(() => {
     if (editor && content !== lastServerContent.current) {
       lastServerContent.current = content
-      // Only reset if the editor doesn't already have this content
-      const currentHtml = editor.getHTML()
-      if (currentHtml !== content && content !== '<p></p>') {
-        editor.commands.setContent(content)
+      if (content !== '<p></p>') {
+        editor.commands.setContent(content, false)
       }
     }
   }, [content, editor])
