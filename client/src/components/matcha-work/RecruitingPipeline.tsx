@@ -1,6 +1,6 @@
 import { useState, useMemo, useRef } from 'react'
-import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video, RefreshCw, Send } from 'lucide-react'
-import type { MWProject, ResumeCandidate, RecruitingData, RecruitingPosting } from '../../types/matcha-work'
+import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video } from 'lucide-react'
+import type { MWProject, RecruitingData } from '../../types/matcha-work'
 import { toggleProjectShortlist, updateProjectPosting, getProjectDetail } from '../../api/matchaWork'
 
 type Tab = 'posting' | 'candidates' | 'interviews' | 'shortlist'
@@ -19,7 +19,7 @@ const c = {
   green: '#22c55e', amber: '#f59e0b',
 }
 
-export default function RecruitingPipeline({ project, projectId, onUpdate, streaming }: RecruitingPipelineProps) {
+export default function RecruitingPipeline({ project, projectId, onUpdate }: RecruitingPipelineProps) {
   const data = (project.project_data || {}) as RecruitingData
   const posting = data.posting || {}
   const candidates = data.candidates || []
@@ -31,7 +31,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, strea
   const [sortAsc, setSortAsc] = useState(false)
   const [saving, setSaving] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>()
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>(null)
 
   // Posting field helpers
   function updateField(field: string, value: string) {
