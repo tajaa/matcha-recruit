@@ -5,9 +5,11 @@ import { Loader2, Trash2, Plus, RefreshCw } from 'lucide-react'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
-function authHeaders() {
+function authHeaders(): Record<string, string> {
   const token = localStorage.getItem('matcha_access_token')
-  return token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' }
+  const h: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) h.Authorization = `Bearer ${token}`
+  return h
 }
 
 const RESEARCH_MODELS = [
