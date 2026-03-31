@@ -15,6 +15,14 @@ interface RecruitingPipelineProps {
   streaming?: boolean
   onSendInterviews?: (candidateIds: string[], positionTitle?: string) => Promise<void>
   onSyncInterviews?: () => Promise<void>
+  onPromptChat?: (message: string) => void
+}
+
+/** Extract [bracketed] placeholders from section HTML content */
+function extractPlaceholders(html: string): string[] {
+  const text = html.replace(/<[^>]+>/g, '')
+  const matches = text.match(/\[[^\]]+\]/g)
+  return matches ? [...new Set(matches)] : []
 }
 
 const c = {
@@ -23,7 +31,7 @@ const c = {
   green: '#22c55e', amber: '#f59e0b',
 }
 
-export default function RecruitingPipeline({ project, projectId, onUpdate, onSendInterviews, onSyncInterviews }: RecruitingPipelineProps) {
+export default function RecruitingPipeline({ project, projectId, onUpdate, onSendInterviews, onSyncInterviews, onPromptChat }: RecruitingPipelineProps) {
   const data = (project.project_data || {}) as RecruitingData
   const posting = data.posting || {}
   const candidates = data.candidates || []
@@ -49,6 +57,12 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   const savedTimer = useRef<ReturnType<typeof setTimeout>>(null)
 
   const isFinalized = !!(posting as Record<string, unknown>).finalized
+
+  const placeholderCount = useMemo(() => {
+    const all: string[] = []
+    for (const s of sections) all.push(...extractPlaceholders(s.content))
+    return all.length
+  }, [sections])
 
   // ── Section CRUD ──
 
@@ -106,6 +120,19 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   }
 
   async function finalizePosting() {
+    // Check for unfilled [bracketed] placeholders in all sections
+    const allPlaceholders: string[] = []
+    for (const s of sections) {
+      allPlaceholders.push(...extractPlaceholders(s.content))
+    }
+    if (allPlaceholders.length > 0 && onPromptChat) {
+      const fields = allPlaceholders.map((p) => `${p}: `).join('\n')
+      onPromptChat(
+        `Fill in these fields for the job posting:\n${fields}`
+      )
+      return
+    }
+
     setSaving(true)
     try {
       await updateProjectPosting(projectId, { ...posting, finalized: true })
@@ -358,9 +385,11 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                   onClick={finalizePosting}
                   disabled={saving}
                   className="w-full py-2 text-xs font-medium rounded transition-colors disabled:opacity-40"
-                  style={{ background: c.green, color: '#fff' }}
+                  style={{ background: placeholderCount > 0 ? c.amber : c.green, color: '#fff' }}
                 >
-                  Finalize Posting
+                  {placeholderCount > 0
+                    ? `Fill ${placeholderCount} field${placeholderCount !== 1 ? 's' : ''} to finalize`
+                    : 'Finalize Posting'}
                 </button>
               )}
             </div>

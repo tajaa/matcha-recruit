@@ -1,10 +1,49 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
+import { Extension } from '@tiptap/core'
+import { Plugin, PluginKey } from '@tiptap/pm/state'
+import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import StarterKit from '@tiptap/starter-kit'
 import Placeholder from '@tiptap/extension-placeholder'
 import LinkExtension from '@tiptap/extension-link'
 import ImageExtension from '@tiptap/extension-image'
 import { Bold, Italic, Heading2, List, ListOrdered, Link, ImagePlus, Loader2, Undo, Redo } from 'lucide-react'
+
+/** TipTap extension that highlights [bracketed placeholders] with orange styling */
+const PlaceholderHighlight = Extension.create({
+  name: 'placeholderHighlight',
+  addProseMirrorPlugins() {
+    function findPlaceholders(doc: Parameters<typeof DecorationSet.create>[0]) {
+      const decos: Decoration[] = []
+      doc.descendants((node, pos) => {
+        if (node.isText && node.text) {
+          const regex = /\[[^\]]+\]/g
+          let match
+          while ((match = regex.exec(node.text)) !== null) {
+            decos.push(
+              Decoration.inline(pos + match.index, pos + match.index + match[0].length, {
+                class: 'bracket-placeholder',
+              })
+            )
+          }
+        }
+      })
+      return DecorationSet.create(doc, decos)
+    }
+    return [
+      new Plugin({
+        key: new PluginKey('placeholderHighlight'),
+        state: {
+          init(_, { doc }) { return findPlaceholders(doc) },
+          apply(tr, old) { return tr.docChanged ? findPlaceholders(tr.doc) : old },
+        },
+        props: {
+          decorations(state) { return this.getState(state) },
+        },
+      }),
+    ]
+  },
+})
 
 interface SectionEditorProps {
   content: string
@@ -24,6 +63,7 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, upload
       Placeholder.configure({ placeholder: 'Start typing...' }),
       LinkExtension.configure({ openOnClick: false }),
       ImageExtension,
+      PlaceholderHighlight,
     ],
     content,
     onUpdate: ({ editor: e }) => {
@@ -200,6 +240,12 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, upload
           float: left;
           height: 0;
           pointer-events: none;
+        }
+        .bracket-placeholder {
+          color: #f59e0b;
+          background: rgba(245, 158, 11, 0.12);
+          border-radius: 2px;
+          padding: 0 1px;
         }
       `}</style>
     </div>

@@ -460,6 +460,19 @@ export default function ProjectView() {
                 setError('Failed to sync interview statuses.')
               }
             }}
+            onPromptChat={(message) => {
+              setInput(message)
+              setTimeout(() => {
+                const el = textareaRef.current
+                if (el) {
+                  el.focus()
+                  el.style.height = 'auto'
+                  el.style.height = el.scrollHeight + 'px'
+                  // Place cursor at end
+                  el.selectionStart = el.selectionEnd = el.value.length
+                }
+              }, 50)
+            }}
           />
         ) : (
           <ProjectPanel
