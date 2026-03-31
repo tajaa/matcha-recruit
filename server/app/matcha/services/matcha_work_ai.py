@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 GEMINI_CALL_TIMEOUT = 120
 
 # ── Gemini Context Cache Registry ──
-# Maps (company_id + prompt_hash) → (cache_name, model, expires_at)
+# Maps (company_id + prompt_hash + model) → (cache_name, model, expires_at)
 _cache_registry: dict[str, tuple[str, str, datetime]] = {}
+_cache_unsupported_models: set[str] = set()  # models that don't support caching — skip silently
 _CACHE_TTL_SECONDS = 3600  # 1 hour
 
 OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
@@ -392,7 +393,15 @@ class GeminiProvider(MatchaWorkAIProvider):
         return self._client
 
     def _get_or_create_cache(self, model: str, static_prompt: str, company_id: str = "") -> Optional[str]:
-        """Get or create a Gemini cached content for the static system prompt."""
+        """Get or create a Gemini cached content for the static system prompt.
+
+        Returns cache name if successful, None if caching isn't supported or fails.
+        Works with any model — silently skips models that don't support caching.
+        """
+        # Skip models we've already learned don't support caching
+        if model in _cache_unsupported_models:
+            return None
+
         prompt_hash = hashlib.md5(static_prompt.encode()).hexdigest()[:12]
         key = f"{company_id}:{prompt_hash}:{model}"
 
@@ -417,7 +426,12 @@ class GeminiProvider(MatchaWorkAIProvider):
             logger.info("[cache] Created Gemini cache %s for company=%s model=%s", cached.name, company_id, model)
             return cached.name
         except Exception as e:
-            logger.warning("[cache] Failed to create Gemini cache: %s", e)
+            err_str = str(e).lower()
+            if "not supported" in err_str or "not available" in err_str or "minimum" in err_str or "caching" in err_str:
+                _cache_unsupported_models.add(model)
+                logger.info("[cache] Model %s does not support caching, skipping future attempts", model)
+            else:
+                logger.warning("[cache] Failed to create Gemini cache: %s", e)
             return None
 
     async def generate(
