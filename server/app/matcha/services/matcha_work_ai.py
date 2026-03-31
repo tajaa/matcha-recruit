@@ -533,19 +533,24 @@ class GeminiProvider(MatchaWorkAIProvider):
         cache_name = self._get_or_create_cache(model, static_prompt, company_id)
 
         if cache_name:
-            # Cached: static prompt is in the cache, only send dynamic part
+            # Cached: static prompt is in the cache. Dynamic context goes as a
+            # content prefix because Gemini doesn't allow system_instruction + cached_content together.
+            cached_contents = [
+                types.Content(role="user", parts=[types.Part.from_text(text=f"[SYSTEM CONTEXT]\n{dynamic_prompt}")]),
+                types.Content(role="model", parts=[types.Part.from_text(text="Understood.")]),
+                *contents,
+            ]
             response = self.client.models.generate_content(
                 model=model,
-                contents=contents,
+                contents=cached_contents,
                 config=types.GenerateContentConfig(
                     cached_content=cache_name,
-                    system_instruction=dynamic_prompt,
                     temperature=0.2,
                     response_mime_type="application/json",
                 ),
             )
         else:
-            # Fallback: send everything uncached
+            # Fallback: send everything uncached via system_instruction
             response = self.client.models.generate_content(
                 model=model,
                 contents=contents,
