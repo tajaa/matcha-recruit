@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, X, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, uploadProjectResumes } from '../../api/matchaWork'
+import type { MWStreamEvent } from '../../types/matcha-work'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
+import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
 
 export default function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -18,9 +20,10 @@ export default function ProjectView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  // Recruiting wizard
+  // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
   const [wizardStep, setWizardStep] = useState(0)
+  const [isDragOver, setIsDragOver] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -115,6 +118,28 @@ export default function ProjectView() {
       setProject((prev) => prev ? { ...prev, chats: [...(prev.chats || []), chat], chat_count: (prev.chat_count || 0) + 1 } : prev)
       setActiveChatId(chat.id)
     } catch {}
+  }
+
+  function handleResumeDropForProject(files: File[]) {
+    if (!projectId || streaming) return
+    setStreaming(true)
+    setStatusMessage('Uploading resumes...')
+    uploadProjectResumes(projectId, files, {
+      onEvent: (event: MWStreamEvent) => {
+        if (event.type === 'status') setStatusMessage(event.message)
+      },
+      onComplete: async () => {
+        setStatusMessage('')
+        setStreaming(false)
+        const updated = await getProjectDetail(projectId)
+        setProject(updated)
+      },
+      onError: (err) => {
+        setStatusMessage('')
+        setError(err)
+        setStreaming(false)
+      },
+    })
   }
 
   async function handleAddToProject(messageId: string, content: string) {
@@ -314,11 +339,30 @@ export default function ProjectView() {
           )}
         </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        {/* Messages + drop zone */}
+        <div
+          className="flex-1 overflow-y-auto px-4 py-4 space-y-4 relative"
+          onDragOver={(e) => { e.preventDefault(); if (!streaming) setIsDragOver(true) }}
+          onDragLeave={(e) => { if (e.currentTarget.contains(e.relatedTarget as Node)) return; setIsDragOver(false) }}
+          onDrop={(e) => {
+            e.preventDefault()
+            setIsDragOver(false)
+            const files = Array.from(e.dataTransfer.files)
+            if (files.length > 0 && project?.project_type === 'recruiting') {
+              handleResumeDropForProject(files)
+            }
+          }}
+        >
+          {isDragOver && project?.project_type === 'recruiting' && (
+            <div className="absolute inset-0 z-10 border-2 border-dashed rounded-lg flex items-center justify-center pointer-events-none" style={{ background: '#22c55e10', borderColor: '#22c55e' }}>
+              <p className="text-sm font-medium" style={{ color: '#22c55e' }}>Drop resumes here to add candidates</p>
+            </div>
+          )}
           {messages.length === 0 && (
             <div className="flex items-center justify-center h-full text-sm" style={{ color: '#6a737d' }}>
-              Start chatting — use "Add to Project" to build your document.
+              {project?.project_type === 'recruiting'
+                ? 'Describe the role you\'re hiring for, or drop resumes to add candidates.'
+                : 'Start chatting \u2014 use "Add to Project" to build your document.'}
             </div>
           )}
           {messages.map((m) => (
@@ -374,13 +418,22 @@ export default function ProjectView() {
         </div>
       </div>
 
-      {/* Right — Project panel */}
+      {/* Right — Project panel or Recruiting pipeline */}
       <div className="hidden md:flex md:w-1/2 shrink-0">
-        <ProjectPanel
-          projectId={projectId!}
-          project={project}
-          onProjectUpdate={(updated) => setProject(updated)}
-        />
+        {project.project_type === 'recruiting' ? (
+          <RecruitingPipeline
+            project={project}
+            projectId={projectId!}
+            onUpdate={(updated) => setProject(updated)}
+            streaming={streaming}
+          />
+        ) : (
+          <ProjectPanel
+            projectId={projectId!}
+            project={project}
+            onProjectUpdate={(updated) => setProject(updated)}
+          />
+        )}
       </div>
     </div>
   )

@@ -275,6 +275,83 @@ export function exportProjectNew(projectId: string, format: 'pdf' | 'md' | 'docx
   return api.get<{ pdf_url?: string; docx_url?: string }>(`/matcha-work/projects/${projectId}/export/${format}`)
 }
 
+// ── Recruiting project ──
+
+export function uploadProjectResumes(
+  projectId: string,
+  files: File[],
+  callbacks: {
+    onEvent: (event: MWStreamEvent) => void
+    onComplete: (data: Record<string, unknown>) => void
+    onError: (err: string) => void
+  },
+): AbortController {
+  const ctrl = new AbortController()
+  const timeout = setTimeout(() => ctrl.abort('timeout'), 300_000)
+
+  ;(async () => {
+    const token = await ensureFreshToken()
+    const form = new FormData()
+    files.forEach((f) => form.append('files', f))
+
+    fetch(`${BASE}/matcha-work/projects/${projectId}/resume/upload`, {
+      method: 'POST',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: form,
+      signal: ctrl.signal,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          clearTimeout(timeout)
+          const text = await res.text().catch(() => res.statusText)
+          callbacks.onError(`${res.status}: ${text}`)
+          return
+        }
+        const reader = res.body?.getReader()
+        if (!reader) { clearTimeout(timeout); callbacks.onError('No response body'); return }
+        const decoder = new TextDecoder()
+        let buf = ''
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buf += decoder.decode(value, { stream: true })
+          const lines = buf.split('\n')
+          buf = lines.pop() ?? ''
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue
+            const raw = line.slice(6).trim()
+            if (raw === '[DONE]') { clearTimeout(timeout); return }
+            try {
+              const event = JSON.parse(raw)
+              callbacks.onEvent(event as MWStreamEvent)
+              if (event.type === 'complete') { clearTimeout(timeout); callbacks.onComplete(event.data); return }
+              if (event.type === 'error') { clearTimeout(timeout); callbacks.onError(event.message); return }
+            } catch {}
+          }
+        }
+        clearTimeout(timeout)
+      })
+      .catch((e) => {
+        clearTimeout(timeout)
+        if (ctrl.signal.aborted && ctrl.signal.reason === 'timeout') {
+          callbacks.onError('Request timed out.')
+        } else if (!ctrl.signal.aborted) {
+          callbacks.onError(e instanceof Error ? e.message : 'Upload failed')
+        }
+      })
+  })()
+
+  return ctrl
+}
+
+export function toggleProjectShortlist(projectId: string, candidateId: string) {
+  return api.post(`/matcha-work/projects/${projectId}/shortlist/${candidateId}`)
+}
+
+export function updateProjectPosting(projectId: string, posting: Record<string, unknown>) {
+  return api.put(`/matcha-work/projects/${projectId}/posting`, posting)
+}
+
 // ── Project (legacy thread-scoped) ──
 
 export function initProject(threadId: string, title: string) {
