@@ -119,7 +119,7 @@ export default function ResumeBatchPanel({ state, lightMode, streaming, onSendIn
 
   if (candidates.length === 0 && !streaming) {
     return (
-      <div className={`hidden md:flex md:w-1/2 items-center justify-center ${th.bg}`}>
+      <div className={`flex w-full md:w-1/2 items-center justify-center ${th.bg}`}>
         <p className={`text-sm ${th.muted}`}>
           No resumes yet — drag and drop files to start a batch.
         </p>
@@ -128,7 +128,7 @@ export default function ResumeBatchPanel({ state, lightMode, streaming, onSendIn
   }
 
   return (
-    <div className={`hidden md:flex md:w-1/2 flex-col ${th.bg}`}>
+    <div className={`flex w-full md:w-1/2 flex-col ${th.bg}`}>
       {/* Header */}
       <div className={`px-4 py-3 border-b ${th.border}`}>
         <div className="flex items-center justify-between">

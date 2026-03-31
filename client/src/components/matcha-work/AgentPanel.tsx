@@ -108,7 +108,7 @@ export default function AgentPanel() {
 
   if (connected === null) {
     return (
-      <div className="hidden md:flex md:w-1/2 items-center justify-center" style={{ background: c.bg }}>
+      <div className="flex w-full md:w-1/2 items-center justify-center" style={{ background: c.bg }}>
         <Loader2 size={20} className="animate-spin" style={{ color: c.muted }} />
       </div>
     )
@@ -116,7 +116,7 @@ export default function AgentPanel() {
 
   if (!connected) {
     return (
-      <div className="hidden md:flex md:w-1/2 items-center justify-center" style={{ background: c.bg }}>
+      <div className="flex w-full md:w-1/2 items-center justify-center" style={{ background: c.bg }}>
         <div className="text-center">
           <Mail size={24} className="mx-auto mb-3" style={{ color: c.muted }} />
           <p className="text-xs mb-3" style={{ color: c.muted }}>Connect your Gmail to get started</p>
@@ -136,7 +136,7 @@ export default function AgentPanel() {
   // Email detail view
   if (selectedEmail) {
     return (
-      <div className="hidden md:flex md:w-1/2 flex-col" style={{ background: c.bg }}>
+      <div className="flex w-full md:w-1/2 flex-col" style={{ background: c.bg }}>
         {/* Header */}
         <div className="px-4 py-3 flex items-center gap-2" style={{ borderBottom: `1px solid ${c.border}` }}>
           <button
@@ -226,7 +226,7 @@ export default function AgentPanel() {
 
   // Email list view
   return (
-    <div className="hidden md:flex md:w-1/2 flex-col" style={{ background: c.bg }}>
+    <div className="flex w-full md:w-1/2 flex-col" style={{ background: c.bg }}>
       {/* Header */}
       <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${c.border}` }}>
         <div>

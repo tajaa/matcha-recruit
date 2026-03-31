@@ -68,6 +68,9 @@ export default function MatchaWorkThread() {
   // Agent mode (local toggle, no backend persistence)
   const [agentMode, setAgentMode] = useState(false)
 
+  // Mobile panel toggle
+  const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat')
+
   // Model selector
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3-flash-preview')
 
@@ -364,6 +367,7 @@ export default function MatchaWorkThread() {
   const showInventoryPanel = isInventory && thread?.current_state
   const isProject = thread?.task_type === 'project'
   const showProjectPanel = isProject && thread?.current_state
+  const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || agentMode)
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -436,7 +440,7 @@ export default function MatchaWorkThread() {
   return (
     <div className="flex flex-col md:flex-row h-[calc(100vh-49px)]">
       {/* Chat panel */}
-      <div className={`flex flex-col ${pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || agentMode ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
+      <div className={`${mobileView === 'panel' && hasRightPanel ? 'hidden md:flex' : 'flex'} flex-col ${hasRightPanel ? 'w-full md:w-1/2' : 'w-full'} border-r ${th.border} ${th.panelBg}`}>
         {/* Header */}
         <div className={`flex items-center gap-3 px-4 py-3 border-b ${th.border}`}>
           <Link to="/work" className={`${th.backArrow} transition-colors`}>
@@ -478,6 +482,26 @@ export default function MatchaWorkThread() {
             <span className={`shrink-0 px-2 py-0.5 text-xs font-medium rounded-full ${th.badge}`}>
               {TASK_LABELS[thread.task_type] ?? thread.task_type}
             </span>
+          )}
+
+          {/* Mobile panel toggle */}
+          {hasRightPanel && (
+            <div className="flex md:hidden rounded overflow-hidden shrink-0" style={{ border: '1px solid' + (lightMode ? '#d4d4d8' : '#444') }}>
+              <button
+                onClick={() => setMobileView('chat')}
+                className="px-2 py-1 text-[10px] font-medium"
+                style={{ background: mobileView === 'chat' ? (lightMode ? '#22c55e' : '#ce9178') : (lightMode ? '#f4f4f5' : '#2a2d2e'), color: mobileView === 'chat' ? '#fff' : (lightMode ? '#71717a' : '#6a737d') }}
+              >
+                Chat
+              </button>
+              <button
+                onClick={() => setMobileView('panel')}
+                className="px-2 py-1 text-[10px] font-medium"
+                style={{ background: mobileView === 'panel' ? (lightMode ? '#22c55e' : '#ce9178') : (lightMode ? '#f4f4f5' : '#2a2d2e'), color: mobileView === 'panel' ? '#fff' : (lightMode ? '#71717a' : '#6a737d') }}
+              >
+                Panel
+              </button>
+            </div>
           )}
 
           <button
@@ -734,81 +758,79 @@ export default function MatchaWorkThread() {
       </div>
 
       {/* Presentation panel */}
-      {showPresentationPanel && (
-        <PresentationPanel
-          state={thread!.current_state}
-          threadId={threadId!}
-          onEditSlide={handleEditSlide}
-          lightMode={lightMode}
-          streaming={streaming}
-        />
-      )}
-
-      {/* Resume batch panel */}
-      {showResumeBatchPanel && (
-        <ResumeBatchPanel
-          state={thread!.current_state}
-          threadId={threadId!}
-          lightMode={lightMode}
-          streaming={streaming}
-          onSendInterviews={async (ids, positionTitle) => {
-            const result = await sendCandidateInterviews(threadId!, ids, positionTitle)
-            if (result.sent.length > 0) {
-              const refreshed = await getThread(threadId!)
-              setThread(refreshed)
-            }
-            if (result.failed.length > 0) {
-              setError(`Failed to send ${result.failed.length} interview(s): ${result.failed.map(f => f.error).join(', ')}`)
-            }
-          }}
-          onSyncInterviews={async () => {
-            const { updated } = await syncInterviewStatuses(threadId!)
-            if (updated > 0) {
-              const refreshed = await getThread(threadId!)
-              setThread(refreshed)
-            }
-          }}
-        />
-      )}
-
-      {/* Inventory panel */}
-      {showInventoryPanel && (
-        <InventoryPanel
-          state={thread!.current_state}
-          threadId={threadId!}
-          lightMode={lightMode}
-          streaming={streaming}
-        />
-      )}
-
-      {/* Project panel */}
-      {showProjectPanel && (
-        <ProjectPanel
-          state={thread!.current_state}
-          threadId={threadId!}
-          lightMode={lightMode}
-          streaming={streaming}
-          onStateUpdate={(newState, newVersion) => {
-            setThread((prev) => prev ? { ...prev, current_state: newState, version: newVersion } : prev)
-          }}
-        />
-      )}
-
-      {/* Agent panel */}
-      {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && (
-        <AgentPanel />
-      )}
-
-      {/* PDF preview panel (offer letters, etc.) */}
-      {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !agentMode && (
-        <div className="hidden md:block md:w-1/2 bg-zinc-900">
-          <iframe
-            src={pdfUrl}
-            className="w-full h-full border-0"
-            title="Document preview"
+      {/* Right panels — visible on desktop always, on mobile via toggle */}
+      <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:contents`}>
+        {showPresentationPanel && (
+          <PresentationPanel
+            state={thread!.current_state}
+            threadId={threadId!}
+            onEditSlide={handleEditSlide}
+            lightMode={lightMode}
+            streaming={streaming}
           />
-        </div>
-      )}
+        )}
+
+        {showResumeBatchPanel && (
+          <ResumeBatchPanel
+            state={thread!.current_state}
+            threadId={threadId!}
+            lightMode={lightMode}
+            streaming={streaming}
+            onSendInterviews={async (ids, positionTitle) => {
+              const result = await sendCandidateInterviews(threadId!, ids, positionTitle)
+              if (result.sent.length > 0) {
+                const refreshed = await getThread(threadId!)
+                setThread(refreshed)
+              }
+              if (result.failed.length > 0) {
+                setError(`Failed to send ${result.failed.length} interview(s): ${result.failed.map(f => f.error).join(', ')}`)
+              }
+            }}
+            onSyncInterviews={async () => {
+              const { updated } = await syncInterviewStatuses(threadId!)
+              if (updated > 0) {
+                const refreshed = await getThread(threadId!)
+                setThread(refreshed)
+              }
+            }}
+          />
+        )}
+
+        {showInventoryPanel && (
+          <InventoryPanel
+            state={thread!.current_state}
+            threadId={threadId!}
+            lightMode={lightMode}
+            streaming={streaming}
+          />
+        )}
+
+        {showProjectPanel && (
+          <ProjectPanel
+            state={thread!.current_state}
+            threadId={threadId!}
+            lightMode={lightMode}
+            streaming={streaming}
+            onStateUpdate={(newState, newVersion) => {
+              setThread((prev) => prev ? { ...prev, current_state: newState, version: newVersion } : prev)
+            }}
+          />
+        )}
+
+        {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && (
+          <AgentPanel />
+        )}
+
+        {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !agentMode && (
+          <div className={`${mobileView === 'panel' ? 'block w-full' : 'hidden md:block'} md:w-1/2 bg-zinc-900`}>
+            <iframe
+              src={pdfUrl}
+              className="w-full h-full border-0"
+              title="Document preview"
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }

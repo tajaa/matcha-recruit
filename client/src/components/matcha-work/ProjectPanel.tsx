@@ -221,7 +221,7 @@ export default function ProjectPanel(props: ProjectPanelProps) {
   }
 
   return (
-    <div className="hidden md:flex md:w-1/2 flex-col" style={{ background: '#1e1e1e' }}>
+    <div className="flex w-full md:w-1/2 flex-col" style={{ background: '#1e1e1e' }}>
       {/* Toolbar */}
       <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #333' }}>
         <div className="flex-1 min-w-0">

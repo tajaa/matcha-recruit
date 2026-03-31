@@ -30,6 +30,9 @@ export default function ProjectView() {
   // we track which placeholders need answers. Each user chat message fills the next one.
   const pendingPlaceholders = useRef<{ placeholder: string; label: string; question: string }[]>([])
 
+  // Mobile panel toggle: chat vs panel
+  const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat')
+
   // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
   const [wizardStep, setWizardStep] = useState(0)
@@ -386,7 +389,7 @@ export default function ProjectView() {
       </div>
 
       {/* Center — chat messages */}
-      <div className="flex-1 flex flex-col min-w-0" style={{ borderRight: '1px solid #333' }}>
+      <div className={`flex-1 flex flex-col min-w-0 ${mobileView === 'panel' ? 'hidden md:flex' : 'flex'}`} style={{ borderRight: '1px solid #333' }}>
         {/* Header */}
         <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid #333' }}>
           <Link to="/work" className="sm:hidden text-[#6a737d] hover:text-[#e8e8e8]">
@@ -400,15 +403,34 @@ export default function ProjectView() {
               {activeThread.title}
             </span>
           )}
-          {project.project_type === 'recruiting' && (
-            <button
-              onClick={() => { setWizardStep(0); setShowWizard(true) }}
-              title="How it works"
-              className="ml-auto p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
-            >
-              <HelpCircle size={14} />
-            </button>
-          )}
+          <div className="flex items-center gap-1.5 ml-auto">
+            {/* Mobile view toggle */}
+            <div className="flex md:hidden rounded overflow-hidden" style={{ border: '1px solid #444' }}>
+              <button
+                onClick={() => setMobileView('chat')}
+                className="px-2.5 py-1 text-[10px] font-medium"
+                style={{ background: mobileView === 'chat' ? '#ce9178' : '#2a2d2e', color: mobileView === 'chat' ? '#fff' : '#6a737d' }}
+              >
+                Chat
+              </button>
+              <button
+                onClick={() => setMobileView('panel')}
+                className="px-2.5 py-1 text-[10px] font-medium"
+                style={{ background: mobileView === 'panel' ? '#ce9178' : '#2a2d2e', color: mobileView === 'panel' ? '#fff' : '#6a737d' }}
+              >
+                {project.project_type === 'recruiting' ? 'Pipeline' : 'Project'}
+              </button>
+            </div>
+            {project.project_type === 'recruiting' && (
+              <button
+                onClick={() => { setWizardStep(0); setShowWizard(true) }}
+                title="How it works"
+                className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
+              >
+                <HelpCircle size={14} />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Messages + drop zone */}
@@ -516,7 +538,7 @@ export default function ProjectView() {
       </div>
 
       {/* Right — Project panel or Recruiting pipeline */}
-      <div className="hidden md:flex md:w-1/2 shrink-0">
+      <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex md:w-1/2 shrink-0`}>
         {project.project_type === 'recruiting' ? (
           <RecruitingPipeline
             project={project}
