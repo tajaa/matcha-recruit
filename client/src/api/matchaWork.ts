@@ -344,6 +344,10 @@ export function uploadProjectResumes(
   return ctrl
 }
 
+export function extractPlaceholderValue(input: string, placeholder: string, context: string) {
+  return api.post<{ value: string }>('/matcha-work/projects/extract-value', { input, placeholder, context })
+}
+
 export function sendProjectInterviews(
   projectId: string,
   candidateIds: string[],

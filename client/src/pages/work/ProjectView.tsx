@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, extractPlaceholderValue } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
@@ -97,30 +97,33 @@ export default function ProjectView() {
     setMessages((prev) => [...prev, makeLocalMsg('assistant', `Fill in: ...${next.label}...`)])
   }
 
-  async function handlePlaceholderAnswer(value: string) {
+  async function handlePlaceholderAnswer(rawInput: string) {
     const entry = pendingPlaceholders.current.shift()
     if (!entry || !projectId) return
-    const placeholder = entry.placeholder
+    const { placeholder, label } = entry
 
     // Add user message locally
-    setMessages((prev) => [...prev, makeLocalMsg('user', value)])
+    setMessages((prev) => [...prev, makeLocalMsg('user', rawInput)])
+
+    // Extract clean value — uses AI for complex inputs, direct for simple ones
+    let value = rawInput
+    try {
+      const result = await extractPlaceholderValue(rawInput, placeholder, label)
+      value = result.value || rawInput
+    } catch {
+      // Fall back to raw input
+    }
 
     // Fetch fresh project to get latest section content (avoid stale state)
     const fresh = await getProjectDetail(projectId)
-    let replaced = false
     for (const section of fresh.sections ?? []) {
       if (section.content.includes(placeholder)) {
         const updated = section.content.replaceAll(placeholder, value)
-        console.log(`[placeholder] Replacing "${placeholder}" → "${value}" in section ${section.id}`)
         await updateProjectSectionNew(projectId, section.id, { content: updated })
-        replaced = true
       }
     }
-    if (!replaced) {
-      console.warn(`[placeholder] "${placeholder}" not found in any section`)
-    }
 
-    // Refresh again to get the updated content into state
+    // Refresh to get the updated content into state
     const refreshed = await getProjectDetail(projectId)
     setProject(refreshed)
 

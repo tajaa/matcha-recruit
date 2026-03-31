@@ -2566,6 +2566,48 @@ async def upload_project_resumes(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@router.post("/projects/extract-value")
+async def extract_placeholder_value(
+    body: dict,
+    _current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Extract a clean replacement value from a user's natural-language answer."""
+    user_input = (body.get("input") or "").strip()
+    placeholder = body.get("placeholder") or ""
+    context = body.get("context") or ""
+
+    if not user_input:
+        return {"value": user_input}
+
+    # Simple case: short input (≤ 3 words) — use directly
+    if len(user_input.split()) <= 3:
+        return {"value": user_input}
+
+    # Complex input: use Gemini flash lite to extract the actual value
+    try:
+        from google import genai as _genai
+        from google.genai import types as _types
+
+        api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
+        client = _genai.Client(api_key=api_key)
+        resp = await asyncio.to_thread(
+            lambda: client.models.generate_content(
+                model="gemini-3.1-flash-lite-preview",
+                contents=[_types.Content(role="user", parts=[_types.Part.from_text(
+                    text=f"Extract the exact value to fill in the placeholder {placeholder} from this user answer: \"{user_input}\"\n"
+                         f"Context from the document: \"{context}\"\n"
+                         f"Return ONLY the extracted value — no quotes, no explanation, just the value itself."
+                )])],
+                config=_types.GenerateContentConfig(temperature=0.0),
+            )
+        )
+        extracted = (resp.text or "").strip().strip('"').strip("'")
+        return {"value": extracted if extracted else user_input}
+    except Exception as e:
+        logger.warning("Value extraction failed, using raw input: %s", e)
+        return {"value": user_input}
+
+
 @router.post("/projects/{project_id}/resume/send-interviews")
 async def send_project_interviews(
     project_id: UUID,
