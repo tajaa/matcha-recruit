@@ -7,6 +7,12 @@ import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
 
+const MODEL_OPTIONS = [
+  { id: 'gemini-3.1-flash-lite-preview', label: 'Flash Lite' },
+  { id: 'gemini-3-flash-preview', label: 'Flash 3' },
+  { id: 'gemini-3.1-pro-preview', label: 'Pro 3.1' },
+] as const
+
 export default function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>()
   const [project, setProject] = useState<MWProject | null>(null)
@@ -18,6 +24,7 @@ export default function ProjectView() {
   const [statusMessage, setStatusMessage] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3-flash-preview')
 
   // Placeholder fill-in tracking: when user clicks finalize with missing fields,
   // we track which placeholders need answers. Each user chat message fills the next one.
@@ -167,7 +174,7 @@ export default function ProjectView() {
         setError(err)
         setStreaming(false)
       },
-    })
+    }, { model: selectedModel })
   }
 
   async function handleNewChat() {
@@ -469,6 +476,21 @@ export default function ProjectView() {
 
         {/* Input */}
         <div className="px-4 py-3" style={{ borderTop: '1px solid #333' }}>
+          <div className="flex items-center gap-2 mb-1.5">
+            <select
+              value={selectedModel}
+              onChange={(e) => {
+                setSelectedModel(e.target.value)
+                localStorage.setItem('mw-model', e.target.value)
+              }}
+              className="text-[10px] font-medium rounded px-2 py-1 appearance-none cursor-pointer border-0"
+              style={{ background: '#2a2d2e', color: '#9ca3af' }}
+            >
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+          </div>
           <div className="flex items-end gap-2">
             <textarea
               ref={textareaRef}
