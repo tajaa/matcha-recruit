@@ -4308,6 +4308,7 @@ async def send_message_stream(
                 slide_index=body.slide_index, context_summary=context_summary,
                 payer_mode_prompt=stream_payer_prompt,
                 model_override=body.model,
+                company_id=str(company_id),
             )
             _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 

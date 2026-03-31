@@ -1,10 +1,11 @@
 import asyncio
+import hashlib
 import json
 import logging
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Any
 
 from google import genai
@@ -17,6 +18,11 @@ from ..models.matcha_work import HandbookDocument, OfferLetterDocument, Onboardi
 logger = logging.getLogger(__name__)
 
 GEMINI_CALL_TIMEOUT = 120
+
+# ── Gemini Context Cache Registry ──
+# Maps (company_id + prompt_hash) → (cache_name, model, expires_at)
+_cache_registry: dict[str, tuple[str, str, datetime]] = {}
+_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
 REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
@@ -76,7 +82,8 @@ Mission:
 {payer_context}
 """
 
-MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE = """You are Matcha Work, an HR copilot for US employers.
+# Static portion of system prompt — instructions + company context (cacheable, changes slowly)
+MATCHA_WORK_STATIC_PROMPT_TEMPLATE = """You are Matcha Work, an HR copilot for US employers.
 
 Today's date: {today}
 
@@ -86,10 +93,6 @@ Mission:
 3) Ask concise clarifying questions when required inputs are missing.
 4) Never block normal Q&A just because no skill is invoked.
 {company_context}
-Current thread context:
-- current_skill (inferred from state): {current_skill}
-- current_state (JSON): {current_state}
-- valid_update_fields: {valid_fields}
 
 Supported skills:
 - offer_letter: create/update offer letter content, save_draft, send_draft, finalize
@@ -246,6 +249,16 @@ Output constraints:
 - cover_image_url must NOT be set by AI — it is generated automatically.
 """
 
+# Dynamic portion — changes every message (never cached)
+MATCHA_WORK_DYNAMIC_PROMPT_TEMPLATE = """Current thread context:
+- current_skill (inferred from state): {current_skill}
+- current_state (JSON): {current_state}
+- valid_update_fields: {valid_fields}
+"""
+
+# Legacy combined template (used as fallback when caching fails)
+MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE = MATCHA_WORK_STATIC_PROMPT_TEMPLATE + "\n" + MATCHA_WORK_DYNAMIC_PROMPT_TEMPLATE
+
 
 def _build_company_context(profile: dict) -> str:
     """Format non-null company profile fields into a labeled block for the system prompt."""
@@ -352,6 +365,7 @@ class MatchaWorkAIProvider:
         company_context: str = "",
         slide_index: Optional[int] = None,
         model_override: Optional[str] = None,
+        company_id: str = "",
     ) -> AIResponse:
         raise NotImplementedError
 
@@ -377,6 +391,35 @@ class GeminiProvider(MatchaWorkAIProvider):
                 self._client = genai.Client(api_key=self.settings.gemini_api_key)
         return self._client
 
+    def _get_or_create_cache(self, model: str, static_prompt: str, company_id: str = "") -> Optional[str]:
+        """Get or create a Gemini cached content for the static system prompt."""
+        prompt_hash = hashlib.md5(static_prompt.encode()).hexdigest()[:12]
+        key = f"{company_id}:{prompt_hash}:{model}"
+
+        # Check existing cache
+        if key in _cache_registry:
+            name, cached_model, expires = _cache_registry[key]
+            if datetime.now(timezone.utc) < expires and cached_model == model:
+                return name
+            # Expired — remove
+            del _cache_registry[key]
+
+        try:
+            cached = self.client.caches.create(
+                model=model,
+                config=types.CreateCachedContentConfig(
+                    system_instruction=static_prompt,
+                    ttl=f"{_CACHE_TTL_SECONDS}s",
+                ),
+            )
+            expires = datetime.now(timezone.utc) + timedelta(seconds=_CACHE_TTL_SECONDS)
+            _cache_registry[key] = (cached.name, model, expires)
+            logger.info("[cache] Created Gemini cache %s for company=%s model=%s", cached.name, company_id, model)
+            return cached.name
+        except Exception as e:
+            logger.warning("[cache] Failed to create Gemini cache: %s", e)
+            return None
+
     async def generate(
         self,
         messages: list[dict],
@@ -386,6 +429,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         context_summary: Optional[str] = None,
         payer_mode_prompt: Optional[str] = None,
         model_override: Optional[str] = None,
+        company_id: str = "",
     ) -> AIResponse:
         if payer_mode_prompt:
             # Payer mode: dedicated medical policy prompt, plain text response (no JSON)
@@ -427,7 +471,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     structured_update=None,
                 )
 
-        system_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
+        static_prompt, dynamic_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context, slide_index=slide_index,
             context_summary=context_summary,
         )
@@ -437,11 +481,13 @@ class GeminiProvider(MatchaWorkAIProvider):
             response = await asyncio.wait_for(
                 asyncio.to_thread(
                     self._call_gemini,
-                    system_prompt,
+                    static_prompt,
+                    dynamic_prompt,
                     contents,
                     valid_fields,
                     model,
                     inferred_skill,
+                    company_id,
                 ),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
@@ -461,21 +507,40 @@ class GeminiProvider(MatchaWorkAIProvider):
 
     def _call_gemini(
         self,
-        system_prompt: str,
+        static_prompt: str,
+        dynamic_prompt: str,
         contents: list,
         valid_fields: list[str],
         model: str,
         inferred_skill: str,
+        company_id: str = "",
     ) -> AIResponse:
-        response = self.client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system_prompt,
-                temperature=0.2,
-                response_mime_type="application/json",
-            ),
-        )
+        # Try to cache the static prompt (instructions + company context)
+        cache_name = self._get_or_create_cache(model, static_prompt, company_id)
+
+        if cache_name:
+            # Cached: static prompt is in the cache, only send dynamic part
+            response = self.client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    cached_content=cache_name,
+                    system_instruction=dynamic_prompt,
+                    temperature=0.2,
+                    response_mime_type="application/json",
+                ),
+            )
+        else:
+            # Fallback: send everything uncached
+            response = self.client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=static_prompt + "\n\n" + dynamic_prompt,
+                    temperature=0.2,
+                    response_mime_type="application/json",
+                ),
+            )
         raw_text = response.text or ""
         raw_text = _clean_json_text(raw_text)
 
@@ -576,12 +641,12 @@ class GeminiProvider(MatchaWorkAIProvider):
         company_context: str = "",
         slide_index: Optional[int] = None,
     ) -> dict:
-        system_prompt, _, _, _ = self._build_prompt_and_contents(
+        static_prompt, dynamic_prompt, _, _, _ = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context, slide_index=slide_index
         )
         model = await _get_model(self.settings)
         windowed = messages[-20:]
-        char_count = len(system_prompt) + sum(len(str(msg.get("content", ""))) for msg in windowed)
+        char_count = len(static_prompt) + len(dynamic_prompt) + sum(len(str(msg.get("content", ""))) for msg in windowed)
         prompt_tokens = max(1, char_count // 4)
         return {
             "prompt_tokens": prompt_tokens,
@@ -598,7 +663,12 @@ class GeminiProvider(MatchaWorkAIProvider):
         company_context: str = "",
         slide_index: Optional[int] = None,
         context_summary: Optional[str] = None,
-    ) -> tuple[str, list, list[str], str]:
+    ) -> tuple[str, str, list, list[str], str]:
+        """Returns (static_prompt, dynamic_prompt, contents, valid_fields, skill).
+
+        static_prompt: instructions + company context (cacheable, changes slowly)
+        dynamic_prompt: current_state + summary + slide lock (changes per message)
+        """
         window_size = 15 if context_summary else 20
         windowed = messages[-window_size:]
         current_skill = _infer_skill_from_state(current_state)
@@ -619,29 +689,30 @@ class GeminiProvider(MatchaWorkAIProvider):
         elif current_skill == "project":
             valid_fields = PROJECT_FIELDS
         else:
-            # No active skill yet — allow any skill to be initiated
             valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS + POLICY_FIELDS + PROJECT_FIELDS
 
-        system_prompt = MATCHA_WORK_SYSTEM_PROMPT_TEMPLATE.format(
+        # Static part — instructions + company context (cached at Gemini API level)
+        static_prompt = MATCHA_WORK_STATIC_PROMPT_TEMPLATE.format(
             today=date.today().isoformat(),
-            current_skill=current_skill,
-            current_state=json.dumps(current_state, default=str, separators=(",", ":")),
-            valid_fields=", ".join(valid_fields),
             company_context=company_context,
         )
 
-        # Inject compacted conversation summary if available
+        # Dynamic part — per-message state (never cached)
+        dynamic_prompt = MATCHA_WORK_DYNAMIC_PROMPT_TEMPLATE.format(
+            current_skill=current_skill,
+            current_state=json.dumps(current_state, default=str, separators=(",", ":")),
+            valid_fields=", ".join(valid_fields),
+        )
+
         if context_summary:
-            system_prompt += (
+            dynamic_prompt += (
                 f"\n\n## Conversation Context Summary\n"
                 f"(Earlier messages were summarized to preserve context)\n"
                 f"{context_summary}\n"
             )
 
-        # Inject slide-focus context when the user has selected a specific slide
         if slide_index is not None and current_skill in ("presentation", "workbook"):
             slides = current_state.get("slides") or []
-            # Workbook presentations store slides under presentation.slides
             if not slides:
                 pres = current_state.get("presentation")
                 if isinstance(pres, dict):
@@ -651,7 +722,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 slide_title = slides[slide_index].get("title", "") if isinstance(slides[slide_index], dict) else ""
             label = f' "{slide_title}"' if slide_title else ""
             total = len(slides)
-            system_prompt += (
+            dynamic_prompt += (
                 f"\n\n--- SLIDE LOCK ACTIVE ---\n"
                 f"The user has selected Slide {slide_index + 1}/{total}{label} (0-based index {slide_index}). "
                 f"You MUST only modify this slide. In your updates JSON:\n"
@@ -671,7 +742,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     parts=[types.Part(text=msg["content"])],
                 )
             )
-        return system_prompt, contents, valid_fields, current_skill
+        return static_prompt, dynamic_prompt, contents, valid_fields, current_skill
 
     def _extract_usage_metadata(self, response: Any, model: str) -> Optional[dict]:
         usage = getattr(response, "usage_metadata", None)
