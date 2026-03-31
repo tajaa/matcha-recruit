@@ -485,8 +485,9 @@ export default function ProjectView() {
               }
             }}
             onPromptChat={(message, placeholders) => {
-              pendingPlaceholders.current = [...placeholders]
               handleSend(message)
+              // Set placeholders AFTER send so the initial prompt doesn't consume one
+              pendingPlaceholders.current = [...placeholders]
             }}
           />
         ) : (
