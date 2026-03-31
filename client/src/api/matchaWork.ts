@@ -344,6 +344,28 @@ export function uploadProjectResumes(
   return ctrl
 }
 
+export function sendProjectInterviews(
+  projectId: string,
+  candidateIds: string[],
+  positionTitle?: string,
+  customMessage?: string,
+) {
+  return api.post<{
+    sent: { id: string; name: string; email: string; interview_id: string; email_sent: boolean }[]
+    failed: { id: string; error: string }[]
+  }>(`/matcha-work/projects/${projectId}/resume/send-interviews`, {
+    candidate_ids: candidateIds,
+    position_title: positionTitle,
+    custom_message: customMessage,
+  })
+}
+
+export function syncProjectInterviews(projectId: string) {
+  return api.post<{ updated: number }>(
+    `/matcha-work/projects/${projectId}/resume/sync-interviews`
+  )
+}
+
 export function toggleProjectShortlist(projectId: string, candidateId: string) {
   return api.post(`/matcha-work/projects/${projectId}/shortlist/${candidateId}`)
 }

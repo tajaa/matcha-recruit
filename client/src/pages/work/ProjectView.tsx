@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, uploadProjectResumes, populatePostingFromChat } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
@@ -144,15 +144,9 @@ export default function ProjectView() {
   async function handleAddToProject(messageId: string, content: string) {
     if (!projectId) return
     try {
-      if (project?.project_type === 'recruiting') {
-        // For recruiting projects, parse chat content into posting fields
-        const updated = await populatePostingFromChat(projectId, content)
-        setProject(updated)
-      } else {
-        await addProjectSectionNew(projectId, { content, source_message_id: messageId })
-        const updated = await getProjectDetail(projectId)
-        setProject(updated)
-      }
+      await addProjectSectionNew(projectId, { content, source_message_id: messageId })
+      const updated = await getProjectDetail(projectId)
+      setProject(updated)
     } catch {}
   }
 
@@ -430,6 +424,25 @@ export default function ProjectView() {
             projectId={projectId!}
             onUpdate={(updated) => setProject(updated)}
             streaming={streaming}
+            onSendInterviews={async (ids, positionTitle) => {
+              const result = await sendProjectInterviews(projectId!, ids, positionTitle)
+              if (result.sent.length > 0) {
+                const updated = await getProjectDetail(projectId!)
+                setProject(updated)
+              }
+              if (result.failed.length > 0) {
+                setError(`Failed to send ${result.failed.length} interview(s): ${result.failed.map((f) => f.error).join(', ')}`)
+              }
+            }}
+            onSyncInterviews={async () => {
+              try {
+                await syncProjectInterviews(projectId!)
+                const updated = await getProjectDetail(projectId!)
+                setProject(updated)
+              } catch {
+                setError('Failed to sync interview statuses.')
+              }
+            }}
           />
         ) : (
           <ProjectPanel

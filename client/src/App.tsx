@@ -41,6 +41,7 @@ import BrokerClients from './pages/broker/BrokerClients'
 import BrokerSettings from './pages/broker/BrokerSettings'
 import BrokerClientDetail from './pages/broker/BrokerClientDetail'
 import ERExportDownload from './pages/shared/ERExportDownload'
+import CandidateInterview from './pages/shared/CandidateInterview'
 import SSOCallback from './pages/SSOCallback'
 import WorkLayout from './layouts/WorkLayout'
 import MatchaWorkList from './pages/work/MatchaWorkList'
@@ -54,6 +55,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/s/:token" element={<ERExportDownload />} />
+      <Route path="/candidate-interview/:token" element={<CandidateInterview />} />
       <Route path="/work" element={<WorkLayout />}>
         <Route index element={<MatchaWorkList />} />
         <Route path=":threadId" element={<MatchaWorkThread />} />

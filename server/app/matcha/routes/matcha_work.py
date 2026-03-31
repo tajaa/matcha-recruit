@@ -2560,6 +2560,194 @@ async def upload_project_resumes(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@router.post("/projects/{project_id}/resume/send-interviews")
+async def send_project_interviews(
+    project_id: UUID,
+    body: SendInterviewsRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create screening interviews for selected project candidates and send invite emails."""
+    import secrets as _secrets
+    from ..services import project_service as proj_svc
+    from app.core.services.email import EmailService
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = await proj_svc.get_project(project_id, company_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    data = project.get("project_data") or {}
+    candidates = data.get("candidates") or []
+    if not candidates:
+        raise HTTPException(status_code=400, detail="No candidates in this project")
+
+    async with get_connection() as conn:
+        company_row = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
+    company_name = company_row["name"] if company_row else "the company"
+
+    position_title = body.position_title or project.get("title") or "Open Position"
+    email_svc = EmailService()
+    settings = get_settings()
+
+    sent = []
+    failed = []
+    updated_candidates = list(candidates)
+
+    for cid in body.candidate_ids:
+        candidate = None
+        candidate_idx = None
+        for idx, c in enumerate(updated_candidates):
+            if c.get("id") == cid:
+                candidate = c
+                candidate_idx = idx
+                break
+
+        if candidate is None:
+            failed.append({"id": cid, "error": "Candidate not found in project"})
+            continue
+
+        email = candidate.get("email")
+        name = candidate.get("name") or candidate.get("filename", "Candidate")
+        if not email:
+            failed.append({"id": cid, "error": f"No email for {name}"})
+            continue
+
+        try:
+            invite_token = _secrets.token_urlsafe(32)
+            interview_data = json.dumps({
+                "invite_token": invite_token,
+                "candidate_name": name,
+                "candidate_email": email,
+                "position_title": position_title,
+                "company_name": company_name,
+                "resume_batch_project_id": str(project_id),
+                "resume_batch_candidate_id": cid,
+            })
+
+            async with get_connection() as interview_conn:
+                interview_row = await interview_conn.fetchrow(
+                    """
+                    INSERT INTO interviews (id, company_id, interviewer_name, interview_type, raw_culture_data, status, created_at)
+                    VALUES (gen_random_uuid(), $1, $2, 'screening', $3, 'pending', NOW())
+                    RETURNING id
+                    """,
+                    company_id,
+                    name,
+                    interview_data,
+                )
+            interview_id = interview_row["id"]
+
+            invite_url = f"{settings.app_base_url}/candidate-interview/{invite_token}"
+            email_sent = await email_svc.send_candidate_interview_invite_email(
+                to_email=email,
+                to_name=name,
+                company_name=company_name,
+                position_title=position_title,
+                invite_url=invite_url,
+                custom_message=body.custom_message,
+            )
+
+            updated_candidates[candidate_idx] = {
+                **candidate,
+                "status": "interview_sent",
+                "interview_id": str(interview_id),
+            }
+
+            sent.append({
+                "id": cid,
+                "name": name,
+                "email": email,
+                "interview_id": str(interview_id),
+                "email_sent": email_sent,
+            })
+        except Exception as e:
+            logger.error("Failed to create interview for project candidate %s: %s", cid, e, exc_info=True)
+            failed.append({"id": cid, "error": str(e)})
+
+    if sent:
+        await proj_svc.update_project_data(project_id, {"candidates": updated_candidates})
+
+    return {"sent": sent, "failed": failed}
+
+
+@router.post("/projects/{project_id}/resume/sync-interviews")
+async def sync_project_interviews(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Sync interview statuses back into project candidates."""
+    from ..services import project_service as proj_svc
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    project = await proj_svc.get_project(project_id, company_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    data = project.get("project_data") or {}
+    candidates = data.get("candidates") or []
+
+    interview_ids = [c.get("interview_id") for c in candidates if c.get("interview_id")]
+    if not interview_ids:
+        return {"updated": 0}
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, status, screening_analysis
+            FROM interviews
+            WHERE id = ANY($1::uuid[])
+            """,
+            interview_ids,
+        )
+
+    interview_map = {str(r["id"]): r for r in rows}
+    updated = 0
+    updated_candidates = list(candidates)
+
+    for idx, c in enumerate(updated_candidates):
+        iid = c.get("interview_id")
+        if not iid or iid not in interview_map:
+            continue
+        row = interview_map[iid]
+        new_status = c.get("status")
+        interview_status = row["status"]
+
+        if interview_status in ("completed", "analyzed") and c.get("status") != "interview_completed":
+            new_status = "interview_completed"
+        elif interview_status == "in_progress" and c.get("status") == "interview_sent":
+            new_status = "interview_in_progress"
+
+        score = None
+        summary = None
+        analysis = row.get("screening_analysis")
+        if analysis:
+            if isinstance(analysis, str):
+                analysis = json.loads(analysis)
+            score = analysis.get("overall_score") or analysis.get("score")
+            summary = analysis.get("summary") or analysis.get("overall_assessment")
+
+        if new_status != c.get("status") or score or summary:
+            updated_candidates[idx] = {
+                **c,
+                "status": new_status,
+                "interview_status": interview_status,
+                "interview_score": score,
+                "interview_summary": summary,
+            }
+            updated += 1
+
+    if updated > 0:
+        await proj_svc.update_project_data(project_id, {"candidates": updated_candidates})
+
+    return {"updated": updated}
+
+
 @router.get("/projects/{project_id}/export/{fmt}")
 async def export_project_endpoint(
     project_id: UUID,

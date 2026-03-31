@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine } from 'lucide-react'
-import type { ProjectSection } from '../../types/matcha-work'
+import type { ProjectSection, MWProject } from '../../types/matcha-work'
 import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta } from '../../api/matchaWork'
-import type { MWProject } from '../../types/matcha-work'
 import SectionEditor from './SectionEditor'
+import { markdownToHtml, sectionToHtml } from './markdownToHtml'
 
 interface ProjectPanelPropsLegacy {
   state: Record<string, unknown>
@@ -28,51 +28,6 @@ interface ProjectPanelPropsNew {
 }
 
 type ProjectPanelProps = ProjectPanelPropsLegacy | ProjectPanelPropsNew
-
-/** Convert markdown to simple HTML for TipTap initialization */
-function markdownToHtml(md: string): string {
-  let html = md
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/__(.+?)__/g, '<strong>$1</strong>')
-    .replace(/(?<!\w)\*(.+?)\*(?!\w)/g, '<em>$1</em>')
-    .replace(/(?<!\w)_(.+?)_(?!\w)/g, '<em>$1</em>')
-    .replace(/^#{2}\s+(.+)$/gm, '<h2>$1</h2>')
-    .replace(/^#{3}\s+(.+)$/gm, '<h3>$1</h3>')
-    .replace(/^#{1}\s+(.+)$/gm, '<h2>$1</h2>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-    .replace(/^---+$/gm, '<hr>')
-    .replace(/^>\s*(.+)$/gm, '<blockquote>$1</blockquote>')
-
-  // Convert bullet lists (- or *)
-  const lines = html.split('\n')
-  const result: string[] = []
-  let inUl = false
-  let inOl = false
-  for (const line of lines) {
-    const bulletMatch = line.match(/^[\s]*[-*]\s+(.+)/)
-    const numMatch = line.match(/^[\s]*\d+\.\s+(.+)/)
-    if (bulletMatch) {
-      if (!inUl) { result.push('<ul>'); inUl = true }
-      result.push(`<li>${bulletMatch[1]}</li>`)
-    } else if (numMatch) {
-      if (!inOl) { result.push('<ol>'); inOl = true }
-      result.push(`<li>${numMatch[1]}</li>`)
-    } else {
-      if (inUl) { result.push('</ul>'); inUl = false }
-      if (inOl) { result.push('</ol>'); inOl = false }
-      if (line.trim() && !line.startsWith('<h') && !line.startsWith('<hr') && !line.startsWith('<blockquote')) {
-        result.push(`<p>${line}</p>`)
-      } else {
-        result.push(line)
-      }
-    }
-  }
-  if (inUl) result.push('</ul>')
-  if (inOl) result.push('</ol>')
-
-  return result.join('\n')
-}
 
 export default function ProjectPanel(props: ProjectPanelProps) {
   const isNewMode = !!props.projectId
@@ -263,16 +218,6 @@ export default function ProjectPanel(props: ProjectPanelProps) {
       }
     } catch {}
     setExporting(false)
-  }
-
-  /** Convert section content to HTML for the editor — handles both raw markdown and HTML */
-  function sectionToHtml(s: ProjectSection): string {
-    const c = s.content
-    if (!c) return ''
-    // If it already looks like HTML, use as-is
-    if (c.startsWith('<') && (c.includes('</p>') || c.includes('</h') || c.includes('</ul>'))) return c
-    // Otherwise convert from markdown
-    return markdownToHtml(c)
   }
 
   return (

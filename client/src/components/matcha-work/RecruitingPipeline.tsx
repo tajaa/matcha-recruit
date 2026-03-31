@@ -1,7 +1,9 @@
-import { useState, useMemo, useRef, useEffect } from 'react'
-import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video } from 'lucide-react'
+import { useState, useMemo, useRef, useCallback } from 'react'
+import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video, Send, Square, CheckSquare, RefreshCw, GripVertical, Plus, Trash2, FileText } from 'lucide-react'
 import type { MWProject, RecruitingData } from '../../types/matcha-work'
-import { toggleProjectShortlist, updateProjectPosting, getProjectDetail } from '../../api/matchaWork'
+import { toggleProjectShortlist, getProjectDetail, addProjectSectionNew, updateProjectSectionNew, deleteProjectSectionNew, updateProjectPosting } from '../../api/matchaWork'
+import SectionEditor from './SectionEditor'
+import { sectionToHtml } from './markdownToHtml'
 
 type Tab = 'posting' | 'candidates' | 'interviews' | 'shortlist'
 type SortKey = 'name' | 'experience_years' | 'location'
@@ -11,6 +13,8 @@ interface RecruitingPipelineProps {
   projectId: string
   onUpdate: (project: MWProject) => void
   streaming?: boolean
+  onSendInterviews?: (candidateIds: string[], positionTitle?: string) => Promise<void>
+  onSyncInterviews?: () => Promise<void>
 }
 
 const c = {
@@ -19,11 +23,12 @@ const c = {
   green: '#22c55e', amber: '#f59e0b',
 }
 
-export default function RecruitingPipeline({ project, projectId, onUpdate }: RecruitingPipelineProps) {
+export default function RecruitingPipeline({ project, projectId, onUpdate, onSendInterviews, onSyncInterviews }: RecruitingPipelineProps) {
   const data = (project.project_data || {}) as RecruitingData
   const posting = data.posting || {}
   const candidates = data.candidates || []
   const shortlistIds = new Set(data.shortlist_ids || [])
+  const sections = project.sections ?? []
 
   const [tab, setTab] = useState<Tab>('posting')
   const [search, setSearch] = useState('')
@@ -31,47 +36,75 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
   const [sortAsc, setSortAsc] = useState(false)
   const [saving, setSaving] = useState(false)
   const [expandedId, setExpandedId] = useState<string | null>(null)
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [sendingInterviews, setSendingInterviews] = useState(false)
+  const [positionInput, setPositionInput] = useState('')
+  const [showPositionPrompt, setShowPositionPrompt] = useState(false)
 
-  // Local posting fields — controlled inputs that sync from server
-  const [localPosting, setLocalPosting] = useState<Record<string, string>>({})
+  // Section title editing
+  const [sectionTitleEditing, setSectionTitleEditing] = useState<string | null>(null)
+  const [sectionTitleDraft, setSectionTitleDraft] = useState('')
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
 
-  // Sync when project data changes (e.g., after AI populates fields)
-  useEffect(() => {
-    const p = ((project.project_data || {}) as RecruitingData).posting || {}
-    setLocalPosting((prev) => {
-      const next: Record<string, string> = {}
-      for (const key of ['title', 'location', 'employment_type', 'compensation', 'description', 'requirements']) {
-        // Server value wins if local is empty or server changed
-        next[key] = (p as Record<string, string>)[key] || prev[key] || ''
-      }
-      return next
-    })
-  }, [project.project_data])
+  const isFinalized = !!(posting as Record<string, unknown>).finalized
 
-  function updateField(field: string, value: string) {
-    setLocalPosting((prev) => ({ ...prev, [field]: value }))
-    if (saveTimer.current) clearTimeout(saveTimer.current)
-    saveTimer.current = setTimeout(async () => {
-      setSaving(true)
-      try {
-        await updateProjectPosting(projectId, { ...posting, [field]: value })
-        const updated = await getProjectDetail(projectId)
-        onUpdate(updated)
-      } catch {}
-      setSaving(false)
+  // ── Section CRUD ──
+
+  async function refreshProject() {
+    const updated = await getProjectDetail(projectId)
+    onUpdate(updated)
+  }
+
+  function handleSectionContentUpdate(sectionId: string, html: string) {
+    clearTimeout(saveTimers.current[sectionId])
+    saveTimers.current[sectionId] = setTimeout(() => {
+      flushSave(sectionId, html)
     }, 1000)
+  }
+
+  const flushSave = useCallback(async (sectionId: string, content: string) => {
+    setSaving(true)
+    try {
+      await updateProjectSectionNew(projectId, sectionId, { content })
+      await refreshProject()
+    } catch {}
+    setSaving(false)
+  }, [projectId])
+
+  async function saveSectionTitle(sectionId: string, newTitle: string) {
+    setSaving(true)
+    try {
+      await updateProjectSectionNew(projectId, sectionId, { title: newTitle })
+      await refreshProject()
+    } catch {}
+    setSaving(false)
+    setSectionTitleEditing(null)
+  }
+
+  async function handleDeleteSection(sectionId: string) {
+    try {
+      await deleteProjectSectionNew(projectId, sectionId)
+      await refreshProject()
+    } catch {}
+  }
+
+  async function handleAddBlankSection() {
+    try {
+      await addProjectSectionNew(projectId, { content: '', title: 'New Section' })
+      await refreshProject()
+    } catch {}
   }
 
   async function finalizePosting() {
     setSaving(true)
     try {
       await updateProjectPosting(projectId, { ...posting, finalized: true })
-      const updated = await getProjectDetail(projectId)
-      onUpdate(updated)
+      await refreshProject()
     } catch {}
     setSaving(false)
   }
+
+  // ── Candidate selection + interviews ──
 
   async function handleToggleShortlist(candidateId: string) {
     try {
@@ -80,7 +113,44 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
     } catch {}
   }
 
-  // Filtered/sorted candidates
+  const selectableIds = useMemo(() =>
+    candidates.filter((c) => c.status === 'analyzed' && c.email).map((c) => c.id),
+    [candidates]
+  )
+
+  const hasInterviews = candidates.some((c) => c.interview_id)
+
+  function toggleSelect(id: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    if (selectedIds.size >= selectableIds.length) setSelectedIds(new Set())
+    else setSelectedIds(new Set(selectableIds))
+  }
+
+  async function handleSendInterviews() {
+    if (!onSendInterviews || selectedIds.size === 0) return
+    setSendingInterviews(true)
+    try {
+      await onSendInterviews(Array.from(selectedIds), positionInput.trim() || undefined)
+      setSelectedIds(new Set())
+      setShowPositionPrompt(false)
+      setPositionInput('')
+    } catch {
+      // error handled by parent
+    }
+    setSendingInterviews(false)
+  }
+
+  // ── Filtered/sorted candidates ──
+
   const filteredCandidates = useMemo(() => {
     const q = search.toLowerCase()
     let list = [...candidates]
@@ -106,13 +176,11 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
   }, [candidates, search, sortKey, sortAsc, tab, shortlistIds])
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
-    { key: 'posting', label: 'Posting' },
+    { key: 'posting', label: 'Posting', count: sections.length },
     { key: 'candidates', label: 'Candidates', count: candidates.length },
     { key: 'shortlist', label: 'Shortlist', count: shortlistIds.size },
     { key: 'interviews', label: 'Interviews', count: candidates.filter((c) => c.interview_id).length },
   ]
-
-  const isFinalized = !!(posting as Record<string, unknown>).finalized
 
   return (
     <div className="flex flex-col w-full" style={{ background: c.bg }}>
@@ -136,61 +204,155 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
             )}
           </button>
         ))}
-        {saving && <Loader2 size={10} className="ml-auto animate-spin" style={{ color: c.muted }} />}
+        <div className="flex items-center gap-1.5 ml-auto">
+          {saving && <Loader2 size={10} className="animate-spin" style={{ color: c.muted }} />}
+          {hasInterviews && onSyncInterviews && (
+            <button
+              onClick={onSyncInterviews}
+              title="Refresh interview statuses"
+              className="p-1 rounded transition-colors"
+              style={{ color: c.muted }}
+            >
+              <RefreshCw size={10} />
+            </button>
+          )}
+          {tab === 'candidates' && selectableIds.length > 0 && onSendInterviews && (
+            <button
+              onClick={toggleSelectAll}
+              className="text-[10px] font-medium px-2 py-1 rounded transition-colors"
+              style={{ color: c.muted }}
+            >
+              {selectedIds.size >= selectableIds.length ? 'Clear' : 'Select All'}
+            </button>
+          )}
+          {selectedIds.size > 0 && onSendInterviews && !showPositionPrompt && (
+            <button
+              onClick={() => setShowPositionPrompt(true)}
+              disabled={sendingInterviews}
+              className="flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded transition-colors disabled:opacity-40"
+              style={{ background: c.green, color: '#fff' }}
+            >
+              <Video size={10} />
+              Interview ({selectedIds.size})
+            </button>
+          )}
+        </div>
       </div>
+      {/* Position title prompt */}
+      {showPositionPrompt && (
+        <div className="flex items-center gap-2 px-3 py-2" style={{ borderBottom: `1px solid ${c.border}` }}>
+          <input
+            value={positionInput}
+            onChange={(e) => setPositionInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleSendInterviews() }}
+            placeholder="Position title (e.g. Senior Engineer)"
+            autoFocus
+            className="flex-1 text-xs rounded px-2.5 py-1.5 border focus:outline-none"
+            style={{ background: '#1a1a1a', color: c.text, borderColor: c.border }}
+          />
+          <button
+            onClick={handleSendInterviews}
+            disabled={sendingInterviews}
+            className="p-1.5 rounded transition-colors disabled:opacity-40"
+            style={{ background: c.green, color: '#fff' }}
+          >
+            {sendingInterviews ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
+          </button>
+          <button
+            onClick={() => { setShowPositionPrompt(false); setPositionInput('') }}
+            className="text-[10px]"
+            style={{ color: c.muted }}
+          >
+            Cancel
+          </button>
+        </div>
+      )}
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto">
-        {/* ── Posting Tab ── */}
+        {/* ── Posting Tab — Section-based editor ── */}
         {tab === 'posting' && (
-          <div className="p-4 space-y-3">
+          <div>
             {isFinalized && (
-              <div className="flex items-center gap-2 px-3 py-2 rounded" style={{ background: '#22c55e20', border: `1px solid ${c.green}40` }}>
+              <div className="flex items-center gap-2 px-3 py-2 mx-3 mt-3 rounded" style={{ background: '#22c55e20', border: `1px solid ${c.green}40` }}>
                 <CheckCircle2 size={14} style={{ color: c.green }} />
                 <span className="text-xs font-medium" style={{ color: c.green }}>Posting Finalized</span>
                 <span className="text-[10px] ml-auto" style={{ color: c.muted }}>Drop resumes in the chat to add candidates</span>
               </div>
             )}
-            {[
-              { key: 'title', label: 'Job Title', type: 'input' },
-              { key: 'location', label: 'Location', type: 'input' },
-              { key: 'employment_type', label: 'Employment Type', type: 'input' },
-              { key: 'compensation', label: 'Compensation', type: 'input' },
-              { key: 'description', label: 'Description', type: 'textarea' },
-              { key: 'requirements', label: 'Requirements', type: 'textarea' },
-            ].map(({ key, label, type }) => (
-              <div key={key}>
-                <label className="text-[10px] font-medium mb-1 block" style={{ color: c.muted }}>{label}</label>
-                {type === 'textarea' ? (
-                  <textarea
-                    value={localPosting[key] || ''}
-                    onChange={(e) => updateField(key, e.target.value)}
-                    rows={4}
-                    className="w-full text-xs rounded border p-2 focus:outline-none resize-none"
-                    style={{ background: '#1a1a1a', color: c.text, borderColor: c.border }}
-                    placeholder={`Enter ${label.toLowerCase()}...`}
-                  />
-                ) : (
-                  <input
-                    value={localPosting[key] || ''}
-                    onChange={(e) => updateField(key, e.target.value)}
-                    className="w-full text-xs rounded border px-2 py-1.5 focus:outline-none"
-                    style={{ background: '#1a1a1a', color: c.text, borderColor: c.border }}
-                    placeholder={`Enter ${label.toLowerCase()}...`}
-                  />
-                )}
+
+            {sections.length === 0 && (
+              <div className="text-center py-12" style={{ color: c.muted }}>
+                <FileText size={24} className="mx-auto mb-2 opacity-40" />
+                <p className="text-xs">No sections yet.</p>
+                <p className="text-xs mt-1">Use the chat to describe the role, then click <strong style={{ color: c.accent }}>"Add to Project"</strong> on any message.</p>
+              </div>
+            )}
+
+            {sections.map((s) => (
+              <div key={s.id} style={{ borderBottom: `1px solid ${c.border}` }}>
+                {/* Section header */}
+                <div className="flex items-center gap-1.5 px-4 py-1.5" style={{ background: c.cardBg }}>
+                  <GripVertical size={12} className="shrink-0 cursor-grab" style={{ color: c.muted }} />
+                  {sectionTitleEditing === s.id ? (
+                    <input
+                      value={sectionTitleDraft}
+                      onChange={(e) => setSectionTitleDraft(e.target.value)}
+                      onBlur={() => saveSectionTitle(s.id, sectionTitleDraft)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') saveSectionTitle(s.id, sectionTitleDraft) }}
+                      autoFocus
+                      className="flex-1 text-xs font-semibold rounded px-1.5 py-0.5 border focus:outline-none"
+                      style={{ background: c.bg, color: c.heading, borderColor: '#555' }}
+                    />
+                  ) : (
+                    <span
+                      onClick={() => { setSectionTitleEditing(s.id); setSectionTitleDraft(s.title || '') }}
+                      className="flex-1 text-xs font-semibold truncate cursor-pointer"
+                      style={{ color: s.title ? c.heading : c.muted }}
+                    >
+                      {s.title || 'Untitled section'}
+                    </span>
+                  )}
+                  <button
+                    onClick={() => handleDeleteSection(s.id)}
+                    className="shrink-0 p-0.5 rounded transition-opacity opacity-30 hover:opacity-100"
+                    style={{ color: '#f87171' }}
+                  >
+                    <Trash2 size={11} />
+                  </button>
+                </div>
+
+                {/* Rich text editor */}
+                <SectionEditor
+                  content={sectionToHtml(s)}
+                  onUpdate={(html) => handleSectionContentUpdate(s.id, html)}
+                />
               </div>
             ))}
-            {!isFinalized && (
+
+            {/* Add section + finalize */}
+            <div className="px-4 py-3 space-y-2">
               <button
-                onClick={finalizePosting}
-                disabled={saving || !localPosting.title}
-                className="w-full py-2 text-xs font-medium rounded transition-colors disabled:opacity-40"
-                style={{ background: c.green, color: '#fff' }}
+                onClick={handleAddBlankSection}
+                className="w-full py-2 border border-dashed text-xs font-medium transition-colors"
+                style={{ borderColor: '#444', color: c.muted, borderRadius: '2px' }}
+                onMouseEnter={(e) => { e.currentTarget.style.borderColor = c.accent; e.currentTarget.style.color = c.accent }}
+                onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#444'; e.currentTarget.style.color = c.muted }}
               >
-                Finalize Posting
+                <Plus size={12} className="inline mr-1" />
+                Add Section
               </button>
-            )}
+              {!isFinalized && sections.length > 0 && (
+                <button
+                  onClick={finalizePosting}
+                  disabled={saving}
+                  className="w-full py-2 text-xs font-medium rounded transition-colors disabled:opacity-40"
+                  style={{ background: c.green, color: '#fff' }}
+                >
+                  Finalize Posting
+                </button>
+              )}
+            </div>
           </div>
         )}
 
@@ -248,6 +410,15 @@ export default function RecruitingPipeline({ project, projectId, onUpdate }: Rec
                     style={{ background: c.cardBg, borderColor: c.border }}
                   >
                     <div className="flex items-start gap-2">
+                      {tab === 'candidates' && cand.email && cand.status === 'analyzed' && onSendInterviews && (
+                        <button
+                          onClick={(e) => toggleSelect(cand.id, e)}
+                          className="shrink-0 mt-0.5"
+                          style={{ color: selectedIds.has(cand.id) ? c.green : c.muted }}
+                        >
+                          {selectedIds.has(cand.id) ? <CheckSquare size={14} /> : <Square size={14} />}
+                        </button>
+                      )}
                       <button
                         onClick={(e) => { e.stopPropagation(); handleToggleShortlist(cand.id) }}
                         className="shrink-0 mt-0.5"
