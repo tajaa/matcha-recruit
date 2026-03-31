@@ -83,7 +83,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   const isFinalized = !!(posting as Record<string, unknown>).finalized
 
   const placeholderCount = useMemo(() => {
-    const all: string[] = []
+    const all: PlaceholderInfo[] = []
     for (const s of sections) all.push(...extractPlaceholders(s.content))
     return all.length
   }, [sections])
