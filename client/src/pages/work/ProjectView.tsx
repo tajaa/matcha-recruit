@@ -7,18 +7,7 @@ import type { UsageSummary } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
-
-const MODEL_OPTIONS = [
-  { id: 'gemini-3.1-flash-lite-preview', label: 'Flash Lite' },
-  { id: 'gemini-3-flash-preview', label: 'Flash 3' },
-  { id: 'gemini-3.1-pro-preview', label: 'Pro 3.1' },
-] as const
-
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
-  return String(n)
-}
+import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/constants'
 
 export default function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -76,10 +65,12 @@ export default function ProjectView() {
   }, [projectId])
 
   // Load token usage
-  useEffect(() => {
-    fetchUsageSummary(30).then(setUsageTotal).catch(() => {})
-    fetchUsageSummary24h().then(setUsage24h).catch(() => {})
-  }, [])
+  const refreshUsage = () => {
+    Promise.all([fetchUsageSummary(30), fetchUsageSummary24h()])
+      .then(([total, daily]) => { setUsageTotal(total); setUsage24h(daily) })
+      .catch(() => {})
+  }
+  useEffect(refreshUsage, [])
 
   // Load active chat messages
   useEffect(() => {
@@ -186,6 +177,7 @@ export default function ProjectView() {
           return [...withoutTemp, data.user_message, data.assistant_message]
         })
         setStreaming(false)
+        refreshUsage()
       },
       onError: (err) => {
         setStatusMessage('')
@@ -452,10 +444,13 @@ export default function ProjectView() {
             </select>
 
             {/* Token counter */}
-            <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono" style={{ color: '#6a737d' }}>
-              {usage24h && <span>24h: {formatTokens(usage24h.totals.total_tokens)}</span>}
-              {usageTotal && <><span>|</span><span>30d: {formatTokens(usageTotal.totals.total_tokens)}</span></>}
-            </div>
+            {(usage24h?.totals.total_tokens || usageTotal?.totals.total_tokens) ? (
+              <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono" style={{ color: '#6a737d' }}>
+                {usage24h && usage24h.totals.total_tokens > 0 && <span>24h: {formatTokens(usage24h.totals.total_tokens)}</span>}
+                {usage24h?.totals.total_tokens && usageTotal?.totals.total_tokens ? <span>|</span> : null}
+                {usageTotal && usageTotal.totals.total_tokens > 0 && <span>30d: {formatTokens(usageTotal.totals.total_tokens)}</span>}
+              </div>
+            ) : null}
 
             {project.project_type === 'recruiting' && (
               <button
