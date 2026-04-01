@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
+import type { UsageSummary } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
@@ -12,6 +13,12 @@ const MODEL_OPTIONS = [
   { id: 'gemini-3-flash-preview', label: 'Flash 3' },
   { id: 'gemini-3.1-pro-preview', label: 'Pro 3.1' },
 ] as const
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
 
 export default function ProjectView() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -25,6 +32,8 @@ export default function ProjectView() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3-flash-preview')
+  const [usageTotal, setUsageTotal] = useState<UsageSummary | null>(null)
+  const [usage24h, setUsage24h] = useState<UsageSummary | null>(null)
 
   // Placeholder fill-in tracking: when user clicks finalize with missing fields,
   // we track which placeholders need answers. Each user chat message fills the next one.
@@ -65,6 +74,12 @@ export default function ProjectView() {
       .finally(() => setLoading(false))
     return () => { abortRef.current?.abort() }
   }, [projectId])
+
+  // Load token usage
+  useEffect(() => {
+    fetchUsageSummary(30).then(setUsageTotal).catch(() => {})
+    fetchUsageSummary24h().then(setUsage24h).catch(() => {})
+  }, [])
 
   // Load active chat messages
   useEffect(() => {
@@ -421,6 +436,27 @@ export default function ProjectView() {
                 {project.project_type === 'recruiting' ? 'Pipeline' : 'Project'}
               </button>
             </div>
+            {/* Model selector */}
+            <select
+              value={selectedModel}
+              onChange={(e) => {
+                setSelectedModel(e.target.value)
+                localStorage.setItem('mw-model', e.target.value)
+              }}
+              className="shrink-0 text-[11px] font-medium rounded-full px-2.5 py-1 appearance-none cursor-pointer border-0"
+              style={{ background: '#2a2d2e', color: '#9ca3af' }}
+            >
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+            </select>
+
+            {/* Token counter */}
+            <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono" style={{ color: '#6a737d' }}>
+              {usage24h && <span>24h: {formatTokens(usage24h.totals.total_tokens)}</span>}
+              {usageTotal && <><span>|</span><span>30d: {formatTokens(usageTotal.totals.total_tokens)}</span></>}
+            </div>
+
             {project.project_type === 'recruiting' && (
               <button
                 onClick={() => { setWizardStep(0); setShowWizard(true) }}
@@ -498,21 +534,6 @@ export default function ProjectView() {
 
         {/* Input */}
         <div className="px-4 py-3" style={{ borderTop: '1px solid #333' }}>
-          <div className="flex items-center gap-2 mb-1.5">
-            <select
-              value={selectedModel}
-              onChange={(e) => {
-                setSelectedModel(e.target.value)
-                localStorage.setItem('mw-model', e.target.value)
-              }}
-              className="text-[10px] font-medium rounded px-2 py-1 appearance-none cursor-pointer border-0"
-              style={{ background: '#2a2d2e', color: '#9ca3af' }}
-            >
-              {MODEL_OPTIONS.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
-          </div>
           <div className="flex items-end gap-2">
             <textarea
               ref={textareaRef}

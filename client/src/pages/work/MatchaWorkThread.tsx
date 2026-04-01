@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip, Bot, FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
-import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode } from '../../api/matchaWork'
+import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
+import type { UsageSummary } from '../../api/matchaWork'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
@@ -23,6 +24,12 @@ const MODEL_OPTIONS = [
   { id: 'gemini-3-flash-preview', label: 'Flash 3.0' },
   { id: 'gemini-3.1-pro-preview', label: 'Pro 3.1' },
 ] as const
+
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`
+  return String(n)
+}
 
 // Skills available in the chat — requiresCompany gates visibility for individual users
 const SKILLS = [
@@ -74,6 +81,10 @@ export default function MatchaWorkThread() {
   // Model selector
   const [selectedModel, setSelectedModel] = useState(() => localStorage.getItem('mw-model') || 'gemini-3-flash-preview')
 
+  // Token usage
+  const [usageTotal, setUsageTotal] = useState<UsageSummary | null>(null)
+  const [usage24h, setUsage24h] = useState<UsageSummary | null>(null)
+
   // Resume drag-and-drop
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -87,6 +98,11 @@ export default function MatchaWorkThread() {
   // Compliance locations — loaded when compliance mode is on
   const [locations, setLocations] = useState<BusinessLocation[]>([])
   const [locationsLoaded, setLocationsLoaded] = useState(false)
+
+  useEffect(() => {
+    fetchUsageSummary(30).then(setUsageTotal).catch(() => {})
+    fetchUsageSummary24h().then(setUsage24h).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (complianceMode && !locationsLoaded) {
@@ -566,7 +582,7 @@ export default function MatchaWorkThread() {
               setSelectedModel(e.target.value)
               localStorage.setItem('mw-model', e.target.value)
             }}
-            className={`hidden sm:block shrink-0 text-[11px] font-medium rounded-full px-2.5 py-1 appearance-none cursor-pointer transition-colors ${th.modeOff} ${
+            className={`shrink-0 text-[11px] font-medium rounded-full px-2.5 py-1 appearance-none cursor-pointer transition-colors ${th.modeOff} ${
               lightMode ? 'bg-zinc-100 text-zinc-600' : 'bg-zinc-700 text-zinc-300'
             }`}
           >
@@ -574,6 +590,12 @@ export default function MatchaWorkThread() {
               <option key={m.id} value={m.id}>{m.label}</option>
             ))}
           </select>
+
+          {/* Token counter */}
+          <div className={`hidden sm:flex items-center gap-1.5 text-[10px] font-mono ${lightMode ? 'text-zinc-400' : 'text-zinc-500'}`}>
+            {usage24h && <span>24h: {formatTokens(usage24h.totals.total_tokens)}</span>}
+            {usageTotal && <><span>|</span><span>30d: {formatTokens(usageTotal.totals.total_tokens)}</span></>}
+          </div>
 
           <button
             onClick={toggleLightMode}
