@@ -493,6 +493,10 @@ async def _sync_single_employee(
             raw_worker=raw_worker,
         )
 
+    # Auto-verify credential requirements that are satisfied by imported data
+    if credentials:
+        await _reconcile_credential_requirements(conn, employee_id, credentials)
+
     # Audit log
     await _insert_audit_log(
         conn,
@@ -509,3 +513,73 @@ async def _sync_single_employee(
     )
 
     return action_label
+
+
+# Mapping: credential_type key → which employee_credentials field(s) satisfy it
+_CRED_KEY_TO_FIELDS: dict[str, list[str]] = {
+    "medical_license": ["license_type", "license_number"],
+    "dea": ["dea_number"],
+    "npi": ["npi_number"],
+    "board_cert": ["board_certification"],
+    "malpractice": ["malpractice_carrier", "malpractice_policy_number"],
+}
+
+
+async def _reconcile_credential_requirements(
+    conn, employee_id: UUID, credentials: dict
+) -> int:
+    """Mark pending credential requirements as 'verified' when HRIS data satisfies them.
+
+    Returns the number of requirements verified.
+    """
+    # Build set of credential_type keys that are satisfied
+    satisfied_keys: set[str] = set()
+    for cred_key, fields in _CRED_KEY_TO_FIELDS.items():
+        if any(credentials.get(f) for f in fields):
+            satisfied_keys.add(cred_key)
+
+    if not satisfied_keys:
+        return 0
+
+    # Fetch pending requirements for this employee that match satisfied keys
+    rows = await conn.fetch(
+        """
+        SELECT ecr.id, ct.key AS ct_key
+        FROM employee_credential_requirements ecr
+        JOIN credential_types ct ON ct.id = ecr.credential_type_id
+        WHERE ecr.employee_id = $1
+          AND ecr.status = 'pending'
+          AND ct.key = ANY($2)
+        """,
+        employee_id,
+        list(satisfied_keys),
+    )
+
+    if not rows:
+        return 0
+
+    ids = [r["id"] for r in rows]
+    await conn.execute(
+        """
+        UPDATE employee_credential_requirements
+        SET status = 'verified', verified_at = NOW()
+        WHERE id = ANY($1)
+        """,
+        ids,
+    )
+
+    # Also mark linked onboarding tasks as completed
+    await conn.execute(
+        """
+        UPDATE employee_onboarding_tasks
+        SET status = 'completed', completed_at = NOW()
+        WHERE id IN (
+            SELECT onboarding_task_id FROM employee_credential_requirements
+            WHERE id = ANY($1) AND onboarding_task_id IS NOT NULL
+        )
+        """,
+        ids,
+    )
+
+    logger.info("[HRIS] Auto-verified %d credential requirements for employee %s", len(ids), employee_id)
+    return len(ids)
