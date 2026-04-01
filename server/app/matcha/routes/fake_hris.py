@@ -474,7 +474,7 @@ def _build_worker(idx: int, raw: dict) -> dict:
     last = raw["last"]
     clean_first = first.lower().replace(" ", "").replace("'", "").replace("-", "")
     clean_last = last.lower().replace(" ", "").replace("'", "")
-    email = f"{clean_first}.{clean_last}@worldhealth.org"
+    email = f"{clean_first}.{clean_last}@360bh.org"
     phone = f"310-555-{raw.get('phone_last4', f'{idx:04d}')}"
 
     # Custom fields
