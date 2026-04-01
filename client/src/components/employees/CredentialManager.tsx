@@ -186,6 +186,55 @@ function UploadZone({
   )
 }
 
+/** Show inline credential data for requirements verified via HRIS import (no document uploaded). */
+function CredentialDataInline({ docType, credentials }: { docType: string; credentials: Record<string, string | null> }) {
+  const fields: { label: string; value: string | null }[] = []
+
+  if (docType === 'medical_license') {
+    fields.push(
+      { label: 'Type', value: credentials.license_type },
+      { label: 'Number', value: credentials.license_number },
+      { label: 'State', value: credentials.license_state },
+      { label: 'Expires', value: credentials.license_expiration ? new Date(credentials.license_expiration).toLocaleDateString() : null },
+    )
+  } else if (docType === 'dea') {
+    fields.push(
+      { label: 'DEA Number', value: credentials.dea_number },
+      { label: 'Expires', value: credentials.dea_expiration ? new Date(credentials.dea_expiration).toLocaleDateString() : null },
+    )
+  } else if (docType === 'npi') {
+    fields.push({ label: 'NPI', value: credentials.npi_number })
+  } else if (docType === 'board_cert') {
+    fields.push(
+      { label: 'Certification', value: credentials.board_certification },
+      { label: 'Expires', value: credentials.board_certification_expiration ? new Date(credentials.board_certification_expiration).toLocaleDateString() : null },
+    )
+  } else if (docType === 'malpractice') {
+    fields.push(
+      { label: 'Carrier', value: credentials.malpractice_carrier },
+      { label: 'Expires', value: credentials.malpractice_expiration ? new Date(credentials.malpractice_expiration).toLocaleDateString() : null },
+    )
+  }
+
+  const filled = fields.filter(f => f.value)
+  if (filled.length === 0) return null
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3 mb-2">
+      <p className="text-[10px] font-medium text-zinc-500 uppercase tracking-wider mb-1.5">Imported from HRIS</p>
+      <div className="flex flex-wrap gap-x-6 gap-y-1">
+        {filled.map(f => (
+          <div key={f.label} className="text-xs">
+            <span className="text-zinc-500">{f.label}: </span>
+            <span className="text-zinc-200 font-mono">{f.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+
 export function CredentialManager({ employeeId }: { employeeId: string }) {
   const {
     documents, credentials, loading,
@@ -415,6 +464,7 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
         const docs = docsByType[docType] ?? []
         const hasApproved = docs.some((d) => d.review_status === 'approved')
         const req = reqByType[docType]
+        const isVerifiedViaData = req?.status === 'verified' && docs.length === 0
 
         return (
           <div key={docType}>
@@ -422,11 +472,16 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
               <h4 className="text-xs font-medium text-zinc-300">
                 {req?.credential_type_label || (DOC_TYPE_LABELS[docType] ?? docType)}
               </h4>
-              {hasApproved && <Badge variant="success">Verified</Badge>}
-              {!hasApproved && docs.length > 0 && <Badge variant="warning">Pending Review</Badge>}
-              {docs.length === 0 && <Badge variant="neutral">Not uploaded</Badge>}
+              {(hasApproved || isVerifiedViaData) && <Badge variant="success">Verified</Badge>}
+              {!hasApproved && !isVerifiedViaData && docs.length > 0 && <Badge variant="warning">Pending Review</Badge>}
+              {!hasApproved && !isVerifiedViaData && docs.length === 0 && <Badge variant="neutral">Not uploaded</Badge>}
               {req && !req.is_required && <span className="text-[10px] text-zinc-600">Optional</span>}
             </div>
+
+            {/* Show inline credential data for HRIS-verified items */}
+            {isVerifiedViaData && credentials && (
+              <CredentialDataInline docType={docType} credentials={credentials} />
+            )}
 
             {docs.length > 0 && (
               <div className="space-y-2 mb-2">
@@ -443,7 +498,7 @@ export function CredentialManager({ employeeId }: { employeeId: string }) {
               </div>
             )}
 
-            {!hasApproved && (
+            {!hasApproved && !isVerifiedViaData && (
               <UploadZone documentType={docType} onUpload={handleUpload} />
             )}
           </div>
