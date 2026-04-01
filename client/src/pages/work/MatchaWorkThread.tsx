@@ -759,7 +759,7 @@ export default function MatchaWorkThread() {
 
       {/* Presentation panel */}
       {/* Right panels — visible on desktop always, on mobile via toggle */}
-      <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:contents`}>
+      {hasRightPanel && <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:contents`}>
         {showPresentationPanel && (
           <PresentationPanel
             state={thread!.current_state}
@@ -830,7 +830,7 @@ export default function MatchaWorkThread() {
             />
           </div>
         )}
-      </div>
+      </div>}
     </div>
   )
 }
