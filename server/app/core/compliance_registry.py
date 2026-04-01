@@ -7621,6 +7621,28 @@ TRIGGER_PROFILES: Tuple[TriggerProfileDef, ...] = (
         attribute_key="entity_type",
         attribute_match="critical_access_hospital",
     ),
+    TriggerProfileDef(
+        key="behavioral_health",
+        label="Behavioral Health Facility",
+        trigger_condition={"type": "entity_type", "value": "behavioral_health"},
+        applicable_categories=(
+            "reproductive_behavioral", "state_licensing", "healthcare_workforce",
+            "clinical_safety", "hipaa_privacy", "corporate_integrity",
+            "quality_reporting",
+        ),
+        research_instruction=(
+            "Research ADDITIONAL requirements for BEHAVIORAL HEALTH facilities. "
+            "Include state behavioral health facility licensing (DHCS or equivalent), "
+            "42 CFR Part 2 substance use disorder confidentiality, Joint Commission "
+            "behavioral health accreditation, SAMHSA certification for opioid treatment "
+            "programs, mental health parity compliance (MHPAEA), seclusion & restraint "
+            "regulations (42 CFR 482.13), state involuntary commitment procedures, and "
+            "behavioral health workforce credentialing (LCSW, LMFT, LPC, BCBA). Only "
+            "return requirements UNIQUE to behavioral health facilities."
+        ),
+        attribute_key="entity_type",
+        attribute_match="behavioral_health",
+    ),
 )
 
 

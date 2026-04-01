@@ -32,6 +32,7 @@ from ..services.onboarding_orchestrator import (
     start_google_workspace_onboarding,
     start_slack_onboarding,
 )
+from ..services.hris_service import PROVIDER_HRIS
 
 router = APIRouter()
 
@@ -1327,3 +1328,279 @@ async def list_provisioning_runs(
             )
             for row in rows
         ]
+
+
+# =======================================================================
+# HRIS Integration Routes (ADP-style pull/import)
+# =======================================================================
+
+class HRISConnectionRequest(BaseModel):
+    mode: str = Field(default="mock", pattern="^(mock|adp)$")
+    base_url: Optional[str] = Field(default=None, max_length=500)
+    client_id: Optional[str] = Field(default=None, max_length=255)
+    client_secret: Optional[str] = None
+    auto_sync_on_schedule: bool = False
+    sync_interval_hours: int = Field(default=24, ge=1, le=168)
+    test_connection: bool = True
+
+
+class HRISConnectionStatus(BaseModel):
+    provider: str = PROVIDER_HRIS
+    connected: bool
+    status: str
+    mode: Optional[str] = None
+    base_url: Optional[str] = None
+    has_client_secret: bool = False
+    auto_sync_on_schedule: bool = False
+    sync_interval_hours: int = 24
+    last_tested_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    last_sync_at: Optional[datetime] = None
+    total_synced_employees: int = 0
+    updated_at: Optional[datetime] = None
+
+
+class HRISSyncRunResponse(BaseModel):
+    sync_run_id: UUID
+    status: str
+    total_records: int = 0
+    created_count: int = 0
+    updated_count: int = 0
+    skipped_count: int = 0
+    error_count: int = 0
+    errors: list[dict] = Field(default_factory=list)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+def _hris_connection_status_payload(row) -> HRISConnectionStatus:
+    if not row:
+        return HRISConnectionStatus(
+            connected=False,
+            status="disconnected",
+        )
+
+    config = _json_object(row["config"])
+    secrets = _json_object(row["secrets"])
+    status_value = row["status"] or "disconnected"
+    return HRISConnectionStatus(
+        connected=status_value == "connected",
+        status=status_value,
+        mode=config.get("mode"),
+        base_url=config.get("base_url"),
+        has_client_secret=bool(secrets.get("client_secret")),
+        auto_sync_on_schedule=_coerce_bool(
+            config.get("auto_sync_on_schedule"), False
+        ),
+        sync_interval_hours=config.get("sync_interval_hours", 24),
+        last_tested_at=row["last_tested_at"],
+        last_error=row["last_error"],
+        updated_at=row["updated_at"],
+    )
+
+
+@router.get("/hris/status", response_model=HRISConnectionStatus)
+async def get_hris_connection_status(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM integration_connections WHERE company_id = $1 AND provider = $2",
+            company_id,
+            PROVIDER_HRIS,
+        )
+        payload = _hris_connection_status_payload(row)
+
+        # Attach last sync info
+        if row:
+            last_sync = await conn.fetchrow(
+                """SELECT completed_at, total_records FROM hris_sync_runs
+                   WHERE connection_id = $1 AND status = 'completed'
+                   ORDER BY completed_at DESC LIMIT 1""",
+                row["id"],
+            )
+            if last_sync:
+                payload.last_sync_at = last_sync["completed_at"]
+                payload.total_synced_employees = last_sync["total_records"] or 0
+
+    return payload
+
+
+@router.post("/hris/connect", response_model=HRISConnectionStatus)
+async def connect_hris(
+    request: HRISConnectionRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+
+    config = {
+        "mode": request.mode,
+        "base_url": request.base_url,
+        "client_id": request.client_id,
+        "auto_sync_on_schedule": request.auto_sync_on_schedule,
+        "sync_interval_hours": request.sync_interval_hours,
+    }
+
+    secrets_payload: dict = {}
+    if request.client_secret:
+        secrets_payload["client_secret"] = encrypt_secret(request.client_secret.strip())
+
+    # Test connection if requested
+    test_status = "connected"
+    test_error = None
+    if request.test_connection and request.mode != "mock":
+        from ..services.hris_service import HRISService
+        service = HRISService()
+        test_secrets = {
+            "client_id": request.client_id or "",
+            "client_secret": request.client_secret or "",
+        }
+        ok, err = await service.test_connection(config, test_secrets)
+        if not ok:
+            test_status = "error"
+            test_error = err
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            INSERT INTO integration_connections
+                (company_id, provider, status, config, secrets, last_tested_at, last_error, created_by, updated_by)
+            VALUES ($1, $2, $3, $4::jsonb, $5::jsonb, NOW(), $6, $7, $7)
+            ON CONFLICT (company_id, provider) DO UPDATE SET
+                status = EXCLUDED.status,
+                config = EXCLUDED.config,
+                secrets = CASE
+                    WHEN EXCLUDED.secrets != '{}'::jsonb THEN EXCLUDED.secrets
+                    ELSE integration_connections.secrets
+                END,
+                last_tested_at = NOW(),
+                last_error = EXCLUDED.last_error,
+                updated_by = EXCLUDED.updated_by,
+                updated_at = NOW()
+            RETURNING *
+            """,
+            company_id,
+            PROVIDER_HRIS,
+            test_status,
+            json.dumps(config),
+            json.dumps(secrets_payload),
+            test_error,
+            current_user.id,
+        )
+
+    return _hris_connection_status_payload(row)
+
+
+@router.post("/hris/disconnect")
+async def disconnect_hris(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        await conn.execute(
+            "DELETE FROM integration_connections WHERE company_id = $1 AND provider = $2",
+            company_id,
+            PROVIDER_HRIS,
+        )
+    return {"status": "disconnected"}
+
+
+@router.post("/hris/sync", response_model=HRISSyncRunResponse)
+async def trigger_hris_sync(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Trigger a manual HRIS sync — fetches all employees from the HRIS and imports them."""
+    company_id = await get_client_company_id(current_user)
+
+    from ..services.hris_sync_orchestrator import start_hris_sync
+    try:
+        result = await start_hris_sync(
+            company_id=company_id,
+            triggered_by=current_user.id,
+            trigger_source="manual",
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+
+    return HRISSyncRunResponse(
+        sync_run_id=result["run_id"],
+        status=result["status"],
+        total_records=result.get("total_records", 0),
+        created_count=result.get("created_count", 0),
+        updated_count=result.get("updated_count", 0),
+        skipped_count=result.get("skipped_count", 0),
+        error_count=result.get("error_count", 0),
+        errors=result.get("errors") or [],
+        started_at=result.get("started_at"),
+        completed_at=result.get("completed_at"),
+        created_at=result.get("created_at"),
+    )
+
+
+@router.get("/hris/sync/history")
+async def get_hris_sync_history(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+    limit: int = Query(default=20, ge=1, le=100),
+):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, status, trigger_source, triggered_by,
+                   total_records, created_count, updated_count, skipped_count, error_count,
+                   errors, last_error, started_at, completed_at, created_at
+            FROM hris_sync_runs
+            WHERE company_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            """,
+            company_id,
+            limit,
+        )
+    return [
+        HRISSyncRunResponse(
+            sync_run_id=row["id"],
+            status=row["status"],
+            total_records=row["total_records"] or 0,
+            created_count=row["created_count"] or 0,
+            updated_count=row["updated_count"] or 0,
+            skipped_count=row["skipped_count"] or 0,
+            error_count=row["error_count"] or 0,
+            errors=row["errors"] if isinstance(row["errors"], list) else [],
+            started_at=row["started_at"],
+            completed_at=row["completed_at"],
+            created_at=row["created_at"],
+        )
+        for row in rows
+    ]
+
+
+@router.get("/hris/sync/{run_id}", response_model=HRISSyncRunResponse)
+async def get_hris_sync_run(
+    run_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT * FROM hris_sync_runs WHERE id = $1 AND company_id = $2",
+            run_id,
+            company_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Sync run not found")
+    return HRISSyncRunResponse(
+        sync_run_id=row["id"],
+        status=row["status"],
+        total_records=row["total_records"] or 0,
+        created_count=row["created_count"] or 0,
+        updated_count=row["updated_count"] or 0,
+        skipped_count=row["skipped_count"] or 0,
+        error_count=row["error_count"] or 0,
+        errors=row["errors"] if isinstance(row["errors"], list) else [],
+        started_at=row["started_at"],
+        completed_at=row["completed_at"],
+        created_at=row["created_at"],
+    )

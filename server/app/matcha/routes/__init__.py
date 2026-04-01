@@ -24,6 +24,7 @@ from .training import router as training_router
 from .i9 import router as i9_router
 from .cobra import router as cobra_router
 from .separation import router as separation_router
+from .fake_hris import router as fake_hris_router
 from ..dependencies import require_feature
 
 # Create main Matcha router
@@ -119,6 +120,8 @@ matcha_router.include_router(
 )
 # Public anonymous incident reporting — no auth, no feature gate (token-validated internally)
 matcha_router.include_router(anonymous_report_router, tags=["anonymous-reporting"])
+# Fake HRIS (simulates ADP Workforce Now API) — no auth gate
+matcha_router.include_router(fake_hris_router, prefix="/fake-hris", tags=["fake-hris"])
 
 # Export individual routers for backwards compatibility
 __all__ = [
@@ -147,4 +150,5 @@ __all__ = [
     "i9_router",
     "cobra_router",
     "separation_router",
+    "fake_hris_router",
 ]

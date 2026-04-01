@@ -4068,7 +4068,7 @@ async def init_db():
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                 provider VARCHAR(50) NOT NULL
-                    CHECK (provider IN ('google_workspace', 'slack')),
+                    CHECK (provider IN ('google_workspace', 'slack', 'hris')),
                 status VARCHAR(20) NOT NULL DEFAULT 'disconnected'
                     CHECK (status IN ('disconnected', 'connected', 'error', 'needs_action')),
                 config JSONB DEFAULT '{}'::jsonb,
@@ -4097,7 +4097,7 @@ async def init_db():
                 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                 employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
                 provider VARCHAR(50) NOT NULL
-                    CHECK (provider IN ('google_workspace', 'slack')),
+                    CHECK (provider IN ('google_workspace', 'slack', 'hris')),
                 status VARCHAR(20) NOT NULL DEFAULT 'pending'
                     CHECK (status IN ('pending', 'running', 'completed', 'failed', 'needs_action', 'rolled_back', 'cancelled')),
                 trigger_source VARCHAR(30) NOT NULL DEFAULT 'manual'
@@ -4148,7 +4148,7 @@ async def init_db():
                 company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
                 employee_id UUID NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
                 provider VARCHAR(50) NOT NULL
-                    CHECK (provider IN ('google_workspace', 'slack')),
+                    CHECK (provider IN ('google_workspace', 'slack', 'hris')),
                 external_user_id VARCHAR(255),
                 external_email VARCHAR(320),
                 status VARCHAR(20) NOT NULL DEFAULT 'active'
@@ -4173,7 +4173,7 @@ async def init_db():
                 step_id UUID REFERENCES onboarding_steps(id) ON DELETE SET NULL,
                 actor_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
                 provider VARCHAR(50) NOT NULL
-                    CHECK (provider IN ('google_workspace', 'slack')),
+                    CHECK (provider IN ('google_workspace', 'slack', 'hris')),
                 action VARCHAR(100) NOT NULL,
                 status VARCHAR(20) NOT NULL
                     CHECK (status IN ('success', 'error', 'info')),
@@ -4190,6 +4190,42 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_provisioning_audit_logs_run
             ON provisioning_audit_logs(run_id)
+        """)
+
+        # ===========================================
+        # HRIS Sync Runs Table
+        # ===========================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS hris_sync_runs (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                connection_id UUID NOT NULL REFERENCES integration_connections(id) ON DELETE CASCADE,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending'
+                    CHECK (status IN ('pending', 'running', 'completed', 'failed', 'partial')),
+                trigger_source VARCHAR(30) NOT NULL DEFAULT 'manual'
+                    CHECK (trigger_source IN ('manual', 'scheduled', 'api')),
+                triggered_by UUID REFERENCES users(id),
+                started_at TIMESTAMPTZ,
+                completed_at TIMESTAMPTZ,
+                total_records INTEGER DEFAULT 0,
+                created_count INTEGER DEFAULT 0,
+                updated_count INTEGER DEFAULT 0,
+                skipped_count INTEGER DEFAULT 0,
+                error_count INTEGER DEFAULT 0,
+                errors JSONB DEFAULT '[]'::jsonb,
+                last_error TEXT,
+                metadata JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP DEFAULT NOW(),
+                updated_at TIMESTAMP DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_hris_sync_runs_company
+            ON hris_sync_runs(company_id, created_at DESC)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_hris_sync_runs_status
+            ON hris_sync_runs(status)
         """)
 
         # ===========================================

@@ -11,6 +11,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "cobra": False,
     "separation_agreements": False,
     "credential_templates": False,
+    "hris_import": False,
 }
 
 
