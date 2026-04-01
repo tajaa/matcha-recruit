@@ -1,7 +1,7 @@
 """Inbox / messaging routes."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -82,15 +82,28 @@ class UserSearchResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# SQL fragments — shared join for resolving display names
+# ---------------------------------------------------------------------------
+
+_USER_NAME_JOIN = """
+    JOIN users u ON u.id = {alias}.user_id
+    LEFT JOIN clients c ON c.user_id = u.id
+    LEFT JOIN employees e ON e.user_id = u.id
+    LEFT JOIN admins a ON a.user_id = u.id
+"""
+
+_USER_NAME_EXPR = "COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email)"
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 async def _resolve_user_display_name(conn, user_id: UUID) -> tuple[str, str, str]:
-    """Return (name, email, role) for a user by checking clients -> employees -> admins -> users."""
+    """Return (name, email, role) for a user."""
     row = await conn.fetchrow(
-        """
-        SELECT u.email, u.role,
-               COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+        f"""
+        SELECT u.email, u.role, {_USER_NAME_EXPR} AS name
         FROM users u
         LEFT JOIN clients c ON c.user_id = u.id
         LEFT JOIN employees e ON e.user_id = u.id
@@ -118,10 +131,9 @@ async def _require_participant(conn, conversation_id: UUID, user_id: UUID) -> No
 async def _build_participant_list(conn, conversation_id: UUID) -> list[ParticipantResponse]:
     """Build the participant response list for a conversation."""
     rows = await conn.fetch(
-        """
+        f"""
         SELECT ip.user_id, ip.last_read_at, ip.is_muted,
-               u.email, u.role,
-               COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+               u.email, u.role, {_USER_NAME_EXPR} AS name
         FROM inbox_participants ip
         JOIN users u ON u.id = ip.user_id
         LEFT JOIN clients c ON c.user_id = u.id
@@ -145,82 +157,86 @@ async def _build_participant_list(conn, conversation_id: UUID) -> list[Participa
     ]
 
 
-async def _send_message_notification(conn, conversation_id: UUID, sender_id: UUID, sender_name: str, preview: str) -> None:
-    """Best-effort email notification to other participants (batched at 15-min intervals)."""
+async def _send_message_notification(
+    conversation_id: UUID,
+    sender_id: UUID,
+    sender_name: str,
+    preview: str,
+) -> None:
+    """Best-effort email notification to other participants (batched, 15-min cooldown).
+
+    Opens its own DB connection so the caller's connection isn't held during email I/O.
+    """
     try:
         from ..services.email import get_email_service
         email_svc = get_email_service()
         if not email_svc.is_configured():
-            logger.debug("Email not configured — skipping inbox notification")
             return
 
-        participants = await conn.fetch(
-            """
-            SELECT ip.user_id, u.email,
-                   COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
-            FROM inbox_participants ip
-            JOIN users u ON u.id = ip.user_id
-            LEFT JOIN clients c ON c.user_id = u.id
-            LEFT JOIN employees e ON e.user_id = u.id
-            LEFT JOIN admins a ON a.user_id = u.id
-            WHERE ip.conversation_id = $1
-              AND ip.user_id != $2
-              AND ip.is_muted = false
-            """,
-            conversation_id,
-            sender_id,
-        )
+        from ...config import get_settings
+        base_url = get_settings().app_base_url.rstrip("/")
 
-        for p in participants:
-            try:
-                # Check batch window — only send if last email to this recipient
-                # from this sender was >15 minutes ago (or never sent).
+        # Gather recipient info + batch state in one connection
+        async with get_connection() as conn:
+            participants = await conn.fetch(
+                f"""
+                SELECT ip.user_id, u.email, {_USER_NAME_EXPR} AS name
+                FROM inbox_participants ip
+                JOIN users u ON u.id = ip.user_id
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE ip.conversation_id = $1
+                  AND ip.user_id != $2
+                  AND ip.is_muted = false
+                """,
+                conversation_id,
+                sender_id,
+            )
+
+            to_notify: list[dict] = []
+            now = datetime.now(timezone.utc)
+            for p in participants:
                 batch = await conn.fetchrow(
-                    """
-                    SELECT last_sent_at FROM inbox_email_batches
-                    WHERE recipient_id = $1 AND sender_id = $2
-                    """,
+                    "SELECT last_sent_at FROM inbox_email_batches WHERE recipient_id = $1 AND sender_id = $2",
                     p["user_id"],
                     sender_id,
                 )
-
-                should_send = True
                 if batch and batch["last_sent_at"]:
-                    from datetime import timezone
                     last_sent = batch["last_sent_at"]
                     if last_sent.tzinfo is None:
                         last_sent = last_sent.replace(tzinfo=timezone.utc)
-                    now = datetime.now(timezone.utc)
-                    if (now - last_sent).total_seconds() < 900:  # 15 minutes
-                        should_send = False
+                    if (now - last_sent).total_seconds() < 900:
+                        continue
+                to_notify.append({"user_id": p["user_id"], "email": p["email"], "name": p["name"]})
 
-                if not should_send:
-                    continue
-
+        # Send emails outside DB connection
+        for recipient in to_notify:
+            try:
                 await email_svc.send_email(
-                    to_email=p["email"],
-                    to_name=p["name"],
+                    to_email=recipient["email"],
+                    to_name=recipient["name"],
                     subject=f"New message from {sender_name}",
                     html_content=(
                         f"<p><strong>{sender_name}</strong> sent you a message:</p>"
                         f"<blockquote>{preview[:200]}</blockquote>"
-                        f"<p><a href=\"https://hey-matcha.com/inbox\">View in Matcha</a></p>"
+                        f"<p><a href=\"{base_url}/app/inbox\">View in Matcha</a></p>"
                     ),
                 )
-
-                # Upsert the batch tracking row
-                await conn.execute(
-                    """
-                    INSERT INTO inbox_email_batches (recipient_id, sender_id, last_sent_at)
-                    VALUES ($1, $2, NOW())
-                    ON CONFLICT (recipient_id, sender_id)
-                    DO UPDATE SET last_sent_at = NOW()
-                    """,
-                    p["user_id"],
-                    sender_id,
-                )
+                # Update batch tracking
+                async with get_connection() as conn:
+                    await conn.execute(
+                        """
+                        INSERT INTO inbox_email_batches (recipient_id, sender_id, last_sent_at)
+                        VALUES ($1, $2, NOW())
+                        ON CONFLICT (recipient_id, sender_id)
+                        DO UPDATE SET last_sent_at = NOW()
+                        """,
+                        recipient["user_id"],
+                        sender_id,
+                    )
             except Exception:
-                logger.warning("Failed to send inbox notification to %s", p["email"], exc_info=True)
+                logger.warning("Failed to send inbox notification to %s", recipient["email"], exc_info=True)
     except Exception:
         logger.warning("Inbox email notification failed", exc_info=True)
 
@@ -237,12 +253,17 @@ async def list_conversations(
 ):
     """List the current user's conversations, sorted by most recent activity."""
     async with get_connection() as conn:
+        # Single query: fetch conversations with unread counts
         rows = await conn.fetch(
             """
-            SELECT ic.id, ic.title, ic.is_group, ic.last_message_at, ic.last_message_preview
+            SELECT ic.id, ic.title, ic.is_group, ic.last_message_at, ic.last_message_preview,
+                   (SELECT COUNT(*) FROM inbox_messages im
+                    WHERE im.conversation_id = ic.id
+                      AND im.sender_id != $1
+                      AND (ip.last_read_at IS NULL OR im.created_at > ip.last_read_at)
+                   ) AS unread_count
             FROM inbox_conversations ic
-            JOIN inbox_participants ip ON ip.conversation_id = ic.id
-            WHERE ip.user_id = $1
+            JOIN inbox_participants ip ON ip.conversation_id = ic.id AND ip.user_id = $1
             ORDER BY ic.last_message_at DESC NULLS LAST
             LIMIT $2 OFFSET $3
             """,
@@ -251,47 +272,53 @@ async def list_conversations(
             offset,
         )
 
-        result: list[ConversationSummary] = []
-        for r in rows:
-            conv_id = r["id"]
-            participants = await _build_participant_list(conn, conv_id)
-
-            # Count unread messages for this user
-            participant_row = await conn.fetchrow(
-                "SELECT last_read_at FROM inbox_participants WHERE conversation_id = $1 AND user_id = $2",
-                conv_id,
-                current_user.id,
+        # Batch-fetch participants for all conversations in one query
+        conv_ids = [r["id"] for r in rows]
+        if conv_ids:
+            all_participants = await conn.fetch(
+                f"""
+                SELECT ip.conversation_id, ip.user_id, ip.last_read_at, ip.is_muted,
+                       u.email, u.role, {_USER_NAME_EXPR} AS name
+                FROM inbox_participants ip
+                JOIN users u ON u.id = ip.user_id
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE ip.conversation_id = ANY($1::uuid[])
+                ORDER BY ip.joined_at
+                """,
+                conv_ids,
             )
-            last_read = participant_row["last_read_at"] if participant_row else None
+            participants_by_conv: dict[UUID, list[ParticipantResponse]] = {}
+            for p in all_participants:
+                cid = p["conversation_id"]
+                if cid not in participants_by_conv:
+                    participants_by_conv[cid] = []
+                participants_by_conv[cid].append(
+                    ParticipantResponse(
+                        user_id=p["user_id"],
+                        name=p["name"],
+                        email=p["email"],
+                        role=p["role"],
+                        last_read_at=p["last_read_at"],
+                        is_muted=p["is_muted"],
+                    )
+                )
+        else:
+            participants_by_conv = {}
 
-            if last_read:
-                unread = await conn.fetchval(
-                    "SELECT COUNT(*) FROM inbox_messages WHERE conversation_id = $1 AND created_at > $2 AND sender_id != $3",
-                    conv_id,
-                    last_read,
-                    current_user.id,
-                )
-            else:
-                # Never read — all messages from others are unread
-                unread = await conn.fetchval(
-                    "SELECT COUNT(*) FROM inbox_messages WHERE conversation_id = $1 AND sender_id != $2",
-                    conv_id,
-                    current_user.id,
-                )
-
-            result.append(
-                ConversationSummary(
-                    id=r["id"],
-                    title=r["title"],
-                    is_group=r["is_group"],
-                    last_message_at=r["last_message_at"],
-                    last_message_preview=r["last_message_preview"],
-                    participants=participants,
-                    unread_count=unread,
-                )
+        return [
+            ConversationSummary(
+                id=r["id"],
+                title=r["title"],
+                is_group=r["is_group"],
+                last_message_at=r["last_message_at"],
+                last_message_preview=r["last_message_preview"],
+                participants=participants_by_conv.get(r["id"], []),
+                unread_count=r["unread_count"],
             )
-
-        return result
+            for r in rows
+        ]
 
 
 @router.post("/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
@@ -301,9 +328,7 @@ async def create_conversation(
 ):
     """Create a new conversation (or reuse an existing 1:1) and send the first message."""
     async with get_connection() as conn:
-        # Validate all participant IDs exist
         all_participant_ids = list(set(body.participant_ids))
-        # Remove self if accidentally included
         all_participant_ids = [pid for pid in all_participant_ids if pid != current_user.id]
         if not all_participant_ids:
             raise HTTPException(status_code=400, detail="Must include at least one other participant")
@@ -320,7 +345,7 @@ async def create_conversation(
         is_group = len(all_participant_ids) > 1
         conversation_id: Optional[UUID] = None
 
-        # For 1:1 conversations, check if one already exists between these two users
+        # For 1:1, check if conversation already exists
         if not is_group:
             other_id = all_participant_ids[0]
             conversation_id = await conn.fetchval(
@@ -339,75 +364,74 @@ async def create_conversation(
 
         preview = body.message[:100]
 
-        if conversation_id:
-            # Existing 1:1 — just add the new message
-            msg_row = await conn.fetchrow(
-                """
-                INSERT INTO inbox_messages (conversation_id, sender_id, content)
-                VALUES ($1, $2, $3)
-                RETURNING id, conversation_id, sender_id, content, created_at, edited_at
-                """,
-                conversation_id,
-                current_user.id,
-                body.message,
-            )
-            await conn.execute(
-                "UPDATE inbox_conversations SET last_message_at = NOW(), last_message_preview = $2 WHERE id = $1",
-                conversation_id,
-                preview,
-            )
-            # Mark sender as read
-            await conn.execute(
-                "UPDATE inbox_participants SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
-                conversation_id,
-                current_user.id,
-            )
-        else:
-            # Create new conversation
-            conv_row = await conn.fetchrow(
-                """
-                INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
-                VALUES ($1, $2, $3, NOW(), $4)
-                RETURNING id, created_at
-                """,
-                body.title,
-                is_group,
-                current_user.id,
-                preview,
-            )
-            conversation_id = conv_row["id"]
-
-            # Add all participants (including the sender)
-            full_participant_ids = [current_user.id] + all_participant_ids
-            for pid in full_participant_ids:
-                last_read = datetime.utcnow() if pid == current_user.id else None
-                await conn.execute(
+        async with conn.transaction():
+            if conversation_id:
+                # Existing 1:1 — add message
+                msg_row = await conn.fetchrow(
                     """
-                    INSERT INTO inbox_participants (conversation_id, user_id, last_read_at)
+                    INSERT INTO inbox_messages (conversation_id, sender_id, content)
                     VALUES ($1, $2, $3)
+                    RETURNING id, conversation_id, sender_id, content, created_at, edited_at
                     """,
                     conversation_id,
-                    pid,
-                    last_read,
+                    current_user.id,
+                    body.message,
+                )
+                await conn.execute(
+                    "UPDATE inbox_conversations SET last_message_at = NOW(), last_message_preview = $2, updated_at = NOW() WHERE id = $1",
+                    conversation_id,
+                    preview,
+                )
+                await conn.execute(
+                    "UPDATE inbox_participants SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
+                    conversation_id,
+                    current_user.id,
+                )
+            else:
+                # Create new conversation
+                conv_row = await conn.fetchrow(
+                    """
+                    INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
+                    VALUES ($1, $2, $3, NOW(), $4)
+                    RETURNING id, created_at
+                    """,
+                    body.title,
+                    is_group,
+                    current_user.id,
+                    preview,
+                )
+                conversation_id = conv_row["id"]
+
+                # Add participants
+                full_participant_ids = [current_user.id] + all_participant_ids
+                for pid in full_participant_ids:
+                    last_read = datetime.now(timezone.utc) if pid == current_user.id else None
+                    await conn.execute(
+                        "INSERT INTO inbox_participants (conversation_id, user_id, last_read_at) VALUES ($1, $2, $3)",
+                        conversation_id,
+                        pid,
+                        last_read,
+                    )
+
+                # First message
+                msg_row = await conn.fetchrow(
+                    """
+                    INSERT INTO inbox_messages (conversation_id, sender_id, content)
+                    VALUES ($1, $2, $3)
+                    RETURNING id, conversation_id, sender_id, content, created_at, edited_at
+                    """,
+                    conversation_id,
+                    current_user.id,
+                    body.message,
                 )
 
-            # Insert the first message
-            msg_row = await conn.fetchrow(
-                """
-                INSERT INTO inbox_messages (conversation_id, sender_id, content)
-                VALUES ($1, $2, $3)
-                RETURNING id, conversation_id, sender_id, content, created_at, edited_at
-                """,
-                conversation_id,
-                current_user.id,
-                body.message,
-            )
-
-        # Send email notification (best-effort)
+        # Email notification (outside transaction, best-effort)
         sender_name, _, _ = await _resolve_user_display_name(conn, current_user.id)
-        await _send_message_notification(conn, conversation_id, current_user.id, sender_name, preview)
+        # Fire and forget — don't block response
+        import asyncio
+        asyncio.create_task(_send_message_notification(conversation_id, current_user.id, sender_name, preview))
 
-        # Build full response
+        # Build response
         conv_data = await conn.fetchrow(
             "SELECT id, title, is_group, created_by, last_message_at, last_message_preview, created_at FROM inbox_conversations WHERE id = $1",
             conversation_id,
@@ -450,6 +474,13 @@ async def get_conversation(
     async with get_connection() as conn:
         await _require_participant(conn, conversation_id, current_user.id)
 
+        # Mark as read first (before building response)
+        await conn.execute(
+            "UPDATE inbox_participants SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
+            conversation_id,
+            current_user.id,
+        )
+
         conv = await conn.fetchrow(
             "SELECT id, title, is_group, created_by, last_message_at, last_message_preview, created_at FROM inbox_conversations WHERE id = $1",
             conversation_id,
@@ -457,9 +488,8 @@ async def get_conversation(
         if not conv:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-        # Fetch messages with optional cursor-based pagination
+        # Fetch messages
         if before:
-            # Get the created_at of the cursor message for keyset pagination
             cursor_ts = await conn.fetchval(
                 "SELECT created_at FROM inbox_messages WHERE id = $1 AND conversation_id = $2",
                 before,
@@ -493,34 +523,37 @@ async def get_conversation(
                 limit,
             )
 
-        # Resolve sender names for all messages
+        # Batch-resolve sender names
+        sender_ids = list({m["sender_id"] for m in msg_rows})
         sender_cache: dict[UUID, str] = {}
-        messages: list[MessageResponse] = []
-        for m in msg_rows:
-            sid = m["sender_id"]
-            if sid not in sender_cache:
-                name, _, _ = await _resolve_user_display_name(conn, sid)
-                sender_cache[sid] = name
-            messages.append(
-                MessageResponse(
-                    id=m["id"],
-                    conversation_id=m["conversation_id"],
-                    sender_id=sid,
-                    sender_name=sender_cache[sid],
-                    content=m["content"],
-                    created_at=m["created_at"],
-                    edited_at=m["edited_at"],
-                )
+        if sender_ids:
+            name_rows = await conn.fetch(
+                f"""
+                SELECT u.id, {_USER_NAME_EXPR} AS name
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE u.id = ANY($1::uuid[])
+                """,
+                sender_ids,
             )
+            sender_cache = {r["id"]: r["name"] for r in name_rows}
+
+        messages = [
+            MessageResponse(
+                id=m["id"],
+                conversation_id=m["conversation_id"],
+                sender_id=m["sender_id"],
+                sender_name=sender_cache.get(m["sender_id"], "Unknown"),
+                content=m["content"],
+                created_at=m["created_at"],
+                edited_at=m["edited_at"],
+            )
+            for m in msg_rows
+        ]
 
         participants = await _build_participant_list(conn, conversation_id)
-
-        # Side effect: mark as read
-        await conn.execute(
-            "UPDATE inbox_participants SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
-            conversation_id,
-            current_user.id,
-        )
 
         return ConversationResponse(
             id=conv["id"],
@@ -531,7 +564,7 @@ async def get_conversation(
             last_message_preview=conv["last_message_preview"],
             participants=participants,
             messages=messages,
-            unread_count=0,  # Just marked as read
+            unread_count=0,
             created_at=conv["created_at"],
         )
 
@@ -546,45 +579,46 @@ async def send_message(
     async with get_connection() as conn:
         await _require_participant(conn, conversation_id, current_user.id)
 
-        msg = await conn.fetchrow(
-            """
-            INSERT INTO inbox_messages (conversation_id, sender_id, content)
-            VALUES ($1, $2, $3)
-            RETURNING id, conversation_id, sender_id, content, created_at, edited_at
-            """,
-            conversation_id,
-            current_user.id,
-            body.content,
-        )
+        async with conn.transaction():
+            msg = await conn.fetchrow(
+                """
+                INSERT INTO inbox_messages (conversation_id, sender_id, content)
+                VALUES ($1, $2, $3)
+                RETURNING id, conversation_id, sender_id, content, created_at, edited_at
+                """,
+                conversation_id,
+                current_user.id,
+                body.content,
+            )
 
-        preview = body.content[:100]
-        await conn.execute(
-            "UPDATE inbox_conversations SET last_message_at = NOW(), last_message_preview = $2 WHERE id = $1",
-            conversation_id,
-            preview,
-        )
+            preview = body.content[:100]
+            await conn.execute(
+                "UPDATE inbox_conversations SET last_message_at = NOW(), last_message_preview = $2, updated_at = NOW() WHERE id = $1",
+                conversation_id,
+                preview,
+            )
 
-        # Mark sender as having read up to now
-        await conn.execute(
-            "UPDATE inbox_participants SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
-            conversation_id,
-            current_user.id,
-        )
+            await conn.execute(
+                "UPDATE inbox_participants SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
+                conversation_id,
+                current_user.id,
+            )
 
         sender_name, _, _ = await _resolve_user_display_name(conn, current_user.id)
 
-        # Best-effort email notifications
-        await _send_message_notification(conn, conversation_id, current_user.id, sender_name, preview)
+    # Email notification outside DB connection (fire and forget)
+    import asyncio
+    asyncio.create_task(_send_message_notification(conversation_id, current_user.id, sender_name, body.content[:100]))
 
-        return MessageResponse(
-            id=msg["id"],
-            conversation_id=msg["conversation_id"],
-            sender_id=msg["sender_id"],
-            sender_name=sender_name,
-            content=msg["content"],
-            created_at=msg["created_at"],
-            edited_at=msg["edited_at"],
-        )
+    return MessageResponse(
+        id=msg["id"],
+        conversation_id=msg["conversation_id"],
+        sender_id=msg["sender_id"],
+        sender_name=sender_name,
+        content=msg["content"],
+        created_at=msg["created_at"],
+        edited_at=msg["edited_at"],
+    )
 
 
 @router.put("/conversations/{conversation_id}/read")
@@ -595,13 +629,11 @@ async def mark_read(
     """Mark a conversation as read for the current user."""
     async with get_connection() as conn:
         await _require_participant(conn, conversation_id, current_user.id)
-
         await conn.execute(
             "UPDATE inbox_participants SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
             conversation_id,
             current_user.id,
         )
-
         return {"ok": True}
 
 
@@ -613,7 +645,6 @@ async def toggle_mute(
     """Toggle mute on a conversation for the current user."""
     async with get_connection() as conn:
         await _require_participant(conn, conversation_id, current_user.id)
-
         new_muted = await conn.fetchval(
             """
             UPDATE inbox_participants
@@ -624,7 +655,6 @@ async def toggle_mute(
             conversation_id,
             current_user.id,
         )
-
         return {"muted": new_muted}
 
 
@@ -668,7 +698,7 @@ async def search_users(
         )
         if not company_id:
             company_id = await conn.fetchval(
-                "SELECT company_id FROM employees WHERE user_id = $1", current_user.id
+                "SELECT org_id FROM employees WHERE user_id = $1", current_user.id
             )
 
         results: list[UserSearchResult] = []
@@ -677,17 +707,18 @@ async def search_users(
         if company_id:
             # Same-company: search by name/email ILIKE
             same_company_rows = await conn.fetch(
-                """
+                f"""
                 SELECT u.id, u.email, u.role,
-                       COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name)) AS name,
+                       {_USER_NAME_EXPR} AS name,
                        co.name AS company_name
                 FROM users u
                 LEFT JOIN clients c ON c.user_id = u.id AND c.company_id = $1
-                LEFT JOIN employees e ON e.user_id = u.id AND e.company_id = $1
+                LEFT JOIN employees e ON e.user_id = u.id AND e.org_id = $1
+                LEFT JOIN admins a ON a.user_id = u.id
                 LEFT JOIN companies co ON co.id = $1
                 WHERE u.id != $2
                   AND u.is_active = true
-                  AND (c.company_id = $1 OR e.company_id = $1)
+                  AND (c.company_id = $1 OR e.org_id = $1)
                   AND (
                     c.name ILIKE $3
                     OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $3
@@ -714,15 +745,15 @@ async def search_users(
         if len(results) < 20:
             existing_ids = {r.id for r in results}
             cross_rows = await conn.fetch(
-                """
+                f"""
                 SELECT u.id, u.email, u.role,
-                       COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name,
+                       {_USER_NAME_EXPR} AS name,
                        co.name AS company_name
                 FROM users u
                 LEFT JOIN clients c ON c.user_id = u.id
                 LEFT JOIN employees e ON e.user_id = u.id
                 LEFT JOIN admins a ON a.user_id = u.id
-                LEFT JOIN companies co ON co.id = COALESCE(c.company_id, e.company_id)
+                LEFT JOIN companies co ON co.id = COALESCE(c.company_id, e.org_id)
                 WHERE u.id != $1
                   AND u.is_active = true
                   AND u.email = $2
