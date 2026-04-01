@@ -692,87 +692,40 @@ async def search_users(
     Cross-company users are only matched by exact email address.
     """
     async with get_connection() as conn:
-        # Determine the current user's company
-        company_id = await conn.fetchval(
-            "SELECT company_id FROM clients WHERE user_id = $1", current_user.id
-        )
-        if not company_id:
-            company_id = await conn.fetchval(
-                "SELECT org_id FROM employees WHERE user_id = $1", current_user.id
-            )
-
-        results: list[UserSearchResult] = []
         search_pattern = f"%{q}%"
 
-        if company_id:
-            # Same-company: search by name/email ILIKE
-            same_company_rows = await conn.fetch(
-                f"""
-                SELECT u.id, u.email, u.role,
-                       {_USER_NAME_EXPR} AS name,
-                       co.name AS company_name
-                FROM users u
-                LEFT JOIN clients c ON c.user_id = u.id AND c.company_id = $1
-                LEFT JOIN employees e ON e.user_id = u.id AND e.org_id = $1
-                LEFT JOIN admins a ON a.user_id = u.id
-                LEFT JOIN companies co ON co.id = $1
-                WHERE u.id != $2
-                  AND u.is_active = true
-                  AND (c.company_id = $1 OR e.org_id = $1)
-                  AND (
-                    c.name ILIKE $3
-                    OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $3
-                    OR u.email ILIKE $3
-                  )
-                LIMIT 20
-                """,
-                company_id,
-                current_user.id,
-                search_pattern,
-            )
-            for r in same_company_rows:
-                results.append(
-                    UserSearchResult(
-                        id=r["id"],
-                        email=r["email"],
-                        name=r["name"] or r["email"],
-                        role=r["role"],
-                        company_name=r["company_name"],
-                    )
-                )
+        rows = await conn.fetch(
+            f"""
+            SELECT u.id, u.email, u.role,
+                   {_USER_NAME_EXPR} AS name,
+                   co.name AS company_name
+            FROM users u
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            LEFT JOIN companies co ON co.id = COALESCE(c.company_id, e.org_id)
+            WHERE u.id != $1
+              AND u.is_active = true
+              AND (
+                c.name ILIKE $2
+                OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $2
+                OR a.name ILIKE $2
+                OR u.email ILIKE $2
+              )
+            ORDER BY u.email
+            LIMIT 20
+            """,
+            current_user.id,
+            search_pattern,
+        )
 
-        # Cross-company: exact email match only
-        if len(results) < 20:
-            existing_ids = {r.id for r in results}
-            cross_rows = await conn.fetch(
-                f"""
-                SELECT u.id, u.email, u.role,
-                       {_USER_NAME_EXPR} AS name,
-                       co.name AS company_name
-                FROM users u
-                LEFT JOIN clients c ON c.user_id = u.id
-                LEFT JOIN employees e ON e.user_id = u.id
-                LEFT JOIN admins a ON a.user_id = u.id
-                LEFT JOIN companies co ON co.id = COALESCE(c.company_id, e.org_id)
-                WHERE u.id != $1
-                  AND u.is_active = true
-                  AND u.email = $2
-                LIMIT $3
-                """,
-                current_user.id,
-                q.lower().strip(),
-                20 - len(results),
+        return [
+            UserSearchResult(
+                id=r["id"],
+                email=r["email"],
+                name=r["name"] or r["email"],
+                role=r["role"],
+                company_name=r["company_name"],
             )
-            for r in cross_rows:
-                if r["id"] not in existing_ids:
-                    results.append(
-                        UserSearchResult(
-                            id=r["id"],
-                            email=r["email"],
-                            name=r["name"] or r["email"],
-                            role=r["role"],
-                            company_name=r["company_name"],
-                        )
-                    )
-
-        return results
+            for r in rows
+        ]
