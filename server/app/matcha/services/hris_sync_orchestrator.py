@@ -453,6 +453,34 @@ async def _sync_single_employee(
     if credentials:
         await _upsert_credentials(conn, employee_id=employee_id, org_id=company_id, creds=credentials)
 
+    # Assign credential requirements based on role + jurisdiction (skip if already assigned)
+    job_title = normalized.get("job_title")
+    work_state = normalized.get("work_state")
+    work_city = normalized.get("work_city")
+    if job_title:
+        has_reqs = await conn.fetchval(
+            "SELECT COUNT(*) FROM employee_credential_requirements WHERE employee_id = $1",
+            employee_id,
+        )
+        if not has_reqs:
+            try:
+                from ...core.services.credential_template_service import (
+                    resolve_credential_requirements,
+                    assign_credential_requirements_to_employee,
+                )
+                cred_reqs = await resolve_credential_requirements(
+                    conn, company_id, work_state, work_city, job_title,
+                )
+                if cred_reqs:
+                    start_date_val = _parse_date(normalized.get("start_date"))
+                    count = await assign_credential_requirements_to_employee(
+                        conn, employee_id, company_id, cred_reqs, start_date_val,
+                    )
+                    if count:
+                        logger.info("[HRIS] Assigned %d credential requirements for %s (%s)", count, email, job_title)
+            except Exception:
+                logger.exception("[HRIS] Failed to assign credential requirements for %s", email)
+
     # Upsert external identity
     hris_id = normalized.get("hris_id")
     if hris_id:
