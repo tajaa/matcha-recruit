@@ -3263,87 +3263,93 @@ async def _create_alert(
         json.dumps(metadata) if metadata else None,
     )
 
-    # Best-effort email notification for every newly created alert.
-    # Gated by COMPLIANCE_EMAILS_ENABLED env var (defaults to true).
-    from ...config import get_settings as _get_settings
-    if _get_settings().compliance_emails_enabled:
-        try:
-            from .email import get_email_service
-
-            email_service = get_email_service()
-            if email_service.is_configured():
-                company_name = (
-                    await conn.fetchval(
-                        "SELECT name FROM companies WHERE id = $1",
-                        company_id,
-                    )
-                    or "Your company"
-                )
-
-                location_row = await conn.fetchrow(
-                    "SELECT name, city, state FROM business_locations WHERE id = $1",
-                    location_id,
-                )
-                if location_row:
-                    location_name = (
-                        location_row["name"]
-                        or f"{location_row['city']}, {location_row['state']}"
-                    )
-                else:
-                    location_name = "your location"
-
-                contact_rows = await conn.fetch(
-                    """
-                    SELECT DISTINCT
-                        u.email,
-                        COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
-                    FROM clients c
-                    JOIN users u ON u.id = c.user_id
-                    WHERE c.company_id = $1
-                      AND u.is_active = true
-                      AND u.email IS NOT NULL
-                    ORDER BY u.email
-                    """,
-                    company_id,
-                )
-
-                contacts = [
-                    {"email": row["email"], "name": row["name"] or row["email"]}
-                    for row in contact_rows
-                ]
-                if contacts:
-                    jurisdictions: list[str] = []
-                    if metadata and isinstance(metadata, dict):
-                        if metadata.get("jurisdiction_name"):
-                            jurisdictions.append(str(metadata["jurisdiction_name"]))
-                        elif metadata.get("jurisdiction_id"):
-                            jurisdiction_row = await conn.fetchrow(
-                                "SELECT city, state FROM jurisdictions WHERE id = $1",
-                                metadata["jurisdiction_id"],
-                            )
-                            if jurisdiction_row:
-                                jurisdictions.append(
-                                    f"{jurisdiction_row['city']}, {jurisdiction_row['state']}"
-                                )
-
-                    send_tasks = [
-                        email_service.send_compliance_change_notification_email(
-                            to_email=contact["email"],
-                            to_name=contact.get("name"),
-                            company_name=company_name,
-                            location_name=location_name,
-                            changed_requirements_count=1,
-                            jurisdictions=jurisdictions or None,
-                        )
-                        for contact in contacts
-                    ]
-                    await asyncio.gather(*send_tasks, return_exceptions=True)
-        except Exception as email_error:
-            print(
-                f"[Compliance] Failed to send alert notification email for alert {alert_id}: {email_error}"
-            )
+    # NOTE: Email is NOT sent per-alert. Instead, callers should batch alerts
+    # and call _send_bulk_alert_email() once after all alerts are created.
+    # This prevents email spam when a compliance check adds many requirements at once.
 
     return alert_id
+
+
+async def _send_bulk_alert_email(
+    conn,
+    company_id: UUID,
+    location_id: UUID,
+    alert_count: int,
+) -> None:
+    """Send a single summary email for a batch of new compliance alerts.
+
+    Called once after all alerts are created (not per-alert) to avoid spam.
+    """
+    if alert_count == 0:
+        return
+
+    from ...config import get_settings as _get_settings
+    if not _get_settings().compliance_emails_enabled:
+        return
+
+    try:
+        from .email import get_email_service
+
+        email_service = get_email_service()
+        if not email_service.is_configured():
+            return
+
+        company_name = (
+            await conn.fetchval(
+                "SELECT name FROM companies WHERE id = $1",
+                company_id,
+            )
+            or "Your company"
+        )
+
+        location_row = await conn.fetchrow(
+            "SELECT name, city, state FROM business_locations WHERE id = $1",
+            location_id,
+        )
+        if location_row:
+            location_name = (
+                location_row["name"]
+                or f"{location_row['city']}, {location_row['state']}"
+            )
+        else:
+            location_name = "your location"
+
+        contact_rows = await conn.fetch(
+            """
+            SELECT DISTINCT
+                u.email,
+                COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
+            FROM clients c
+            JOIN users u ON u.id = c.user_id
+            WHERE c.company_id = $1
+              AND u.is_active = true
+              AND u.email IS NOT NULL
+            ORDER BY u.email
+            """,
+            company_id,
+        )
+
+        contacts = [
+            {"email": row["email"], "name": row["name"] or row["email"]}
+            for row in contact_rows
+        ]
+        if contacts:
+            send_tasks = [
+                email_service.send_compliance_change_notification_email(
+                    to_email=contact["email"],
+                    to_name=contact.get("name"),
+                    company_name=company_name,
+                    location_name=location_name,
+                    changed_requirements_count=alert_count,
+                    jurisdictions=None,
+                )
+                for contact in contacts
+            ]
+            await asyncio.gather(*send_tasks, return_exceptions=True)
+    except Exception as email_error:
+        print(
+            f"[Compliance] Failed to send bulk alert email for {alert_count} alerts: {email_error}"
+        )
 
 
 def _record_change_notification_item(
@@ -4983,6 +4989,13 @@ async def run_compliance_check_stream(
             alert_count = sync_result["alerts"]
             changes_to_verify = sync_result["changes_to_verify"]
             existing_by_key = sync_result["existing_by_key"]
+
+            # Send ONE summary email for all new requirement alerts (not per-alert)
+            if alert_count > 0:
+                try:
+                    await _send_bulk_alert_email(conn, company_id, location_id, alert_count)
+                except Exception as e:
+                    print(f"[Compliance] Bulk alert email error: {e}")
 
             # Auto-embed new/updated jurisdiction requirements for RAG Q&A
             try:
