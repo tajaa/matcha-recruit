@@ -126,7 +126,7 @@ export function ComposeModal({ isOpen, onClose, onCreated }: Props) {
                 type="text"
                 value={query}
                 onChange={(e) => handleQueryChange(e.target.value)}
-                placeholder={selected.length === 0 ? 'Search by name or email...' : 'Add another...'}
+                placeholder={selected.length === 0 ? 'Name, or full email for external...' : 'Add another...'}
                 className="w-full bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none"
               />
             </div>
@@ -142,7 +142,12 @@ export function ComposeModal({ isOpen, onClose, onCreated }: Props) {
                 </div>
               )}
               {!searching && filteredResults.length === 0 && (
-                <div className="px-3 py-2 text-sm text-zinc-500">No users found</div>
+                <div className="px-3 py-2.5">
+                  <p className="text-sm text-zinc-500">No users found</p>
+                  {!query.includes('@') && (
+                    <p className="text-xs text-zinc-600 mt-1">Enter a full email address to message someone outside your organization</p>
+                  )}
+                </div>
               )}
               {filteredResults.map((user) => (
                 <button
