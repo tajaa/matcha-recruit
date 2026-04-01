@@ -2922,6 +2922,7 @@ async def _sync_requirements_to_location(
                     source_url=req.get("source_url"),
                     source_name=req.get("source_name"),
                     alert_type="new_requirement",
+                    skip_email=True,  # bulk — caller sends one summary email
                 )
             existing_by_key[requirement_key] = {"id": req_id}
 
@@ -3235,8 +3236,15 @@ async def _create_alert(
     verification_sources: Optional[list] = None,
     effective_date: Optional[date] = None,
     metadata: Optional[dict] = None,
+    skip_email: bool = False,
 ) -> UUID:
-    """Create a compliance alert with extended fields. Returns alert ID."""
+    """Create a compliance alert with extended fields. Returns alert ID.
+
+    Args:
+        skip_email: When True, suppresses per-alert email notification.
+            Callers doing bulk operations should set this to True and call
+            _send_bulk_alert_email() once after all alerts are created.
+    """
     alert_id = await conn.fetchval(
         """
         INSERT INTO compliance_alerts
@@ -3263,15 +3271,28 @@ async def _create_alert(
         json.dumps(metadata) if metadata else None,
     )
 
-    # NOTE: Email is NOT sent per-alert. Instead, callers should batch alerts
-    # and call _send_bulk_alert_email() once after all alerts are created.
-    # This prevents email spam when a compliance check adds many requirements at once.
+    if not skip_email:
+        await _send_single_alert_email(conn, company_id, location_id)
 
     return alert_id
 
 
-async def _send_bulk_alert_email(
+async def _send_single_alert_email(
     conn,
+    company_id: UUID,
+    location_id: UUID,
+) -> None:
+    """Send a per-alert email for individual (non-bulk) alerts."""
+    from ...config import get_settings as _get_settings
+    if not _get_settings().compliance_emails_enabled:
+        return
+    try:
+        await _send_alert_email_impl(company_id, location_id, 1)
+    except Exception as e:
+        print(f"[Compliance] Failed to send single alert email: {e}")
+
+
+async def _send_bulk_alert_email(
     company_id: UUID,
     location_id: UUID,
     alert_count: int,
@@ -3282,74 +3303,54 @@ async def _send_bulk_alert_email(
     """
     if alert_count == 0:
         return
-
     from ...config import get_settings as _get_settings
     if not _get_settings().compliance_emails_enabled:
         return
-
     try:
-        from .email import get_email_service
+        await _send_alert_email_impl(company_id, location_id, alert_count)
+    except Exception as e:
+        print(f"[Compliance] Failed to send bulk alert email for {alert_count} alerts: {e}")
 
-        email_service = get_email_service()
-        if not email_service.is_configured():
-            return
 
-        company_name = (
-            await conn.fetchval(
-                "SELECT name FROM companies WHERE id = $1",
-                company_id,
-            )
-            or "Your company"
-        )
+async def _send_alert_email_impl(
+    company_id: UUID,
+    location_id: UUID,
+    alert_count: int,
+) -> None:
+    """Shared implementation for alert emails (single or bulk)."""
+    from .email import get_email_service
 
+    email_service = get_email_service()
+    if not email_service.is_configured():
+        return
+
+    company_name, contacts = await _get_company_admin_contacts(company_id)
+    if not contacts:
+        return
+
+    from ...database import get_connection
+    async with get_connection() as conn:
         location_row = await conn.fetchrow(
             "SELECT name, city, state FROM business_locations WHERE id = $1",
             location_id,
         )
-        if location_row:
-            location_name = (
-                location_row["name"]
-                or f"{location_row['city']}, {location_row['state']}"
-            )
-        else:
-            location_name = "your location"
+    location_name = (
+        (location_row["name"] or f"{location_row['city']}, {location_row['state']}")
+        if location_row else "your location"
+    )
 
-        contact_rows = await conn.fetch(
-            """
-            SELECT DISTINCT
-                u.email,
-                COALESCE(NULLIF(c.name, ''), split_part(u.email, '@', 1)) AS name
-            FROM clients c
-            JOIN users u ON u.id = c.user_id
-            WHERE c.company_id = $1
-              AND u.is_active = true
-              AND u.email IS NOT NULL
-            ORDER BY u.email
-            """,
-            company_id,
+    send_tasks = [
+        email_service.send_compliance_change_notification_email(
+            to_email=contact["email"],
+            to_name=contact.get("name"),
+            company_name=company_name,
+            location_name=location_name,
+            changed_requirements_count=alert_count,
+            jurisdictions=None,
         )
-
-        contacts = [
-            {"email": row["email"], "name": row["name"] or row["email"]}
-            for row in contact_rows
-        ]
-        if contacts:
-            send_tasks = [
-                email_service.send_compliance_change_notification_email(
-                    to_email=contact["email"],
-                    to_name=contact.get("name"),
-                    company_name=company_name,
-                    location_name=location_name,
-                    changed_requirements_count=alert_count,
-                    jurisdictions=None,
-                )
-                for contact in contacts
-            ]
-            await asyncio.gather(*send_tasks, return_exceptions=True)
-    except Exception as email_error:
-        print(
-            f"[Compliance] Failed to send bulk alert email for {alert_count} alerts: {email_error}"
-        )
+        for contact in contacts
+    ]
+    await asyncio.gather(*send_tasks, return_exceptions=True)
 
 
 def _record_change_notification_item(
@@ -4993,7 +4994,7 @@ async def run_compliance_check_stream(
             # Send ONE summary email for all new requirement alerts (not per-alert)
             if alert_count > 0:
                 try:
-                    await _send_bulk_alert_email(conn, company_id, location_id, alert_count)
+                    await _send_bulk_alert_email(company_id, location_id, alert_count)
                 except Exception as e:
                     print(f"[Compliance] Bulk alert email error: {e}")
 
@@ -7530,6 +7531,13 @@ async def run_compliance_check_background(
             alert_count = sync_result["alerts"]
             changes_to_verify = sync_result["changes_to_verify"]
             existing_by_key = sync_result["existing_by_key"]
+
+            # Send ONE summary email for all new requirement alerts
+            if alert_count > 0:
+                try:
+                    await _send_bulk_alert_email(company_id, location_id, alert_count)
+                except Exception as e:
+                    print(f"[Compliance] Bulk alert email error: {e}")
 
             # Collect (alert_id, change_info) for batch impact summary generation
             bg_alert_changes: list[tuple] = []
