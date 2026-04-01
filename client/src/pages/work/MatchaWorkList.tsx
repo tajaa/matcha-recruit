@@ -24,7 +24,7 @@ export default function MatchaWorkList() {
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [showTypePicker, setShowTypePicker] = useState(false)
-  const [tab, setTab] = useState<Tab>('all')
+  const [tab, setTab] = useState<Tab>('projects')
   const [error, setError] = useState('')
 
   async function load() {
