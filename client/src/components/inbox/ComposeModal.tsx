@@ -126,6 +126,14 @@ export function ComposeModal({ isOpen, onClose, onCreated }: Props) {
                 type="text"
                 value={query}
                 onChange={(e) => handleQueryChange(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && filteredResults.length > 0) {
+                    e.preventDefault()
+                    addRecipient(filteredResults[0])
+                  } else if (e.key === 'Backspace' && !query && selected.length > 0) {
+                    removeRecipient(selected[selected.length - 1].id)
+                  }
+                }}
                 placeholder={selected.length === 0 ? 'Name, or full email for external...' : 'Add another...'}
                 className="w-full bg-transparent text-sm text-zinc-100 placeholder-zinc-500 outline-none"
               />
