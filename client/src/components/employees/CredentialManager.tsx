@@ -188,31 +188,40 @@ function UploadZone({
 
 /** Show inline credential data for requirements verified via HRIS import (no document uploaded). */
 function CredentialDataInline({ docType, credentials }: { docType: string; credentials: Record<string, unknown> }) {
+  const s = (key: string): string | null => {
+    const v = credentials[key]
+    return typeof v === 'string' ? v : null
+  }
+  const d = (key: string): string | null => {
+    const v = credentials[key]
+    return typeof v === 'string' ? new Date(v).toLocaleDateString() : null
+  }
+
   const fields: { label: string; value: string | null }[] = []
 
   if (docType === 'medical_license') {
     fields.push(
-      { label: 'Type', value: credentials.license_type },
-      { label: 'Number', value: credentials.license_number },
-      { label: 'State', value: credentials.license_state },
-      { label: 'Expires', value: credentials.license_expiration ? new Date(credentials.license_expiration).toLocaleDateString() : null },
+      { label: 'Type', value: s('license_type') },
+      { label: 'Number', value: s('license_number') },
+      { label: 'State', value: s('license_state') },
+      { label: 'Expires', value: d('license_expiration') },
     )
   } else if (docType === 'dea') {
     fields.push(
-      { label: 'DEA Number', value: credentials.dea_number },
-      { label: 'Expires', value: credentials.dea_expiration ? new Date(credentials.dea_expiration).toLocaleDateString() : null },
+      { label: 'DEA Number', value: s('dea_number') },
+      { label: 'Expires', value: d('dea_expiration') },
     )
   } else if (docType === 'npi') {
-    fields.push({ label: 'NPI', value: credentials.npi_number })
+    fields.push({ label: 'NPI', value: s('npi_number') })
   } else if (docType === 'board_cert') {
     fields.push(
-      { label: 'Certification', value: credentials.board_certification },
-      { label: 'Expires', value: credentials.board_certification_expiration ? new Date(credentials.board_certification_expiration).toLocaleDateString() : null },
+      { label: 'Certification', value: s('board_certification') },
+      { label: 'Expires', value: d('board_certification_expiration') },
     )
   } else if (docType === 'malpractice') {
     fields.push(
-      { label: 'Carrier', value: credentials.malpractice_carrier },
-      { label: 'Expires', value: credentials.malpractice_expiration ? new Date(credentials.malpractice_expiration).toLocaleDateString() : null },
+      { label: 'Carrier', value: s('malpractice_carrier') },
+      { label: 'Expires', value: d('malpractice_expiration') },
     )
   }
 
