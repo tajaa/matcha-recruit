@@ -187,7 +187,7 @@ function UploadZone({
 }
 
 /** Show inline credential data for requirements verified via HRIS import (no document uploaded). */
-function CredentialDataInline({ docType, credentials }: { docType: string; credentials: Record<string, string | null> }) {
+function CredentialDataInline({ docType, credentials }: { docType: string; credentials: Record<string, unknown> }) {
   const fields: { label: string; value: string | null }[] = []
 
   if (docType === 'medical_license') {

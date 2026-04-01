@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Search, Loader2 } from 'lucide-react'
+import { X, Loader2 } from 'lucide-react'
 import { Modal } from '../ui'
 import { searchUsers, createConversation } from '../../api/inbox'
 import type { UserSearchResult, Conversation } from '../../api/inbox'

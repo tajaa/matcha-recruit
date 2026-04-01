@@ -15,6 +15,7 @@ type Props = {
 const GROUP_LABELS: Record<CategoryGroup | 'supplementary', string> = {
   labor: 'Labor',
   healthcare: 'Healthcare',
+  behavioral_health: 'Behavioral Health',
   oncology: 'Oncology',
   medical_compliance: 'Medical Compliance',
   life_sciences: 'Life Sciences',
