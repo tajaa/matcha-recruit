@@ -21,6 +21,7 @@ from .investigation_invite import router as investigation_invite_router
 from .candidate_invite import router as candidate_invite_router
 from .sso import router as sso_router
 from .credential_templates import router as credential_templates_router
+from .inbox import router as inbox_router
 from ...matcha.dependencies import require_feature
 
 # Create main core router
@@ -52,6 +53,7 @@ core_router.include_router(sso_router, prefix="/sso", tags=["sso"])
 core_router.include_router(credential_templates_router, prefix="/credential-templates",
                            tags=["credential-templates"],
                            dependencies=[Depends(require_feature("credential_templates"))])
+core_router.include_router(inbox_router, prefix="/inbox", tags=["inbox"])
 
 # Export individual routers for backwards compatibility
 __all__ = [
@@ -73,4 +75,5 @@ __all__ = [
     "legislative_tracker_router",
     "sso_router",
     "credential_templates_router",
+    "inbox_router",
 ]

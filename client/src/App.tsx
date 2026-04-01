@@ -31,6 +31,7 @@ import HandbookForm from './pages/app/HandbookForm'
 import Policies from './pages/app/Policies'
 import RiskAssessment from './pages/app/RiskAssessment'
 import CredentialTemplates from './pages/app/CredentialTemplates'
+import Inbox from './pages/app/Inbox'
 import EscalatedQueries from './pages/app/EscalatedQueries'
 import Accommodations from './pages/app/Accommodations'
 import AccommodationDetail from './pages/app/AccommodationDetail'
@@ -103,6 +104,7 @@ export default function App() {
         <Route path="handbook/:id/edit" element={<HandbookForm />} />
         <Route path="risk-assessment" element={<RiskAssessment />} />
         <Route path="credential-templates" element={<CredentialTemplates />} />
+        <Route path="inbox" element={<Inbox />} />
       </Route>
     </Routes>
   )
