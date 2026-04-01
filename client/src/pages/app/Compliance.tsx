@@ -212,6 +212,7 @@ export default function Compliance() {
                     loading={detail.loading}
                     onPin={handlePinRequirement}
                     checkMessages={check.messages}
+                    facilityAttributes={selectedLoc?.facility_attributes}
                   />
                 )}
                 {tab === 'alerts' && (

@@ -5,7 +5,9 @@ import { useComplianceRequirements } from '../../hooks/compliance/useComplianceR
 import type { ComplianceRequirement } from '../../types/compliance'
 import { CATEGORY_LABELS } from '../../types/compliance'
 import type { CategoryGroup } from '../../generated/complianceCategories'
+import { BEHAVIORAL_HEALTH_CATEGORIES } from '../../generated/complianceCategories'
 import { JURISDICTION_LEVEL_LABELS, RATE_TYPE_LABELS } from '../../api/compliance'
+import type { FacilityAttributes } from '../../types/compliance'
 import type { ComplianceCheckMessage } from '../../hooks/compliance/useComplianceCheck'
 
 const GROUP_OPTIONS = [
@@ -13,6 +15,7 @@ const GROUP_OPTIONS = [
   { value: 'labor', label: 'Core Labor' },
   { value: 'supplementary', label: 'Supplementary' },
   { value: 'healthcare', label: 'Healthcare' },
+  { value: 'behavioral_health', label: 'Behavioral Health' },
   { value: 'oncology', label: 'Oncology' },
   { value: 'medical_compliance', label: 'Medical Compliance' },
   { value: 'life_sciences', label: 'Life Sciences' },
@@ -23,11 +26,13 @@ type Props = {
   loading: boolean
   onPin: (requirementId: string, isPinned: boolean) => void
   checkMessages: ComplianceCheckMessage[]
+  facilityAttributes?: FacilityAttributes | null
 }
 
-export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages }: Props) {
+export function ComplianceRequirementsTab({ requirements, loading, onPin, checkMessages, facilityAttributes }: Props) {
+  const isBehavioralHealth = facilityAttributes?.entity_type === 'behavioral_health'
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
-  const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>('all')
+  const [groupFilter, setGroupFilter] = useState<'all' | CategoryGroup>(isBehavioralHealth ? 'behavioral_health' : 'all')
   const [searchQuery, setSearchQuery] = useState('')
 
   const filteredRequirements = useMemo(() => {
@@ -50,6 +55,15 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
 
   const filteredSections = useMemo(() => {
     if (groupFilter === 'all') return sectionedCategories
+    if (groupFilter === 'behavioral_health') {
+      // Cross-cutting filter: show categories from any section that are in BEHAVIORAL_HEALTH_CATEGORIES
+      return sectionedCategories
+        .map((s) => ({
+          ...s,
+          categories: s.categories.filter(([cat]) => BEHAVIORAL_HEALTH_CATEGORIES.has(cat)),
+        }))
+        .filter((s) => s.categories.length > 0)
+    }
     return sectionedCategories.filter((s) => s.id === groupFilter)
   }, [sectionedCategories, groupFilter])
 
@@ -101,6 +115,16 @@ export function ComplianceRequirementsTab({ requirements, loading, onPin, checkM
           {searchQuery ? `${filteredRequirements.length} / ${requirements.length}` : requirements.length}
         </span>
       </div>
+
+      {groupFilter === 'behavioral_health' && (
+        <div className="rounded-lg border border-violet-800/40 bg-violet-950/20 px-4 py-3">
+          <p className="text-sm text-violet-300/90">
+            <span className="font-medium">Behavioral Health Facility</span>
+            {' \u2014 '}
+            Showing requirements for mental health parity, substance use disorder confidentiality (42 CFR Part 2), facility licensing, seclusion &amp; restraint, and workforce credentialing.
+          </p>
+        </div>
+      )}
 
       {filteredSections.length === 0 && searchQuery ? (
         <div className="border border-zinc-800 rounded-lg px-4 py-6 text-center">

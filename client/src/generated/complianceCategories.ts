@@ -109,7 +109,7 @@ export const CATEGORY_SHORT_LABELS: Record<string, string> = {
   'biosafety_lab': 'Biosafety',
 };
 
-export type CategoryGroup = 'healthcare' | 'labor' | 'life_sciences' | 'manufacturing' | 'medical_compliance' | 'oncology' | 'supplementary';
+export type CategoryGroup = 'behavioral_health' | 'healthcare' | 'labor' | 'life_sciences' | 'manufacturing' | 'medical_compliance' | 'oncology' | 'supplementary';
 
 export const CATEGORY_GROUPS: Record<string, CategoryGroup> = {
   'minimum_wage': 'labor',
@@ -181,6 +181,7 @@ export const ONCOLOGY_CATEGORIES = new Set(['chemotherapy_handling', 'oncology_c
 export const MEDICAL_COMPLIANCE_CATEGORIES = new Set(['antitrust', 'cybersecurity', 'emerging_regulatory', 'environmental_safety', 'health_it', 'language_access', 'marketing_comms', 'medical_devices', 'payer_relations', 'pediatric_vulnerable', 'pharmacy_drugs', 'quality_reporting', 'records_retention', 'reproductive_behavioral', 'tax_exempt', 'telehealth', 'transplant_organ']);
 export const MANUFACTURING_CATEGORIES = new Set(['process_safety', 'environmental_compliance', 'chemical_safety', 'machine_safety', 'industrial_hygiene', 'trade_compliance', 'product_safety', 'labor_relations', 'quality_systems', 'supply_chain']);
 export const LIFE_SCIENCES_CATEGORIES = new Set(['biosafety_lab', 'clinical_trials_gcp', 'drug_supply_chain', 'glp_nonclinical', 'gmp_manufacturing', 'sunshine_open_payments']);
+export const BEHAVIORAL_HEALTH_CATEGORIES = new Set(['reproductive_behavioral', 'state_licensing', 'healthcare_workforce', 'hipaa_privacy', 'clinical_safety', 'corporate_integrity', 'quality_reporting']);
 export const SUPPLEMENTARY_CATEGORIES = new Set(['business_license', 'posting_requirements', 'tax_rate']);
 
 export const ALL_CATEGORY_KEYS: string[] = ['minimum_wage', 'overtime', 'sick_leave', 'meal_breaks', 'pay_frequency', 'final_pay', 'minor_work_permit', 'scheduling_reporting', 'leave', 'workplace_safety', 'workers_comp', 'anti_discrimination', 'business_license', 'tax_rate', 'posting_requirements', 'hipaa_privacy', 'billing_integrity', 'clinical_safety', 'healthcare_workforce', 'corporate_integrity', 'research_consent', 'state_licensing', 'emergency_preparedness', 'radiation_safety', 'chemotherapy_handling', 'tumor_registry', 'oncology_clinical_trials', 'oncology_patient_rights', 'health_it', 'quality_reporting', 'cybersecurity', 'environmental_safety', 'pharmacy_drugs', 'payer_relations', 'reproductive_behavioral', 'pediatric_vulnerable', 'telehealth', 'medical_devices', 'transplant_organ', 'antitrust', 'tax_exempt', 'language_access', 'records_retention', 'marketing_comms', 'emerging_regulatory', 'gmp_manufacturing', 'glp_nonclinical', 'clinical_trials_gcp', 'drug_supply_chain', 'sunshine_open_payments', 'biosafety_lab'];

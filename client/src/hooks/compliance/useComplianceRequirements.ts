@@ -7,11 +7,12 @@ import {
 
 type SectionId = CategoryGroup
 
-const SECTION_ORDER: SectionId[] = ['labor', 'supplementary', 'healthcare', 'oncology', 'medical_compliance', 'life_sciences', 'manufacturing']
+const SECTION_ORDER: SectionId[] = ['labor', 'supplementary', 'healthcare', 'behavioral_health', 'oncology', 'medical_compliance', 'life_sciences', 'manufacturing']
 const SECTION_LABELS: Record<SectionId, string> = {
   labor: 'Core Labor',
   supplementary: 'Supplementary',
   healthcare: 'Healthcare',
+  behavioral_health: 'Behavioral Health',
   oncology: 'Oncology',
   medical_compliance: 'Medical Compliance',
   life_sciences: 'Life Sciences',
