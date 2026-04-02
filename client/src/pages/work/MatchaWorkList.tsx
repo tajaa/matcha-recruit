@@ -168,6 +168,11 @@ export default function MatchaWorkList() {
                     <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-700 text-zinc-300">
                       {p.chat_count} chat{p.chat_count !== 1 ? 's' : ''}
                     </span>
+                    {p.collaborator_role === 'collaborator' && (
+                      <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-blue-900/40 text-blue-300 flex items-center gap-1">
+                        <Users size={10} />Shared
+                      </span>
+                    )}
                   </div>
                   <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
                     <span>{p.sections?.length ?? 0} sections</span>

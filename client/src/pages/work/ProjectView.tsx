@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle, UserPlus } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
 import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
+import CollaboratorPanel from '../../components/matcha-work/CollaboratorPanel'
 import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/constants'
 
 export default function ProjectView() {
@@ -35,6 +36,7 @@ export default function ProjectView() {
   const [showWizard, setShowWizard] = useState(false)
   const [wizardStep, setWizardStep] = useState(0)
   const [isDragOver, setIsDragOver] = useState(false)
+  const [showCollaborators, setShowCollaborators] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -411,6 +413,26 @@ export default function ProjectView() {
             </span>
           )}
           <div className="flex items-center gap-1.5 ml-auto">
+            {/* Share / collaborators (admin only) */}
+            {project.collaborator_role && (
+              <div className="relative">
+                <button
+                  onClick={() => { if (!showCollaborators) setShowCollaborators(true) }}
+                  className="p-1 rounded transition-colors"
+                  style={{ color: showCollaborators ? '#ce9178' : '#6a737d' }}
+                  title="Share project"
+                >
+                  <UserPlus size={14} />
+                </button>
+                {showCollaborators && (
+                  <CollaboratorPanel
+                    projectId={projectId!}
+                    currentUserRole={project.collaborator_role}
+                    onClose={() => setShowCollaborators(false)}
+                  />
+                )}
+              </div>
+            )}
             {/* Mobile view toggle */}
             <div className="flex md:hidden rounded overflow-hidden" style={{ border: '1px solid #444' }}>
               <button

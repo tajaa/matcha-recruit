@@ -2244,13 +2244,32 @@ def _strip_markdown(text: str) -> str:
 # ── Project (top-level) endpoints ──
 
 
+async def _verify_project_access(project_id: UUID, current_user: CurrentUser) -> tuple[dict, str]:
+    """Check project access. For admins, uses collaborator table. Returns (project, role)."""
+    from ..services import project_service as proj_svc
+    if current_user.role == "admin":
+        result = await proj_svc.get_project_as_collaborator(project_id, current_user.id)
+        if result:
+            return result
+        raise HTTPException(status_code=404, detail="Project not found")
+    company_id = await get_client_company_id(current_user)
+    if not company_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project = await proj_svc.get_project(project_id, company_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project, "owner"
+
+
 @router.get("/projects")
 async def list_projects_endpoint(
     status: Optional[str] = Query(None, pattern="^(active|archived)$"),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """List all projects for the current company."""
+    """List all projects for the current user."""
     from ..services import project_service as proj_svc
+    if current_user.role == "admin":
+        return await proj_svc.list_projects(None, status, user_id=current_user.id)
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
@@ -2278,13 +2297,7 @@ async def get_project_endpoint(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Get a project with its chat list."""
-    from ..services import project_service as proj_svc
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = await proj_svc.get_project(project_id, company_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await _verify_project_access(project_id, current_user)
     return project
 
 
@@ -2296,10 +2309,7 @@ async def update_project_endpoint(
 ):
     """Update project title, pin, or status."""
     from ..services import project_service as proj_svc
-    company_id = await get_client_company_id(current_user)
-    project = await proj_svc.get_project(project_id, company_id) if company_id else None
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    await _verify_project_access(project_id, current_user)
     return await proj_svc.update_project(project_id, body)
 
 
@@ -2310,10 +2320,7 @@ async def archive_project_endpoint(
 ):
     """Archive a project."""
     from ..services import project_service as proj_svc
-    company_id = await get_client_company_id(current_user)
-    project = await proj_svc.get_project(project_id, company_id) if company_id else None
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
+    await _verify_project_access(project_id, current_user)
     await proj_svc.archive_project(project_id)
     return {"status": "archived"}
 
@@ -2326,6 +2333,7 @@ async def add_project_section_endpoint(
 ):
     """Add a section to the project."""
     from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
     raw_content = body.get("content", "")
     if body.get("source_message_id"):
         raw_content = _strip_markdown(raw_content)
@@ -2340,6 +2348,7 @@ async def reorder_project_sections_endpoint(
 ):
     """Reorder project sections."""
     from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
     return await proj_svc.reorder_sections(project_id, body.get("section_ids", []))
 
 
@@ -2352,6 +2361,7 @@ async def update_project_section_endpoint(
 ):
     """Update a project section."""
     from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
     return await proj_svc.update_section(project_id, section_id, body)
 
 
@@ -2363,7 +2373,71 @@ async def delete_project_section_endpoint(
 ):
     """Delete a project section."""
     from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
     return await proj_svc.delete_section(project_id, section_id)
+
+
+# ── Project collaborator endpoints ──
+
+
+@router.get("/projects/{project_id}/collaborators")
+async def list_project_collaborators(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List collaborators on a project."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    return await proj_svc.list_collaborators(project_id)
+
+
+@router.post("/projects/{project_id}/collaborators")
+async def add_project_collaborator(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Add an admin user as a collaborator."""
+    from ..services import project_service as proj_svc
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can add collaborators")
+    await _verify_project_access(project_id, current_user)
+    user_id = body.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+    try:
+        return await proj_svc.add_collaborator(project_id, UUID(user_id), current_user.id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/projects/{project_id}/collaborators/{user_id}")
+async def remove_project_collaborator(
+    project_id: UUID,
+    user_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Remove a collaborator from a project. Only the owner can do this."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    try:
+        return await proj_svc.remove_collaborator(project_id, user_id, current_user.id)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/admin-users/search")
+async def search_admin_users_endpoint(
+    q: str = Query(..., min_length=2, max_length=100),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Search admin users for the collaborator invite picker."""
+    from ..services import project_service as proj_svc
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can search admin users")
+    return await proj_svc.search_admin_users(q, current_user.id)
 
 
 @router.post("/projects/{project_id}/chats")
@@ -2374,7 +2448,8 @@ async def create_project_chat_endpoint(
 ):
     """Create a new chat within a project."""
     from ..services import project_service as proj_svc
-    company_id = await get_client_company_id(current_user)
+    project, _role = await _verify_project_access(project_id, current_user)
+    company_id = project.get("company_id")
     if company_id is None:
         raise HTTPException(status_code=400, detail="No company associated")
     return await proj_svc.create_project_chat(project_id, company_id, current_user.id, body.get("title"))
@@ -2389,9 +2464,7 @@ async def populate_posting_from_chat(
     """Extract structured posting fields from a chat message using AI."""
     from ..services import project_service as proj_svc
 
-    company_id = await get_client_company_id(current_user)
-    if not company_id or not await proj_svc.get_project(project_id, company_id):
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await _verify_project_access(project_id, current_user)
 
     content = body.get("content", "")
     if not content:
@@ -2421,7 +2494,6 @@ async def populate_posting_from_chat(
         fields = {"description": _strip_markdown(content)}
 
     # Merge with existing posting (don't overwrite non-null fields with null)
-    project = await proj_svc.get_project(project_id, company_id)
     existing = (project.get("project_data") or {}).get("posting") or {}
     merged = {**existing}
     for k, v in fields.items():
@@ -2440,9 +2512,7 @@ async def update_project_posting(
 ):
     """Update the job posting data for a recruiting project."""
     from ..services import project_service as proj_svc
-    company_id = await get_client_company_id(current_user)
-    if not company_id or not await proj_svc.get_project(project_id, company_id):
-        raise HTTPException(status_code=404, detail="Project not found")
+    await _verify_project_access(project_id, current_user)
     return await proj_svc.update_project_data(project_id, {"posting": body})
 
 
@@ -2454,9 +2524,7 @@ async def toggle_project_shortlist(
 ):
     """Toggle a candidate on/off the shortlist."""
     from ..services import project_service as proj_svc
-    company_id = await get_client_company_id(current_user)
-    if not company_id or not await proj_svc.get_project(project_id, company_id):
-        raise HTTPException(status_code=404, detail="Project not found")
+    await _verify_project_access(project_id, current_user)
     return await proj_svc.toggle_shortlist(project_id, candidate_id)
 
 
@@ -2469,12 +2537,7 @@ async def upload_project_resumes(
     """Upload resumes to a recruiting project — extract candidates into project_data."""
     from ..services import project_service as proj_svc
 
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = await proj_svc.get_project(project_id, company_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await _verify_project_access(project_id, current_user)
 
     # Require finalized posting before accepting resumes
     data = project.get("project_data") or {}
@@ -2662,12 +2725,7 @@ async def analyze_project_candidates(
     """Rank candidates against the job posting using AI."""
     from ..services import project_service as proj_svc
 
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = await proj_svc.get_project(project_id, company_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await _verify_project_access(project_id, current_user)
 
     # Build posting text from sections (strip HTML tags for clean AI input)
     sections = project.get("sections") or []
@@ -2785,19 +2843,14 @@ async def send_project_interviews(
     from ..services import project_service as proj_svc
     from app.core.services.email import EmailService
 
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project = await proj_svc.get_project(project_id, company_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await _verify_project_access(project_id, current_user)
 
     data = project.get("project_data") or {}
     candidates = data.get("candidates") or []
     if not candidates:
         raise HTTPException(status_code=400, detail="No candidates in this project")
 
+    company_id = project.get("company_id")
     async with get_connection() as conn:
         company_row = await conn.fetchrow("SELECT name FROM companies WHERE id = $1", company_id)
     company_name = company_row["name"] if company_row else "the company"
@@ -2895,13 +2948,7 @@ async def sync_project_interviews(
     """Sync interview statuses back into project candidates."""
     from ..services import project_service as proj_svc
 
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    project = await proj_svc.get_project(project_id, company_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await _verify_project_access(project_id, current_user)
 
     data = project.get("project_data") or {}
     candidates = data.get("candidates") or []
@@ -2970,12 +3017,7 @@ async def export_project_endpoint(
 ):
     """Export project as PDF, DOCX, or Markdown."""
     from ..services import project_service as proj_svc
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = await proj_svc.get_project(project_id, company_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+    project, _role = await _verify_project_access(project_id, current_user)
 
     title = project["title"]
     sections = project["sections"]

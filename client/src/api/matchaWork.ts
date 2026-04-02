@@ -271,6 +271,26 @@ export function createProjectChat(projectId: string, title?: string) {
   return api.post<import('../types/matcha-work').MWThread>(`/matcha-work/projects/${projectId}/chats`, { title })
 }
 
+// ── Collaborators ──
+
+export function listCollaborators(projectId: string) {
+  return api.get<import('../types/matcha-work').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators`)
+}
+
+export function addCollaborator(projectId: string, userId: string) {
+  return api.post<import('../types/matcha-work').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators`, { user_id: userId })
+}
+
+export function removeCollaborator(projectId: string, userId: string) {
+  return api.delete<import('../types/matcha-work').ProjectCollaborator[]>(`/matcha-work/projects/${projectId}/collaborators/${userId}`)
+}
+
+export function searchAdminUsers(query: string) {
+  return api.get<{ user_id: string; name: string; email: string; avatar_url: string | null }[]>(
+    `/matcha-work/admin-users/search?q=${encodeURIComponent(query)}`
+  )
+}
+
 export function exportProjectNew(projectId: string, format: 'pdf' | 'md' | 'docx') {
   return api.get<{ pdf_url?: string; docx_url?: string }>(`/matcha-work/projects/${projectId}/export/${format}`)
 }

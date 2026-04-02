@@ -51,6 +51,15 @@ export interface RecruitingData {
   shortlist_ids?: string[]
 }
 
+export interface ProjectCollaborator {
+  user_id: string
+  name: string
+  email: string
+  avatar_url: string | null
+  role: 'owner' | 'collaborator'
+  created_at: string
+}
+
 export interface MWProject {
   id: string
   title: string
@@ -62,6 +71,8 @@ export interface MWProject {
   version: number
   chat_count: number
   chats?: MWThread[]
+  collaborator_role?: 'owner' | 'collaborator'
+  collaborators?: ProjectCollaborator[]
   created_at: string
   updated_at: string
 }
