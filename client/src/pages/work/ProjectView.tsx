@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle, UserPlus, Mail } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil } from 'lucide-react'
 import { listConversations, getConversation, sendMessage as sendInboxMessage, getUnreadCount } from '../../api/inbox'
 import type { ConversationSummary, Conversation } from '../../api/inbox'
 import { ConversationList } from '../../components/inbox/ConversationList'
@@ -8,7 +8,7 @@ import { MessageThread } from '../../components/inbox/MessageThread'
 import { ComposeModal } from '../../components/inbox/ComposeModal'
 import { useMe } from '../../hooks/useMe'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions, fetchUsageSummary, fetchUsageSummary24h, updateTitle, pinThread } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
@@ -68,6 +68,33 @@ export default function ProjectView() {
   useEffect(() => {
     if (sidebarMode === 'inbox') loadInbox()
   }, [sidebarMode, loadInbox])
+
+  // Chat rename/pin
+  const [renamingChatId, setRenamingChatId] = useState<string | null>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
+
+  async function handleRenameChat(chatId: string) {
+    if (!renameDraft.trim()) { setRenamingChatId(null); return }
+    try {
+      await updateTitle(chatId, renameDraft.trim())
+      setProject((prev) => prev ? {
+        ...prev,
+        chats: prev.chats?.map((c) => c.id === chatId ? { ...c, title: renameDraft.trim() } : c),
+      } : prev)
+    } catch {}
+    setRenamingChatId(null)
+  }
+
+  async function handlePinChat(chatId: string, currentlyPinned: boolean) {
+    try {
+      await pinThread(chatId, !currentlyPinned)
+      setProject((prev) => prev ? {
+        ...prev,
+        chats: prev.chats?.map((c) => c.id === chatId ? { ...c, is_pinned: !currentlyPinned } : c),
+      } : prev)
+    } catch {}
+  }
 
   // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
@@ -404,7 +431,7 @@ export default function ProjectView() {
   return (
     <div className="flex h-[calc(100vh-49px)]" style={{ background: '#1e1e1e' }}>
       {/* Chat sidebar */}
-      <div className="hidden sm:flex flex-col w-[130px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
+      <div className="hidden sm:flex flex-col w-[180px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
         {/* Top: back + new chat */}
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #333' }}>
           <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]">
@@ -421,20 +448,52 @@ export default function ProjectView() {
 
         {/* Chat list */}
         <div className="flex-1 overflow-y-auto py-1">
-          {chats.map((c) => (
-            <button
+          {[...(chats || [])].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0)).map((c) => (
+            <div
               key={c.id}
-              onClick={() => { setActiveChatId(c.id); setSidebarMode('chats') }}
-              className={`w-full text-left px-3 py-2 text-xs truncate transition-colors ${
+              className={`group flex items-center px-3 py-2 transition-colors cursor-pointer ${
                 activeChatId === c.id && sidebarMode === 'chats'
                   ? 'text-[#e8e8e8]'
                   : 'text-[#6a737d] hover:text-[#d4d4d4]'
               }`}
               style={activeChatId === c.id && sidebarMode === 'chats' ? { background: '#2a2d2e' } : {}}
+              onClick={() => { setActiveChatId(c.id); setSidebarMode('chats') }}
             >
-              <MessageSquare size={10} className="inline mr-1.5" />
-              {c.title}
-            </button>
+              {renamingChatId === c.id ? (
+                <input
+                  ref={renameInputRef}
+                  value={renameDraft}
+                  onChange={(e) => setRenameDraft(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleRenameChat(c.id); if (e.key === 'Escape') setRenamingChatId(null) }}
+                  onBlur={() => handleRenameChat(c.id)}
+                  autoFocus
+                  className="flex-1 text-xs bg-transparent border-b border-[#ce9178] outline-none text-[#e8e8e8] min-w-0"
+                  onClick={(e) => e.stopPropagation()}
+                />
+              ) : (
+                <>
+                  {c.is_pinned && <Pin size={8} className="shrink-0 mr-1 text-[#ce9178]" />}
+                  <MessageSquare size={10} className="shrink-0 mr-1.5" />
+                  <span className="flex-1 text-xs truncate">{c.title}</span>
+                  <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 ml-1">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setRenamingChatId(c.id); setRenameDraft(c.title) }}
+                      className="p-0.5 rounded hover:text-[#ce9178]"
+                      title="Rename"
+                    >
+                      <Pencil size={9} />
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); handlePinChat(c.id, c.is_pinned) }}
+                      className="p-0.5 rounded hover:text-[#ce9178]"
+                      title={c.is_pinned ? 'Unpin' : 'Pin'}
+                    >
+                      {c.is_pinned ? <PinOff size={9} /> : <Pin size={9} />}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           ))}
         </div>
 
@@ -483,20 +542,25 @@ export default function ProjectView() {
                 setInboxActiveConvo((prev) => prev ? { ...prev, messages: [...prev.messages, msg] } : prev)
               }}
               onMarkRead={() => {}}
-              onBack={() => setInboxActiveConvo(null)}
+              onBack={() => { setInboxActiveConvo(null); loadInbox() }}
             />
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full gap-3">
-              <Mail size={24} className="text-[#6a737d]" />
-              <p className="text-xs text-[#6a737d]">Select a conversation</p>
-              <button
-                onClick={() => setInboxComposeOpen(true)}
-                className="text-xs px-3 py-1.5 rounded transition-colors"
-                style={{ background: '#2a2d2e', color: '#d4d4d4' }}
-              >
-                New Message
-              </button>
+          ) : inboxLoading ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 size={20} className="animate-spin text-[#6a737d]" />
             </div>
+          ) : (
+            <ConversationList
+              conversations={inboxConversations}
+              selectedId={null}
+              currentUserId={currentUserId}
+              onSelect={async (id) => {
+                try {
+                  const convo = await getConversation(id)
+                  setInboxActiveConvo(convo)
+                } catch {}
+              }}
+              onCompose={() => setInboxComposeOpen(true)}
+            />
           )}
           <ComposeModal
             isOpen={inboxComposeOpen}
