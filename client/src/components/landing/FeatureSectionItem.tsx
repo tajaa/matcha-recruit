@@ -3,7 +3,15 @@ import { motion, useScroll, useTransform, useMotionValue, useMotionTemplate } fr
 import { DOT_GRID_BG } from './shared'
 import { GlitchText } from '../GlitchText'
 
-export function FeatureSectionItem({ section, idx }: { section: typeof SECTIONS[0], idx: number }) {
+export interface Section {
+  category: string
+  accent: string
+  title: string
+  desc: string
+  graphic: React.ComponentType
+}
+
+export function FeatureSectionItem({ section, idx }: { section: Section, idx: number }) {
   const reversed = idx % 2 === 1
   const Graphic = section.graphic
   const containerRef = useRef<HTMLDivElement>(null)
@@ -86,10 +94,9 @@ export function FeatureSectionItem({ section, idx }: { section: typeof SECTIONS[
           className={reversed ? 'lg:order-1' : ''}
         >
           <motion.div
-            style={{ rotateX, rotateY }}
+            style={{ rotateX, rotateY, boxShadow: `0 25px 50px -12px rgba(0,0,0,0.5)` }}
             transition={{ type: "spring", stiffness: 300, damping: 20 }}
             className="relative border border-zinc-800/60 bg-zinc-950/40 overflow-hidden rounded-xl group-hover:border-zinc-700/80 transition-colors duration-500"
-            style={{ boxShadow: `0 25px 50px -12px rgba(0,0,0,0.5)` }}
           >
             {/* Inner Glow on Hover */}
             <motion.div

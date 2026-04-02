@@ -1,5 +1,5 @@
-import { lazy, Suspense, useEffect, useState, useRef } from 'react'
-import { motion, useInView, useScroll, useTransform, useMotionTemplate, useMotionValue } from 'framer-motion'
+import { lazy, Suspense, useState } from 'react'
+import { motion } from 'framer-motion'
 import { LinkButton } from '../components/ui'
 import { AsciiHalftone } from '../components/AsciiHalftone'
 import { GlitchText } from '../components/GlitchText'
