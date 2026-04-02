@@ -9235,3 +9235,122 @@ async def admin_browse_repository(
         )
 
     return {"requirements": [dict(r) for r in rows]}
+
+
+# ==========================================================================
+# Beta Invitations
+# ==========================================================================
+
+class BetaInviteRequest(BaseModel):
+    emails: list[EmailStr] = Field(..., min_length=1, max_length=50)
+
+
+@router.post("/beta-invitations")
+async def send_beta_invitations(
+    body: BetaInviteRequest,
+    current_user=Depends(require_admin),
+):
+    """Send private beta invitations for Matcha Work."""
+    from ...config import get_settings
+    settings = get_settings()
+    base_url = settings.app_base_url.rstrip("/")
+
+    email_svc = get_email_service()
+    sent = 0
+    skipped: list[str] = []
+
+    async with get_connection() as conn:
+        for email in body.emails:
+            email_lower = email.lower().strip()
+            # Skip if already invited (pending) or already registered
+            existing = await conn.fetchrow(
+                "SELECT status FROM beta_invitations WHERE email = $1 AND status IN ('pending', 'registered') LIMIT 1",
+                email_lower,
+            )
+            if existing:
+                skipped.append(email_lower)
+                continue
+
+            # Also skip if already a user
+            existing_user = await conn.fetchval("SELECT id FROM users WHERE email = $1", email_lower)
+            if existing_user:
+                skipped.append(email_lower)
+                continue
+
+            token = secrets.token_hex(32)
+            await conn.execute(
+                """INSERT INTO beta_invitations (email, token, invited_by)
+                   VALUES ($1, $2, $3)""",
+                email_lower, token, current_user.id,
+            )
+
+            invite_url = f"{base_url}/register/beta?token={token}"
+            html = f"""
+            <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 0;">
+                <h2 style="color: #e4e4e7; font-size: 20px; margin-bottom: 8px;">You're invited to Matcha Work</h2>
+                <p style="color: #a1a1aa; font-size: 14px; line-height: 1.6; margin-bottom: 24px;">
+                    You've been selected for the private beta of Matcha Work — an AI-powered workspace
+                    for HR, compliance, and recruiting professionals.
+                </p>
+                <a href="{invite_url}"
+                   style="display: inline-block; background: #10b981; color: white; padding: 12px 28px;
+                          border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+                    Create Your Account
+                </a>
+                <p style="color: #71717a; font-size: 12px; margin-top: 24px;">
+                    This invitation is for <strong>{email_lower}</strong> and can only be used once.
+                </p>
+            </div>
+            """
+            try:
+                if email_svc.is_configured():
+                    await email_svc.send_email(
+                        to_email=email_lower,
+                        subject="You're invited to Matcha Work (Private Beta)",
+                        html_content=html,
+                    )
+            except Exception as e:
+                logger.warning(f"Failed to send beta invite to {email_lower}: {e}")
+                # Remove the invite row so admin can retry
+                await conn.execute("DELETE FROM beta_invitations WHERE token = $1", token)
+                skipped.append(email_lower)
+                continue
+
+            sent += 1
+
+    return {"sent": sent, "skipped": skipped}
+
+
+@router.get("/beta-invitations")
+async def list_beta_invitations(current_user=Depends(require_admin)):
+    """List all beta invitations."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, email, status, created_at, registered_at
+               FROM beta_invitations
+               ORDER BY created_at DESC
+               LIMIT 200"""
+        )
+    return [
+        {
+            "id": str(r["id"]),
+            "email": r["email"],
+            "status": r["status"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "registered_at": r["registered_at"].isoformat() if r["registered_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/beta-invitations/{invite_id}")
+async def revoke_beta_invitation(invite_id: UUID, current_user=Depends(require_admin)):
+    """Revoke a pending beta invitation."""
+    async with get_connection() as conn:
+        deleted = await conn.execute(
+            "DELETE FROM beta_invitations WHERE id = $1 AND status = 'pending'",
+            invite_id,
+        )
+    if deleted == "DELETE 0":
+        raise HTTPException(status_code=404, detail="Invitation not found or already used")
+    return {"ok": True}

@@ -2569,6 +2569,96 @@ async def get_candidate_sessions(user_id: UUID):
         return sessions
 
 
+# ── Beta invitation registration ──
+
+
+class BetaRegisterRequest(BaseModel):
+    token: str
+    password: str
+    name: str
+
+
+@router.get("/beta-invite/{token}")
+async def validate_beta_invite(token: str):
+    """Validate a beta invitation token (public, no auth)."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT email, status FROM beta_invitations WHERE token = $1",
+            token,
+        )
+    if not row or row["status"] != "pending":
+        return {"valid": False, "email": None}
+    return {"valid": True, "email": row["email"]}
+
+
+@router.post("/register/beta", response_model=TokenResponse)
+async def register_beta(request: BetaRegisterRequest):
+    """Register a new individual account via beta invitation token."""
+    from ..feature_flags import DEFAULT_COMPANY_FEATURES
+    from ...core.services.stripe_service import FREE_SIGNUP_CREDITS
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            invite = await conn.fetchrow(
+                "SELECT id, email, status FROM beta_invitations WHERE token = $1 FOR UPDATE",
+                request.token,
+            )
+            if not invite or invite["status"] != "pending":
+                raise HTTPException(status_code=400, detail="Invalid or expired invitation")
+
+            email = invite["email"]
+
+            existing = await conn.fetchval("SELECT id FROM users WHERE email = $1", email)
+            if existing:
+                raise HTTPException(status_code=400, detail="Email already registered")
+
+            # Create personal workspace (same as register_individual)
+            personal_features = {**DEFAULT_COMPANY_FEATURES, "matcha_work": True}
+            company = await conn.fetchrow(
+                """INSERT INTO companies (name, status, approved_at, is_personal, enabled_features)
+                   VALUES ($1, 'approved', NOW(), true, $2::jsonb)
+                   RETURNING id""",
+                f"{request.name}'s Workspace",
+                json.dumps(personal_features),
+            )
+            company_id = company["id"]
+
+            await conn.execute(
+                """INSERT INTO mw_credit_balances (company_id, credits_remaining, total_credits_purchased, total_credits_granted)
+                   VALUES ($1, $2, 0, $2) ON CONFLICT (company_id) DO NOTHING""",
+                company_id, FREE_SIGNUP_CREDITS,
+            )
+
+            password_hash = hash_password(request.password)
+            user = await conn.fetchrow(
+                """INSERT INTO users (email, password_hash, role)
+                   VALUES ($1, $2, 'individual')
+                   RETURNING id, email, role""",
+                email, password_hash,
+            )
+
+            await conn.execute(
+                "INSERT INTO clients (user_id, company_id, name) VALUES ($1, $2, $3)",
+                user["id"], company_id, request.name,
+            )
+            await conn.execute("UPDATE companies SET owner_id = $1 WHERE id = $2", user["id"], company_id)
+
+            # Mark invitation as registered
+            await conn.execute(
+                "UPDATE beta_invitations SET status = 'registered', registered_at = NOW(), user_id = $1 WHERE id = $2",
+                user["id"], invite["id"],
+            )
+
+    access_token = create_access_token(user["id"], user["email"], user["role"])
+    refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
+
+    return TokenResponse(
+        access_token=access_token,
+        refresh_token=refresh_token,
+        token_type="bearer",
+    )
+
+
 # ── Individual registration ──
 
 

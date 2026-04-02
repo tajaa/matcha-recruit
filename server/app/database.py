@@ -4308,6 +4308,24 @@ async def init_db():
         """)
 
         # ===========================================
+        # Beta Invitations Table
+        # ===========================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS beta_invitations (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                email VARCHAR(255) NOT NULL,
+                token VARCHAR(64) NOT NULL UNIQUE,
+                status VARCHAR(20) DEFAULT 'pending',
+                invited_by UUID REFERENCES users(id),
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                registered_at TIMESTAMPTZ,
+                user_id UUID REFERENCES users(id)
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_beta_invitations_token ON beta_invitations(token)")
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_beta_invitations_email ON beta_invitations(email)")
+
+        # ===========================================
         # HR News Articles Table
         # ===========================================
         await conn.execute("""

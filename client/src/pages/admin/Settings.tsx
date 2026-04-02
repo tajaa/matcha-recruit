@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Card } from '../../components/ui'
 import { Button } from '../../components/ui'
-import { Loader2, Trash2, Plus, RefreshCw } from 'lucide-react'
+import { Loader2, Trash2, Plus, RefreshCw, Send } from 'lucide-react'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -52,6 +52,13 @@ export default function Settings() {
   const [showAddQuota, setShowAddQuota] = useState(false)
   const [newQuota, setNewQuota] = useState({ user_email: '', token_limit: '100000', window_hours: '12' })
   const [quotaError, setQuotaError] = useState('')
+
+  // Beta invitations
+  const [betaEmails, setBetaEmails] = useState('')
+  const [betaInvites, setBetaInvites] = useState<{ id: string; email: string; status: string; created_at: string | null; registered_at: string | null }[]>([])
+  const [betaLoading, setBetaLoading] = useState(true)
+  const [betaSending, setBetaSending] = useState(false)
+  const [betaResult, setBetaResult] = useState<string | null>(null)
 
   useEffect(() => {
     fetch(`${BASE}/admin/platform-settings`, { headers: authHeaders() })
@@ -130,6 +137,44 @@ export default function Settings() {
       setNewQuota({ user_email: '', token_limit: '100000', window_hours: '12' })
       await loadQuotasAndUsage()
     }
+  }
+
+  const loadBetaInvites = useCallback(async () => {
+    setBetaLoading(true)
+    try {
+      const res = await fetch(`${BASE}/admin/beta-invitations`, { headers: authHeaders() })
+      if (res.ok) setBetaInvites(await res.json())
+    } catch {}
+    setBetaLoading(false)
+  }, [])
+
+  useEffect(() => { loadBetaInvites() }, [loadBetaInvites])
+
+  async function handleSendBetaInvites() {
+    const emails = betaEmails
+      .split(/[\n,;]+/)
+      .map((e) => e.trim().toLowerCase())
+      .filter((e) => e.includes('@'))
+    if (emails.length === 0) return
+    setBetaSending(true)
+    setBetaResult(null)
+    try {
+      const res = await fetch(`${BASE}/admin/beta-invitations`, {
+        method: 'POST', headers: authHeaders(), body: JSON.stringify({ emails }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setBetaResult(`Sent ${data.sent} invitation${data.sent !== 1 ? 's' : ''}${data.skipped?.length ? `. Skipped: ${data.skipped.join(', ')}` : ''}`)
+        setBetaEmails('')
+        await loadBetaInvites()
+      }
+    } catch {}
+    setBetaSending(false)
+  }
+
+  async function handleRevokeBetaInvite(id: string) {
+    await fetch(`${BASE}/admin/beta-invitations/${id}`, { method: 'DELETE', headers: authHeaders() })
+    await loadBetaInvites()
   }
 
   const hasChanges = pendingMode !== researchMode
@@ -335,6 +380,70 @@ export default function Settings() {
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Beta Invitations ── */}
+      <div className="mt-12 max-w-2xl">
+        <h2 className="text-sm font-medium text-zinc-300 mb-1">Matcha Work Beta Invitations</h2>
+        <p className="text-xs text-zinc-500 mb-4">
+          Send private beta invitations for Matcha Work. Recipients get an independent individual account (not attached to any business).
+        </p>
+
+        {/* Send form */}
+        <Card className="p-4 mb-4">
+          <label className="text-[10px] text-zinc-500 mb-1 block">Email addresses (one per line, or comma-separated)</label>
+          <textarea
+            value={betaEmails}
+            onChange={(e) => setBetaEmails(e.target.value)}
+            placeholder="jane@example.com&#10;john@example.com"
+            rows={3}
+            className="w-full text-xs rounded border border-zinc-700 bg-zinc-900 px-2.5 py-1.5 text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-y"
+          />
+          {betaResult && <p className="text-xs text-emerald-400 mt-2">{betaResult}</p>}
+          <div className="mt-3">
+            <Button onClick={handleSendBetaInvites} disabled={betaSending || !betaEmails.trim()}>
+              <Send size={12} className="mr-1.5" />
+              {betaSending ? 'Sending...' : 'Send Invitations'}
+            </Button>
+          </div>
+        </Card>
+
+        {/* Invitation list */}
+        {betaLoading ? (
+          <div className="flex items-center gap-2 py-4 text-sm text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin" /> Loading invitations...
+          </div>
+        ) : betaInvites.length === 0 ? (
+          <p className="text-xs text-zinc-500 py-4">No invitations sent yet.</p>
+        ) : (
+          <div className="space-y-1.5">
+            {betaInvites.map((inv) => (
+              <Card key={inv.id} className="flex items-center gap-3 px-3 py-2.5">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-zinc-200 truncate">{inv.email}</p>
+                  <p className="text-[10px] text-zinc-500">
+                    Sent {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '—'}
+                    {inv.registered_at && ` · Registered ${new Date(inv.registered_at).toLocaleDateString()}`}
+                  </p>
+                </div>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${
+                  inv.status === 'registered'
+                    ? 'bg-emerald-900/30 text-emerald-400'
+                    : inv.status === 'pending'
+                    ? 'bg-amber-900/30 text-amber-400'
+                    : 'bg-zinc-800 text-zinc-500'
+                }`}>
+                  {inv.status}
+                </span>
+                {inv.status === 'pending' && (
+                  <button onClick={() => handleRevokeBetaInvite(inv.id)} className="text-zinc-600 hover:text-red-400 p-1">
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </Card>
+            ))}
           </div>
         )}
       </div>
