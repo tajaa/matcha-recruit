@@ -666,6 +666,19 @@ async def init_db():
             END $$;
         """)
 
+        # Add mw_last_active column to users table (Matcha Work presence)
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'mw_last_active'
+                ) THEN
+                    ALTER TABLE users ADD COLUMN mw_last_active TIMESTAMPTZ;
+                END IF;
+            END $$;
+        """)
+
         # Add avatar_url column to users table
         await conn.execute("""
             DO $$

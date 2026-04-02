@@ -1,7 +1,11 @@
 import { Link, Outlet } from 'react-router-dom'
 import { ArrowLeft } from 'lucide-react'
+import { usePresenceHeartbeat } from '../hooks/usePresenceHeartbeat'
+import { OnlineUsersPanel } from '../components/work/OnlineUsersPanel'
 
 export default function WorkLayout() {
+  usePresenceHeartbeat()
+
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col">
       <header className="flex items-center gap-3 px-6 py-3 border-b border-zinc-800">
@@ -18,6 +22,7 @@ export default function WorkLayout() {
       <main className="flex-1">
         <Outlet />
       </main>
+      <OnlineUsersPanel />
     </div>
   )
 }
