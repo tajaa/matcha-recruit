@@ -3,6 +3,7 @@ import { X, Loader2 } from 'lucide-react'
 import { Modal } from '../ui'
 import { searchUsers, createConversation } from '../../api/inbox'
 import type { UserSearchResult, Conversation } from '../../api/inbox'
+import Avatar from '../Avatar'
 
 type Props = {
   isOpen: boolean
@@ -161,12 +162,15 @@ export function ComposeModal({ isOpen, onClose, onCreated }: Props) {
                 <button
                   key={user.id}
                   onClick={() => addRecipient(user)}
-                  className="w-full text-left px-3 py-2 hover:bg-zinc-800 transition-colors"
+                  className="w-full text-left px-3 py-2 hover:bg-zinc-800 transition-colors flex items-center gap-2.5"
                 >
-                  <div className="text-sm text-zinc-200">{user.name}</div>
-                  <div className="text-xs text-zinc-500">
-                    {user.email}
-                    {user.company_name && ` - ${user.company_name}`}
+                  <Avatar name={user.name} avatarUrl={user.avatar_url} size="sm" />
+                  <div className="min-w-0">
+                    <div className="text-sm text-zinc-200 truncate">{user.name}</div>
+                    <div className="text-xs text-zinc-500 truncate">
+                      {user.email}
+                      {user.company_name && ` - ${user.company_name}`}
+                    </div>
                   </div>
                 </button>
               ))}

@@ -666,6 +666,19 @@ async def init_db():
             END $$;
         """)
 
+        # Add avatar_url column to users table
+        await conn.execute("""
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = 'users' AND column_name = 'avatar_url'
+                ) THEN
+                    ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500);
+                END IF;
+            END $$;
+        """)
+
         # Update users role constraint
         await conn.execute("""
             DO $$

@@ -17,6 +17,7 @@ export interface Participant {
   name: string
   email: string
   role: string
+  avatar_url?: string | null
   last_read_at: string | null
   is_muted: boolean
 }
@@ -42,6 +43,7 @@ export interface UserSearchResult {
   email: string
   name: string
   role: string
+  avatar_url?: string | null
   company_name: string | null
 }
 

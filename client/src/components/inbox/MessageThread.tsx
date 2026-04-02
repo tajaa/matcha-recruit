@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react'
 import { Send, BellOff, Bell, ArrowLeft } from 'lucide-react'
 import type { Conversation, Participant } from '../../api/inbox'
 import { toggleMute as apiToggleMute } from '../../api/inbox'
+import Avatar from '../Avatar'
 
 type Props = {
   conversation: Conversation
@@ -152,6 +153,10 @@ export function MessageThread({ conversation, currentUserId, onSendMessage, onMa
             <ArrowLeft className="w-5 h-5" />
           </button>
         )}
+        {(() => {
+          const other = conversation.participants.find((p) => p.user_id !== currentUserId)
+          return other ? <Avatar name={other.name} avatarUrl={other.avatar_url} size="sm" /> : null
+        })()}
         <div className="flex-1 min-w-0">
           <h3 className="text-sm font-semibold text-zinc-100 truncate">{displayTitle}</h3>
           {conversation.is_group && (
@@ -189,14 +194,19 @@ export function MessageThread({ conversation, currentUserId, onSendMessage, onMa
             <div className="space-y-2">
               {group.messages.map((msg) => {
                 const isMine = msg.sender_id === currentUserId
+                const sender = conversation.participants.find((p) => p.user_id === msg.sender_id)
 
                 return (
                   <div
                     key={msg.id}
                     className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}
                   >
+                    {!isMine && (
+                      <div className="mt-auto mr-2 shrink-0">
+                        <Avatar name={msg.sender_name} avatarUrl={sender?.avatar_url} size="sm" />
+                      </div>
+                    )}
                     <div className={`max-w-[75%] ${isMine ? 'items-end' : 'items-start'}`}>
-                      {/* Sender name for group conversations (received messages only) */}
                       {conversation.is_group && !isMine && (
                         <p className="text-xs text-zinc-500 mb-0.5 px-1">{msg.sender_name}</p>
                       )}

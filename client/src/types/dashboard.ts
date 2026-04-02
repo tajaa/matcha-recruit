@@ -177,6 +177,7 @@ export interface MeUser {
   id: string
   email: string
   role: string
+  avatar_url?: string | null
 }
 
 export interface MeClientProfile {

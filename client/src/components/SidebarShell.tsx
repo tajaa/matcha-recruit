@@ -1,7 +1,9 @@
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { LogOut } from 'lucide-react'
+import { LogOut, Settings, ChevronDown } from 'lucide-react'
+import { useState, useEffect } from 'react'
 import { Logo } from './ui'
+import Avatar from './Avatar'
 
 export type NavItem = {
   to: string
@@ -9,13 +11,78 @@ export type NavItem = {
   label: string
 }
 
+export type NavGroup = {
+  label: string
+  items: NavItem[]
+}
+
 type SidebarShellProps = {
   logoTo: string
   logoLabel: string
-  nav: NavItem[]
+  nav: (NavItem | NavGroup)[]
+  user?: { name: string; avatarUrl?: string | null; settingsTo?: string }
 }
 
-export default function SidebarShell({ logoTo, logoLabel, nav }: SidebarShellProps) {
+function isGroup(item: NavItem | NavGroup): item is NavGroup {
+  return 'items' in item
+}
+
+function NavItemLink({ item, location }: { item: NavItem; location: ReturnType<typeof useLocation> }) {
+  const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
+  const isActive = isExact
+    ? location.pathname === item.to
+    : location.pathname.startsWith(item.to)
+
+  return (
+    <NavLink
+      to={item.to}
+      className={
+        `group relative flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors duration-100 ${
+          isActive
+            ? 'bg-zinc-800/60 text-zinc-100 font-medium'
+            : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 font-normal'
+        }`
+      }
+    >
+      <item.icon className={`h-4 w-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-zinc-50 group-hover:text-white'}`} strokeWidth={1.6} />
+      {item.label}
+    </NavLink>
+  )
+}
+
+function NavGroupSection({ group, location }: { group: NavGroup; location: ReturnType<typeof useLocation> }) {
+  const hasActiveChild = group.items.some((item) => {
+    const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
+    return isExact ? location.pathname === item.to : location.pathname.startsWith(item.to)
+  })
+  const [open, setOpen] = useState(hasActiveChild)
+
+  // Auto-expand when navigating to a child (e.g. via URL)
+  useEffect(() => {
+    if (hasActiveChild) setOpen(true)
+  }, [hasActiveChild])
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
+      >
+        {group.label}
+        <ChevronDown className={`h-3 w-3 transition-transform duration-150 ${open ? '' : '-rotate-90'}`} strokeWidth={2} />
+      </button>
+      {open && (
+        <div className="space-y-0.5 mt-0.5">
+          {group.items.map((item) => (
+            <NavItemLink key={item.to} item={item} location={location} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function SidebarShell({ logoTo, logoLabel, nav, user }: SidebarShellProps) {
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -37,33 +104,31 @@ export default function SidebarShell({ logoTo, logoLabel, nav }: SidebarShellPro
 
       {/* Navigation */}
       <nav className="flex-1 px-2.5 pt-3 space-y-1 overflow-y-auto">
-        {nav.map((item) => {
-          const isExact = item.to === '/app' || item.to === '/admin' || item.to === '/broker'
-          const isActive = isExact
-            ? location.pathname === item.to
-            : location.pathname.startsWith(item.to)
-
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={
-                `group relative flex items-center gap-2.5 rounded-md px-2.5 py-[7px] text-[13px] transition-colors duration-100 ${
-                  isActive
-                    ? 'bg-zinc-800/60 text-zinc-100 font-medium'
-                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 font-normal'
-                }`
-              }
-            >
-              <item.icon className={`h-4 w-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-zinc-50 group-hover:text-white'}`} strokeWidth={1.6} />
-              {item.label}
-            </NavLink>
+        {nav.map((item) =>
+          isGroup(item) ? (
+            <NavGroupSection key={item.label} group={item} location={location} />
+          ) : (
+            <NavItemLink key={item.to} item={item} location={location} />
           )
-        })}
+        )}
       </nav>
 
       {/* Footer */}
-      <div className="px-2.5 py-3 border-t border-zinc-800/30">
+      <div className="px-2.5 py-3 border-t border-zinc-800/30 space-y-1">
+        {user && (
+          <div className="flex items-center gap-2.5 px-2.5 py-1.5">
+            <Avatar name={user.name} avatarUrl={user.avatarUrl} size="sm" />
+            <span className="text-[13px] text-zinc-300 truncate flex-1">{user.name}</span>
+            {user.settingsTo && (
+              <NavLink
+                to={user.settingsTo}
+                className="text-zinc-500 hover:text-zinc-300 transition-colors"
+              >
+                <Settings className="h-3.5 w-3.5" strokeWidth={1.6} />
+              </NavLink>
+            )}
+          </div>
+        )}
         <button
           type="button"
           onClick={handleLogout}

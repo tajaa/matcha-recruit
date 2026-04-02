@@ -46,6 +46,7 @@ class ParticipantResponse(BaseModel):
     name: str
     email: str
     role: str
+    avatar_url: Optional[str] = None
     last_read_at: Optional[datetime] = None
     is_muted: bool = False
 
@@ -78,6 +79,7 @@ class UserSearchResult(BaseModel):
     email: str
     name: str
     role: str
+    avatar_url: Optional[str] = None
     company_name: Optional[str] = None
 
 
@@ -133,7 +135,7 @@ async def _build_participant_list(conn, conversation_id: UUID) -> list[Participa
     rows = await conn.fetch(
         f"""
         SELECT ip.user_id, ip.last_read_at, ip.is_muted,
-               u.email, u.role, {_USER_NAME_EXPR} AS name
+               u.email, u.role, u.avatar_url, {_USER_NAME_EXPR} AS name
         FROM inbox_participants ip
         JOIN users u ON u.id = ip.user_id
         LEFT JOIN clients c ON c.user_id = u.id
@@ -150,6 +152,7 @@ async def _build_participant_list(conn, conversation_id: UUID) -> list[Participa
             name=r["name"],
             email=r["email"],
             role=r["role"],
+            avatar_url=r["avatar_url"],
             last_read_at=r["last_read_at"],
             is_muted=r["is_muted"],
         )
@@ -278,7 +281,7 @@ async def list_conversations(
             all_participants = await conn.fetch(
                 f"""
                 SELECT ip.conversation_id, ip.user_id, ip.last_read_at, ip.is_muted,
-                       u.email, u.role, {_USER_NAME_EXPR} AS name
+                       u.email, u.role, u.avatar_url, {_USER_NAME_EXPR} AS name
                 FROM inbox_participants ip
                 JOIN users u ON u.id = ip.user_id
                 LEFT JOIN clients c ON c.user_id = u.id
@@ -300,6 +303,7 @@ async def list_conversations(
                         name=p["name"],
                         email=p["email"],
                         role=p["role"],
+                        avatar_url=p["avatar_url"],
                         last_read_at=p["last_read_at"],
                         is_muted=p["is_muted"],
                     )
@@ -696,7 +700,7 @@ async def search_users(
 
         rows = await conn.fetch(
             f"""
-            SELECT u.id, u.email, u.role,
+            SELECT u.id, u.email, u.role, u.avatar_url,
                    {_USER_NAME_EXPR} AS name,
                    co.name AS company_name
             FROM users u
@@ -725,6 +729,7 @@ async def search_users(
                 email=r["email"],
                 name=r["name"] or r["email"],
                 role=r["role"],
+                avatar_url=r["avatar_url"],
                 company_name=r["company_name"],
             )
             for r in rows

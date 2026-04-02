@@ -229,3 +229,9 @@ export const api = {
     URL.revokeObjectURL(url)
   },
 }
+
+export function uploadAvatar(file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.upload<{ avatar_url: string }>('/auth/avatar', fd)
+}

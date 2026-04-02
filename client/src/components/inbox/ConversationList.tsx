@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Search, Plus } from 'lucide-react'
 import type { ConversationSummary } from '../../api/inbox'
+import Avatar from '../Avatar'
 
 type Props = {
   conversations: ConversationSummary[]
@@ -110,12 +111,20 @@ export function ConversationList({ conversations, selectedId, currentUserId, onS
               }`}
             >
               <div className="flex items-start gap-3">
-                {/* Unread dot */}
-                <div className="mt-1.5 shrink-0">
-                  {hasUnread ? (
-                    <div className="w-2.5 h-2.5 rounded-full bg-blue-500" />
-                  ) : (
-                    <div className="w-2.5 h-2.5" />
+                {/* Avatar with unread indicator */}
+                <div className="relative shrink-0">
+                  {(() => {
+                    const other = convo.participants.find((p) => p.user_id !== currentUserId)
+                    return (
+                      <Avatar
+                        name={displayName(convo, currentUserId)}
+                        avatarUrl={other?.avatar_url}
+                        size="sm"
+                      />
+                    )
+                  })()}
+                  {hasUnread && (
+                    <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-blue-500 ring-2 ring-zinc-950" />
                   )}
                 </div>
 

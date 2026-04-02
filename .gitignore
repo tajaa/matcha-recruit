@@ -117,6 +117,15 @@ desktop/Matcha/build/
 !.claude/CLAUDE.md
 /soc/
 
+# Scratch / working files
+resumes/
+CODE_REVIEW.md
+COMPETITIVE_ANALYSIS.md
+ESCALATED_QUERIES_PLAN.md
+HR_FEATURES_GAP_ANALYSIS.md
+OPS_AGENT_FEATURES.md
+POLICY_SUGGESTIONS_PLAN.md
+
 # Proposals / docs
 *.pdf
 DEAL_PROPOSAL_HEALTHCARE.md

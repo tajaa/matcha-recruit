@@ -19,9 +19,23 @@ function _fetch(): Promise<MeResponse> {
   return _promise
 }
 
+export function invalidateMeCache() {
+  _cache = null
+  _promise = null
+}
+
 export function useMe() {
   const [me, setMe] = useState<MeResponse | null>(_cache)
   const [loading, setLoading] = useState(!_cache)
+
+  const refresh = useCallback(() => {
+    invalidateMeCache()
+    setLoading(true)
+    _fetch()
+      .then(setMe)
+      .catch(() => setMe(null))
+      .finally(() => setLoading(false))
+  }, [])
 
   useEffect(() => {
     _fetch()
@@ -38,5 +52,5 @@ export function useMe() {
   const isHealthcare =
     me?.profile?.industry?.toLowerCase() === 'healthcare'
 
-  return { me, loading, hasFeature, isHealthcare }
+  return { me, loading, hasFeature, isHealthcare, refresh }
 }

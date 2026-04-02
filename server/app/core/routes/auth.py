@@ -7,7 +7,7 @@ import time
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException, Depends, Request, status
+from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, status
 from pydantic import BaseModel, EmailStr
 
 from ...database import get_connection
@@ -1892,7 +1892,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
 
     async with get_connection() as conn:
         user_row = await conn.fetchrow(
-            """SELECT id, email, role, is_active,
+            """SELECT id, email, role, is_active, avatar_url,
                       COALESCE(beta_features, '{}'::jsonb) as beta_features,
                       COALESCE(interview_prep_tokens, 0) as interview_prep_tokens,
                       COALESCE(allowed_interview_roles, '[]'::jsonb) as allowed_interview_roles
@@ -1919,13 +1919,15 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
         # sidebar gate can apply platform checks universally, not just for admins.
         visible_features = await get_visible_features(conn=conn)
 
+        _avatar = user_row["avatar_url"]
+
         if current_user.role == "admin":
             profile = await conn.fetchrow(
                 "SELECT id, user_id, name, created_at FROM admins WHERE user_id = $1",
                 current_user.id
             )
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -2009,7 +2011,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                         onboarding_needed["integrations"] = True
 
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -2044,6 +2046,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "id": str(current_user.id),
                     "email": current_user.email,
                     "role": current_user.role,
+                    "avatar_url": _avatar,
                     "beta_features": current_user.beta_features,
                     "interview_prep_tokens": current_user.interview_prep_tokens,
                     "allowed_interview_roles": current_user.allowed_interview_roles
@@ -2076,7 +2079,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 default_company_features_json(),
             )
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -2121,7 +2124,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
             )
             terms_accepted = bool(profile and profile["terms_accepted_at"] is not None)
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -2144,7 +2147,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 "visible_features": visible_features,
             }
 
-    return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role}, "profile": None, "visible_features": visible_features}
+    return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar}, "profile": None, "visible_features": visible_features}
 
 
 @router.post("/broker/accept-terms", response_model=BrokerTermsAcceptanceResponse)
@@ -2299,6 +2302,33 @@ async def change_email(
             "refresh_token": refresh_token,
             "expires_in": settings.jwt_access_token_expire_minutes * 60
         }
+
+
+_AVATAR_MAX_SIZE = 5 * 1024 * 1024  # 5 MB
+_AVATAR_ALLOWED_TYPES = {"image/jpeg", "image/png", "image/webp"}
+
+
+@router.post("/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Upload a profile avatar image. Returns the public URL."""
+    if file.content_type not in _AVATAR_ALLOWED_TYPES:
+        raise HTTPException(status_code=400, detail="Only JPEG, PNG, and WebP images are accepted")
+
+    data = await file.read()
+    if len(data) > _AVATAR_MAX_SIZE:
+        raise HTTPException(status_code=400, detail="Image must be under 5 MB")
+
+    from ..services.storage import get_storage
+    storage = get_storage()
+    url = await storage.upload_file(data, file.filename or "avatar.jpg", prefix="avatars", content_type=file.content_type)
+
+    async with get_connection() as conn:
+        await conn.execute("UPDATE users SET avatar_url = $1 WHERE id = $2", url, current_user.id)
+
+    return {"avatar_url": url}
 
 
 @router.put("/profile")
