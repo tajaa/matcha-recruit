@@ -1,6 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle, UserPlus } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle, UserPlus, Mail } from 'lucide-react'
+import { listConversations, getConversation, sendMessage as sendInboxMessage, getUnreadCount } from '../../api/inbox'
+import type { ConversationSummary, Conversation } from '../../api/inbox'
+import { ConversationList } from '../../components/inbox/ConversationList'
+import { MessageThread } from '../../components/inbox/MessageThread'
+import { ComposeModal } from '../../components/inbox/ComposeModal'
+import { useMe } from '../../hooks/useMe'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
 import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
@@ -31,6 +37,37 @@ export default function ProjectView() {
 
   // Mobile panel toggle: chat vs panel
   const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat')
+
+  // Sidebar mode: 'chats' or 'inbox'
+  const [sidebarMode, setSidebarMode] = useState<'chats' | 'inbox'>('chats')
+  const [inboxConversations, setInboxConversations] = useState<ConversationSummary[]>([])
+  const [inboxActiveConvo, setInboxActiveConvo] = useState<Conversation | null>(null)
+  const [inboxLoading, setInboxLoading] = useState(false)
+  const [inboxUnread, setInboxUnread] = useState(0)
+  const [inboxComposeOpen, setInboxComposeOpen] = useState(false)
+  const { me } = useMe()
+  const currentUserId = me?.user?.id ?? ''
+
+  const loadInbox = useCallback(async () => {
+    setInboxLoading(true)
+    try {
+      const data = await listConversations()
+      setInboxConversations(data)
+    } catch {}
+    setInboxLoading(false)
+  }, [])
+
+  useEffect(() => {
+    getUnreadCount().then((r) => setInboxUnread(r.count)).catch(() => {})
+    const id = setInterval(() => {
+      getUnreadCount().then((r) => setInboxUnread(r.count)).catch(() => {})
+    }, 60_000)
+    return () => clearInterval(id)
+  }, [])
+
+  useEffect(() => {
+    if (sidebarMode === 'inbox') loadInbox()
+  }, [sidebarMode, loadInbox])
 
   // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
@@ -368,6 +405,7 @@ export default function ProjectView() {
     <div className="flex h-[calc(100vh-49px)]" style={{ background: '#1e1e1e' }}>
       {/* Chat sidebar */}
       <div className="hidden sm:flex flex-col w-[130px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
+        {/* Top: back + new chat */}
         <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #333' }}>
           <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]">
             <ArrowLeft size={14} />
@@ -381,26 +419,99 @@ export default function ProjectView() {
           </button>
         </div>
 
+        {/* Chat list */}
         <div className="flex-1 overflow-y-auto py-1">
           {chats.map((c) => (
             <button
               key={c.id}
-              onClick={() => setActiveChatId(c.id)}
+              onClick={() => { setActiveChatId(c.id); setSidebarMode('chats') }}
               className={`w-full text-left px-3 py-2 text-xs truncate transition-colors ${
-                activeChatId === c.id
+                activeChatId === c.id && sidebarMode === 'chats'
                   ? 'text-[#e8e8e8]'
                   : 'text-[#6a737d] hover:text-[#d4d4d4]'
               }`}
-              style={activeChatId === c.id ? { background: '#2a2d2e' } : {}}
+              style={activeChatId === c.id && sidebarMode === 'chats' ? { background: '#2a2d2e' } : {}}
             >
               <MessageSquare size={10} className="inline mr-1.5" />
               {c.title}
             </button>
           ))}
         </div>
+
+        {/* Bottom: Inbox + User */}
+        <div style={{ borderTop: '1px solid #333' }}>
+          <button
+            onClick={() => { setSidebarMode(sidebarMode === 'inbox' ? 'chats' : 'inbox') }}
+            className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-xs transition-colors ${
+              sidebarMode === 'inbox' ? 'text-[#e8e8e8]' : 'text-[#6a737d] hover:text-[#d4d4d4]'
+            }`}
+            style={sidebarMode === 'inbox' ? { background: '#2a2d2e' } : {}}
+          >
+            <Mail size={12} />
+            <span className="flex-1 text-left">Inbox</span>
+            {inboxUnread > 0 && (
+              <span className="w-4 h-4 rounded-full bg-blue-500 text-[8px] font-bold text-white flex items-center justify-center">
+                {inboxUnread > 9 ? '9+' : inboxUnread}
+              </span>
+            )}
+          </button>
+          <Link
+            to="/app/settings"
+            className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-[#6a737d] hover:text-[#d4d4d4] transition-colors"
+          >
+            {me?.user?.avatar_url ? (
+              <img src={me.user.avatar_url} className="w-5 h-5 rounded-full object-cover" alt="" />
+            ) : (
+              <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center text-[8px] font-bold text-zinc-300">
+                {(me?.profile?.name || me?.user?.email || '?')[0].toUpperCase()}
+              </div>
+            )}
+            <span className="truncate">{me?.profile?.name || me?.user?.email || 'Settings'}</span>
+          </Link>
+        </div>
       </div>
 
+      {/* Center — inbox view when sidebar is in inbox mode */}
+      {sidebarMode === 'inbox' && (
+        <div className={`flex-1 flex flex-col min-w-0 ${mobileView === 'panel' ? 'hidden md:flex' : 'flex'}`} style={{ borderRight: '1px solid #333', background: '#1e1e1e' }}>
+          {inboxActiveConvo ? (
+            <MessageThread
+              conversation={inboxActiveConvo}
+              currentUserId={currentUserId}
+              onSendMessage={async (content) => {
+                const msg = await sendInboxMessage(inboxActiveConvo.id, content)
+                setInboxActiveConvo((prev) => prev ? { ...prev, messages: [...prev.messages, msg] } : prev)
+              }}
+              onMarkRead={() => {}}
+              onBack={() => setInboxActiveConvo(null)}
+            />
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full gap-3">
+              <Mail size={24} className="text-[#6a737d]" />
+              <p className="text-xs text-[#6a737d]">Select a conversation</p>
+              <button
+                onClick={() => setInboxComposeOpen(true)}
+                className="text-xs px-3 py-1.5 rounded transition-colors"
+                style={{ background: '#2a2d2e', color: '#d4d4d4' }}
+              >
+                New Message
+              </button>
+            </div>
+          )}
+          <ComposeModal
+            isOpen={inboxComposeOpen}
+            onClose={() => setInboxComposeOpen(false)}
+            onCreated={(convo) => {
+              setInboxActiveConvo(convo)
+              setInboxComposeOpen(false)
+              loadInbox()
+            }}
+          />
+        </div>
+      )}
+
       {/* Center — chat messages */}
+      {sidebarMode === 'chats' && (
       <div className={`flex-1 flex flex-col min-w-0 ${mobileView === 'panel' ? 'hidden md:flex' : 'flex'}`} style={{ borderRight: '1px solid #333' }}>
         {/* Header */}
         <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid #333' }}>
@@ -577,6 +688,7 @@ export default function ProjectView() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Right — Project panel or Recruiting pipeline */}
       <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex flex-1 min-w-0`}>
