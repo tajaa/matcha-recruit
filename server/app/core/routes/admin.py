@@ -9271,12 +9271,6 @@ async def send_beta_invitations(
                 skipped.append(email_lower)
                 continue
 
-            # Also skip if already a user
-            existing_user = await conn.fetchval("SELECT id FROM users WHERE email = $1", email_lower)
-            if existing_user:
-                skipped.append(email_lower)
-                continue
-
             token = secrets.token_hex(32)
             await conn.execute(
                 """INSERT INTO beta_invitations (email, token, invited_by)
@@ -9306,6 +9300,7 @@ async def send_beta_invitations(
                 if email_svc.is_configured():
                     await email_svc.send_email(
                         to_email=email_lower,
+                        to_name=email_lower.split("@")[0],
                         subject="You're invited to Matcha Work (Private Beta)",
                         html_content=html,
                     )
