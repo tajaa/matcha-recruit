@@ -63,10 +63,10 @@ export function CredentialAlerts({ summary, expirations }: CredentialAlertsProps
 
       <button
         type="button"
-        onClick={() => navigate('/app/employees')}
+        onClick={() => navigate('/app/credential-templates')}
         className="mt-3 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
       >
-        View All Employees &rarr;
+        View Credentials &rarr;
       </button>
     </Card>
   )

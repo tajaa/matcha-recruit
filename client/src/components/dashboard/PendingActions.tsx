@@ -117,7 +117,7 @@ export function PendingActions({
           credentialSummary.critical > 0 && `${credentialSummary.critical} critical`,
           credentialSummary.warning > 0 && `${credentialSummary.warning} warning`,
         ].filter(Boolean).join(', '),
-        href: '/app/employees',
+        href: '/app/credential-templates',
       })
     }
   }

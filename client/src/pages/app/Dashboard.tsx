@@ -182,7 +182,11 @@ export default function Dashboard() {
           value={stats?.er_case_summary?.open_cases ?? 0}
           subtitle={
             (stats?.er_case_summary?.open_cases ?? 0) > 0
-              ? `${stats?.er_case_summary?.investigating ?? 0} investigating · ${stats?.er_case_summary?.pending_action ?? 0} pending`
+              ? [
+                  stats?.er_case_summary?.open && `${stats.er_case_summary.open} open`,
+                  stats?.er_case_summary?.in_review && `${stats.er_case_summary.in_review} in review`,
+                  stats?.er_case_summary?.pending_determination && `${stats.er_case_summary.pending_determination} pending`,
+                ].filter(Boolean).join(' · ') || 'Open cases'
               : 'No open cases'
           }
           icon={Briefcase}

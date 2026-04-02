@@ -54,8 +54,12 @@ class WageAlertSummary(BaseModel):
 
 class ERCaseSummary(BaseModel):
     open_cases: int
-    investigating: int
-    pending_action: int
+    open: int = 0
+    in_review: int = 0
+    pending_determination: int = 0
+    # Legacy fields kept for backward compat
+    investigating: int = 0
+    pending_action: int = 0
 
 
 class StalePolicySummary(BaseModel):
@@ -250,8 +254,9 @@ async def get_dashboard_stats(
                 status_map = {r["status"]: r["cnt"] for r in er_rows}
                 er_case_summary = ERCaseSummary(
                     open_cases=total_open,
-                    investigating=status_map.get("investigating", 0),
-                    pending_action=status_map.get("action_required", 0) + status_map.get("pending", 0),
+                    open=status_map.get("open", 0),
+                    in_review=status_map.get("in_review", 0),
+                    pending_determination=status_map.get("pending_determination", 0),
                 )
     except Exception:
         logger.exception("Failed to fetch ER case summary for dashboard")
