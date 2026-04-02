@@ -2380,8 +2380,6 @@ async def add_project_section_endpoint(
     from ..services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     raw_content = body.get("content", "")
-    if body.get("source_message_id"):
-        raw_content = _strip_markdown(raw_content)
     return await proj_svc.add_section(project_id, {**body, "content": raw_content})
 
 
@@ -3063,6 +3061,7 @@ async def export_project_endpoint(
     """Export project as PDF, DOCX, or Markdown."""
     from ..services import project_service as proj_svc
     project, _role = await _verify_project_access(project_id, current_user)
+    company_id = await get_client_company_id(current_user)
 
     title = project["title"]
     sections = project["sections"]

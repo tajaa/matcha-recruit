@@ -132,7 +132,7 @@ export default function PresentationPanel({
   if (!pres || totalSlides === 0) {
     return (
       <div
-        className="flex w-full md:w-1/2 items-center justify-center"
+        className="flex w-full items-center justify-center"
         style={{ background: lightMode ? '#f8fafc' : '#18181b' }}
       >
         <p className={lightMode ? 'text-zinc-400 text-sm' : 'text-zinc-500 text-sm'}>
@@ -157,7 +157,7 @@ export default function PresentationPanel({
     <div
       ref={panelRef}
       tabIndex={0}
-      className="flex w-full md:w-1/2 flex-col outline-none"
+      className="flex w-full flex-col outline-none"
       style={{ background: lightMode ? '#f8fafc' : '#18181b' }}
     >
       {/* Toolbar */}

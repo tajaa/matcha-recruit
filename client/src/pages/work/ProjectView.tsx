@@ -233,7 +233,10 @@ export default function ProjectView() {
       await addProjectSectionNew(projectId, { content, source_message_id: messageId })
       const updated = await getProjectDetail(projectId)
       setProject(updated)
-    } catch {}
+    } catch (e) {
+      console.error('Add to project failed:', e)
+      setError(e instanceof Error ? e.message : 'Failed to add to project')
+    }
   }
 
   if (loading) {
@@ -576,7 +579,7 @@ export default function ProjectView() {
       </div>
 
       {/* Right — Project panel or Recruiting pipeline */}
-      <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex md:w-1/2 shrink-0`}>
+      <div className={`${mobileView === 'panel' ? 'flex w-full' : 'hidden'} md:flex flex-1 min-w-0`}>
         {project.project_type === 'recruiting' ? (
           <RecruitingPipeline
             project={project}

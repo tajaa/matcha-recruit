@@ -90,7 +90,7 @@ export default function InventoryPanel({ state, lightMode, streaming }: Inventor
 
   if (items.length === 0 && !streaming) {
     return (
-      <div className={`flex w-full md:w-1/2 items-center justify-center ${th.bg}`}>
+      <div className={`flex w-full items-center justify-center ${th.bg}`}>
         <p className={`text-sm ${th.muted}`}>
           No inventory yet — drop invoices or spreadsheets to start.
         </p>
@@ -99,7 +99,7 @@ export default function InventoryPanel({ state, lightMode, streaming }: Inventor
   }
 
   return (
-    <div className={`flex w-full md:w-1/2 flex-col ${th.bg}`}>
+    <div className={`flex w-full flex-col ${th.bg}`}>
       {/* Header */}
       <div className={`px-4 py-3 border-b ${th.border}`}>
         <div className="flex items-center justify-between">

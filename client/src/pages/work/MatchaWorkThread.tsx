@@ -839,7 +839,7 @@ export default function MatchaWorkThread() {
         )}
 
         {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !agentMode && (
-          <div className={`${mobileView === 'panel' ? 'block w-full' : 'hidden md:block'} md:w-1/2 bg-zinc-900`}>
+          <div className={`${mobileView === 'panel' ? 'block w-full' : 'hidden md:block'} flex-1 bg-zinc-900`}>
             <iframe
               src={pdfUrl}
               className="w-full h-full border-0"
