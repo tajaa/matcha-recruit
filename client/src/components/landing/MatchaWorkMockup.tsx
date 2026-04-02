@@ -39,12 +39,12 @@ export function MatchaWorkMockup() {
         <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-3">Recent Threads</div>
         <div className="flex flex-col gap-1.5">
           <div className="px-3 py-2 rounded-md bg-zinc-800/60 text-xs text-zinc-200 border border-zinc-700/50 shadow-sm flex items-center gap-2">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            Overtime Compliance CA
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Offer Letter: SWE
           </div>
           <div className="px-3 py-2 rounded-md text-xs text-zinc-400 hover:bg-zinc-800/30 transition-colors flex items-center gap-2">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            Offer Letter: SWE
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Overtime Compliance CA
           </div>
           <div className="px-3 py-2 rounded-md text-xs text-zinc-400 hover:bg-zinc-800/30 transition-colors flex items-center gap-2">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
@@ -58,15 +58,10 @@ export function MatchaWorkMockup() {
         {/* Header */}
         <div className="h-14 border-b border-zinc-800/50 flex items-center px-6 justify-between bg-zinc-900/20">
           <div className="flex items-center gap-3">
-            <div className="text-sm font-semibold text-zinc-200">Overtime Compliance CA</div>
+            <div className="text-sm font-semibold text-zinc-200">Offer Letter: SWE</div>
             <span className="px-1.5 py-0.5 rounded-full bg-zinc-800 text-[9px] text-zinc-400 border border-zinc-700">Project</span>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded border border-emerald-500/20 flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-              gemini-3-flash-preview
-            </div>
-          </div>
+          {/* Removed Model Selector for Beta */}
         </div>
 
         {/* Chat Messages */}
@@ -78,7 +73,7 @@ export function MatchaWorkMockup() {
             className="flex justify-end"
           >
             <div className="bg-emerald-600/10 border border-emerald-500/20 text-zinc-200 text-sm px-4 py-3 rounded-2xl rounded-tr-sm max-w-[80%] shadow-sm">
-              What are the overtime exemption requirements for salaried employees in California vs. federal FLSA?
+              Draft an offer letter for a Senior Software Engineer candidate in San Francisco, CA. Base salary $185,000, 4-year vesting schedule for equity.
             </div>
           </motion.div>
 
@@ -91,34 +86,38 @@ export function MatchaWorkMockup() {
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
             </div>
             
-            <div className="bg-zinc-800/40 border border-zinc-700/50 text-zinc-300 text-sm px-5 py-4 rounded-2xl rounded-tl-sm max-w-[85%] leading-relaxed shadow-sm">
+            <div className="bg-zinc-800/40 border border-zinc-700/50 text-zinc-300 text-sm px-5 py-4 rounded-2xl rounded-tl-sm max-w-[85%] leading-relaxed shadow-sm w-full">
               {typingStep === 2 && (
                 <div className="flex items-center gap-2 text-zinc-400 font-mono text-xs">
-                  <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" /> Analyzing regulations...
+                  <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" /> Generating document...
                 </div>
               )}
               {typingStep >= 3 && (
-                <div className="space-y-3">
-                  <p>Analyzing federal FLSA § 13(a)(1) against CA Labor Code § 515...</p>
+                <div className="space-y-3 w-full">
+                  <p>Here is the draft offer letter. It includes standard California at-will employment language and the requested equity vesting schedule.</p>
                   
-                  <div className="grid grid-cols-2 gap-3 mt-3">
-                    <div className="p-3 bg-zinc-900/50 rounded border border-zinc-700/50">
-                      <div className="text-[10px] uppercase tracking-widest text-zinc-500 mb-1">Federal FLSA</div>
-                      <div className="font-mono text-zinc-300">$35,568/yr</div>
-                      <div className="text-xs text-zinc-500 mt-1">Primary duty test</div>
+                  <div className="mt-3 p-4 bg-zinc-900/80 rounded-lg border border-zinc-700/80 shadow-inner flex flex-col gap-3 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-2 opacity-20">
+                       <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
                     </div>
-                    <div className="p-3 bg-emerald-900/20 rounded border border-emerald-500/30">
-                      <div className="text-[10px] uppercase tracking-widest text-emerald-500/80 mb-1">California</div>
-                      <div className="font-mono text-emerald-400">$66,560/yr</div>
-                      <div className="text-xs text-emerald-500/70 mt-1">&gt;50% time on exempt duties</div>
+                    <div className="flex items-center gap-2 text-zinc-300 font-bold border-b border-zinc-700/50 pb-2 z-10">
+                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                       SWE_Offer_Letter_Draft.pdf
                     </div>
-                  </div>
-
-                  <p className="pt-2">California applies a stricter salary threshold and duties test.</p>
-                  
-                  <div className="mt-3 p-3 bg-emerald-500/10 border-l-2 border-emerald-500 rounded-r">
-                    <div className="text-emerald-500 text-[10px] uppercase tracking-widest font-bold mb-1">Recommendation</div>
-                    <div className="text-zinc-300">Apply the CA standard for all CA-based employees to ensure compliance.</div>
+                    <div className="space-y-2 text-xs font-mono text-zinc-400 z-10">
+                       <div className="h-2 bg-zinc-700/50 rounded w-3/4"></div>
+                       <div className="h-2 bg-zinc-700/50 rounded w-1/2"></div>
+                       <div className="h-2 bg-zinc-700/50 rounded w-full"></div>
+                       <div className="h-2 bg-zinc-700/50 rounded w-5/6"></div>
+                    </div>
+                    <div className="flex gap-2 mt-2 z-10">
+                       <button className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/30 transition-colors uppercase tracking-wider font-bold">
+                         Preview
+                       </button>
+                       <button className="text-[10px] bg-zinc-800 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded hover:bg-zinc-700 transition-colors uppercase tracking-wider font-bold">
+                         Edit
+                       </button>
+                    </div>
                   </div>
                 </div>
               )}
