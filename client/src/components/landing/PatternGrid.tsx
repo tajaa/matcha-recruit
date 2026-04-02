@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { motion, useInView, AnimatePresence } from 'framer-motion'
-import { SCAN_LINE_BG, PATTERN_INCIDENTS } from './shared'
+import { SCAN_LINE_BG } from './shared'
 
 /* ── Pattern Grid (Incident Reports) ──────────────────────────── */
 export function PatternGrid() {
