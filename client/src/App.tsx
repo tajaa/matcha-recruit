@@ -33,6 +33,7 @@ import RiskAssessment from './pages/app/RiskAssessment'
 import CredentialTemplates from './pages/app/CredentialTemplates'
 import Inbox from './pages/app/Inbox'
 import UserSettings from './pages/app/UserSettings'
+import Notifications from './pages/app/Notifications'
 import EscalatedQueries from './pages/app/EscalatedQueries'
 import Accommodations from './pages/app/Accommodations'
 import AccommodationDetail from './pages/app/AccommodationDetail'
@@ -108,6 +109,7 @@ export default function App() {
         <Route path="risk-assessment" element={<RiskAssessment />} />
         <Route path="credential-templates" element={<CredentialTemplates />} />
         <Route path="inbox" element={<Inbox />} />
+        <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<UserSettings />} />
       </Route>
     </Routes>

@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
-  BadgeCheck, MessageSquareWarning, Mail,
+  BadgeCheck, MessageSquareWarning, Mail, Bell,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -31,6 +31,7 @@ const nav: (NavItem | NavGroup)[] = [
     label: 'Communication',
     items: [
       { to: '/app/inbox', icon: Mail, label: 'Inbox' },
+      { to: '/app/notifications', icon: Bell, label: 'Notifications' },
       { to: '/app/escalated-queries', icon: MessageSquareWarning, label: 'Escalations' },
     ],
   },

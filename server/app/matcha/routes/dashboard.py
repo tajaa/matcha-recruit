@@ -397,13 +397,13 @@ class ClientNotificationsResponse(BaseModel):
 
 
 _CLIENT_NOTIFICATION_LINK_MAP: dict[str, str] = {
-    "incident": "/app/ir/incidents/{id}",
-    "employee": "/app/matcha/employees/{id}",
-    "offer_letter": "/app/matcha/offer-letters",
-    "er_case": "/app/matcha/er-copilot/{id}",
-    "handbook": "/app/matcha/handbook/{id}",
-    "compliance_alert": "/app/matcha/compliance",
-    "credential_expiry": "/app/matcha/employees",
+    "incident": "/app/ir/{id}",
+    "employee": "/app/employees/{id}",
+    "offer_letter": "/app/policies",
+    "er_case": "/app/er-copilot/{id}",
+    "handbook": "/app/handbook/{id}",
+    "compliance_alert": "/app/compliance",
+    "credential_expiry": "/app/credential-templates",
 }
 
 # Each sub-query is parameterized with $1 = company_id.
@@ -440,14 +440,14 @@ _CLIENT_NOTIFICATION_SUBQUERIES: list[str] = [
             NULL AS severity, status, created_at
        FROM handbooks
        WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'""",
-    # Compliance alerts — only material changes with sufficient confidence
+    # Compliance alerts — material changes and new requirements
     """SELECT id::text, 'compliance_alert' AS type,
             title, message AS subtitle,
             severity, status, created_at
        FROM compliance_alerts
        WHERE company_id = $1
          AND created_at > NOW() - INTERVAL '30 days'
-         AND alert_type = 'change'
+         AND alert_type IN ('change', 'new_requirement')
          AND COALESCE(confidence_score, 1.0) >= 0.6""",
     # Credential expirations — healthcare employee licenses expiring within 90 days
     """SELECT ec.id::text, 'credential_expiry' AS type,
