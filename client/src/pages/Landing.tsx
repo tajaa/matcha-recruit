@@ -10,7 +10,7 @@ import { MonteCarloDistribution } from '../components/landing/MonteCarloDistribu
 import { TimelineConstructor } from '../components/landing/TimelineConstructor'
 import { PatternGrid } from '../components/landing/PatternGrid'
 import { RadarChart } from '../components/landing/RadarChart'
-import { TerminalTyping } from '../components/landing/TerminalTyping'
+import { MatchaWorkMockup } from '../components/landing/MatchaWorkMockup'
 import { FeatureSectionItem } from '../components/landing/FeatureSectionItem'
 import { DOT_GRID_BG } from '../components/landing/shared'
 
@@ -219,16 +219,21 @@ export default function Landing() {
             style={{ backgroundImage: DOT_GRID_BG, backgroundSize: '24px 24px' }}
           />
           <div className="relative max-w-7xl mx-auto">
-            <div className="text-center mb-10">
-              <span className="text-xs tracking-[0.3em] text-emerald-500 uppercase flex items-center justify-center gap-2">
+            <div className="text-center mb-10 relative">
+              <span className="text-xs tracking-[0.3em] text-emerald-500 uppercase flex items-center justify-center gap-2 mb-4">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
                 Agentic Workspace
               </span>
-              <h2 className="text-4xl sm:text-5xl font-bold uppercase tracking-wide text-zinc-100 mt-4 flex items-center justify-center">
-                <GlitchText text="Matcha Work" cycleWords={["Matcha Work", "System Active", "Terminal Ready"]} />
-              </h2>
+              <div className="flex justify-center items-center gap-4 mt-4">
+                <h2 className="text-4xl sm:text-5xl font-bold uppercase tracking-wide text-zinc-100 flex items-center justify-center">
+                  <GlitchText text="Matcha Work" cycleWords={["Matcha Work", "System Active", "Terminal Ready"]} />
+                </h2>
+                <span className="px-2 py-1 bg-amber-500/10 text-amber-500 border border-amber-500/30 rounded text-[10px] font-[Orbitron] font-bold tracking-widest uppercase">
+                  Beta
+                </span>
+              </div>
               <p className="text-zinc-500 text-sm sm:text-base mt-4 max-w-lg mx-auto leading-relaxed">
-                Multi-threaded document workspace for compliance research, ER case analysis, regulatory reasoning chains, and cross-referencing organizational data.
+                A standalone companion tool to the core Matcha platform. An experimental multi-threaded document workspace for compliance research, ER case analysis, and regulatory reasoning chains.
               </p>
             </div>
 
@@ -238,7 +243,7 @@ export default function Landing() {
               style={{ boxShadow: "0 20px 40px -10px rgba(16, 185, 129, 0.15)" }}
               className="rounded-lg overflow-hidden max-w-2xl mx-auto border border-emerald-500/20"
             >
-              <TerminalTyping />
+              <MatchaWorkMockup />
             </motion.div>
 
             <div className="text-center mt-10">
