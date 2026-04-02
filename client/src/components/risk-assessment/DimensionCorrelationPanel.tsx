@@ -95,7 +95,7 @@ export function DimensionCorrelationPanel({ qs }: Props) {
                 />
                 <Tooltip
                   contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11 }}
-                  formatter={(v: number | undefined, name?: string) => [v ?? 0, name === 'x' ? labelFor(dimX) : labelFor(dimY)]}
+                  formatter={(v, name) => [v ?? 0, name === 'x' ? labelFor(dimX) : labelFor(dimY)]}
                 />
                 <Scatter
                   data={data.points}

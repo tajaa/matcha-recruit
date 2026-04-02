@@ -62,7 +62,7 @@ export function EnhancedBenchmarksPanel({ qs }: Props) {
             <YAxis type="category" dataKey="name" tick={{ fill: '#a1a1aa', fontSize: 10 }} axisLine={false} tickLine={false} width={95} />
             <Tooltip
               contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11 }}
-              formatter={(v: number | undefined, name?: string) => [(v ?? 0).toFixed(2), name === 'company' ? 'Company' : 'Industry Median']}
+              formatter={(v, name) => [((v as number) ?? 0).toFixed(2), name === 'company' ? 'Company' : 'Industry Median']}
             />
             <Bar dataKey="industry" fill="#3b82f6" opacity={0.4} barSize={14} radius={[0, 3, 3, 0]} />
             <Bar dataKey="company" barSize={14} radius={[0, 3, 3, 0]}>

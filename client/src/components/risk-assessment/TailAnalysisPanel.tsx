@@ -112,12 +112,12 @@ export function TailAnalysisPanel({ qs }: Props) {
               <Tooltip
                 contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11 }}
                 labelFormatter={(v) => String(v)}
-                formatter={(v: number | undefined, name?: string) => {
+                formatter={(v, name) => {
                   if (v == null) return ['-', name]
                   const labels: Record<string, string> = {
                     value: 'Value', rolling_mean: 'Mean', upper_2s: '+2σ', lower_2s: '-2σ', anomalyValue: 'Anomaly',
                   }
-                  return [typeof v === 'number' ? v.toFixed(1) : v, labels[name] ?? name]
+                  return [typeof v === 'number' ? (v as number).toFixed(1) : v, labels[name as string] ?? name]
                 }}
               />
               {/* Sigma band */}

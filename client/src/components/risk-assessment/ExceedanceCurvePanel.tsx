@@ -50,7 +50,7 @@ export function ExceedanceCurvePanel({ mc }: Props) {
             <Tooltip
               contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 12 }}
               labelFormatter={(v) => `Loss ≥ ${fmtCompact(v as number)}`}
-              formatter={(v: number | undefined) => [pctFmt(v ?? 0), 'Probability']}
+              formatter={(v) => [pctFmt((v as number) ?? 0), 'Probability']}
             />
             <ReferenceLine y={0.05} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1} label={{ value: '5%', position: 'right', fill: '#f59e0b', fontSize: 9 }} />
             <ReferenceLine y={0.01} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1} label={{ value: '1%', position: 'right', fill: '#ef4444', fontSize: 9 }} />

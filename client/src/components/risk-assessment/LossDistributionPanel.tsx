@@ -73,7 +73,7 @@ export function LossDistributionPanel({ mc, isAdmin, onRerun, running }: Props) 
             <Tooltip
               contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 12 }}
               labelFormatter={(v) => fmtMoney(v as number)}
-              formatter={(v: number | undefined) => [v ?? 0, 'Frequency']}
+              formatter={(v) => [v ?? 0, 'Frequency']}
             />
             <ReferenceLine x={aggregate.var_95} stroke="#f59e0b" strokeDasharray="4 4" strokeWidth={1.5} label={{ value: 'VaR 95%', position: 'top', fill: '#f59e0b', fontSize: 10 }} />
             <ReferenceLine x={aggregate.var_99} stroke="#ef4444" strokeDasharray="4 4" strokeWidth={1.5} label={{ value: 'VaR 99%', position: 'top', fill: '#ef4444', fontSize: 10 }} />
