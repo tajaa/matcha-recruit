@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ScatterChart, Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, Line, ComposedChart } from 'recharts'
+import { Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, Line, ComposedChart } from 'recharts'
 import { api } from '../../api/client'
 import { DIMENSION_LABELS, DIMENSION_ORDER, DIMENSION_COLORS } from '../../types/risk-assessment'
 import type { CorrelationResult } from '../../types/risk-assessment'
@@ -95,7 +95,7 @@ export function DimensionCorrelationPanel({ qs }: Props) {
                 />
                 <Tooltip
                   contentStyle={{ background: '#18181b', border: '1px solid #3f3f46', borderRadius: 8, fontSize: 11 }}
-                  formatter={(v: number, name: string) => [v, name === 'x' ? labelFor(dimX) : labelFor(dimY)]}
+                  formatter={(v: number | undefined, name?: string) => [v ?? 0, name === 'x' ? labelFor(dimX) : labelFor(dimY)]}
                 />
                 <Scatter
                   data={data.points}

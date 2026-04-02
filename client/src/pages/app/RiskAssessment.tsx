@@ -201,7 +201,7 @@ export default function RiskAssessment() {
   )
 }
 
-function QuantitativeTab({ qs, isAdmin, companyId }: { qs: string; isAdmin: boolean; companyId: string | null }) {
+function QuantitativeTab({ qs, isAdmin }: { qs: string; isAdmin: boolean; companyId: string | null }) {
   const { data: mc, loading, error, reload } = useMonteCarloData(qs)
 
   return (
