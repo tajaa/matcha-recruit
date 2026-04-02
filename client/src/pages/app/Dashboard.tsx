@@ -273,15 +273,6 @@ export default function Dashboard() {
         <>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
             <div className="lg:col-span-2 space-y-6">
-              <PendingActions
-                pendingIncidents={stats?.pending_incidents ?? []}
-                wageAlerts={stats?.wage_alerts ?? null}
-                credentialSummary={credentials?.summary}
-                complianceAlerts={stats?.critical_compliance_alerts ?? 0}
-                compliancePendingActions={compliancePendingActions}
-                escalatedQueries={stats?.escalated_queries_open ?? 0}
-                escalatedQueriesHigh={stats?.escalated_queries_high ?? 0}
-              />
               <ComplianceWidget />
               {isHealthcare && credentials && (
                 <CredentialAlerts

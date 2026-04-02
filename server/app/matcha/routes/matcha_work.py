@@ -2270,21 +2270,50 @@ async def sync_resume_batch_interviews(
 
 
 async def _convert_svgs_to_images(content: str, company_id, project_id) -> str:
-    """Find inline <svg>...</svg> blocks, upload each as an image, replace with <img> tags."""
+    """Convert inline SVGs and fenced SVG code blocks to uploaded <img> tags."""
     import re as _re
-    svg_pattern = _re.compile(r'<svg[\s\S]*?</svg>', _re.IGNORECASE)
-    matches = list(svg_pattern.finditer(content))
-    if not matches:
-        return content
 
     storage = get_storage()
+    prefix = f"matcha-work/{company_id}/{project_id}/diagrams"
+    counter = 0
+
+    async def _upload_svg(svg_str: str) -> str:
+        nonlocal counter
+        counter += 1
+        svg_bytes = svg_str.encode("utf-8")
+        url = await storage.upload_file(svg_bytes, f"diagram-{counter}.svg", prefix=prefix, content_type="image/svg+xml")
+        return f'<img src="{url}" alt="Diagram" style="max-width:100%;margin:8px 0;" />'
+
     result = content
-    for i, match in enumerate(reversed(matches)):
-        svg_bytes = match.group(0).encode("utf-8")
-        prefix = f"matcha-work/{company_id}/{project_id}/diagrams"
-        url = await storage.upload_file(svg_bytes, f"diagram-{i}.svg", prefix=prefix, content_type="image/svg+xml")
-        img_tag = f'<img src="{url}" alt="Diagram" style="max-width:100%;margin:8px 0;" />'
+
+    # 1. Fenced code blocks: ```svg ... ``` or ```xml ... ``` containing <svg
+    fenced_pattern = _re.compile(r'```(?:svg|xml)\s*\n([\s\S]*?)\n```', _re.IGNORECASE)
+    fenced_matches = list(fenced_pattern.finditer(result))
+    for match in reversed(fenced_matches):
+        inner = match.group(1).strip()
+        if '<svg' in inner.lower():
+            img_tag = await _upload_svg(inner)
+            result = result[:match.start()] + img_tag + result[match.end():]
+
+    # 2. Inline <svg>...</svg> blocks
+    svg_pattern = _re.compile(r'<svg[\s\S]*?</svg>', _re.IGNORECASE)
+    svg_matches = list(svg_pattern.finditer(result))
+    for match in reversed(svg_matches):
+        img_tag = await _upload_svg(match.group(0))
         result = result[:match.start()] + img_tag + result[match.end():]
+
+    # 3. Markdown image references to data URIs: ![...](data:image/svg+xml;base64,...)
+    data_uri_pattern = _re.compile(r'!\[([^\]]*)\]\(data:image/svg\+xml;base64,([A-Za-z0-9+/=]+)\)')
+    data_matches = list(data_uri_pattern.finditer(result))
+    for match in reversed(data_matches):
+        import base64
+        try:
+            svg_str = base64.b64decode(match.group(2)).decode("utf-8")
+            img_tag = await _upload_svg(svg_str)
+            result = result[:match.start()] + img_tag + result[match.end():]
+        except Exception:
+            pass
+
     return result
 
 
