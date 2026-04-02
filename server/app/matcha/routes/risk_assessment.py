@@ -735,3 +735,98 @@ async def get_anomalies(
 
     result = await detect_anomalies(company_id, months=months)
     return result.to_dict()
+
+
+# ---------------------------------------------------------------------------
+# Dimension Correlation Analysis
+# ---------------------------------------------------------------------------
+
+VALID_DIMS = {"compliance", "incidents", "er_cases", "workforce", "legislative", "overall"}
+
+
+@router.get("/correlations")
+async def get_correlations(
+    dim_x: str = Query(...),
+    dim_y: str = Query(...),
+    months: int = Query(36, ge=6, le=36),
+    current_user=Depends(require_admin_or_client),
+    company_id_override: str | None = Query(None, alias="company_id"),
+):
+    """Compute Pearson correlation between two risk dimensions over time."""
+    if dim_x not in VALID_DIMS or dim_y not in VALID_DIMS:
+        raise HTTPException(status_code=400, detail=f"Invalid dimension. Choose from: {', '.join(sorted(VALID_DIMS))}")
+
+    if current_user.role == "admin" and company_id_override:
+        company_id = UUID(company_id_override)
+    else:
+        company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=403, detail="No company associated")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT overall_score, dimensions, computed_at
+            FROM risk_assessment_history
+            WHERE company_id = $1 AND computed_at >= $2
+            ORDER BY computed_at ASC
+            """,
+            company_id,
+            cutoff,
+        )
+
+    if len(rows) < 3:
+        raise HTTPException(status_code=404, detail="Not enough history data for correlation analysis (need >= 3 points)")
+
+    import json as _json
+
+    points = []
+    for r in rows:
+        dims = r["dimensions"]
+        if isinstance(dims, str):
+            dims = _json.loads(dims)
+        if dim_x == "overall":
+            x_val = float(r["overall_score"])
+        else:
+            dim_data = dims.get(dim_x, {})
+            x_val = float(dim_data.get("score", dim_data) if isinstance(dim_data, dict) else dim_data)
+        if dim_y == "overall":
+            y_val = float(r["overall_score"])
+        else:
+            dim_data = dims.get(dim_y, {})
+            y_val = float(dim_data.get("score", dim_data) if isinstance(dim_data, dict) else dim_data)
+        points.append({
+            "x": round(x_val, 2),
+            "y": round(y_val, 2),
+            "period": r["computed_at"].isoformat() if hasattr(r["computed_at"], "isoformat") else str(r["computed_at"]),
+        })
+
+    n = len(points)
+    xs = [p["x"] for p in points]
+    ys = [p["y"] for p in points]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+
+    import math
+
+    cov = sum((xs[i] - mean_x) * (ys[i] - mean_y) for i in range(n)) / n
+    std_x = math.sqrt(sum((x - mean_x) ** 2 for x in xs) / n)
+    std_y = math.sqrt(sum((y - mean_y) ** 2 for y in ys) / n)
+
+    r_val = (cov / (std_x * std_y)) if std_x > 0 and std_y > 0 else 0.0
+
+    # Linear regression: y = slope * x + intercept
+    var_x = std_x ** 2
+    slope = (cov / var_x) if var_x > 0 else 0.0
+    intercept = mean_y - slope * mean_x
+
+    return {
+        "dim_x": dim_x,
+        "dim_y": dim_y,
+        "points": points,
+        "correlation": round(r_val, 4),
+        "r_squared": round(r_val ** 2, 4),
+        "trend_line": {"slope": round(slope, 4), "intercept": round(intercept, 4)},
+        "n": n,
+    }

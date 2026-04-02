@@ -46,6 +46,39 @@ Z_90 = 1.2816
 
 
 @dataclass
+class HistogramBin:
+    x: float  # bin midpoint
+    count: int
+    density: float  # count / total / bin_width
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"x": round(self.x, 2), "count": self.count, "density": round(self.density, 6)}
+
+
+@dataclass
+class ExceedanceCurvePoint:
+    threshold: float
+    probability: float  # P(Loss >= threshold)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"threshold": round(self.threshold, 2), "probability": round(self.probability, 6)}
+
+
+@dataclass
+class DistributionStats:
+    mean: float
+    median: float
+    std_dev: float
+    skewness: float
+    kurtosis: float  # excess kurtosis
+    iqr: float
+    tail_ratio: float  # CVaR95 / VaR95
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: round(v, 4) for k, v in asdict(self).items()}
+
+
+@dataclass
 class CategorySimResult:
     key: str
     label: str
@@ -54,9 +87,14 @@ class CategorySimResult:
     expected_loss: float
     percentiles: dict[str, float]
     zero_loss_pct: float
+    histogram_bins: list[HistogramBin] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("histogram_bins", None)
+        if self.histogram_bins:
+            d["histogram_bins"] = [b.to_dict() for b in self.histogram_bins]
+        return d
 
 
 @dataclass
@@ -67,9 +105,26 @@ class AggregateSimResult:
     var_99: float
     cvar_95: float
     max_simulated: float
+    histogram_bins: list[HistogramBin] | None = None
+    exceedance_curve: list[ExceedanceCurvePoint] | None = None
+    distribution_stats: DistributionStats | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = {
+            "expected_annual_loss": self.expected_annual_loss,
+            "percentiles": self.percentiles,
+            "var_95": self.var_95,
+            "var_99": self.var_99,
+            "cvar_95": self.cvar_95,
+            "max_simulated": self.max_simulated,
+        }
+        if self.histogram_bins:
+            d["histogram_bins"] = [b.to_dict() for b in self.histogram_bins]
+        if self.exceedance_curve:
+            d["exceedance_curve"] = [p.to_dict() for p in self.exceedance_curve]
+        if self.distribution_stats:
+            d["distribution_stats"] = self.distribution_stats.to_dict()
+        return d
 
 
 @dataclass
@@ -230,6 +285,86 @@ def _poisson(lam: float, rng: random.Random) -> int:
             return k - 1
 
 
+def _compute_histogram(sorted_values: list[float], n_bins: int = 80) -> list[HistogramBin]:
+    """Compute histogram bins from a sorted list of values."""
+    if not sorted_values or sorted_values[-1] <= 0:
+        return []
+    # Use p99 * 1.1 as upper bound to avoid extreme outlier stretching
+    p99_idx = int(0.99 * (len(sorted_values) - 1))
+    upper = sorted_values[p99_idx] * 1.1
+    if upper <= 0:
+        return []
+    bin_width = upper / n_bins
+    bins: list[HistogramBin] = []
+    total = len(sorted_values)
+    vi = 0  # pointer into sorted values
+    for i in range(n_bins):
+        lo = i * bin_width
+        hi = lo + bin_width
+        mid = lo + bin_width / 2
+        count = 0
+        while vi < total and sorted_values[vi] < hi:
+            if sorted_values[vi] >= lo:
+                count += 1
+            vi += 1
+        density = (count / total / bin_width) if bin_width > 0 else 0.0
+        bins.append(HistogramBin(x=mid, count=count, density=density))
+    return bins
+
+
+def _compute_exceedance_curve(sorted_values: list[float], n_points: int = 200) -> list[ExceedanceCurvePoint]:
+    """Compute empirical survival function P(Loss >= threshold)."""
+    if not sorted_values:
+        return []
+    max_val = sorted_values[-1]
+    if max_val <= 0:
+        return []
+    n = len(sorted_values)
+    points: list[ExceedanceCurvePoint] = []
+    for i in range(n_points):
+        threshold = (i / (n_points - 1)) * max_val if n_points > 1 else 0.0
+        # Binary search for first value >= threshold
+        lo, hi = 0, n
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if sorted_values[mid] < threshold:
+                lo = mid + 1
+            else:
+                hi = mid
+        prob = (n - lo) / n
+        points.append(ExceedanceCurvePoint(threshold=threshold, probability=prob))
+    return points
+
+
+def _compute_distribution_stats(
+    sorted_values: list[float], var_95: float, cvar_95: float,
+) -> DistributionStats:
+    """Compute distribution statistics from sorted samples."""
+    n = len(sorted_values)
+    mean = sum(sorted_values) / n
+    median = sorted_values[n // 2]
+    variance = sum((v - mean) ** 2 for v in sorted_values) / n
+    std_dev = math.sqrt(variance) if variance > 0 else 0.0
+
+    if std_dev > 0:
+        skewness = sum((v - mean) ** 3 for v in sorted_values) / (n * std_dev ** 3)
+        kurtosis = sum((v - mean) ** 4 for v in sorted_values) / (n * std_dev ** 4) - 3.0
+    else:
+        skewness = 0.0
+        kurtosis = 0.0
+
+    p25_idx = int(0.25 * (n - 1))
+    p75_idx = int(0.75 * (n - 1))
+    iqr = sorted_values[p75_idx] - sorted_values[p25_idx]
+    tail_ratio = (cvar_95 / var_95) if var_95 > 0 else 0.0
+
+    return DistributionStats(
+        mean=mean, median=median, std_dev=std_dev,
+        skewness=skewness, kurtosis=kurtosis,
+        iqr=iqr, tail_ratio=tail_ratio,
+    )
+
+
 def run_monte_carlo(
     cost_of_risk_items: list[dict[str, Any]],
     iterations: int = DEFAULT_ITERATIONS,
@@ -307,6 +442,54 @@ def run_monte_carlo(
 
     max_simulated = aggregate_totals[-1] if aggregate_totals else 0.0
 
+    # Quantitative analytics: histogram, exceedance curve, distribution stats
+    hist_bins = _compute_histogram(aggregate_totals, n_bins=80)
+    exc_curve = _compute_exceedance_curve(aggregate_totals, n_points=200)
+    dist_stats = _compute_distribution_stats(aggregate_totals, var_95, cvar_95) if aggregate_totals else None
+
+    # Per-category sparkline histograms (re-derive sorted totals from percentiles is lossy,
+    # so we re-simulate once more with same seed for per-category sorted arrays)
+    rng3 = random.Random(seed)
+    cat_sorted: dict[str, list[float]] = {}
+    for item in cost_of_risk_items:
+        cat_totals: list[float] = []
+        key = item["key"]
+        low = item.get("low", 0)
+        high = item.get("high", 0)
+        affected_count = item.get("affected_count", 0)
+        is_stochastic = key in STOCHASTIC_LAMBDA_OVERRIDES
+        if low <= 0 and high <= 0:
+            for _ in range(iterations):
+                cat_totals.append(0.0)
+            cat_sorted[key] = cat_totals
+            continue
+        if is_stochastic:
+            base_rate = STOCHASTIC_LAMBDA_OVERRIDES[key]
+            lam = base_rate * max(affected_count, 1)
+            per_unit_low = low / max(affected_count, 1)
+            per_unit_high = high / max(affected_count, 1)
+        else:
+            lam = float(affected_count) if affected_count > 0 else 1.0
+            per_unit_low = low / max(affected_count, 1)
+            per_unit_high = high / max(affected_count, 1)
+        mu, sigma = _lognormal_params(max(per_unit_low, 1), max(per_unit_high, 1))
+        for _ in range(iterations):
+            if is_stochastic:
+                n_events = _poisson(lam, rng3)
+            else:
+                n_events = int(lam)
+            it_total = 0.0
+            for _ in range(n_events):
+                cost = rng3.lognormvariate(mu, sigma) if sigma > 0 else math.exp(mu)
+                it_total += cost
+            cat_totals.append(it_total)
+        cat_totals.sort()
+        cat_sorted[key] = cat_totals
+
+    for key, cat_result in categories.items():
+        if key in cat_sorted:
+            cat_result.histogram_bins = _compute_histogram(cat_sorted[key], n_bins=30)
+
     aggregate = AggregateSimResult(
         expected_annual_loss=round(expected_annual_loss, 2),
         percentiles=percentiles,
@@ -314,6 +497,9 @@ def run_monte_carlo(
         var_99=round(var_99, 2),
         cvar_95=round(cvar_95, 2),
         max_simulated=round(max_simulated, 2),
+        histogram_bins=hist_bins,
+        exceedance_curve=exc_curve,
+        distribution_stats=dist_stats,
     )
 
     return MonteCarloResult(

@@ -13,9 +13,16 @@ import { AnomaliesPanel } from '../../components/risk-assessment/AnomaliesPanel'
 import { SeparationRiskCard } from '../../components/risk-assessment/SeparationRiskCard'
 import { ERCaseMetricsPanel } from '../../components/risk-assessment/ERCaseMetricsPanel'
 import { BAND_COLOR, BAND_LABEL, type Band } from '../../types/risk-assessment'
+import { useMonteCarloData } from '../../hooks/risk-assessment/useMonteCarloData'
+import { LossDistributionPanel } from '../../components/risk-assessment/LossDistributionPanel'
+import { ExceedanceCurvePanel } from '../../components/risk-assessment/ExceedanceCurvePanel'
+import { DimensionCorrelationPanel } from '../../components/risk-assessment/DimensionCorrelationPanel'
+import { TailAnalysisPanel } from '../../components/risk-assessment/TailAnalysisPanel'
+import { EnhancedBenchmarksPanel } from '../../components/risk-assessment/EnhancedBenchmarksPanel'
+import { EnhancedCohortPanel } from '../../components/risk-assessment/EnhancedCohortPanel'
 
 export default function RiskAssessment() {
-  const [tab, setTab] = useState<'overview' | 'analytics'>('overview')
+  const [tab, setTab] = useState<'overview' | 'analytics' | 'quantitative'>('overview')
   const {
     assessment,
     loading,
@@ -108,7 +115,7 @@ export default function RiskAssessment() {
 
       {/* Tabs */}
       <div className="flex gap-0 border border-zinc-700 rounded-xl overflow-hidden w-fit">
-        {(['overview', 'analytics'] as const).map((t) => (
+        {(['overview', 'analytics', 'quantitative'] as const).map((t) => (
           <button
             key={t}
             className={`px-5 py-2 text-[11px] uppercase tracking-widest font-bold transition-colors ${
@@ -118,7 +125,7 @@ export default function RiskAssessment() {
             }`}
             onClick={() => setTab(t)}
           >
-            {t === 'overview' ? 'Overview' : 'Analytics'}
+            {t === 'overview' ? 'Overview' : t === 'analytics' ? 'Analytics' : 'Quantitative'}
           </button>
         ))}
       </div>
@@ -185,6 +192,47 @@ export default function RiskAssessment() {
           <AnomaliesPanel qs={qs} />
         </div>
       )}
+
+      {/* Quantitative Tab */}
+      {tab === 'quantitative' && (
+        <QuantitativeTab qs={qs} isAdmin={isAdmin} companyId={selectedCompanyId} />
+      )}
+    </div>
+  )
+}
+
+function QuantitativeTab({ qs, isAdmin, companyId }: { qs: string; isAdmin: boolean; companyId: string | null }) {
+  const { data: mc, loading, error, reload } = useMonteCarloData(qs)
+
+  return (
+    <div className="space-y-6">
+      {loading && (
+        <div className="text-xs text-zinc-500 animate-pulse py-8 text-center">Loading quantitative analytics...</div>
+      )}
+      {!loading && mc && (
+        <>
+          <LossDistributionPanel mc={mc} isAdmin={isAdmin} onRerun={reload} />
+          <ExceedanceCurvePanel mc={mc} />
+        </>
+      )}
+      {!loading && error && (
+        <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 text-sm text-zinc-500 text-center">
+          {error}
+          {isAdmin && (
+            <button onClick={reload} className="ml-2 text-zinc-400 hover:text-zinc-200 transition-colors underline">
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <DimensionCorrelationPanel qs={qs} />
+        <TailAnalysisPanel qs={qs} />
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <EnhancedCohortPanel qs={qs} />
+        <EnhancedBenchmarksPanel qs={qs} />
+      </div>
     </div>
   )
 }

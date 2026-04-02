@@ -77,6 +77,13 @@ export type CostOfRisk = {
 
 // ─── Monte Carlo ─────────────────────────────────────────────────────────────
 
+export type HistogramBin = { x: number; count: number; density: number }
+export type ExceedanceCurvePoint = { threshold: number; probability: number }
+export type MCDistributionStats = {
+  mean: number; median: number; std_dev: number
+  skewness: number; kurtosis: number; iqr: number; tail_ratio: number
+}
+
 export type MonteCarloCategoryResult = {
   key: string
   label: string
@@ -85,6 +92,7 @@ export type MonteCarloCategoryResult = {
   expected_loss: number
   percentiles: { p10: number; p25: number; p50: number; p75: number; p90: number; p95: number; p99: number }
   zero_loss_pct: number
+  histogram_bins?: HistogramBin[]
 }
 
 export type MonteCarloAggregateResult = {
@@ -94,6 +102,9 @@ export type MonteCarloAggregateResult = {
   var_99: number
   cvar_95: number
   max_simulated: number
+  histogram_bins?: HistogramBin[]
+  exceedance_curve?: ExceedanceCurvePoint[]
+  distribution_stats?: MCDistributionStats
 }
 
 export type MonteCarloResult = {
@@ -147,11 +158,22 @@ export type AnomalyItem = {
   description: string
 }
 
+export type TimeSeriesPoint = {
+  period: string
+  value: number
+  rolling_mean: number | null
+  rolling_std: number | null
+  z_score: number | null
+  upper_2s: number | null
+  lower_2s: number | null
+}
+
 export type MetricTimeSeries = {
   metric: string
   label: string
   data_points: number
   anomalies: AnomalyItem[]
+  time_series?: TimeSeriesPoint[]
 }
 
 export type AnomalyDetectionResult = {
@@ -161,6 +183,20 @@ export type AnomalyDetectionResult = {
   total_anomalies: number
   alert_count: number
   warning_count: number
+}
+
+// ─── Dimension Correlation ──────────────────────────────────────────────────
+
+export type CorrelationPoint = { x: number; y: number; period: string }
+
+export type CorrelationResult = {
+  dim_x: string
+  dim_y: string
+  points: CorrelationPoint[]
+  correlation: number
+  r_squared: number
+  trend_line: { slope: number; intercept: number }
+  n: number
 }
 
 // ─── Employee Compliance ─────────────────────────────────────────────────────

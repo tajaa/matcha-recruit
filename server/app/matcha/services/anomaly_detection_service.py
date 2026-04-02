@@ -37,6 +37,20 @@ class Anomaly:
 
 
 @dataclass
+class TimeSeriesPoint:
+    period: str
+    value: float
+    rolling_mean: float | None = None
+    rolling_std: float | None = None
+    z_score: float | None = None
+    upper_2s: float | None = None  # mean + 2σ
+    lower_2s: float | None = None  # mean - 2σ
+
+    def to_dict(self) -> dict[str, Any]:
+        return {k: (round(v, 2) if isinstance(v, float) else v) for k, v in asdict(self).items()}
+
+
+@dataclass
 class MetricTimeSeries:
     metric: str
     label: str
@@ -45,10 +59,14 @@ class MetricTimeSeries:
     rolling_mean: float
     rolling_std: float
     anomalies: list[Anomaly]
+    time_series: list[TimeSeriesPoint] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["anomalies"] = [a.to_dict() for a in self.anomalies]
+        d.pop("time_series", None)
+        if self.time_series:
+            d["time_series"] = [p.to_dict() for p in self.time_series]
         return d
 
 
@@ -90,8 +108,10 @@ def _detect_anomalies_in_series(
         MetricTimeSeries with detected anomalies.
     """
     anomalies: list[Anomaly] = []
+    ts_points: list[TimeSeriesPoint] = []
 
     if len(values) < MIN_DATA_POINTS:
+        ts_points = [TimeSeriesPoint(period=v[0], value=round(v[1], 2)) for v in values]
         return MetricTimeSeries(
             metric=metric,
             label=label,
@@ -100,7 +120,12 @@ def _detect_anomalies_in_series(
             rolling_mean=0.0,
             rolling_std=0.0,
             anomalies=[],
+            time_series=ts_points,
         )
+
+    # Record early points without rolling stats
+    for i in range(min(MIN_DATA_POINTS, len(values))):
+        ts_points.append(TimeSeriesPoint(period=values[i][0], value=round(values[i][1], 2)))
 
     # Compute rolling statistics and check each point
     for i in range(MIN_DATA_POINTS, len(values)):
@@ -109,17 +134,28 @@ def _detect_anomalies_in_series(
         window_values = [v[1] for v in values[start:i]]
 
         if len(window_values) < 3:
+            ts_points.append(TimeSeriesPoint(period=values[i][0], value=round(values[i][1], 2)))
             continue
 
         mean = sum(window_values) / len(window_values)
         variance = sum((v - mean) ** 2 for v in window_values) / len(window_values)
         std = math.sqrt(variance) if variance > 0 else 0.0
 
-        if std == 0:
-            continue
-
         period, current_val = values[i]
-        z = (current_val - mean) / std
+        z = (current_val - mean) / std if std > 0 else None
+
+        ts_points.append(TimeSeriesPoint(
+            period=period,
+            value=round(current_val, 2),
+            rolling_mean=round(mean, 2),
+            rolling_std=round(std, 2),
+            z_score=round(z, 2) if z is not None else None,
+            upper_2s=round(mean + 2 * std, 2) if std > 0 else None,
+            lower_2s=round(mean - 2 * std, 2) if std > 0 else None,
+        ))
+
+        if std == 0 or z is None:
+            continue
 
         if abs(z) >= 3.0:
             severity = "alert"
@@ -154,6 +190,7 @@ def _detect_anomalies_in_series(
         rolling_mean=round(current_mean, 2),
         rolling_std=round(current_std, 2),
         anomalies=anomalies,
+        time_series=ts_points,
     )
 
 
