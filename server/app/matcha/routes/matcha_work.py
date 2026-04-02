@@ -2269,6 +2269,25 @@ async def sync_resume_batch_interviews(
     return {"updated": updated}
 
 
+async def _convert_svgs_to_images(content: str, company_id, project_id) -> str:
+    """Find inline <svg>...</svg> blocks, upload each as an image, replace with <img> tags."""
+    import re as _re
+    svg_pattern = _re.compile(r'<svg[\s\S]*?</svg>', _re.IGNORECASE)
+    matches = list(svg_pattern.finditer(content))
+    if not matches:
+        return content
+
+    storage = get_storage()
+    result = content
+    for i, match in enumerate(reversed(matches)):
+        svg_bytes = match.group(0).encode("utf-8")
+        prefix = f"matcha-work/{company_id}/{project_id}/diagrams"
+        url = await storage.upload_file(svg_bytes, f"diagram-{i}.svg", prefix=prefix, content_type="image/svg+xml")
+        img_tag = f'<img src="{url}" alt="Diagram" style="max-width:100%;margin:8px 0;" />'
+        result = result[:match.start()] + img_tag + result[match.end():]
+    return result
+
+
 def _strip_markdown(text: str) -> str:
     """Strip common markdown syntax to produce clean plain text for project sections."""
     import re as _re
@@ -2379,7 +2398,12 @@ async def add_project_section_endpoint(
     """Add a section to the project."""
     from ..services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
+    company_id = await get_client_company_id(current_user)
     raw_content = body.get("content", "")
+
+    # Convert inline SVGs to uploaded images so TipTap can render them
+    raw_content = await _convert_svgs_to_images(raw_content, company_id, project_id)
+
     return await proj_svc.add_section(project_id, {**body, "content": raw_content})
 
 
