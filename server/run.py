@@ -15,4 +15,5 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port,
         reload=reload,
+        reload_dirs=["app"] if reload else None,
     )
