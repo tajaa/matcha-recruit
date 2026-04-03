@@ -3136,12 +3136,35 @@ async def export_project_endpoint(
 
     if fmt == "pdf":
         import html as _html
+
+        # Inline remote images as base64 data URIs so WeasyPrint can render them
+        async def _inline_images(html_str: str) -> str:
+            import re as _re, base64
+            storage = get_storage()
+            img_pattern = _re.compile(r'<img\s+[^>]*src="([^"]+)"', _re.IGNORECASE)
+            result = html_str
+            for match in reversed(list(img_pattern.finditer(result))):
+                src = match.group(1)
+                if not storage.is_supported_storage_path(src):
+                    continue
+                try:
+                    data = await storage.download_file(src)
+                    ext = src.rsplit(".", 1)[-1].lower() if "." in src else "png"
+                    mime = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(ext, "image/png")
+                    b64 = base64.b64encode(data).decode()
+                    data_uri = f"data:{mime};base64,{b64}"
+                    result = result[:match.start(1)] + data_uri + result[match.end(1):]
+                except Exception:
+                    pass
+            return result
+
         sections_html = []
         for idx, s in enumerate(sections):
             heading = ""
             if s.get("title"):
                 heading = f'<h2><span class="section-num">{idx + 1}.</span> {_html.escape(s["title"])}</h2>'
             content = s.get("content", "")
+            content = await _inline_images(content)
             if content.lstrip().startswith("<"):
                 content_html = content
             else:
