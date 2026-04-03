@@ -527,6 +527,35 @@ export function uploadProjectImage(threadId: string, file: File) {
   )
 }
 
+// ── Project file attachments ──
+
+export interface ProjectFile {
+  id: string
+  project_id: string
+  filename: string
+  storage_url: string
+  content_type: string | null
+  file_size: number
+  created_at: string
+}
+
+export function listProjectFiles(projectId: string) {
+  return api.get<ProjectFile[]>(`/matcha-work/projects/${projectId}/files`)
+}
+
+export function uploadProjectFile(projectId: string, file: File) {
+  const form = new FormData()
+  form.append('file', file)
+  return api.upload<ProjectFile>(
+    `/matcha-work/projects/${projectId}/files`,
+    form,
+  )
+}
+
+export function deleteProjectFile(projectId: string, fileId: string) {
+  return api.delete(`/matcha-work/projects/${projectId}/files/${fileId}`)
+}
+
 // ── Candidate interviews ──
 
 export async function sendCandidateInterviews(

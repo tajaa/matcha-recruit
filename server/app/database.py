@@ -4931,6 +4931,23 @@ async def init_db():
             ON CONFLICT (company_id) DO NOTHING
         """)
 
+        # ===========================================
+        # Project File Attachments
+        # ===========================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_project_files (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                project_id UUID NOT NULL REFERENCES mw_projects(id) ON DELETE CASCADE,
+                uploaded_by UUID NOT NULL REFERENCES users(id),
+                filename VARCHAR(500) NOT NULL,
+                storage_url TEXT NOT NULL,
+                content_type VARCHAR(100),
+                file_size BIGINT NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_project_files_project_id ON mw_project_files(project_id)")
+
         # Training compliance tables
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS training_requirements (

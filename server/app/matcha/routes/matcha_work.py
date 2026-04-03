@@ -2481,6 +2481,93 @@ async def delete_project_section_endpoint(
     return await proj_svc.delete_section(project_id, section_id)
 
 
+# ── Project file attachment endpoints ──
+
+ALLOWED_PROJECT_FILE_EXTENSIONS = {
+    ".pdf", ".docx", ".doc", ".txt", ".csv", ".xlsx", ".xls",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg",
+    ".pptx", ".md",
+}
+PROJECT_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+@router.post("/projects/{project_id}/files")
+async def upload_project_file(
+    project_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload a file attachment to a project."""
+    from ..services import project_file_service
+
+    project, _role = await _verify_project_access(project_id, current_user)
+    company_id = project.get("company_id")
+    if not company_id:
+        company_id = await get_client_company_id(current_user)
+
+    fname = file.filename or "file"
+    ext = os.path.splitext(fname)[1].lower()
+    if ext not in ALLOWED_PROJECT_FILE_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+
+    content = await file.read()
+    if len(content) > PROJECT_FILE_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 10 MB limit")
+
+    storage_url = await get_storage().upload_file(
+        content, fname,
+        prefix=f"matcha-work/{company_id}/{project_id}/files",
+        content_type=file.content_type,
+    )
+
+    record = await project_file_service.add_project_file(
+        project_id=project_id,
+        uploaded_by=current_user.id,
+        filename=fname,
+        storage_url=storage_url,
+        content_type=file.content_type,
+        file_size=len(content),
+    )
+    return record
+
+
+@router.get("/projects/{project_id}/files")
+async def list_project_files_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List file attachments for a project."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+    return await project_file_service.list_project_files(project_id)
+
+
+@router.delete("/projects/{project_id}/files/{file_id}")
+async def delete_project_file_endpoint(
+    project_id: UUID,
+    file_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Delete a file attachment from a project."""
+    from ..services import project_file_service
+
+    await _verify_project_access(project_id, current_user)
+
+    record = await project_file_service.get_project_file(file_id, project_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Remove from storage
+    try:
+        await get_storage().delete_file(record["storage_url"])
+    except Exception:
+        pass
+
+    await project_file_service.delete_project_file(file_id, project_id)
+    return {"deleted": True}
+
+
 # ── Diagram editing endpoints ──
 
 
@@ -4336,6 +4423,15 @@ async def send_message(
     # Call AI with company context
     ai_provider = get_ai_provider()
     ctx = _build_company_context(profile)
+
+    # Inject project file attachments metadata
+    if thread.get("project_id"):
+        from ..services import project_file_service
+        pfiles = await project_file_service.list_project_files(thread["project_id"])
+        if pfiles:
+            listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
+            ctx += f"\n\n=== PROJECT ATTACHMENTS ===\nThe user has attached these files to the project. Reference them when relevant:\n{listing}\n"
+
     compliance_result: ComplianceContextResult | None = None
     if thread.get("node_mode"):
         node_ctx = await build_node_context(company_id)
@@ -4567,6 +4663,15 @@ async def send_message_stream(
 
     ai_provider = get_ai_provider()
     ctx = _build_company_context(profile)
+
+    # Inject project file attachments metadata
+    if thread.get("project_id"):
+        from ..services import project_file_service
+        pfiles = await project_file_service.list_project_files(thread["project_id"])
+        if pfiles:
+            listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
+            ctx += f"\n\n=== PROJECT ATTACHMENTS ===\nThe user has attached these files to the project. Reference them when relevant:\n{listing}\n"
+
     # Node/compliance context is built inside event_stream() so we can yield status events
 
     async def event_stream():

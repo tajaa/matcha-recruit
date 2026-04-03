@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
-import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine, Pencil } from 'lucide-react'
+import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine, Pencil, Paperclip, Upload } from 'lucide-react'
 import type { ProjectSection, MWProject } from '../../types/matcha-work'
-import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta } from '../../api/matchaWork'
+import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta, listProjectFiles, uploadProjectFile, deleteProjectFile } from '../../api/matchaWork'
+import type { ProjectFile } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
 
 const DiagramEditor = lazy(() => import('./DiagramEditor'))
+
+const ALLOWED_FILE_EXT = /\.(pdf|docx?|txt|csv|xlsx?|png|jpe?g|gif|webp|svg|pptx|md)$/i
 
 interface ProjectPanelPropsLegacy {
   state: Record<string, unknown>
@@ -53,6 +56,43 @@ export default function ProjectPanel(props: ProjectPanelProps) {
   const [loadingPreview, setLoadingPreview] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
+  // File attachments
+  const [files, setFiles] = useState<ProjectFile[]>([])
+  const [uploadingFiles, setUploadingFiles] = useState<string[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (!isNewMode || !projectId) return
+    listProjectFiles(projectId).then(setFiles).catch(() => {})
+  }, [projectId, isNewMode])
+
+  async function handleFileUploadList(fileList: File[]) {
+    const valid = fileList.filter(f => ALLOWED_FILE_EXT.test(f.name) && f.size <= 10 * 1024 * 1024)
+    if (valid.length === 0) return
+    for (const file of valid) {
+      setUploadingFiles(prev => [...prev, file.name])
+      try {
+        const uploaded = await uploadProjectFile(projectId, file)
+        setFiles(prev => [uploaded, ...prev])
+      } catch {}
+      setUploadingFiles(prev => prev.filter(n => n !== file.name))
+    }
+  }
+
+  async function handleDeleteFile(fileId: string) {
+    try {
+      await deleteProjectFile(projectId, fileId)
+      setFiles(prev => prev.filter(f => f.id !== fileId))
+    } catch {}
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes >= 1_000_000) return `${(bytes / 1_000_000).toFixed(1)} MB`
+    if (bytes >= 1_000) return `${Math.round(bytes / 1_000)} KB`
+    return `${bytes} B`
+  }
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -224,7 +264,29 @@ export default function ProjectPanel(props: ProjectPanelProps) {
   }
 
   return (
-    <div className="flex w-full flex-col" style={{ background: '#1e1e1e' }}>
+    <div
+      className="flex w-full flex-col relative"
+      style={{ background: '#1e1e1e' }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (isNewMode) setIsDragOver(true) }}
+      onDragLeave={(e) => { if (e.currentTarget.contains(e.relatedTarget as Node)) return; setIsDragOver(false) }}
+      onDrop={(e) => {
+        e.preventDefault(); e.stopPropagation(); setIsDragOver(false)
+        if (!isNewMode) return
+        const droppedFiles = Array.from(e.dataTransfer.files)
+        if (droppedFiles.length > 0) handleFileUploadList(droppedFiles)
+      }}
+    >
+      {/* Drag overlay */}
+      {isDragOver && (
+        <div className="absolute inset-0 z-10 border-2 border-dashed rounded-lg flex items-center justify-center pointer-events-none"
+          style={{ background: 'rgba(206, 145, 120, 0.06)', borderColor: '#ce9178' }}>
+          <div className="text-center">
+            <Upload size={20} className="mx-auto mb-1" style={{ color: '#ce9178' }} />
+            <p className="text-sm font-medium" style={{ color: '#ce9178' }}>Drop files to attach</p>
+          </div>
+        </div>
+      )}
+
       {/* Toolbar */}
       <div className="px-4 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #333' }}>
         <div className="flex-1 min-w-0">
@@ -294,6 +356,46 @@ export default function ProjectPanel(props: ProjectPanelProps) {
         </div>
       </div>
 
+      {/* Attachments */}
+      {isNewMode && (files.length > 0 || uploadingFiles.length > 0) && (
+        <div className="px-4 py-2" style={{ borderBottom: '1px solid #333' }}>
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider" style={{ color: '#6a737d' }}>
+              <Paperclip size={10} />
+              Attachments ({files.length})
+            </span>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="text-[10px] px-1.5 py-0.5 rounded transition-colors"
+              style={{ color: '#ce9178' }}
+            >
+              + Add
+            </button>
+          </div>
+          {uploadingFiles.map(name => (
+            <div key={name} className="flex items-center gap-2 py-1 text-xs" style={{ color: '#6a737d' }}>
+              <Loader2 size={10} className="animate-spin" /> <span className="truncate">{name}</span>
+            </div>
+          ))}
+          {files.map(f => (
+            <div key={f.id} className="flex items-center gap-2 py-1 group">
+              <FileText size={12} className="shrink-0" style={{ color: '#6a737d' }} />
+              <a href={f.storage_url} target="_blank" rel="noopener noreferrer" className="flex-1 text-xs truncate hover:underline" style={{ color: '#d4d4d4' }}>
+                {f.filename}
+              </a>
+              <span className="text-[9px] shrink-0" style={{ color: '#6a737d' }}>{formatBytes(f.file_size)}</span>
+              <button
+                onClick={() => handleDeleteFile(f.id)}
+                className="shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                style={{ color: '#f87171' }}
+              >
+                <Trash2 size={10} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Preview mode — show PDF iframe */}
       {previewMode && (
         <div className="flex-1 overflow-hidden" style={{ background: '#252526' }}>
@@ -319,6 +421,16 @@ export default function ProjectPanel(props: ProjectPanelProps) {
             <FileText size={24} className="mx-auto mb-2 opacity-40" />
             <p className="text-xs">No sections yet.</p>
             <p className="text-xs mt-1">Add content from chat or create a blank section.</p>
+            {isNewMode && files.length === 0 && (
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-3 text-[10px] px-3 py-1.5 rounded transition-colors"
+                style={{ color: '#ce9178', border: '1px dashed #ce917850' }}
+              >
+                <Paperclip size={10} className="inline mr-1" />
+                Attach files
+              </button>
+            )}
           </div>
         )}
 
@@ -396,6 +508,11 @@ export default function ProjectPanel(props: ProjectPanelProps) {
         </div>
       </div>
       )}
+      {/* Hidden file input — always mounted so ref is stable */}
+      {isNewMode && (
+        <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { handleFileUploadList(Array.from(e.target.files ?? [])); e.target.value = '' }} />
+      )}
+
       {/* Diagram Editor Modal */}
       {editingDiagram && (
         <Suspense fallback={null}>
