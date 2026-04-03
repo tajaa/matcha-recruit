@@ -47,11 +47,25 @@ function RenderValue({ value }: { value: unknown }) {
             <tbody>
               {value.map((item, i) => (
                 <tr key={i}>
-                  {keys.map(k => (
-                    <td key={k} className="px-2 py-1" style={{ color: '#d4d4d4', borderBottom: '1px solid #2a2a2a' }}>
-                      {String((item as Record<string, unknown>)[k] ?? '—')}
-                    </td>
-                  ))}
+                  {keys.map(k => {
+                    const cellVal = (item as Record<string, unknown>)[k]
+                    return (
+                      <td key={k} className="px-2 py-1 align-top" style={{ color: '#d4d4d4', borderBottom: '1px solid #2a2a2a' }}>
+                        {cellVal == null ? '—'
+                          : Array.isArray(cellVal) ? cellVal.map((v, j) => (
+                              <div key={j} className="text-[10px]">
+                                {typeof v === 'object' && v !== null
+                                  ? Object.values(v as Record<string, unknown>).join(' · ')
+                                  : String(v)}
+                              </div>
+                            ))
+                          : typeof cellVal === 'object' ? Object.entries(cellVal as Record<string, unknown>).map(([ck, cv]) => (
+                              <div key={ck} className="text-[10px]">{formatKey(ck)}: {String(cv ?? '—')}</div>
+                            ))
+                          : String(cellVal)}
+                      </td>
+                    )
+                  })}
                 </tr>
               ))}
             </tbody>

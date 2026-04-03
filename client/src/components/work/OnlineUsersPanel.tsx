@@ -29,31 +29,27 @@ export function OnlineUsersPanel() {
 
   return (
     <>
-      {/* Floating trigger button */}
+      {/* Inline trigger */}
       <button
         onClick={() => setOpen(!open)}
-        className={`fixed bottom-6 right-6 z-40 flex items-center gap-2 rounded-full px-4 py-2.5 shadow-lg transition-all ${
-          open
-            ? 'bg-zinc-700 text-zinc-100'
-            : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
-        }`}
+        className="relative flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white transition-colors"
       >
         <div className="relative">
           <Users className="w-4 h-4" />
           {count > 0 && (
-            <div className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 rounded-full bg-emerald-500 text-[8px] font-bold text-white flex items-center justify-center">
+            <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-emerald-500 text-[7px] font-bold text-white flex items-center justify-center">
               {count}
             </div>
           )}
         </div>
-        <span className="text-xs font-medium">
+        <span className="hidden sm:inline text-xs">
           {count > 0 ? `${count} online` : 'Online'}
         </span>
       </button>
 
       {/* Panel */}
       {open && (
-        <div className="fixed bottom-20 right-6 z-40 w-72 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden">
+        <div className="absolute top-full right-0 mt-2 z-40 w-72 bg-zinc-900 border border-zinc-800 rounded-xl shadow-2xl overflow-hidden">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
             <div className="flex items-center gap-2">
