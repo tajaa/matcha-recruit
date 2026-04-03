@@ -4,17 +4,58 @@ struct ContentView: View {
     @Environment(AppState.self) private var appState
     @State private var threadListVM = ThreadListViewModel()
     @State private var isCreating = false
+    @State private var sidebarTab: SidebarTab = .threads
+
+    enum SidebarTab: String, CaseIterable {
+        case threads = "Threads"
+        case projects = "Projects"
+        case inbox = "Inbox"
+    }
 
     var body: some View {
         @Bindable var appState = appState
 
         NavigationSplitView {
-            ThreadListView(viewModel: threadListVM)
-                .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
+            VStack(spacing: 0) {
+                // Tab picker
+                Picker("", selection: $sidebarTab) {
+                    ForEach(SidebarTab.allCases, id: \.self) { tab in
+                        HStack(spacing: 4) {
+                            Text(tab.rawValue)
+                            if tab == .inbox && appState.unreadInboxCount > 0 {
+                                Text("\(appState.unreadInboxCount)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 4)
+                                    .background(Color.matcha500)
+                                    .clipShape(Capsule())
+                            }
+                        }
+                        .tag(tab)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+
+                switch sidebarTab {
+                case .threads:
+                    ThreadListView(viewModel: threadListVM)
+                case .projects:
+                    ProjectListView()
+                case .inbox:
+                    InboxSidebarView()
+                }
+            }
+            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
         } detail: {
             if let threadId = appState.selectedThreadId {
                 ThreadDetailView(threadId: threadId)
                     .onChange(of: threadId) { appState.showSkills = false }
+            } else if let projectId = appState.selectedProjectId {
+                ProjectDetailView(projectId: projectId)
+            } else if appState.showInbox {
+                InboxView()
             } else if appState.showSkills {
                 SkillsView()
             } else {
@@ -77,6 +118,80 @@ struct ContentView: View {
                         .foregroundColor(.secondary)
                     }
                 }
+            }
+        }
+        .onChange(of: sidebarTab) {
+            // Clear selections when switching tabs
+            if sidebarTab == .inbox {
+                appState.selectedThreadId = nil
+                appState.selectedProjectId = nil
+                appState.showSkills = false
+                appState.showInbox = true
+            } else {
+                appState.showInbox = false
+            }
+        }
+    }
+}
+
+// MARK: - Inbox Sidebar (lightweight conversation list for sidebar)
+
+private struct InboxSidebarView: View {
+    @Environment(AppState.self) private var appState
+    @State private var conversations: [MWInboxConversation] = []
+    @State private var isLoading = true
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if isLoading {
+                Spacer()
+                ProgressView().tint(.secondary)
+                Spacer()
+            } else if conversations.isEmpty {
+                Spacer()
+                VStack(spacing: 8) {
+                    Image(systemName: "envelope").font(.system(size: 28)).foregroundColor(.secondary)
+                    Text("No messages").font(.system(size: 13)).foregroundColor(.secondary)
+                }
+                Spacer()
+            } else {
+                List(conversations, id: \.id) { convo in
+                    Button {
+                        appState.showInbox = true
+                        appState.selectedThreadId = nil
+                        appState.selectedProjectId = nil
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(convo.title ?? convo.participants?.first?.name ?? "Conversation")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                if let preview = convo.lastMessagePreview {
+                                    Text(preview)
+                                        .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
+                                }
+                            }
+                            Spacer()
+                            if (convo.unreadCount ?? 0) > 0 {
+                                Circle().fill(Color.matcha500).frame(width: 8, height: 8)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 2)
+                }
+                .listStyle(.sidebar)
+                .scrollContentBackground(.hidden)
+            }
+        }
+        .background(Color.appBackground)
+        .task {
+            do {
+                let list = try await InboxService.shared.listConversations()
+                await MainActor.run { conversations = list; isLoading = false }
+            } catch {
+                await MainActor.run { isLoading = false }
             }
         }
     }

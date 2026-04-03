@@ -30,6 +30,18 @@
 		48C216A1C92E1717B236961D /* NewThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */; };
 		A7F2C319E8B045D16F3CA982 /* SkillsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9E4D71F3C825A064D17F308 /* SkillsView.swift */; };
 		D1A2B3C4E5F60718A9B0C1D2 /* UsageSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2B3C4D5F6071829A0B1C2D3 /* UsageSummaryView.swift */; };
+		F3A4B5C6D7E8091A2B3C4D5E /* ResumeBatchPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A4B5C6D7E8F9011A2B3C4D5E /* ResumeBatchPanelView.swift */; };
+		B5C6D7E8F9A0112B3C4D5E6F /* InventoryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D7E8F9A0B1223C4D5E6F70 /* InventoryPanelView.swift */; };
+		AA11BB22CC33DD44EE550001 /* ProjectDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */; };
+		AA11BB22CC33DD44EE550002 /* ProjectListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660002 /* ProjectListView.swift */; };
+		AA11BB22CC33DD44EE550003 /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */; };
+		AA11BB22CC33DD44EE550004 /* SectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */; };
+		AA11BB22CC33DD44EE550005 /* CollaboratorPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */; };
+		AA11BB22CC33DD44EE550006 /* AgentPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */; };
+		AA11BB22CC33DD44EE550007 /* ComplianceDecisionTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */; };
+		AA11BB22CC33DD44EE550008 /* InboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660008 /* InboxService.swift */; };
+		AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660009 /* InboxView.swift */; };
+		AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */; };
 		59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD09F509367E88989F2B765 /* StatusBadge.swift */; };
 		208F703F48307B35717A911B /* LoadingDots.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13338371A8BC76142D4A946 /* LoadingDots.swift */; };
 		84947A5F80A1EC7B15C1B8E9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 043A0A515D971904874F82FA /* Assets.xcassets */; };
@@ -60,6 +72,18 @@
 		1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewThreadView.swift; sourceTree = "<group>"; };
 		B9E4D71F3C825A064D17F308 /* SkillsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsView.swift; sourceTree = "<group>"; };
 		E2B3C4D5F6071829A0B1C2D3 /* UsageSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryView.swift; sourceTree = "<group>"; };
+		A4B5C6D7E8F9011A2B3C4D5E /* ResumeBatchPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeBatchPanelView.swift; sourceTree = "<group>"; };
+		C6D7E8F9A0B1223C4D5E6F70 /* InventoryPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InventoryPanelView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailViewModel.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660002 /* ProjectListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectListView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionEditorView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaboratorPanelView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPanelView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComplianceDecisionTreeView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660008 /* InboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxService.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660009 /* InboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxComposeView.swift; sourceTree = "<group>"; };
 		FAD09F509367E88989F2B765 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		B13338371A8BC76142D4A946 /* LoadingDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingDots.swift; sourceTree = "<group>"; };
 		043A0A515D971904874F82FA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -111,6 +135,7 @@
 			children = (
 				CB1861633F56B0B081A83870 /* Login */,
 				3F39F7E6D963F82CA7F10D0F /* MatchaWork */,
+				AA11BB22CC33DD44EE770001 /* Inbox */,
 				2A3B09DBB213E1E548F63A3D /* Components */,
 			);
 			name = Views;
@@ -146,6 +171,7 @@
 				15F1E6446AC5C08F85073A51 /* APIClient.swift */,
 				696FF167B14C8BBD12958A10 /* AuthService.swift */,
 				4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */,
+				AA11BB22CC33DD44EE660008 /* InboxService.swift */,
 			);
 			name = Services;
 			path = Services;
@@ -157,6 +183,7 @@
 				0B03E99B58F986725B43CD7A /* AuthViewModel.swift */,
 				FA53495B161A46747955400C /* ThreadListViewModel.swift */,
 				F88AB428B69CD0DC86AF1AA9 /* ThreadDetailViewModel.swift */,
+				AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */,
 			);
 			name = ViewModels;
 			path = ViewModels;
@@ -183,6 +210,14 @@
 				1768B8AD82B9DE8709D0ADF7 /* NewThreadView.swift */,
 				B9E4D71F3C825A064D17F308 /* SkillsView.swift */,
 				E2B3C4D5F6071829A0B1C2D3 /* UsageSummaryView.swift */,
+				A4B5C6D7E8F9011A2B3C4D5E /* ResumeBatchPanelView.swift */,
+				C6D7E8F9A0B1223C4D5E6F70 /* InventoryPanelView.swift */,
+				AA11BB22CC33DD44EE660002 /* ProjectListView.swift */,
+				AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */,
+				AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */,
+				AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */,
+				AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */,
+				AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */,
 			);
 			name = MatchaWork;
 			path = MatchaWork;
@@ -205,6 +240,16 @@
 			);
 			name = Resources;
 			path = Resources;
+			sourceTree = "<group>";
+		};
+		AA11BB22CC33DD44EE770001 /* Inbox */ = {
+			isa = PBXGroup;
+			children = (
+				AA11BB22CC33DD44EE660009 /* InboxView.swift */,
+				AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */,
+			);
+			name = Inbox;
+			path = Inbox;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -299,6 +344,18 @@
 				48C216A1C92E1717B236961D /* NewThreadView.swift in Sources */,
 				A7F2C319E8B045D16F3CA982 /* SkillsView.swift in Sources */,
 				D1A2B3C4E5F60718A9B0C1D2 /* UsageSummaryView.swift in Sources */,
+				F3A4B5C6D7E8091A2B3C4D5E /* ResumeBatchPanelView.swift in Sources */,
+				B5C6D7E8F9A0112B3C4D5E6F /* InventoryPanelView.swift in Sources */,
+				AA11BB22CC33DD44EE550001 /* ProjectDetailViewModel.swift in Sources */,
+				AA11BB22CC33DD44EE550002 /* ProjectListView.swift in Sources */,
+				AA11BB22CC33DD44EE550003 /* ProjectDetailView.swift in Sources */,
+				AA11BB22CC33DD44EE550004 /* SectionEditorView.swift in Sources */,
+				AA11BB22CC33DD44EE550005 /* CollaboratorPanelView.swift in Sources */,
+				AA11BB22CC33DD44EE550006 /* AgentPanelView.swift in Sources */,
+				AA11BB22CC33DD44EE550007 /* ComplianceDecisionTreeView.swift in Sources */,
+				AA11BB22CC33DD44EE550008 /* InboxService.swift in Sources */,
+				AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */,
+				AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */,
 				59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */,
 				208F703F48307B35717A911B /* LoadingDots.swift in Sources */,
 			);

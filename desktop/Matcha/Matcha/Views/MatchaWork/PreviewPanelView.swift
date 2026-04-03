@@ -38,6 +38,10 @@ struct PreviewPanelView: View {
                     OnboardingPreview(state: currentState)
                 case .handbook:
                     HandbookPreview(state: currentState)
+                case .resumeBatch:
+                    ResumeBatchPanelView(state: currentState, threadId: threadId)
+                case .inventory:
+                    InventoryPanelView(state: currentState)
                 case .chat:
                     EmptyPreviewView()
                 }

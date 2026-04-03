@@ -6,6 +6,7 @@ struct ThreadDetailView: View {
     @State private var showVersionHistory = false
     @State private var showFinalizeConfirm = false
     @State private var showUsageSummary = false
+    @State private var showAgentPanel = false
     @State private var editingTitle = false
     @State private var titleDraft = ""
     @AppStorage("mw-chat-theme") private var lightMode = false
@@ -160,6 +161,20 @@ struct ThreadDetailView: View {
                 .menuStyle(.borderlessButton)
                 .fixedSize()
                 .help("Select AI model")
+
+                // Email agent
+                Button {
+                    showAgentPanel.toggle()
+                } label: {
+                    Image(systemName: "envelope")
+                        .font(.system(size: 13))
+                        .foregroundColor(showAgentPanel ? .matcha500 : nil)
+                }
+                .help("Email agent")
+                .popover(isPresented: $showAgentPanel) {
+                    AgentPanelView()
+                        .frame(width: 560, height: 440)
+                }
 
                 // Usage summary
                 Button {

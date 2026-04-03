@@ -40,6 +40,10 @@ class ThreadDetailViewModel {
         case .handbook:
             return currentState["handbook_title"] != nil
                 || currentState["handbook_sections"] != nil
+        case .resumeBatch:
+            return currentState["candidates"] != nil
+        case .inventory:
+            return currentState["inventory_items"] != nil
         case .chat:
             return false
         }

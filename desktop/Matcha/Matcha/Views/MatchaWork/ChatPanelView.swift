@@ -1,12 +1,17 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private let resumeExtensions: Set<String> = ["pdf", "doc", "docx", "txt"]
+private let inventoryExtensions: Set<String> = ["csv", "xlsx", "xls"]
+
 struct ChatPanelView: View {
     @Bindable var viewModel: ThreadDetailViewModel
     var lightMode: Bool = false
     var selectedModel: String? = nil
     @State private var inputText = ""
     @State private var previewURL: String? = nil
+    @State private var isDragOver = false
+    @State private var uploadProgress: String? = nil
 
     private func send() {
         let content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -28,6 +33,52 @@ struct ChatPanelView: View {
             return "Edit slide \(idx + 1) — describe your changes..."
         }
         return "Message..."
+    }
+
+    private func handleFileDrop(_ providers: [NSItemProvider]) {
+        guard let threadId = viewModel.thread?.id else { return }
+        for provider in providers {
+            provider.loadItem(forTypeIdentifier: "public.file-url") { item, _ in
+                guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
+                let ext = url.pathExtension.lowercased()
+                guard let fileData = try? Data(contentsOf: url) else { return }
+
+                let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
+                let file = (data: fileData, filename: url.lastPathComponent, mimeType: mime)
+
+                let endpoint: String
+                if resumeExtensions.contains(ext) {
+                    endpoint = "resume/upload"
+                } else if inventoryExtensions.contains(ext) {
+                    endpoint = "inventory/upload"
+                } else {
+                    return // unsupported file type
+                }
+
+                Task {
+                    await MainActor.run { uploadProgress = "Uploading \(url.lastPathComponent)..." }
+                    do {
+                        let bytes = try await MatchaWorkService.shared.uploadFiles(
+                            threadId: threadId, endpoint: endpoint, files: [file]
+                        )
+                        // Consume SSE stream (refresh thread when done)
+                        for try await line in bytes.lines {
+                            if line.hasPrefix("data: "), line.contains("\"type\":\"complete\"") || line.contains("[DONE]") {
+                                break
+                            }
+                        }
+                        // Reload thread to pick up new state
+                        await viewModel.loadThread(id: threadId)
+                        await MainActor.run { uploadProgress = nil }
+                    } catch {
+                        await MainActor.run {
+                            viewModel.errorMessage = "Upload failed: \(error.localizedDescription)"
+                            uploadProgress = nil
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private func pickImages() {
@@ -203,6 +254,20 @@ struct ChatPanelView: View {
                     .background(lightMode ? Color(white: 0.97) : Color.zinc900.opacity(0.5))
                 }
 
+                // Upload progress
+                if let progress = uploadProgress {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text(progress)
+                            .font(.system(size: 11))
+                            .foregroundColor(.matcha500)
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.matcha500.opacity(0.06))
+                }
+
                 // Input area
                 HStack(alignment: .bottom, spacing: 10) {
                     // Image attach button
@@ -247,6 +312,18 @@ struct ChatPanelView: View {
                 .padding(.vertical, 10)
                 .background(Color.zinc900)
             }
+        }
+        .overlay(
+            isDragOver
+            ? RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.matcha500, lineWidth: 2)
+                .background(Color.matcha500.opacity(0.05))
+                .allowsHitTesting(false)
+            : nil
+        )
+        .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
+            handleFileDrop(providers)
+            return true
         }
         .background(Color.appBackground)
         .sheet(isPresented: Binding(get: { previewURL != nil }, set: { if !$0 { previewURL = nil } })) {

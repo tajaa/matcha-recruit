@@ -272,6 +272,75 @@ class MatchaWorkService {
         invalidateThread(threadId: id)
     }
 
+    // MARK: - Resume / Inventory File Upload (multipart)
+
+    func uploadFiles(
+        threadId: String,
+        endpoint: String,
+        files: [(data: Data, filename: String, mimeType: String)]
+    ) async throws -> URLSession.AsyncBytes {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        for file in files {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(file.filename)\"\r\n")
+            body.append("Content-Type: \(file.mimeType)\r\n\r\n")
+            body.append(file.data)
+            body.append("\r\n")
+        }
+        body.append("--\(boundary)--\r\n")
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/threads/\(threadId)/\(endpoint)") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, "Upload failed")
+        }
+        invalidateThread(threadId: threadId)
+        return bytes
+    }
+
+    // MARK: - Send / Sync Interviews
+
+    func sendInterviews(
+        threadId: String,
+        candidateIds: [String],
+        positionTitle: String? = nil,
+        customMessage: String? = nil
+    ) async throws -> [String: Any] {
+        let body = MWSendInterviewsRequest(
+            candidateIds: candidateIds,
+            positionTitle: positionTitle,
+            customMessage: customMessage
+        )
+        let data = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/threads/\(threadId)/resume/send-interviews",
+            body: body
+        )
+        invalidateThread(threadId: threadId)
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        return json
+    }
+
+    func syncInterviews(threadId: String) async throws {
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/threads/\(threadId)/resume/sync-interviews"
+        )
+        invalidateThread(threadId: threadId)
+    }
+
     // MARK: - Usage Summary
 
     func fetchUsageSummary(periodDays: Int = 30) async throws -> MWUsageSummary {
@@ -313,6 +382,138 @@ class MatchaWorkService {
             method: "GET",
             path: "\(basePath)/threads/\(threadId)/project/export/\(format)"
         )
+    }
+
+    // MARK: - Projects
+
+    func listProjects(status: String? = nil) async throws -> [MWProject] {
+        var path = "\(basePath)/projects"
+        if let s = status { path += "?status=\(s)" }
+        return try await client.request(method: "GET", path: path)
+    }
+
+    func createProject(title: String, projectType: String = "general") async throws -> MWProject {
+        struct Body: Codable { let title: String; let projectType: String
+            enum CodingKeys: String, CodingKey { case title; case projectType = "project_type" }
+        }
+        return try await client.request(method: "POST", path: "\(basePath)/projects", body: Body(title: title, projectType: projectType))
+    }
+
+    func getProjectDetail(id: String) async throws -> MWProject {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(id)")
+    }
+
+    func updateProjectMeta(id: String, title: String? = nil, isPinned: Bool? = nil, status: String? = nil) async throws -> MWProject {
+        struct Body: Codable { let title: String?; let isPinned: Bool?; let status: String?
+            enum CodingKeys: String, CodingKey { case title; case isPinned = "is_pinned"; case status }
+        }
+        return try await client.request(method: "PATCH", path: "\(basePath)/projects/\(id)", body: Body(title: title, isPinned: isPinned, status: status))
+    }
+
+    func archiveProject(id: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(id)")
+    }
+
+    func addProjectSection(projectId: String, title: String, content: String = "") async throws -> MWProject {
+        struct Body: Codable { let title: String; let content: String }
+        return try await client.request(method: "POST", path: "\(basePath)/projects/\(projectId)/sections", body: Body(title: title, content: content))
+    }
+
+    func updateProjectSection(projectId: String, sectionId: String, title: String? = nil, content: String? = nil) async throws -> MWProject {
+        struct Body: Codable { let title: String?; let content: String? }
+        return try await client.request(method: "PUT", path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)", body: Body(title: title, content: content))
+    }
+
+    func deleteProjectSection(projectId: String, sectionId: String) async throws -> MWProject {
+        try await client.request(method: "DELETE", path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)")
+    }
+
+    func reorderProjectSections(projectId: String, sectionIds: [String]) async throws -> MWProject {
+        struct Body: Codable { let sectionIds: [String]; enum CodingKeys: String, CodingKey { case sectionIds = "section_ids" } }
+        return try await client.request(method: "PUT", path: "\(basePath)/projects/\(projectId)/sections/reorder", body: Body(sectionIds: sectionIds))
+    }
+
+    func createProjectChat(projectId: String, title: String? = nil) async throws -> MWThread {
+        struct Body: Codable { let title: String? }
+        return try await client.request(method: "POST", path: "\(basePath)/projects/\(projectId)/chats", body: Body(title: title))
+    }
+
+    func exportProject(projectId: String, format: String) async throws -> Data {
+        try await client.requestData(method: "GET", path: "\(basePath)/projects/\(projectId)/export/\(format)")
+    }
+
+    // MARK: - Collaborators
+
+    func listCollaborators(projectId: String) async throws -> [MWProjectCollaborator] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/collaborators")
+    }
+
+    func addCollaborator(projectId: String, userId: String) async throws {
+        struct Body: Codable { let userId: String; let role: String; enum CodingKeys: String, CodingKey { case userId = "user_id"; case role } }
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/projects/\(projectId)/collaborators", body: Body(userId: userId, role: "collaborator"))
+    }
+
+    func removeCollaborator(projectId: String, userId: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(projectId)/collaborators/\(userId)")
+    }
+
+    func searchAdminUsers(query: String) async throws -> [MWAdminSearchUser] {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        return try await client.request(method: "GET", path: "\(basePath)/admin-users/search?q=\(encoded)")
+    }
+
+    // MARK: - Recruiting Pipeline
+
+    func updateProjectPosting(projectId: String, posting: [String: Any]) async throws -> Data {
+        let json = try JSONSerialization.data(withJSONObject: posting)
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/posting") else { throw APIError.invalidURL }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = json
+        let (data, _) = try await URLSession.shared.data(for: request)
+        return data
+    }
+
+    func toggleShortlist(projectId: String, candidateId: String) async throws -> Data {
+        try await client.requestData(method: "POST", path: "\(basePath)/projects/\(projectId)/shortlist/\(candidateId)")
+    }
+
+    // MARK: - Email Agent
+
+    func agentEmailStatus() async throws -> MWAgentEmailStatus {
+        try await client.request(method: "GET", path: "\(basePath)/agent/email/status")
+    }
+
+    func agentConnectGmail() async throws -> String {
+        struct Resp: Codable { let authUrl: String; enum CodingKeys: String, CodingKey { case authUrl = "auth_url" } }
+        let resp: Resp = try await client.request(method: "POST", path: "\(basePath)/agent/email/connect")
+        return resp.authUrl
+    }
+
+    func agentDisconnectGmail() async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/agent/email/disconnect")
+    }
+
+    func agentFetchEmails() async throws -> [MWAgentEmail] {
+        try await client.request(method: "POST", path: "\(basePath)/agent/email/fetch")
+    }
+
+    func agentDraftReply(emailId: String, instructions: String) async throws -> String {
+        struct Body: Codable { let emailId: String; let instructions: String
+            enum CodingKeys: String, CodingKey { case emailId = "email_id"; case instructions }
+        }
+        struct Resp: Codable { let draft: String }
+        let resp: Resp = try await client.request(method: "POST", path: "\(basePath)/agent/email/draft", body: Body(emailId: emailId, instructions: instructions))
+        return resp.draft
+    }
+
+    func agentSendEmail(to: String, subject: String, body: String, replyToId: String? = nil) async throws {
+        struct Body: Codable { let to: String; let subject: String; let body: String; let replyToId: String?
+            enum CodingKeys: String, CodingKey { case to, subject, body; case replyToId = "reply_to_id" }
+        }
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/agent/email/send", body: Body(to: to, subject: subject, body: body, replyToId: replyToId))
     }
 
     func removeImage(threadId: String, imageUrl: String) async throws -> [String] {

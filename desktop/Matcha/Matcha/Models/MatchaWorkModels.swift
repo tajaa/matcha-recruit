@@ -23,24 +23,21 @@ enum MWTaskType: String, Codable {
     case onboarding
     case presentation
     case handbook
+    case resumeBatch = "resume_batch"
+    case inventory
     case chat
 
     var label: String {
         switch self {
-        case .chat:
-            return "chat"
-        case .review:
-            return "anonymized review"
-        case .workbook:
-            return "HR workbook"
-        case .onboarding:
-            return "employee onboarding"
-        case .presentation:
-            return "presentation"
-        case .handbook:
-            return "employee handbook"
-        case .offerLetter:
-            return "offer letter"
+        case .chat: return "chat"
+        case .review: return "anonymized review"
+        case .workbook: return "HR workbook"
+        case .onboarding: return "employee onboarding"
+        case .presentation: return "presentation"
+        case .handbook: return "employee handbook"
+        case .offerLetter: return "offer letter"
+        case .resumeBatch: return "resume batch"
+        case .inventory: return "inventory"
         }
     }
 }
@@ -55,13 +52,19 @@ func inferMWTaskType(from state: [String: AnyCodable]) -> MWTaskType {
     if state.keys.contains(where: { $0.hasPrefix("handbook_") }) {
         return .handbook
     }
+    if state["candidates"] != nil || state["batch_title"] != nil || state["batch_status"] != nil {
+        return .resumeBatch
+    }
+    if state["inventory_items"] != nil || state["inventory_title"] != nil {
+        return .inventory
+    }
     if state["sections"] != nil || state["workbook_title"] != nil {
         return .workbook
     }
     if state["presentation_title"] != nil || state["slides"] != nil {
         return .presentation
     }
-    if state["employees"] != nil || state["batch_status"] != nil {
+    if state["employees"] != nil {
         return .onboarding
     }
     return .chat
@@ -427,6 +430,88 @@ struct MWPayerPolicySource: Codable {
     }
 }
 
+// MARK: - Resume Candidate
+
+struct MWResumeCandidate: Codable, Identifiable {
+    let id: String
+    let filename: String
+    let resumeUrl: String?
+    let name: String?
+    let email: String?
+    let phone: String?
+    let location: String?
+    let currentTitle: String?
+    let experienceYears: Double?
+    let skills: [String]?
+    let education: String?
+    let certifications: [String]?
+    let summary: String?
+    let strengths: [String]?
+    let flags: [String]?
+    let status: String?
+    let interviewId: String?
+    let interviewStatus: String?
+    let interviewScore: Double?
+    let interviewSummary: String?
+    let matchScore: Double?
+    let matchSummary: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, filename, name, email, phone, location, skills, education
+        case certifications, summary, strengths, flags, status
+        case resumeUrl = "resume_url"
+        case currentTitle = "current_title"
+        case experienceYears = "experience_years"
+        case interviewId = "interview_id"
+        case interviewStatus = "interview_status"
+        case interviewScore = "interview_score"
+        case interviewSummary = "interview_summary"
+        case matchScore = "match_score"
+        case matchSummary = "match_summary"
+    }
+
+    var displayName: String { name ?? filename }
+}
+
+struct MWSendInterviewsRequest: Codable {
+    let candidateIds: [String]
+    let positionTitle: String?
+    let customMessage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case candidateIds = "candidate_ids"
+        case positionTitle = "position_title"
+        case customMessage = "custom_message"
+    }
+}
+
+// MARK: - Inventory Item
+
+struct MWInventoryItem: Codable, Identifiable {
+    let id: String
+    let filename: String
+    let productName: String?
+    let sku: String?
+    let category: String?
+    let quantity: Double?
+    let unit: String?
+    let unitCost: Double?
+    let totalCost: Double?
+    let vendor: String?
+    let parLevel: Double?
+    let status: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, filename, sku, category, quantity, unit, vendor, status
+        case productName = "product_name"
+        case unitCost = "unit_cost"
+        case totalCost = "total_cost"
+        case parLevel = "par_level"
+    }
+
+    var displayName: String { productName ?? filename }
+}
+
 // MARK: - Usage Summary
 
 struct MWUsageSummary: Codable {
@@ -515,6 +600,214 @@ struct MWSendReviewRequestsResponse: Codable {
         case sentCount = "sent_count"
         case failedCount = "failed_count"
         case failedEmails = "failed_emails"
+    }
+}
+
+// MARK: - Projects
+
+enum MWProjectType: String, Codable {
+    case general
+    case presentation
+    case recruiting
+}
+
+struct MWProject: Codable, Identifiable {
+    let id: String
+    var title: String
+    let projectType: String?
+    var status: String?
+    var isPinned: Bool?
+    var version: Int?
+    var sections: [MWProjectSection]?
+    var projectData: [String: AnyCodable]?
+    var chatCount: Int?
+    var collaborators: [MWProjectCollaborator]?
+    let createdAt: String?
+    var updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, status, version, sections
+        case projectType = "project_type"
+        case isPinned = "is_pinned"
+        case projectData = "project_data"
+        case chatCount = "chat_count"
+        case collaborators
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
+}
+
+struct MWProjectSection: Codable, Identifiable {
+    let id: String
+    var title: String
+    var content: String?
+    var sourceMessageId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, content
+        case sourceMessageId = "source_message_id"
+    }
+}
+
+struct MWProjectCollaborator: Codable, Identifiable {
+    var id: String { userId }
+    let userId: String
+    let name: String
+    let email: String
+    let avatarUrl: String?
+    let role: String?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, email, role
+        case userId = "user_id"
+        case avatarUrl = "avatar_url"
+        case createdAt = "created_at"
+    }
+}
+
+struct MWAdminSearchUser: Codable, Identifiable {
+    let id: String
+    let email: String
+    let name: String
+    let avatarUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, email, name
+        case avatarUrl = "avatar_url"
+    }
+}
+
+// MARK: - Email Agent
+
+struct MWAgentEmail: Codable, Identifiable {
+    let id: String
+    let subject: String?
+    let from: String?
+    let date: String?
+    let body: String?
+}
+
+struct MWAgentEmailStatus: Codable {
+    let connected: Bool
+    let email: String?
+    let lastSync: String?
+
+    enum CodingKeys: String, CodingKey {
+        case connected, email
+        case lastSync = "last_sync"
+    }
+}
+
+// MARK: - Inbox
+
+struct MWInboxConversation: Codable, Identifiable {
+    let id: String
+    var title: String?
+    let isGroup: Bool?
+    var lastMessageAt: String?
+    var lastMessagePreview: String?
+    var participants: [MWInboxParticipant]?
+    var unreadCount: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, participants
+        case isGroup = "is_group"
+        case lastMessageAt = "last_message_at"
+        case lastMessagePreview = "last_message_preview"
+        case unreadCount = "unread_count"
+    }
+}
+
+struct MWInboxConversationDetail: Codable, Identifiable {
+    let id: String
+    var title: String?
+    let isGroup: Bool?
+    let createdBy: String?
+    var lastMessageAt: String?
+    var lastMessagePreview: String?
+    var participants: [MWInboxParticipant]?
+    var messages: [MWInboxMessage]?
+    var unreadCount: Int?
+    let createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, participants, messages
+        case isGroup = "is_group"
+        case createdBy = "created_by"
+        case lastMessageAt = "last_message_at"
+        case lastMessagePreview = "last_message_preview"
+        case unreadCount = "unread_count"
+        case createdAt = "created_at"
+    }
+}
+
+struct MWInboxMessage: Codable, Identifiable {
+    let id: String
+    let conversationId: String
+    let senderId: String
+    let senderName: String
+    let content: String
+    let attachments: [MWInboxAttachment]?
+    let createdAt: String
+    let editedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, content, attachments
+        case conversationId = "conversation_id"
+        case senderId = "sender_id"
+        case senderName = "sender_name"
+        case createdAt = "created_at"
+        case editedAt = "edited_at"
+    }
+}
+
+struct MWInboxAttachment: Codable, Identifiable {
+    var id: String { url }
+    let url: String
+    let filename: String
+    let contentType: String
+    let size: Int
+
+    enum CodingKeys: String, CodingKey {
+        case url, filename, size
+        case contentType = "content_type"
+    }
+
+    var isImage: Bool { contentType.hasPrefix("image/") }
+}
+
+struct MWInboxParticipant: Codable, Identifiable {
+    var id: String { userId }
+    let userId: String
+    let name: String
+    let email: String
+    let role: String?
+    let avatarUrl: String?
+    let lastReadAt: String?
+    let isMuted: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case name, email, role
+        case userId = "user_id"
+        case avatarUrl = "avatar_url"
+        case lastReadAt = "last_read_at"
+        case isMuted = "is_muted"
+    }
+}
+
+struct MWInboxUserSearch: Codable, Identifiable {
+    let id: String
+    let email: String
+    let name: String
+    let role: String?
+    let avatarUrl: String?
+    let companyName: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, email, name, role
+        case avatarUrl = "avatar_url"
+        case companyName = "company_name"
     }
 }
 

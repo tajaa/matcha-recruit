@@ -5,9 +5,13 @@ class AppState {
     var isAuthenticated: Bool = false
     var currentUser: UserInfo? = nil
     var selectedThreadId: String? = nil
+    var selectedProjectId: String? = nil
     var showSkills: Bool = false
+    var showInbox: Bool = false
     var onlineUsers: [MWOnlineUser] = []
+    var unreadInboxCount: Int = 0
     private var heartbeatTask: Task<Void, Never>?
+    private var inboxPollTask: Task<Void, Never>?
 
     init() {
         APIClient.shared.onUnauthorized = { [weak self] in
@@ -27,6 +31,7 @@ class AppState {
         isAuthenticated = true
         MatchaWorkService.shared.updateCacheScope(user.id)
         startPresenceHeartbeat()
+        startInboxPolling()
     }
 
     @MainActor
@@ -36,8 +41,13 @@ class AppState {
         selectedThreadId = nil
         showSkills = false
         onlineUsers = []
+        unreadInboxCount = 0
+        selectedProjectId = nil
+        showInbox = false
         heartbeatTask?.cancel()
         heartbeatTask = nil
+        inboxPollTask?.cancel()
+        inboxPollTask = nil
         MatchaWorkService.shared.updateCacheScope(nil)
         APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)
@@ -48,6 +58,19 @@ class AppState {
         guard let user = await AuthService.shared.restoreSession() else { return }
         await MainActor.run {
             didLogin(user: user)
+        }
+    }
+
+    private func startInboxPolling() {
+        inboxPollTask?.cancel()
+        inboxPollTask = Task {
+            while !Task.isCancelled {
+                do {
+                    let count = try await InboxService.shared.getUnreadCount()
+                    await MainActor.run { unreadInboxCount = count }
+                } catch { }
+                try? await Task.sleep(for: .seconds(60))
+            }
         }
     }
 
