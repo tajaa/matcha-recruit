@@ -4,7 +4,10 @@ Twilio Media Streams: mulaw 8kHz
 Gemini Live API: PCM signed 16-bit 16kHz
 """
 
-import audioop_lts as audioop
+try:
+    import audioop
+except ImportError:
+    import audioop_lts as audioop  # Python 3.13+ fallback
 
 
 def mulaw_8k_to_pcm_16k(mulaw_data: bytes) -> bytes:

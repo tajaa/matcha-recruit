@@ -26,4 +26,4 @@ stripe>=8.0.0
 python3-saml>=1.16.0
 playwright>=1.49.0
 twilio>=9.0.0
-audioop-lts>=0.2.1
+audioop-lts>=0.2.1; python_version >= "3.13"
