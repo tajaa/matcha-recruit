@@ -51,14 +51,24 @@ const nav: (NavItem | NavGroup)[] = [
   },
 ]
 
+// Personal accounts only see Matcha Work — no platform/HR items
+const personalNav: (NavItem | NavGroup)[] = [
+  {
+    label: 'AI',
+    items: [
+      { to: '/work', icon: Sparkles, label: 'Matcha Work' },
+    ],
+  },
+]
+
 export default function ClientSidebar() {
-  const { me } = useMe()
+  const { me, loading, isPersonal } = useMe()
 
   return (
     <SidebarShell
-      logoTo="/app"
+      logoTo={isPersonal ? '/work' : '/app'}
       logoLabel="Matcha"
-      nav={nav}
+      nav={loading ? [] : isPersonal ? personalNav : nav}
       user={me?.profile ? {
         name: me.profile.name,
         avatarUrl: me.user?.avatar_url,

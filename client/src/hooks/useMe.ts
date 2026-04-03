@@ -52,5 +52,7 @@ export function useMe() {
   const isHealthcare =
     me?.profile?.industry?.toLowerCase() === 'healthcare'
 
-  return { me, loading, hasFeature, isHealthcare, refresh }
+  const isPersonal = !!me?.profile?.is_personal
+
+  return { me, loading, hasFeature, isHealthcare, isPersonal, refresh }
 }

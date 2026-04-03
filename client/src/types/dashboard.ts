@@ -193,6 +193,7 @@ export interface MeClientProfile {
   industry: string | null
   healthcare_specialties: string[]
   enabled_features: Record<string, boolean>
+  is_personal: boolean
   name: string
   phone: string | null
   job_title: string | null

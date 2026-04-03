@@ -1945,6 +1945,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                        comp.status as company_status, comp.rejection_reason,
                        comp.industry, comp.healthcare_specialties,
                        COALESCE(comp.enabled_features, $2::jsonb) as enabled_features,
+                       COALESCE(comp.is_personal, false) as is_personal,
                        c.name, c.phone, c.job_title, c.created_at
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
@@ -2022,6 +2023,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "industry": profile["industry"],
                     "healthcare_specialties": list(profile["healthcare_specialties"] or []),
                     "enabled_features": merge_company_features(profile["enabled_features"]),
+                    "is_personal": profile["is_personal"],
                     "name": profile["name"],
                     "phone": profile["phone"],
                     "job_title": profile["job_title"],
