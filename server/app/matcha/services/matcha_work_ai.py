@@ -11,6 +11,9 @@ from typing import Optional, Any
 from google import genai
 from google.genai import types
 
+# Google Search grounding tool — enables real-time web data in all MW responses
+_GOOGLE_SEARCH_TOOL = types.Tool(google_search=types.GoogleSearch())
+
 from ...config import get_settings
 from ...core.services.platform_settings import get_matcha_work_model_mode
 from ..models.matcha_work import HandbookDocument, OfferLetterDocument, OnboardingDocument, PolicyDocument, PresentationDocument, ProjectDocument, ReviewDocument, WorkbookDocument
@@ -484,6 +487,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                             config=types.GenerateContentConfig(
                                 system_instruction=full_prompt,
                                 temperature=0.2,
+                                tools=[_GOOGLE_SEARCH_TOOL],
                             ),
                         )
                     ),
@@ -560,6 +564,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     cached_content=cache_name,
                     temperature=0.2,
                     response_mime_type="application/json",
+                    tools=[_GOOGLE_SEARCH_TOOL],
                 ),
             )
         else:
@@ -571,6 +576,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     system_instruction=static_prompt + "\n\n" + dynamic_prompt,
                     temperature=0.2,
                     response_mime_type="application/json",
+                    tools=[_GOOGLE_SEARCH_TOOL],
                 ),
             )
         raw_text = response.text or ""
