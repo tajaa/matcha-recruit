@@ -267,6 +267,18 @@ export function reorderProjectSectionsNew(projectId: string, sectionIds: string[
   return api.put(`/matcha-work/projects/${projectId}/sections/reorder`, { section_ids: sectionIds })
 }
 
+export function editDiagramAI(projectId: string, sectionId: string, instruction: string) {
+  return api.post<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/edit-diagram`, { instruction })
+}
+
+export function editDiagramText(projectId: string, sectionId: string, edits: { old_text: string; new_text: string }[]) {
+  return api.post<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/edit-diagram-text`, { edits })
+}
+
+export function saveDiagramSVG(projectId: string, sectionId: string, svg: string) {
+  return api.post<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/save-diagram`, { svg })
+}
+
 export function createProjectChat(projectId: string, title?: string) {
   return api.post<import('../types/matcha-work').MWThread>(`/matcha-work/projects/${projectId}/chats`, { title })
 }

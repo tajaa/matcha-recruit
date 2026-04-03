@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { api } from '../../api/client'
 import type { BenchmarkResult } from '../../types/risk-assessment'
+import { InfoTip } from './InfoTip'
 
 type Props = { qs: string }
 
@@ -51,7 +52,7 @@ export function EnhancedBenchmarksPanel({ qs }: Props) {
   return (
     <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Industry Benchmarks</div>
+        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Industry Benchmarks<InfoTip text="Compares your company's rates against NAICS industry medians from BLS, OSHA, and EEOC public data. Blue bars = your company, red bars = industry median. Green = better than peers, red = worse. Pxx = your estimated percentile rank." /></div>
         <div className="text-[10px] text-zinc-600 font-mono">{data.naics_label} ({data.naics_code})</div>
       </div>
 

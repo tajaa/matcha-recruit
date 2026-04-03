@@ -1,6 +1,7 @@
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ReferenceLine, ResponsiveContainer } from 'recharts'
 import type { MonteCarloResult } from '../../types/risk-assessment'
 import { fmtCompact, fmtMoney } from '../../types/risk-assessment'
+import { InfoTip } from './InfoTip'
 
 type Props = {
   mc: MonteCarloResult
@@ -9,10 +10,10 @@ type Props = {
   running?: boolean
 }
 
-function StatCard({ label, value, color }: { label: string; value: string; color?: string }) {
+function StatCard({ label, value, color, tip }: { label: string; value: string; color?: string; tip?: string }) {
   return (
     <div className="bg-zinc-800/60 rounded-xl px-4 py-3">
-      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">{label}</div>
+      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">{label}{tip && <InfoTip text={tip} />}</div>
       <div className={`text-lg font-semibold mt-1 ${color ?? 'text-zinc-100'}`}>{value}</div>
     </div>
   )
@@ -40,16 +41,16 @@ export function LossDistributionPanel({ mc, isAdmin, onRerun, running }: Props) 
   return (
     <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-5">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Loss Distribution</div>
+        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Loss Distribution<InfoTip text="Histogram of 10,000 simulated annual loss outcomes. Each bar shows how often a particular loss range occurred. The shape reveals whether your risk is concentrated or has a long tail." /></div>
         <div className="text-[10px] text-zinc-600 font-mono">{mc.iterations.toLocaleString()} iterations</div>
       </div>
 
       {/* Stat cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Expected Loss" value={fmtCompact(aggregate.expected_annual_loss)} />
-        <StatCard label="VaR 95%" value={fmtCompact(aggregate.var_95)} color="text-amber-400" />
-        <StatCard label="VaR 99%" value={fmtCompact(aggregate.var_99)} color="text-red-400" />
-        <StatCard label="CVaR 95%" value={fmtCompact(aggregate.cvar_95)} color="text-red-300" />
+        <StatCard label="Expected Loss" value={fmtCompact(aggregate.expected_annual_loss)} tip="The average annual loss across all 10,000 simulations. This is your baseline cost-of-risk estimate." />
+        <StatCard label="VaR 95%" value={fmtCompact(aggregate.var_95)} color="text-amber-400" tip="Value at Risk: there is a 95% chance your annual loss will be below this amount. Only 5% of simulations exceeded this." />
+        <StatCard label="VaR 99%" value={fmtCompact(aggregate.var_99)} color="text-red-400" tip="Value at Risk at 99% confidence. Only 1% of simulations exceeded this — represents a severe but plausible worst case." />
+        <StatCard label="CVaR 95%" value={fmtCompact(aggregate.cvar_95)} color="text-red-300" tip="Conditional VaR (Expected Shortfall): the average loss in the worst 5% of scenarios. Shows how bad things get when they go wrong." />
       </div>
 
       {/* Histogram */}
@@ -89,14 +90,14 @@ export function LossDistributionPanel({ mc, isAdmin, onRerun, running }: Props) 
           {[
             { label: 'Mean', value: fmtCompact(stats.mean) },
             { label: 'Median', value: fmtCompact(stats.median) },
-            { label: 'Std Dev', value: fmtCompact(stats.std_dev) },
-            { label: 'IQR', value: fmtCompact(stats.iqr) },
-            { label: 'Skewness', value: stats.skewness.toFixed(2) },
-            { label: 'Kurtosis', value: stats.kurtosis.toFixed(2) },
-            { label: 'Tail Ratio', value: stats.tail_ratio.toFixed(2) + 'x' },
+            { label: 'Std Dev', value: fmtCompact(stats.std_dev), tip: 'Standard deviation — measures how spread out the loss outcomes are from the mean.' },
+            { label: 'IQR', value: fmtCompact(stats.iqr), tip: 'Interquartile range — the spread between the 25th and 75th percentiles. Shows where the middle 50% of outcomes fall.' },
+            { label: 'Skewness', value: stats.skewness.toFixed(2), tip: 'Positive skew means the distribution has a longer right tail (more extreme losses). >1 indicates significant right skew.' },
+            { label: 'Kurtosis', value: stats.kurtosis.toFixed(2), tip: 'Excess kurtosis measures tail heaviness. >0 means fatter tails than a normal distribution (more extreme events). >3 is very heavy.' },
+            { label: 'Tail Ratio', value: stats.tail_ratio.toFixed(2) + 'x', tip: 'CVaR/VaR ratio. Higher values (>1.3x) indicate the tail losses are much worse than the VaR threshold suggests.' },
           ].map((s) => (
             <div key={s.label} className="bg-zinc-800 px-3 py-2">
-              <div className="text-[9px] text-zinc-500 uppercase tracking-wider">{s.label}</div>
+              <div className="text-[9px] text-zinc-500 uppercase tracking-wider">{s.label}{s.tip && <InfoTip text={s.tip} />}</div>
               <div className="text-xs text-zinc-200 font-mono mt-0.5">{s.value}</div>
             </div>
           ))}

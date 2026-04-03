@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Scatter, XAxis, YAxis, Tooltip, ResponsiveContainer, Line, ComposedChart } from 'recharts'
 import { api } from '../../api/client'
 import { DIMENSION_LABELS, DIMENSION_ORDER, DIMENSION_COLORS } from '../../types/risk-assessment'
+import { InfoTip } from './InfoTip'
 import type { CorrelationResult } from '../../types/risk-assessment'
 
 type Props = { qs: string }
@@ -42,7 +43,7 @@ export function DimensionCorrelationPanel({ qs }: Props) {
 
   return (
     <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
-      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Dimension Correlation</div>
+      <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Dimension Correlation<InfoTip text="Scatter plot showing how two risk dimensions move together over time. Pearson r measures linear correlation: +1 = perfectly correlated, 0 = no relationship, -1 = inversely correlated. R² shows what % of variation in one dimension is explained by the other." /></div>
 
       {/* Selectors */}
       <div className="flex items-center gap-3">

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ScatterChart, Scatter, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { api } from '../../api/client'
 import type { CohortResult } from '../../types/risk-assessment'
+import { InfoTip } from './InfoTip'
 
 type Props = { qs: string }
 
@@ -54,7 +55,7 @@ export function EnhancedCohortPanel({ qs }: Props) {
   return (
     <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Cohort Risk Map</div>
+        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Cohort Risk Map<InfoTip text="Bubble chart showing risk concentration by employee cohort. X-axis = incident rate per 100 employees, Y-axis = risk concentration (cohort's share of incidents vs share of headcount). Bubble size = headcount. Red bubbles have disproportionately high risk." /></div>
         <select
           value={dim}
           onChange={(e) => setDim(e.target.value)}

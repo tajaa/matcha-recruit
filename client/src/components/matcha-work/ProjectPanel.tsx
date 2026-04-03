@@ -1,9 +1,11 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine } from 'lucide-react'
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
+import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine, Pencil } from 'lucide-react'
 import type { ProjectSection, MWProject } from '../../types/matcha-work'
 import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
+
+const DiagramEditor = lazy(() => import('./DiagramEditor'))
 
 interface ProjectPanelPropsLegacy {
   state: Record<string, unknown>
@@ -45,6 +47,7 @@ export default function ProjectPanel(props: ProjectPanelProps) {
   const [exporting, setExporting] = useState(false)
   const [saving, setSaving] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
+  const [editingDiagram, setEditingDiagram] = useState<{ sectionId: string; diagramData: NonNullable<ProjectSection['diagram_data']>; imageUrl: string } | null>(null)
   const [previewMode, setPreviewMode] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
@@ -359,6 +362,22 @@ export default function ProjectPanel(props: ProjectPanelProps) {
               onImageUpload={handleImageUpload}
               uploadingImage={uploadingImage}
             />
+
+            {/* Edit Diagram button for sections with diagram data */}
+            {s.diagram_data && s.diagram_data.length > 0 && (
+              <button
+                onClick={() => setEditingDiagram({
+                  sectionId: s.id,
+                  diagramData: s.diagram_data!,
+                  imageUrl: s.diagram_data![0].storage_url,
+                })}
+                className="flex items-center gap-1.5 mx-3 mb-2 px-2.5 py-1.5 text-[10px] font-medium rounded transition-colors"
+                style={{ color: '#ce9178', background: '#2a2d2e' }}
+              >
+                <Pencil size={10} />
+                Edit Diagram
+              </button>
+            )}
           </div>
         ))}
 
@@ -376,6 +395,22 @@ export default function ProjectPanel(props: ProjectPanelProps) {
           </button>
         </div>
       </div>
+      )}
+      {/* Diagram Editor Modal */}
+      {editingDiagram && (
+        <Suspense fallback={null}>
+          <DiagramEditor
+            projectId={projectId}
+            sectionId={editingDiagram.sectionId}
+            diagramData={editingDiagram.diagramData}
+            imageUrl={editingDiagram.imageUrl}
+            onClose={() => setEditingDiagram(null)}
+            onUpdated={(updated) => {
+              if (props.onProjectUpdate) props.onProjectUpdate(updated)
+              setEditingDiagram(null)
+            }}
+          />
+        </Suspense>
       )}
     </div>
   )

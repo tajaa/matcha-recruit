@@ -85,11 +85,18 @@ export interface AgentEmail {
   body: string
 }
 
+export interface DiagramData {
+  svg_source: string
+  storage_url: string
+  created_from: string
+}
+
 export interface ProjectSection {
   id: string
   title: string | null
   content: string
   source_message_id: string | null
+  diagram_data?: DiagramData[]
 }
 
 export interface InventoryItem {

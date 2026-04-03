@@ -202,6 +202,8 @@ async def add_section(project_id: UUID, section: dict) -> dict:
         "content": section.get("content", ""),
         "source_message_id": section.get("source_message_id"),
     }
+    if section.get("diagram_data"):
+        new_section["diagram_data"] = section["diagram_data"]
     sections.append(new_section)
     result = await _update_sections(project_id, sections)
     return {"section": new_section, **result}
@@ -211,10 +213,14 @@ async def update_section(project_id: UUID, section_id: str, updates: dict) -> di
     sections = await get_sections(project_id)
     for i, s in enumerate(sections):
         if s.get("id") == section_id:
+            merged = {**s}
             if "title" in updates:
-                sections[i] = {**s, "title": updates["title"]}
+                merged["title"] = updates["title"]
             if "content" in updates:
-                sections[i] = {**sections[i], "content": updates["content"]}
+                merged["content"] = updates["content"]
+            if "diagram_data" in updates:
+                merged["diagram_data"] = updates["diagram_data"]
+            sections[i] = merged
             break
     return await _update_sections(project_id, sections)
 

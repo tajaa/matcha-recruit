@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { ComposedChart, Line, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Scatter } from 'recharts'
 import { api } from '../../api/client'
 import type { AnomalyDetectionResult, MetricTimeSeries } from '../../types/risk-assessment'
+import { InfoTip } from './InfoTip'
 
 type Props = { qs: string }
 
@@ -61,7 +62,7 @@ export function TailAnalysisPanel({ qs }: Props) {
   return (
     <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Tail Analysis & Anomalies</div>
+        <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold">Tail Analysis & Anomalies<InfoTip text="Time series of risk metrics with statistical process control bands (mean +/- 2 standard deviations). Points outside the shaded band are anomalies — warnings at 2σ, alerts at 3σ. These flag unusual spikes that may need investigation." /></div>
         <div className="flex gap-2">
           <span className="text-[10px] font-mono text-red-400">{data.alert_count} alerts</span>
           <span className="text-[10px] font-mono text-amber-400">{data.warning_count} warnings</span>

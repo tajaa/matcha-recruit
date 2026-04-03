@@ -2269,20 +2269,22 @@ async def sync_resume_batch_interviews(
     return {"updated": updated}
 
 
-async def _convert_svgs_to_images(content: str, company_id, project_id) -> str:
-    """Convert inline SVGs and fenced SVG code blocks to uploaded <img> tags."""
+async def _convert_svgs_to_images(content: str, company_id, project_id) -> tuple[str, list[dict]]:
+    """Convert inline SVGs to uploaded <img> tags. Returns (html, diagram_data_list)."""
     import re as _re
 
     storage = get_storage()
     prefix = f"matcha-work/{company_id}/{project_id}/diagrams"
     counter = 0
+    diagrams: list[dict] = []
 
     async def _upload_svg(svg_str: str) -> str:
         nonlocal counter
         counter += 1
         svg_bytes = svg_str.encode("utf-8")
         url = await storage.upload_file(svg_bytes, f"diagram-{counter}.svg", prefix=prefix, content_type="image/svg+xml")
-        return f'<img src="{url}" alt="Diagram" style="max-width:100%;margin:8px 0;" />'
+        diagrams.append({"svg_source": svg_str, "storage_url": url, "created_from": "ai_generation"})
+        return f'<img src="{url}" alt="Diagram" data-diagram-index="{len(diagrams) - 1}" style="max-width:100%;margin:8px 0;" />'
 
     result = content
 
@@ -2314,7 +2316,7 @@ async def _convert_svgs_to_images(content: str, company_id, project_id) -> str:
         except Exception:
             pass
 
-    return result
+    return result, diagrams
 
 
 def _strip_markdown(text: str) -> str:
@@ -2431,9 +2433,12 @@ async def add_project_section_endpoint(
     raw_content = body.get("content", "")
 
     # Convert inline SVGs to uploaded images so TipTap can render them
-    raw_content = await _convert_svgs_to_images(raw_content, company_id, project_id)
+    raw_content, diagrams = await _convert_svgs_to_images(raw_content, company_id, project_id)
 
-    return await proj_svc.add_section(project_id, {**body, "content": raw_content})
+    section_data = {**body, "content": raw_content}
+    if diagrams:
+        section_data["diagram_data"] = diagrams
+    return await proj_svc.add_section(project_id, section_data)
 
 
 @router.put("/projects/{project_id}/sections/reorder")
@@ -2471,6 +2476,184 @@ async def delete_project_section_endpoint(
     from ..services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.delete_section(project_id, section_id)
+
+
+# ── Diagram editing endpoints ──
+
+
+@router.post("/projects/{project_id}/sections/{section_id}/edit-diagram")
+async def edit_diagram_ai(
+    project_id: UUID,
+    section_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Use AI to modify a diagram based on a natural language instruction."""
+    from ..services import project_service as proj_svc
+
+    await _verify_project_access(project_id, current_user)
+    company_id = await get_client_company_id(current_user)
+    instruction = body.get("instruction", "").strip()
+    if not instruction:
+        raise HTTPException(status_code=400, detail="Instruction is required")
+
+    project = await proj_svc.get_project(project_id, company_id)
+    section = next((s for s in project.get("sections", []) if s.get("id") == section_id), None)
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    diagram_data = section.get("diagram_data")
+    if not diagram_data or not isinstance(diagram_data, list) or len(diagram_data) == 0:
+        raise HTTPException(status_code=400, detail="No diagram data found in this section")
+
+    svg_source = diagram_data[0].get("svg_source", "")
+    if not svg_source:
+        raise HTTPException(status_code=400, detail="No SVG source available for editing")
+
+    # Call Gemini to modify the SVG
+    import google.genai as genai
+    from ...config import get_settings
+    settings = get_settings()
+
+    client = genai.Client(api_key=settings.gemini_api_key)
+    prompt = f"""You are an SVG diagram editor. Here is an SVG diagram:
+
+{svg_source}
+
+Modify this SVG according to the following instruction:
+{instruction}
+
+Return ONLY the modified SVG code, nothing else. No markdown fences, no explanation. Just the raw <svg>...</svg> content."""
+
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+        )
+        new_svg = response.text.strip()
+        # Clean up any markdown fences
+        if new_svg.startswith("```"):
+            new_svg = new_svg.split("\n", 1)[1] if "\n" in new_svg else new_svg
+        if new_svg.endswith("```"):
+            new_svg = new_svg.rsplit("```", 1)[0].strip()
+        if not new_svg.startswith("<svg"):
+            raise HTTPException(status_code=500, detail="AI did not return valid SVG")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI diagram edit failed: {e}")
+
+    # Upload new SVG
+    storage = get_storage()
+    prefix = f"matcha-work/{company_id}/{project_id}/diagrams"
+    svg_bytes = new_svg.encode("utf-8")
+    new_url = await storage.upload_file(svg_bytes, f"diagram-edited-{section_id[:8]}.svg", prefix=prefix, content_type="image/svg+xml")
+
+    # Update section content — replace old img with new
+    import re as _re
+    new_img = f'<img src="{new_url}" alt="Diagram" data-diagram-index="0" style="max-width:100%;margin:8px 0;" />'
+    old_content = section.get("content", "")
+    updated_content = _re.sub(r'<img[^>]*data-diagram-index[^>]*/>', new_img, old_content)
+    if updated_content == old_content:
+        # Fallback: replace first img with diagram alt
+        updated_content = _re.sub(r'<img[^>]*alt="Diagram"[^>]*/>', new_img, old_content, count=1)
+    if updated_content == old_content:
+        updated_content = old_content + new_img
+
+    new_diagram_data = [{"svg_source": new_svg, "storage_url": new_url, "created_from": "ai_edit"}]
+    await proj_svc.update_section(project_id, section_id, {
+        "content": updated_content,
+        "diagram_data": new_diagram_data,
+    })
+
+    updated = await proj_svc.get_project(project_id, company_id)
+    return updated
+
+
+@router.post("/projects/{project_id}/sections/{section_id}/edit-diagram-text")
+async def edit_diagram_text(
+    project_id: UUID,
+    section_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Edit text labels in a diagram by direct string replacement."""
+    from ..services import project_service as proj_svc
+
+    await _verify_project_access(project_id, current_user)
+    company_id = await get_client_company_id(current_user)
+    edits = body.get("edits", [])
+    if not edits:
+        raise HTTPException(status_code=400, detail="No edits provided")
+
+    project = await proj_svc.get_project(project_id, company_id)
+    section = next((s for s in project.get("sections", []) if s.get("id") == section_id), None)
+    if not section or not section.get("diagram_data"):
+        raise HTTPException(status_code=404, detail="Section or diagram not found")
+
+    svg_source = section["diagram_data"][0].get("svg_source", "")
+    if not svg_source:
+        raise HTTPException(status_code=400, detail="No SVG source")
+
+    new_svg = svg_source
+    for edit in edits:
+        old_text = edit.get("old_text", "")
+        new_text = edit.get("new_text", "")
+        if old_text:
+            new_svg = new_svg.replace(f">{old_text}<", f">{new_text}<")
+
+    storage = get_storage()
+    prefix = f"matcha-work/{company_id}/{project_id}/diagrams"
+    new_url = await storage.upload_file(new_svg.encode("utf-8"), f"diagram-textedit-{section_id[:8]}.svg", prefix=prefix, content_type="image/svg+xml")
+
+    import re as _re
+    new_img = f'<img src="{new_url}" alt="Diagram" data-diagram-index="0" style="max-width:100%;margin:8px 0;" />'
+    old_content = section.get("content", "")
+    updated_content = _re.sub(r'<img[^>]*alt="Diagram"[^>]*/>', new_img, old_content, count=1)
+
+    await proj_svc.update_section(project_id, section_id, {
+        "content": updated_content,
+        "diagram_data": [{"svg_source": new_svg, "storage_url": new_url, "created_from": "text_edit"}],
+    })
+    return await proj_svc.get_project(project_id, company_id)
+
+
+@router.post("/projects/{project_id}/sections/{section_id}/save-diagram")
+async def save_diagram(
+    project_id: UUID,
+    section_id: str,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Save a diagram from the visual editor (Excalidraw SVG export)."""
+    from ..services import project_service as proj_svc
+
+    await _verify_project_access(project_id, current_user)
+    company_id = await get_client_company_id(current_user)
+    svg = body.get("svg", "").strip()
+    if not svg or "<svg" not in svg.lower():
+        raise HTTPException(status_code=400, detail="Invalid SVG")
+
+    storage = get_storage()
+    prefix = f"matcha-work/{company_id}/{project_id}/diagrams"
+    new_url = await storage.upload_file(svg.encode("utf-8"), f"diagram-visual-{section_id[:8]}.svg", prefix=prefix, content_type="image/svg+xml")
+
+    import re as _re
+    new_img = f'<img src="{new_url}" alt="Diagram" data-diagram-index="0" style="max-width:100%;margin:8px 0;" />'
+
+    project = await proj_svc.get_project(project_id, company_id)
+    section = next((s for s in project.get("sections", []) if s.get("id") == section_id), None)
+    if not section:
+        raise HTTPException(status_code=404, detail="Section not found")
+
+    old_content = section.get("content", "")
+    updated_content = _re.sub(r'<img[^>]*alt="Diagram"[^>]*/>', new_img, old_content, count=1)
+
+    await proj_svc.update_section(project_id, section_id, {
+        "content": updated_content,
+        "diagram_data": [{"svg_source": svg, "storage_url": new_url, "created_from": "visual_editor"}],
+    })
+    return await proj_svc.get_project(project_id, company_id)
 
 
 # ── Project collaborator endpoints ──
