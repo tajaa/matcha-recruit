@@ -49,6 +49,31 @@ async def lifespan(app: FastAPI):
         if count != "0":
             print(f"[Matcha] Recovered {count} stuck documents from previous crash")
 
+    # Recover research tasks stuck in 'running' from a previous crash
+    async with get_connection() as conn:
+        stuck_projects = await conn.fetch(
+            """SELECT id, project_data FROM mw_projects
+               WHERE project_data::text LIKE '%"running"%'"""
+        )
+        recovered = 0
+        for row in stuck_projects:
+            data = row["project_data"] if isinstance(row["project_data"], dict) else {}
+            changed = False
+            for task in data.get("research_tasks", []):
+                for inp in task.get("inputs", []):
+                    if inp.get("status") == "running":
+                        inp["status"] = "pending"
+                        changed = True
+                        recovered += 1
+            if changed:
+                import json as _json
+                await conn.execute(
+                    "UPDATE mw_projects SET project_data = $1::jsonb WHERE id = $2",
+                    _json.dumps(data), row["id"],
+                )
+        if recovered:
+            print(f"[Matcha] Reset {recovered} stuck research input(s) to pending")
+
     # Initialize Redis notification manager (for worker task notifications)
     await init_notification_manager(settings.redis_url)
     print(f"[Matcha] Redis notification manager connected to {settings.redis_url}")

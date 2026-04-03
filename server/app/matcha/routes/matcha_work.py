@@ -2764,12 +2764,13 @@ async def run_research_task(
     task_id: str,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Queue all pending research inputs for processing."""
-    from app.workers.tasks.research_browse import run_research_browse
+    """Run all pending research inputs sequentially with SSE status streaming."""
+    from ..services.research_browse_service import run_research_for_input
+    from starlette.responses import StreamingResponse
 
-    project, _role = await _verify_project_access(project_id, current_user)
-    company_id = project.get("company_id") or await get_client_company_id(current_user)
+    await _verify_project_access(project_id, current_user)
 
+    # Collect pending inputs
     async with get_connection() as conn:
         async with conn.transaction():
             row = await conn.fetchrow(
@@ -2780,30 +2781,74 @@ async def run_research_task(
                 data = json.loads(data)
             data = data or {}
 
-            queued = 0
+            pending_inputs = []
+            instructions = ""
             for task in data.get("research_tasks", []):
                 if task["id"] == task_id:
                     instructions = task.get("instructions", "")
                     if not instructions:
                         raise HTTPException(status_code=400, detail="Task has no instructions")
-
                     for inp in task.get("inputs", []):
                         if inp["status"] in ("pending", "error"):
                             inp["status"] = "running"
                             inp.pop("error", None)
-                            run_research_browse.delay(
-                                str(project_id), task_id, inp["id"],
-                                inp["url"], instructions, str(company_id),
-                            )
-                            queued += 1
+                            pending_inputs.append({"id": inp["id"], "url": inp["url"]})
 
                     await conn.execute(
                         "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
                         json.dumps(data), project_id,
                     )
-                    return {"queued": queued}
+                    break
 
-    raise HTTPException(status_code=404, detail="Research task not found")
+    if not pending_inputs:
+        return {"queued": 0}
+
+    async def event_stream():
+        for i, inp in enumerate(pending_inputs):
+            yield _sse_data({"type": "status", "input_id": inp["id"], "url": inp["url"],
+                             "message": f"Starting research ({i + 1}/{len(pending_inputs)}): {inp['url']}"})
+
+            async def on_status(msg):
+                pass  # will be replaced per-input below
+
+            status_queue: asyncio.Queue = asyncio.Queue()
+
+            async def stream_status(msg: str):
+                await status_queue.put(msg)
+
+            # Run browse in background, stream statuses
+            browse_task = asyncio.create_task(
+                run_research_for_input(
+                    project_id, task_id, inp["id"], inp["url"], instructions,
+                    on_status=stream_status,
+                )
+            )
+
+            while not browse_task.done():
+                try:
+                    msg = await asyncio.wait_for(status_queue.get(), timeout=1.0)
+                    yield _sse_data({"type": "status", "input_id": inp["id"], "message": msg})
+                except asyncio.TimeoutError:
+                    pass
+
+            # Drain remaining messages
+            while not status_queue.empty():
+                msg = status_queue.get_nowait()
+                yield _sse_data({"type": "status", "input_id": inp["id"], "message": msg})
+
+            result = browse_task.result()
+            yield _sse_data({
+                "type": "complete" if not result.get("error") else "error",
+                "input_id": inp["id"],
+                "url": inp["url"],
+                "findings": result.get("findings", {}),
+                "summary": result.get("summary", ""),
+                "error": result.get("error"),
+            })
+
+        yield _sse_data({"type": "done", "message": f"Finished researching {len(pending_inputs)} URL(s)"})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 @router.post("/projects/{project_id}/research-tasks/{task_id}/inputs/{input_id}/retry")
@@ -2813,11 +2858,14 @@ async def retry_research_input(
     input_id: str,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Retry a failed research input."""
-    from app.workers.tasks.research_browse import run_research_browse
+    """Retry a failed research input with SSE streaming."""
+    from ..services.research_browse_service import run_research_for_input
+    from starlette.responses import StreamingResponse
 
-    project, _role = await _verify_project_access(project_id, current_user)
-    company_id = project.get("company_id") or await get_client_company_id(current_user)
+    await _verify_project_access(project_id, current_user)
+
+    retry_url = ""
+    retry_instructions = ""
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -2831,26 +2879,97 @@ async def retry_research_input(
 
             for task in data.get("research_tasks", []):
                 if task["id"] == task_id:
+                    retry_instructions = task.get("instructions", "")
                     for inp in task.get("inputs", []):
                         if inp["id"] == input_id:
                             inp["status"] = "running"
                             inp.pop("error", None)
                             inp.pop("completed_at", None)
-                            # Remove old result
+                            retry_url = inp["url"]
                             task["results"] = [r for r in task.get("results", []) if r.get("input_id") != input_id]
 
                             await conn.execute(
                                 "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
                                 json.dumps(data), project_id,
                             )
+                            break
+                    break
 
-                            run_research_browse.delay(
-                                str(project_id), task_id, input_id,
-                                inp["url"], task.get("instructions", ""), str(company_id),
-                            )
-                            return {"retrying": True}
+    if not retry_url:
+        raise HTTPException(status_code=404, detail="Input not found")
 
-    raise HTTPException(status_code=404, detail="Input not found")
+    async def event_stream():
+        status_queue: asyncio.Queue = asyncio.Queue()
+
+        async def stream_status(msg: str):
+            await status_queue.put(msg)
+
+        browse_task = asyncio.create_task(
+            run_research_for_input(
+                project_id, task_id, input_id, retry_url, retry_instructions,
+                on_status=stream_status,
+            )
+        )
+
+        while not browse_task.done():
+            try:
+                msg = await asyncio.wait_for(status_queue.get(), timeout=1.0)
+                yield _sse_data({"type": "status", "input_id": input_id, "message": msg})
+            except asyncio.TimeoutError:
+                pass
+
+        while not status_queue.empty():
+            msg = status_queue.get_nowait()
+            yield _sse_data({"type": "status", "input_id": input_id, "message": msg})
+
+        result = browse_task.result()
+        yield _sse_data({
+            "type": "complete" if not result.get("error") else "error",
+            "input_id": input_id, "url": retry_url,
+            "findings": result.get("findings", {}),
+            "summary": result.get("summary", ""),
+            "error": result.get("error"),
+        })
+        yield _sse_data({"type": "done"})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+@router.post("/projects/{project_id}/research-tasks/{task_id}/stop")
+async def stop_research_task(
+    project_id: UUID,
+    task_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Reset all running inputs back to pending (cancel in-flight research)."""
+    await _verify_project_access(project_id, current_user)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+
+            reset_count = 0
+            for task in data.get("research_tasks", []):
+                if task["id"] == task_id:
+                    for inp in task.get("inputs", []):
+                        if inp["status"] == "running":
+                            inp["status"] = "pending"
+                            reset_count += 1
+                    break
+
+            if reset_count:
+                await conn.execute(
+                    "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                    json.dumps(data), project_id,
+                )
+
+    return {"reset": reset_count}
 
 
 # ── Diagram editing endpoints ──

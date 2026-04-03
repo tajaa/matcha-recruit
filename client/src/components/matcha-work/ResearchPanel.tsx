@@ -1,13 +1,13 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useRef } from 'react'
 import {
   Plus, Trash2, Play, ChevronDown, ChevronRight,
-  Globe, Loader2, CheckCircle, Search, AlertCircle,
+  Globe, Loader2, CheckCircle, Search, AlertCircle, FileOutput,
 } from 'lucide-react'
 import type { MWProject, ResearchTask, ResearchResult } from '../../types/matcha-work'
 import {
   createResearchTask, updateResearchTask, deleteResearchTask,
-  addResearchInputs, deleteResearchInput, runResearch, retryResearchInput,
-  getProjectDetail,
+  addResearchInputs, deleteResearchInput, runResearchStream, retryResearchStream,
+  stopResearch, getProjectDetail, addProjectSectionNew,
 } from '../../api/matchaWork'
 
 interface Props {
@@ -29,18 +29,7 @@ export default function ResearchPanel({ project, projectId, onUpdate }: Props) {
   const [expandedTask, setExpandedTask] = useState<string | null>(tasks[0]?.id ?? null)
   const [creating, setCreating] = useState(false)
 
-  // Poll when any input is running
-  const hasRunning = tasks.some(t => t.inputs?.some(i => i.status === 'running'))
-  useEffect(() => {
-    if (!hasRunning) return
-    const id = setInterval(async () => {
-      try {
-        const updated = await getProjectDetail(projectId)
-        onUpdate(updated)
-      } catch {}
-    }, 3000)
-    return () => clearInterval(id)
-  }, [hasRunning, projectId, onUpdate])
+  // No polling needed — streaming SSE provides real-time updates
 
   async function handleCreateTask() {
     setCreating(true)
@@ -106,6 +95,8 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
   const [instructionsDraft, setInstructionsDraft] = useState(task.instructions)
   const [urlDraft, setUrlDraft] = useState('')
   const [running, setRunning] = useState(false)
+  const [streamStatus, setStreamStatus] = useState<string | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
   const [expandedResult, setExpandedResult] = useState<string | null>(null)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>()
 
@@ -143,12 +134,37 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
   }
 
   async function handleRun() {
+    const abort = new AbortController()
+    abortRef.current = abort
     setRunning(true)
+    setStreamStatus(null)
     try {
-      await runResearch(projectId, task.id)
+      await runResearchStream(projectId, task.id, async (event) => {
+        if (event.type === 'status') {
+          setStreamStatus(event.message || null)
+        } else if (event.type === 'complete' || event.type === 'error') {
+          setStreamStatus(null)
+          await refresh()
+        } else if (event.type === 'done') {
+          setStreamStatus(null)
+          await refresh()
+        }
+      }, abort.signal)
+    } catch {
+      // AbortError or network error — expected on cancel
+    }
+    abortRef.current = null
+    setRunning(false)
+    setStreamStatus(null)
+    await refresh()
+  }
+
+  async function handleStop() {
+    abortRef.current?.abort()
+    try {
+      await stopResearch(projectId, task.id)
       await refresh()
     } catch {}
-    setRunning(false)
   }
 
   async function handleDeleteTask() {
@@ -166,8 +182,34 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
   }
 
   async function handleRetry(inputId: string) {
+    setRunning(true)
+    setStreamStatus(null)
     try {
-      await retryResearchInput(projectId, task.id, inputId)
+      await retryResearchStream(projectId, task.id, inputId, async (event) => {
+        if (event.type === 'status') {
+          setStreamStatus(event.message || null)
+        } else if (event.type === 'complete' || event.type === 'error' || event.type === 'done') {
+          setStreamStatus(null)
+          await refresh()
+        }
+      })
+    } catch {}
+    setRunning(false)
+    setStreamStatus(null)
+  }
+
+  async function handleAddToProject(inputUrl: string, findings: Record<string, unknown>, summary?: string) {
+    const title = formatUrl(inputUrl)
+    let html = `<h2>${title}</h2>`
+    if (summary) html += `<p>${summary}</p>`
+    html += '<table>'
+    for (const [key, value] of Object.entries(findings)) {
+      const displayVal = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '—')
+      html += `<tr><td><strong>${formatKey(key)}</strong></td><td>${displayVal}</td></tr>`
+    }
+    html += '</table>'
+    try {
+      await addProjectSectionNew(projectId, { title, content: html })
       await refresh()
     } catch {}
   }
@@ -251,9 +293,39 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
                 <Trash2 size={10} />
               </button>
             </div>
+            {running && (
+              <div className="flex items-center gap-2 mt-1.5 px-1">
+                <Loader2 size={10} className="animate-spin" style={{ color: '#3b82f6' }} />
+                <span className="text-[10px] flex-1" style={{ color: '#93c5fd' }}>{streamStatus || 'Starting...'}</span>
+                <button
+                  onClick={handleStop}
+                  className="text-[10px] font-medium px-2 py-0.5 rounded"
+                  style={{ color: '#f87171', background: '#3f1515' }}
+                >
+                  Stop
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Results */}
+          {completedCount > 1 && (
+            <button
+              onClick={async () => {
+                for (const inp of (task.inputs ?? [])) {
+                  const r = getResult(inp.id)
+                  if (r && Object.keys(r.findings || {}).length > 0) {
+                    await handleAddToProject(inp.url, r.findings, r.summary)
+                  }
+                }
+              }}
+              className="flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded transition-colors"
+              style={{ color: '#ce9178', background: '#2a2d2e' }}
+            >
+              <FileOutput size={10} />
+              Add All to Project ({completedCount} results)
+            </button>
+          )}
           {(task.inputs?.length ?? 0) > 0 && (
             <div className="space-y-1.5">
               {task.inputs?.map(inp => {
@@ -324,6 +396,16 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
                         </div>
                         {Object.keys(result.findings || {}).length === 0 && (
                           <p className="text-[11px]" style={{ color: '#6a737d' }}>No findings extracted</p>
+                        )}
+                        {Object.keys(result.findings || {}).length > 0 && (
+                          <button
+                            onClick={() => handleAddToProject(inp.url, result.findings, result.summary)}
+                            className="flex items-center gap-1 mt-2 text-[10px] font-medium px-2 py-1 rounded transition-colors"
+                            style={{ color: '#ce9178', background: '#2a2d2e' }}
+                          >
+                            <FileOutput size={10} />
+                            Add to Project
+                          </button>
                         )}
                       </div>
                     )}

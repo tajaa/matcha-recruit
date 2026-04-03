@@ -582,12 +582,69 @@ export function deleteResearchInput(projectId: string, taskId: string, inputId: 
   return api.delete(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}`)
 }
 
-export function runResearch(projectId: string, taskId: string) {
-  return api.post<{ queued: number }>(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/run`)
+export async function runResearchStream(
+  projectId: string,
+  taskId: string,
+  onEvent: (event: { type: string; input_id?: string; message?: string; findings?: Record<string, unknown>; summary?: string; error?: string | null }) => void,
+  signal?: AbortSignal,
+) {
+  const token = localStorage.getItem('matcha_access_token')
+  const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/run`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    signal,
+  })
+  if (!res.ok) throw new Error(`${res.status}`)
+  const reader = res.body?.getReader()
+  if (!reader) return
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() || ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try { onEvent(JSON.parse(line.slice(6))) } catch {}
+      }
+    }
+  }
 }
 
-export function retryResearchInput(projectId: string, taskId: string, inputId: string) {
-  return api.post(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/retry`)
+export async function retryResearchStream(
+  projectId: string,
+  taskId: string,
+  inputId: string,
+  onEvent: (event: { type: string; input_id?: string; message?: string }) => void,
+) {
+  const token = localStorage.getItem('matcha_access_token')
+  const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/retry`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`${res.status}`)
+  const reader = res.body?.getReader()
+  if (!reader) return
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() || ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try { onEvent(JSON.parse(line.slice(6))) } catch {}
+      }
+    }
+  }
+}
+
+export function stopResearch(projectId: string, taskId: string) {
+  return api.post(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/stop`)
 }
 
 // ── Candidate interviews ──
