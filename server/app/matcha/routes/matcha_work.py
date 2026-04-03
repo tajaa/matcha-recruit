@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, UploadFile, File, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, UploadFile, File, status
 from fastapi.responses import StreamingResponse
 
 from ...core.models.auth import CurrentUser
@@ -2566,6 +2566,291 @@ async def delete_project_file_endpoint(
 
     await project_file_service.delete_project_file(file_id, project_id)
     return {"deleted": True}
+
+
+# ── Research task endpoints ──
+
+
+@router.post("/projects/{project_id}/research-tasks")
+async def create_research_task(
+    project_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a new research task in a project."""
+    from ..services import project_service as proj_svc
+    import uuid as _uuid
+
+    await _verify_project_access(project_id, current_user)
+
+    task = {
+        "id": str(_uuid.uuid4()),
+        "name": body.get("name", "Untitled Research"),
+        "instructions": body.get("instructions", ""),
+        "inputs": [],
+        "results": [],
+    }
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+            tasks = data.get("research_tasks", [])
+            tasks.append(task)
+            data["research_tasks"] = tasks
+            await conn.execute(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(data), project_id,
+            )
+
+    return task
+
+
+@router.put("/projects/{project_id}/research-tasks/{task_id}")
+async def update_research_task(
+    project_id: UUID,
+    task_id: str,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update a research task definition."""
+    await _verify_project_access(project_id, current_user)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+
+            for task in data.get("research_tasks", []):
+                if task["id"] == task_id:
+                    if "name" in body:
+                        task["name"] = body["name"]
+                    if "instructions" in body:
+                        task["instructions"] = body["instructions"]
+                    await conn.execute(
+                        "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                        json.dumps(data), project_id,
+                    )
+                    return task
+
+    raise HTTPException(status_code=404, detail="Research task not found")
+
+
+@router.delete("/projects/{project_id}/research-tasks/{task_id}")
+async def delete_research_task(
+    project_id: UUID,
+    task_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Delete a research task and all its results."""
+    await _verify_project_access(project_id, current_user)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+            data["research_tasks"] = [t for t in data.get("research_tasks", []) if t["id"] != task_id]
+            await conn.execute(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(data), project_id,
+            )
+
+    return {"deleted": True}
+
+
+@router.post("/projects/{project_id}/research-tasks/{task_id}/inputs")
+async def add_research_inputs(
+    project_id: UUID,
+    task_id: str,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Add URLs to a research task."""
+    import uuid as _uuid
+
+    await _verify_project_access(project_id, current_user)
+    urls = body.get("urls", [])
+    if not urls:
+        raise HTTPException(status_code=400, detail="No URLs provided")
+
+    new_inputs = []
+    for url in urls:
+        url = url.strip()
+        if not url or not (url.startswith("http://") or url.startswith("https://")):
+            continue
+        new_inputs.append({
+            "id": str(_uuid.uuid4()),
+            "url": url,
+            "status": "pending",
+            "queued_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    if not new_inputs:
+        raise HTTPException(status_code=400, detail="No valid URLs provided")
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+
+            for task in data.get("research_tasks", []):
+                if task["id"] == task_id:
+                    task.setdefault("inputs", []).extend(new_inputs)
+                    await conn.execute(
+                        "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                        json.dumps(data), project_id,
+                    )
+                    return {"added": len(new_inputs), "inputs": new_inputs}
+
+    raise HTTPException(status_code=404, detail="Research task not found")
+
+
+@router.delete("/projects/{project_id}/research-tasks/{task_id}/inputs/{input_id}")
+async def delete_research_input(
+    project_id: UUID,
+    task_id: str,
+    input_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Remove a URL from a research task."""
+    await _verify_project_access(project_id, current_user)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+
+            for task in data.get("research_tasks", []):
+                if task["id"] == task_id:
+                    task["inputs"] = [i for i in task.get("inputs", []) if i["id"] != input_id]
+                    task["results"] = [r for r in task.get("results", []) if r.get("input_id") != input_id]
+                    await conn.execute(
+                        "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                        json.dumps(data), project_id,
+                    )
+                    return {"deleted": True}
+
+    raise HTTPException(status_code=404, detail="Research task not found")
+
+
+@router.post("/projects/{project_id}/research-tasks/{task_id}/run")
+async def run_research_task(
+    project_id: UUID,
+    task_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Queue all pending research inputs for processing."""
+    from app.workers.tasks.research_browse import run_research_browse
+
+    project, _role = await _verify_project_access(project_id, current_user)
+    company_id = project.get("company_id") or await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+
+            queued = 0
+            for task in data.get("research_tasks", []):
+                if task["id"] == task_id:
+                    instructions = task.get("instructions", "")
+                    if not instructions:
+                        raise HTTPException(status_code=400, detail="Task has no instructions")
+
+                    for inp in task.get("inputs", []):
+                        if inp["status"] in ("pending", "error"):
+                            inp["status"] = "running"
+                            inp.pop("error", None)
+                            run_research_browse.delay(
+                                str(project_id), task_id, inp["id"],
+                                inp["url"], instructions, str(company_id),
+                            )
+                            queued += 1
+
+                    await conn.execute(
+                        "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                        json.dumps(data), project_id,
+                    )
+                    return {"queued": queued}
+
+    raise HTTPException(status_code=404, detail="Research task not found")
+
+
+@router.post("/projects/{project_id}/research-tasks/{task_id}/inputs/{input_id}/retry")
+async def retry_research_input(
+    project_id: UUID,
+    task_id: str,
+    input_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Retry a failed research input."""
+    from app.workers.tasks.research_browse import run_research_browse
+
+    project, _role = await _verify_project_access(project_id, current_user)
+    company_id = project.get("company_id") or await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+
+            for task in data.get("research_tasks", []):
+                if task["id"] == task_id:
+                    for inp in task.get("inputs", []):
+                        if inp["id"] == input_id:
+                            inp["status"] = "running"
+                            inp.pop("error", None)
+                            inp.pop("completed_at", None)
+                            # Remove old result
+                            task["results"] = [r for r in task.get("results", []) if r.get("input_id") != input_id]
+
+                            await conn.execute(
+                                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                                json.dumps(data), project_id,
+                            )
+
+                            run_research_browse.delay(
+                                str(project_id), task_id, input_id,
+                                inp["url"], task.get("instructions", ""), str(company_id),
+                            )
+                            return {"retrying": True}
+
+    raise HTTPException(status_code=404, detail="Input not found")
 
 
 # ── Diagram editing endpoints ──

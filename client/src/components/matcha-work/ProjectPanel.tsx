@@ -5,6 +5,7 @@ import { updateProjectSection, deleteProjectSection, addProjectSection, exportPr
 import type { ProjectFile } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
+import ResearchPanel from './ResearchPanel'
 
 const DiagramEditor = lazy(() => import('./DiagramEditor'))
 
@@ -51,6 +52,7 @@ export default function ProjectPanel(props: ProjectPanelProps) {
   const [saving, setSaving] = useState(false)
   const [uploadingImage, setUploadingImage] = useState(false)
   const [editingDiagram, setEditingDiagram] = useState<{ sectionId: string; diagramData: NonNullable<ProjectSection['diagram_data']>; imageUrl: string } | null>(null)
+  const [panelTab, setPanelTab] = useState<'sections' | 'research'>('sections')
   const [previewMode, setPreviewMode] = useState(false)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
@@ -356,6 +358,38 @@ export default function ProjectPanel(props: ProjectPanelProps) {
         </div>
       </div>
 
+      {/* Panel tabs — show when in new project mode */}
+      {isNewMode && (
+        <div className="flex" style={{ borderBottom: '1px solid #333' }}>
+          {(['sections', 'research'] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setPanelTab(tab)}
+              className="px-4 py-1.5 text-[10px] uppercase tracking-widest font-bold transition-colors"
+              style={{
+                color: panelTab === tab ? '#e8e8e8' : '#6a737d',
+                background: panelTab === tab ? '#252526' : 'transparent',
+                borderBottom: panelTab === tab ? '2px solid #ce9178' : '2px solid transparent',
+              }}
+            >
+              {tab === 'sections' ? 'Sections' : 'Research'}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Research panel */}
+      {isNewMode && panelTab === 'research' && (
+        <ResearchPanel
+          project={props.project!}
+          projectId={projectId}
+          onUpdate={(updated) => props.onProjectUpdate?.(updated)}
+        />
+      )}
+
+      {/* Sections tab content (hidden when research tab is active) */}
+      {(!isNewMode || panelTab === 'sections') && <>
+
       {/* Attachments */}
       {isNewMode && (files.length > 0 || uploadingFiles.length > 0) && (
         <div className="px-4 py-2" style={{ borderBottom: '1px solid #333' }}>
@@ -512,6 +546,9 @@ export default function ProjectPanel(props: ProjectPanelProps) {
       {isNewMode && (
         <input ref={fileInputRef} type="file" multiple hidden onChange={(e) => { handleFileUploadList(Array.from(e.target.files ?? [])); e.target.value = '' }} />
       )}
+
+      </>}
+      {/* End sections tab content */}
 
       {/* Diagram Editor Modal */}
       {editingDiagram && (

@@ -24,3 +24,4 @@ greenlet>=3.0.0
 feedparser>=6.0.0
 stripe>=8.0.0
 python3-saml>=1.16.0
+playwright>=1.49.0

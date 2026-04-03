@@ -5,6 +5,8 @@ import type {
   MWCreateResponse,
   MWSendResponse,
   MWStreamEvent,
+  ResearchTask,
+  ResearchInput,
 } from '../types/matcha-work'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
@@ -554,6 +556,38 @@ export function uploadProjectFile(projectId: string, file: File) {
 
 export function deleteProjectFile(projectId: string, fileId: string) {
   return api.delete(`/matcha-work/projects/${projectId}/files/${fileId}`)
+}
+
+// ── Research tasks ──
+
+export function createResearchTask(projectId: string, body: { name: string; instructions: string }) {
+  return api.post<ResearchTask>(`/matcha-work/projects/${projectId}/research-tasks`, body)
+}
+
+export function updateResearchTask(projectId: string, taskId: string, body: Partial<{ name: string; instructions: string }>) {
+  return api.put<ResearchTask>(`/matcha-work/projects/${projectId}/research-tasks/${taskId}`, body)
+}
+
+export function deleteResearchTask(projectId: string, taskId: string) {
+  return api.delete(`/matcha-work/projects/${projectId}/research-tasks/${taskId}`)
+}
+
+export function addResearchInputs(projectId: string, taskId: string, urls: string[]) {
+  return api.post<{ added: number; inputs: ResearchInput[] }>(
+    `/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs`, { urls },
+  )
+}
+
+export function deleteResearchInput(projectId: string, taskId: string, inputId: string) {
+  return api.delete(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}`)
+}
+
+export function runResearch(projectId: string, taskId: string) {
+  return api.post<{ queued: number }>(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/run`)
+}
+
+export function retryResearchInput(projectId: string, taskId: string, inputId: string) {
+  return api.post(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/retry`)
 }
 
 // ── Candidate interviews ──

@@ -60,12 +60,47 @@ export interface ProjectCollaborator {
   created_at: string
 }
 
+// ── Research Tasks ──
+
+export interface ResearchField {
+  name: string
+  label: string
+  type: 'text' | 'boolean' | 'number'
+}
+
+export interface ResearchInput {
+  id: string
+  url: string
+  status: 'pending' | 'running' | 'completed' | 'error'
+  queued_at?: string
+  completed_at?: string
+  error?: string
+}
+
+export interface ResearchResult {
+  input_id: string
+  findings: Record<string, unknown>
+  summary?: string
+}
+
+export interface ResearchTask {
+  id: string
+  name: string
+  instructions: string
+  inputs: ResearchInput[]
+  results: ResearchResult[]
+}
+
+export interface ResearchData {
+  research_tasks?: ResearchTask[]
+}
+
 export interface MWProject {
   id: string
   title: string
   project_type: 'general' | 'presentation' | 'recruiting'
   sections: ProjectSection[]
-  project_data: RecruitingData | Record<string, unknown>
+  project_data: RecruitingData & ResearchData & Record<string, unknown>
   status: string
   is_pinned: boolean
   version: number
