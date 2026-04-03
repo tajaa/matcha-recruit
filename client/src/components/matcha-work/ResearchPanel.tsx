@@ -98,7 +98,7 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
   const [streamStatus, setStreamStatus] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const [expandedResult, setExpandedResult] = useState<string | null>(null)
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>()
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>(null)
 
   const completedCount = task.inputs?.filter(i => i.status === 'completed').length ?? 0
   const totalCount = task.inputs?.length ?? 0
@@ -263,13 +263,7 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
                 <button
                   onClick={async () => {
                     await handleAddUrls()
-                    // Auto-run after adding
-                    setRunning(true)
-                    try {
-                      await runResearch(projectId, task.id)
-                      await refresh()
-                    } catch {}
-                    setRunning(false)
+                    await handleRun()
                   }}
                   disabled={running || !instructionsDraft.trim()}
                   className="flex items-center gap-1 text-[10px] font-medium px-2.5 py-1 rounded transition-colors disabled:opacity-40"
