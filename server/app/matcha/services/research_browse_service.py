@@ -303,6 +303,36 @@ async def _browse_and_extract_inner(
     if not extracted:
         return {"findings": {}, "summary": "Could not extract data", "error": "No data extracted", "screenshot_url": screenshot_url, "total_tokens": total_tokens_used}
 
+    # Auto-call if phone found + info missing + Twilio configured
+    phone = _extract_phone_number(extracted)
+    missing = _identify_missing_info(instructions, extracted)
+    if phone and missing and _twilio_configured():
+        apartment_name = extracted.get("name") or extracted.get("property_name") or extracted.get("apartment_name") or "the property"
+        if on_status:
+            await on_status(f"Calling {apartment_name} at {phone} to ask about: {', '.join(missing)}...")
+        try:
+            from ...core.services.twilio_call_service import get_twilio_call_service
+            call_service = get_twilio_call_service()
+            call_result = await call_service.initiate_and_wait(
+                to_number=phone,
+                apartment_name=str(apartment_name),
+                missing_info=missing,
+                timeout=330,
+            )
+            if call_result.findings:
+                extracted.update(call_result.findings)
+            if call_result.transcript:
+                extracted["_phone_call_transcript"] = call_result.transcript
+                extracted["_phone_call_made"] = True
+            if call_result.error and on_status:
+                await on_status(f"Phone call issue: {call_result.error}")
+            elif on_status:
+                await on_status(f"Phone call complete")
+        except Exception as exc:
+            logger.warning("Auto-call failed for %s: %s", phone, exc)
+            if on_status:
+                await on_status(f"Phone call failed: {str(exc)[:80]}")
+
     summary = extracted.pop("summary", "")
     return {"findings": extracted, "summary": summary, "error": None, "screenshot_url": screenshot_url, "total_tokens": total_tokens_used}
 
@@ -391,3 +421,60 @@ async def run_research_for_input(
         error_result = {"findings": {}, "summary": "", "error": str(exc)[:500]}
         await save_research_result(project_id, task_id, input_id, error_result)
         return error_result
+
+
+# ── Phone call helpers ──
+
+
+def _extract_phone_number(findings: dict) -> str | None:
+    """Extract and normalize a phone number from research findings."""
+    import re
+    phone_keys = ("phone", "phone_number", "office_phone", "leasing_phone",
+                  "contact_phone", "contact_info")
+    for key, val in findings.items():
+        if any(pk in key.lower() for pk in phone_keys):
+            if isinstance(val, str):
+                raw = val
+            elif isinstance(val, dict):
+                raw = val.get("phone", "") or val.get("phone_number", "") or str(val)
+            else:
+                continue
+            from ...core.services.twilio_call_service import normalize_phone_number
+            normalized = normalize_phone_number(raw)
+            if normalized:
+                return normalized
+    return None
+
+
+def _identify_missing_info(instructions: str, findings: dict) -> list[str]:
+    """Identify what the instructions asked for that wasn't found in findings."""
+    keywords_map = {
+        "deposit": ["deposit", "security deposit"],
+        "lease terms": ["lease", "lease term", "lease length", "short term"],
+        "pet policy": ["pet", "pet deposit", "pet rent"],
+        "utilities": ["utilities", "utility", "water", "electric"],
+        "parking": ["parking", "garage"],
+        "move-in costs": ["move-in", "move in cost", "application fee"],
+        "availability": ["available", "availability", "move-in date"],
+        "pricing": ["price", "pricing", "rent", "cost"],
+    }
+
+    instructions_lower = instructions.lower()
+    findings_text = json.dumps(findings).lower()
+    missing = []
+
+    for field_name, keywords in keywords_map.items():
+        # Was this asked for in instructions?
+        if any(kw in instructions_lower for kw in keywords):
+            # Is it missing or null in findings?
+            if not any(kw in findings_text for kw in keywords):
+                missing.append(field_name)
+
+    return missing
+
+
+def _twilio_configured() -> bool:
+    """Check if Twilio is configured for outbound calls."""
+    from ...config import get_settings
+    settings = get_settings()
+    return bool(settings.twilio_account_sid and settings.twilio_auth_token and settings.twilio_phone_number)

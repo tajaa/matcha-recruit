@@ -28,6 +28,12 @@ class Settings:
 
     # Auth
     jwt_secret_key: str
+
+    # Twilio (outbound phone calls for research)
+    twilio_account_sid: Optional[str] = None
+    twilio_auth_token: Optional[str] = None
+    twilio_phone_number: Optional[str] = None
+    twilio_media_stream_url: Optional[str] = None
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 1440  # 24 hours
     jwt_refresh_token_expire_days: int = 30
@@ -148,6 +154,10 @@ def load_settings() -> Settings:
         voice=os.getenv("GEMINI_VOICE", "Kore"),
         port=int(os.getenv("PORT", "8002")),
         search_api_key=os.getenv("SEARCH_API_KEY"),
+        twilio_account_sid=os.getenv("TWILIO_ACCOUNT_SID"),
+        twilio_auth_token=os.getenv("TWILIO_AUTH_TOKEN"),
+        twilio_phone_number=os.getenv("TWILIO_PHONE_NUMBER"),
+        twilio_media_stream_url=os.getenv("TWILIO_MEDIA_STREAM_URL"),
         jwt_secret_key=jwt_secret_key,
         jwt_algorithm=os.getenv("JWT_ALGORITHM", "HS256"),
         jwt_access_token_expire_minutes=int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "1440")),

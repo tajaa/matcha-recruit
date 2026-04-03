@@ -9,7 +9,7 @@ from .rate_limiter import get_rate_limiter, RateLimitExceeded
 
 from typing import Literal
 
-InterviewType = Literal["culture", "candidate", "screening", "tutor_interview", "tutor_language", "investigation"]
+InterviewType = Literal["culture", "candidate", "screening", "tutor_interview", "tutor_language", "investigation", "phone_call"]
 
 CULTURE_INTERVIEW_PROMPT = """You are an AI interviewer conducting a company culture interview for Matcha Recruit.
 
@@ -664,6 +664,44 @@ class GeminiLiveSession:
         self._closed = False
         self._receive_task = asyncio.create_task(self._receive_loop())
 
+    async def connect_raw(self, system_prompt: str) -> None:
+        """Connect to Gemini with a raw system prompt (for phone calls, custom use cases)."""
+        await get_rate_limiter().check_and_record("gemini_session", "phone_call")
+
+        self._interview_type = "phone_call"
+        self._input_transcript_buffer = ""
+        self._output_transcript_buffer = ""
+        self.session_transcript = []
+
+        config = types.LiveConnectConfig(
+            response_modalities=["AUDIO"],
+            speech_config=types.SpeechConfig(
+                voice_config=types.VoiceConfig(
+                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self.voice)
+                )
+            ),
+            system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+            realtime_input_config=types.RealtimeInputConfig(
+                activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
+                automatic_activity_detection=types.AutomaticActivityDetection(
+                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
+                    silence_duration_ms=500,
+                ),
+            ),
+            context_window_compression=types.ContextWindowCompressionConfig(
+                sliding_window=types.SlidingWindow(),
+            ),
+        )
+
+        print("[Gemini] Connecting for phone call")
+        self._session_context = self.client.aio.live.connect(model=self.model, config=config)
+        self.session = await self._session_context.__aenter__()
+        print("[Gemini] Phone call session connected")
+        self._closed = False
+        self._receive_task = asyncio.create_task(self._receive_loop())
+
     async def _receive_loop(self) -> None:
         """Receive responses from Gemini."""
         try:
@@ -806,6 +844,8 @@ class GeminiLiveSession:
                     speaker = "Tutor"
                 elif self._interview_type == "investigation":
                     speaker = "Investigator"
+                elif self._interview_type == "phone_call":
+                    speaker = "Agent"
                 else:
                     speaker = "Interviewer"
             else:
@@ -816,6 +856,8 @@ class GeminiLiveSession:
                     speaker = "Learner"
                 elif self._interview_type == "investigation":
                     speaker = "Interviewee"
+                elif self._interview_type == "phone_call":
+                    speaker = "Leasing Office"
                 else:
                     speaker = "HR"
             lines.append(f"{speaker}: {text}")
