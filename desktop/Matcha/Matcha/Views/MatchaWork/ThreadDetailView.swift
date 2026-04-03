@@ -5,13 +5,19 @@ struct ThreadDetailView: View {
     @State private var viewModel = ThreadDetailViewModel()
     @State private var showVersionHistory = false
     @State private var showFinalizeConfirm = false
+    @State private var showUsageSummary = false
     @State private var editingTitle = false
     @State private var titleDraft = ""
     @AppStorage("mw-chat-theme") private var lightMode = false
+    @AppStorage("mw-model") private var selectedModelId = "flash"
+
+    private var selectedModelValue: String? {
+        mwModelOptions.first { $0.id == selectedModelId }?.value
+    }
 
     var body: some View {
         HSplitView {
-            ChatPanelView(viewModel: viewModel, lightMode: lightMode)
+            ChatPanelView(viewModel: viewModel, lightMode: lightMode, selectedModel: selectedModelValue)
                 .frame(minWidth: 320)
 
             if viewModel.hasPreviewContent || viewModel.isLoadingPDF {
@@ -123,6 +129,50 @@ struct ThreadDetailView: View {
                 }
 
                 Divider()
+
+                // Model picker
+                Menu {
+                    ForEach(mwModelOptions) { option in
+                        Button {
+                            selectedModelId = option.id
+                        } label: {
+                            HStack {
+                                Text(option.label)
+                                if selectedModelId == option.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 10))
+                        Text(mwModelOptions.first { $0.id == selectedModelId }?.label ?? "Flash")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
+                    .foregroundColor(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Select AI model")
+
+                // Usage summary
+                Button {
+                    showUsageSummary = true
+                } label: {
+                    Image(systemName: "chart.bar")
+                        .font(.system(size: 13))
+                }
+                .help("Token usage summary")
+                .popover(isPresented: $showUsageSummary) {
+                    UsageSummaryView()
+                        .frame(width: 340, height: 360)
+                }
 
                 // Light/dark toggle
                 Button {

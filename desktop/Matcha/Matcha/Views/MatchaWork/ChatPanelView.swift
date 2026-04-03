@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 struct ChatPanelView: View {
     @Bindable var viewModel: ThreadDetailViewModel
     var lightMode: Bool = false
+    var selectedModel: String? = nil
     @State private var inputText = ""
     @State private var previewURL: String? = nil
 
@@ -11,7 +12,7 @@ struct ChatPanelView: View {
         let content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty, !viewModel.isStreaming else { return }
         inputText = ""
-        Task { await viewModel.sendMessage(content: content) }
+        Task { await viewModel.sendMessage(content: content, model: selectedModel) }
     }
 
     private var selectedSlideTitle: String? {

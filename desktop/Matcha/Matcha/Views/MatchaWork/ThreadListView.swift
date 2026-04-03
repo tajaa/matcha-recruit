@@ -35,6 +35,40 @@ struct ThreadListView: View {
                 Text("Matcha Work")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.secondary)
+
+                // Online users
+                if !appState.onlineUsers.isEmpty {
+                    HStack(spacing: -4) {
+                        ForEach(appState.onlineUsers.prefix(5)) { user in
+                            Circle()
+                                .fill(Color.matcha500)
+                                .frame(width: 18, height: 18)
+                                .overlay(
+                                    Text(String(user.name.prefix(1)).uppercased())
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.white)
+                                )
+                                .overlay(
+                                    Circle().stroke(Color.appBackground, lineWidth: 1.5)
+                                )
+                                .help(user.name)
+                        }
+                        if appState.onlineUsers.count > 5 {
+                            Circle()
+                                .fill(Color.zinc800)
+                                .frame(width: 18, height: 18)
+                                .overlay(
+                                    Text("+\(appState.onlineUsers.count - 5)")
+                                        .font(.system(size: 7, weight: .bold))
+                                        .foregroundColor(.secondary)
+                                )
+                                .overlay(
+                                    Circle().stroke(Color.appBackground, lineWidth: 1.5)
+                                )
+                        }
+                    }
+                }
+
                 Spacer()
                 Button {
                     guard !isCreating else { return }

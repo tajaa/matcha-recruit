@@ -427,6 +427,111 @@ struct MWPayerPolicySource: Codable {
     }
 }
 
+// MARK: - Usage Summary
+
+struct MWUsageSummary: Codable {
+    let periodDays: Int
+    let generatedAt: String
+    let totals: MWUsageTotals
+    let byModel: [MWModelUsage]
+
+    enum CodingKeys: String, CodingKey {
+        case periodDays = "period_days"
+        case generatedAt = "generated_at"
+        case totals
+        case byModel = "by_model"
+    }
+}
+
+struct MWUsageTotals: Codable {
+    let promptTokens: Int
+    let completionTokens: Int
+    let totalTokens: Int
+    let operationCount: Int
+    let estimatedOperations: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case promptTokens = "prompt_tokens"
+        case completionTokens = "completion_tokens"
+        case totalTokens = "total_tokens"
+        case operationCount = "operation_count"
+        case estimatedOperations = "estimated_operations"
+    }
+}
+
+struct MWModelUsage: Codable, Identifiable {
+    var id: String { model }
+    let model: String
+    let promptTokens: Int
+    let completionTokens: Int
+    let totalTokens: Int
+    let operationCount: Int
+    let costDollars: Double?
+
+    enum CodingKeys: String, CodingKey {
+        case model
+        case promptTokens = "prompt_tokens"
+        case completionTokens = "completion_tokens"
+        case totalTokens = "total_tokens"
+        case operationCount = "operation_count"
+        case costDollars = "cost_dollars"
+    }
+}
+
+// MARK: - Online Users (Presence)
+
+struct MWOnlineUser: Codable, Identifiable {
+    let id: String
+    let email: String
+    let name: String
+    let avatarUrl: String?
+    let lastActive: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, email, name
+        case avatarUrl = "avatar_url"
+        case lastActive = "last_active"
+    }
+}
+
+// MARK: - Review Requests
+
+struct MWSendReviewRequestsRequest: Codable {
+    let recipientEmails: [String]
+    let customMessage: String?
+
+    enum CodingKeys: String, CodingKey {
+        case recipientEmails = "recipient_emails"
+        case customMessage = "custom_message"
+    }
+}
+
+struct MWSendReviewRequestsResponse: Codable {
+    let sentCount: Int
+    let failedCount: Int
+    let failedEmails: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case sentCount = "sent_count"
+        case failedCount = "failed_count"
+        case failedEmails = "failed_emails"
+    }
+}
+
+// MARK: - Model Options
+
+struct MWModelOption: Identifiable {
+    let id: String
+    let label: String
+    let value: String
+}
+
+let mwModelOptions: [MWModelOption] = [
+    MWModelOption(id: "flash-lite", label: "Flash Lite 3.1", value: "gemini-2.0-flash-lite"),
+    MWModelOption(id: "flash", label: "Flash 3.0", value: "gemini-2.0-flash"),
+    MWModelOption(id: "pro", label: "Pro 3.1", value: "gemini-2.5-pro-preview-05-06"),
+]
+
 // MARK: - Mode Toggle Request Types
 
 struct MWNodeModeRequest: Codable {

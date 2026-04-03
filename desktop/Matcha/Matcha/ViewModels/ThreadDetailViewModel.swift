@@ -95,7 +95,7 @@ class ThreadDetailViewModel {
         }
     }
 
-    func sendMessage(content: String) async {
+    func sendMessage(content: String, model: String? = nil) async {
         guard let threadId = thread?.id else { return }
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
@@ -131,13 +131,14 @@ class ThreadDetailViewModel {
         struct SendBody: Codable {
             let content: String
             let slideIndex: Int?
+            let model: String?
             enum CodingKeys: String, CodingKey {
-                case content
+                case content, model
                 case slideIndex = "slide_index"
             }
         }
         request.httpBody = try? JSONEncoder().encode(
-            SendBody(content: content, slideIndex: capturedSlideIndex)
+            SendBody(content: content, slideIndex: capturedSlideIndex, model: model)
         )
 
         let task = Task {

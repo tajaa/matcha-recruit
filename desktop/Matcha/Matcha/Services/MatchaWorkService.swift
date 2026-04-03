@@ -272,6 +272,49 @@ class MatchaWorkService {
         invalidateThread(threadId: id)
     }
 
+    // MARK: - Usage Summary
+
+    func fetchUsageSummary(periodDays: Int = 30) async throws -> MWUsageSummary {
+        try await client.request(
+            method: "GET",
+            path: "\(basePath)/usage/summary?period_days=\(periodDays)"
+        )
+    }
+
+    // MARK: - Presence
+
+    func sendHeartbeat() async throws {
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/presence/heartbeat")
+    }
+
+    func fetchOnlineUsers() async throws -> [MWOnlineUser] {
+        try await client.request(method: "GET", path: "\(basePath)/presence/online")
+    }
+
+    // MARK: - Review Requests
+
+    func sendReviewRequests(
+        threadId: String,
+        emails: [String],
+        customMessage: String? = nil
+    ) async throws -> MWSendReviewRequestsResponse {
+        let body = MWSendReviewRequestsRequest(recipientEmails: emails, customMessage: customMessage)
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/threads/\(threadId)/review-requests/send",
+            body: body
+        )
+    }
+
+    // MARK: - Export
+
+    func exportThread(threadId: String, format: String) async throws -> Data {
+        try await client.requestData(
+            method: "GET",
+            path: "\(basePath)/threads/\(threadId)/project/export/\(format)"
+        )
+    }
+
     func removeImage(threadId: String, imageUrl: String) async throws -> [String] {
         let encoded = imageUrl.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? imageUrl
         let path = "\(basePath)/threads/\(threadId)/images?url=\(encoded)"
