@@ -284,16 +284,46 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
     setStreamStatus(null)
   }
 
-  async function handleAddToProject(inputUrl: string, findings: Record<string, unknown>, summary?: string) {
+  function flattenValue(value: unknown): string {
+    if (value == null) return '—'
+    if (Array.isArray(value)) {
+      if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
+        return value.map((item, i) => {
+          const obj = item as Record<string, unknown>
+          const parts = Object.entries(obj).map(([k, v]) => {
+            if (Array.isArray(v)) return `${formatKey(k)}: ${v.map(x => typeof x === 'object' && x !== null ? Object.values(x as Record<string, unknown>).join(' · ') : String(x)).join(', ')}`
+            if (typeof v === 'object' && v !== null) return `${formatKey(k)}: ${Object.entries(v as Record<string, unknown>).map(([ck, cv]) => `${formatKey(ck)}: ${String(cv ?? '—')}`).join(', ')}`
+            return `${formatKey(k)}: ${String(v ?? '—')}`
+          })
+          return parts.join(' | ')
+        }).join('\n')
+      }
+      return value.map(v => String(v)).join(', ')
+    }
+    if (typeof value === 'object') {
+      return Object.entries(value as Record<string, unknown>).map(([k, v]) =>
+        `${formatKey(k)}: ${String(v ?? '—')}`
+      ).join('\n')
+    }
+    return String(value)
+  }
+
+  async function handleAddToProject(inputUrl: string, findings: Record<string, unknown>, summary?: string, screenshotUrl?: string) {
     const title = formatUrl(inputUrl)
     let html = `<h2>${title}</h2>`
+    if (screenshotUrl) html += `<img src="${screenshotUrl}" alt="${title}" style="max-width:100%;border-radius:8px;margin:8px 0;" />`
     if (summary) html += `<p>${summary}</p>`
-    html += '<table>'
     for (const [key, value] of Object.entries(findings)) {
-      const displayVal = typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value ?? '—')
-      html += `<tr><td><strong>${formatKey(key)}</strong></td><td>${displayVal}</td></tr>`
+      const text = flattenValue(value)
+      html += `<h3>${formatKey(key)}</h3>`
+      // Split multiline values into paragraphs
+      const lines = text.split('\n').filter(Boolean)
+      if (lines.length > 1) {
+        html += '<ul>' + lines.map(l => `<li>${l}</li>`).join('') + '</ul>'
+      } else {
+        html += `<p>${text}</p>`
+      }
     }
-    html += '</table>'
     try {
       await addProjectSectionNew(projectId, { title, content: html })
       await refresh()
@@ -431,7 +461,7 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
                 for (const inp of (task.inputs ?? [])) {
                   const r = getResult(inp.id)
                   if (r && Object.keys(r.findings || {}).length > 0) {
-                    await handleAddToProject(inp.url, r.findings, r.summary)
+                    await handleAddToProject(inp.url, r.findings, r.summary, r.screenshot_url)
                   }
                 }
               }}
@@ -525,7 +555,7 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
                         {Object.keys(result.findings || {}).length > 0 && (
                           <div className="flex items-center gap-2 mt-2">
                             <button
-                              onClick={() => handleAddToProject(inp.url, result.findings, result.summary)}
+                              onClick={() => handleAddToProject(inp.url, result.findings, result.summary, result.screenshot_url)}
                               className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors"
                               style={{ color: '#ce9178', background: '#2a2d2e' }}
                             >
