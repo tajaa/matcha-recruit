@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Plus, Pin, Archive, Loader2, FolderOpen, FileText, Presentation, Users, X } from 'lucide-react'
 import type { MWThread, MWProject } from '../../types/matcha-work'
-import { listThreads, createThread, pinThread, archiveThread, listProjects, createProjectNew } from '../../api/matchaWork'
+import { listThreads, createThread, pinThread, archiveThread, listProjects, createProjectNew, fetchTaskBoard, createTask, updateTask, deleteTask, dismissAutoTask } from '../../api/matchaWork'
+import type { TaskBoardResponse } from '../../api/matchaWork'
+import TaskBoard from '../../components/work/TaskBoard'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -15,12 +17,13 @@ const TASK_LABELS: Record<string, string> = {
   policy: 'Policy',
 }
 
-type Tab = 'all' | 'active' | 'pinned' | 'archived' | 'projects'
+type Tab = 'all' | 'active' | 'pinned' | 'archived' | 'projects' | 'tasks'
 
 export default function MatchaWorkList() {
   const navigate = useNavigate()
   const [threads, setThreads] = useState<MWThread[]>([])
   const [projects, setProjects] = useState<MWProject[]>([])
+  const [taskBoard, setTaskBoard] = useState<TaskBoardResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [showTypePicker, setShowTypePicker] = useState(false)
@@ -31,7 +34,10 @@ export default function MatchaWorkList() {
     setLoading(true)
     setError('')
     try {
-      if (tab === 'projects') {
+      if (tab === 'tasks') {
+        const data = await fetchTaskBoard()
+        setTaskBoard(data)
+      } else if (tab === 'projects') {
         const data = await listProjects()
         setProjects(data)
       } else {
@@ -106,20 +112,23 @@ export default function MatchaWorkList() {
     { key: 'pinned', label: 'Pinned' },
     { key: 'archived', label: 'Archived' },
     { key: 'projects', label: 'Projects' },
+    { key: 'tasks', label: 'Tasks' },
   ]
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-white">Matcha Work</h1>
-        <button
-          onClick={handleCreate}
-          disabled={creating}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
-        >
-          {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-          {tab === 'projects' ? 'New Project' : 'New Thread'}
-        </button>
+        {tab !== 'tasks' && (
+          <button
+            onClick={handleCreate}
+            disabled={creating}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+          >
+            {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+            {tab === 'projects' ? 'New Project' : 'New Thread'}
+          </button>
+        )}
       </div>
 
       {/* Tabs */}
@@ -149,6 +158,45 @@ export default function MatchaWorkList() {
         <div className="flex justify-center py-16">
           <Loader2 className="animate-spin text-zinc-500" size={24} />
         </div>
+      ) : tab === 'tasks' ? (
+        <TaskBoard
+          autoItems={taskBoard?.auto_items ?? []}
+          manualItems={taskBoard?.manual_items ?? []}
+          dismissedIds={taskBoard?.dismissed_ids ?? []}
+          onCreateTask={async (body) => {
+            const newTask = await createTask(body)
+            setTaskBoard((prev) => prev ? { ...prev, manual_items: [newTask, ...prev.manual_items], total: prev.total + 1 } : prev)
+          }}
+          onCompleteTask={async (id) => {
+            await updateTask(id, { status: 'completed' })
+            setTaskBoard((prev) => prev ? {
+              ...prev,
+              manual_items: prev.manual_items.map((t) => t.id === id ? { ...t, status: 'completed' } : t),
+            } : prev)
+          }}
+          onUncompleteTask={async (id) => {
+            await updateTask(id, { status: 'pending' })
+            setTaskBoard((prev) => prev ? {
+              ...prev,
+              manual_items: prev.manual_items.map((t) => t.id === id ? { ...t, status: 'pending', completed_at: null } : t),
+            } : prev)
+          }}
+          onDismiss={async (category, sourceId) => {
+            await dismissAutoTask(category, sourceId)
+            setTaskBoard((prev) => prev ? {
+              ...prev,
+              dismissed_ids: [...prev.dismissed_ids, `${category}:${sourceId}`],
+            } : prev)
+          }}
+          onDeleteTask={async (id) => {
+            await deleteTask(id)
+            setTaskBoard((prev) => prev ? {
+              ...prev,
+              manual_items: prev.manual_items.filter((t) => t.id !== id),
+              total: prev.total - 1,
+            } : prev)
+          }}
+        />
       ) : tab === 'projects' ? (
         projects.length === 0 ? (
           <div className="text-center py-16 text-zinc-500">No projects yet. Create one to get started.</div>
