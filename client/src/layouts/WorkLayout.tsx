@@ -110,6 +110,7 @@ export default function WorkLayout() {
 
         <div className="ml-auto flex items-center gap-4">
           <TokenIndicator />
+          <OnlineUsersPanel />
           <Link
             to={isPersonal ? '/work' : '/app/inbox'}
             className="relative flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white transition-colors"
@@ -127,7 +128,6 @@ export default function WorkLayout() {
       <main className="flex-1">
         <Outlet />
       </main>
-      <OnlineUsersPanel />
     </div>
   )
 }

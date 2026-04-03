@@ -645,6 +645,42 @@ export async function retryResearchStream(
   }
 }
 
+export async function followUpResearchStream(
+  projectId: string,
+  taskId: string,
+  inputId: string,
+  followUp: string,
+  onEvent: (event: { type: string; input_id?: string; message?: string }) => void,
+  signal?: AbortSignal,
+  captureScreenshot?: boolean,
+) {
+  const token = localStorage.getItem('matcha_access_token')
+  const qs = captureScreenshot ? '?capture_screenshot=true' : ''
+  const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/inputs/${inputId}/follow-up${qs}`, {
+    method: 'POST',
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ follow_up: followUp }),
+    signal,
+  })
+  if (!res.ok) throw new Error(`${res.status}`)
+  const reader = res.body?.getReader()
+  if (!reader) return
+  const decoder = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() || ''
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try { onEvent(JSON.parse(line.slice(6))) } catch {}
+      }
+    }
+  }
+}
+
 export function stopResearch(projectId: string, taskId: string) {
   return api.post(`/matcha-work/projects/${projectId}/research-tasks/${taskId}/stop`)
 }

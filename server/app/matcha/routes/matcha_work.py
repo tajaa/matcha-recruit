@@ -2854,6 +2854,112 @@ async def run_research_task(
     return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
+@router.post("/projects/{project_id}/research-tasks/{task_id}/inputs/{input_id}/follow-up")
+async def follow_up_research_input(
+    project_id: UUID,
+    task_id: str,
+    input_id: str,
+    body: dict = Body(...),
+    capture_screenshot: bool = Query(False),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Re-research a URL with additional instructions, building on previous findings."""
+    from ..services.research_browse_service import run_research_for_input
+    from starlette.responses import StreamingResponse
+
+    project, _role = await _verify_project_access(project_id, current_user)
+    company_id = str(project.get("company_id") or await get_client_company_id(current_user))
+
+    follow_up = body.get("follow_up", "").strip()
+    if not follow_up:
+        raise HTTPException(status_code=400, detail="follow_up is required")
+
+    follow_url = ""
+    combined_instructions = ""
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id,
+            )
+            data = row["project_data"] if row else {}
+            if isinstance(data, str):
+                data = json.loads(data)
+            data = data or {}
+
+            for task in data.get("research_tasks", []):
+                if task["id"] == task_id:
+                    base_instructions = task.get("instructions", "")
+
+                    # Find previous findings for context
+                    prev_findings = {}
+                    for r in task.get("results", []):
+                        if r.get("input_id") == input_id:
+                            prev_findings = r.get("findings", {})
+                            break
+
+                    # Build combined instructions with previous context
+                    combined_instructions = base_instructions
+                    if prev_findings:
+                        combined_instructions += f"\n\nPREVIOUS FINDINGS (already gathered):\n{json.dumps(prev_findings, indent=2)}"
+                    combined_instructions += f"\n\nADDITIONAL REQUEST:\n{follow_up}"
+
+                    for inp in task.get("inputs", []):
+                        if inp["id"] == input_id:
+                            inp["status"] = "running"
+                            inp.pop("error", None)
+                            inp.pop("completed_at", None)
+                            follow_url = inp["url"]
+                            # Keep old results — new ones will merge
+                            break
+
+                    await conn.execute(
+                        "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                        json.dumps(data), project_id,
+                    )
+                    break
+
+    if not follow_url:
+        raise HTTPException(status_code=404, detail="Input not found")
+
+    async def event_stream():
+        status_queue: asyncio.Queue = asyncio.Queue()
+
+        async def stream_status(msg: str):
+            await status_queue.put(msg)
+
+        browse_task = asyncio.create_task(
+            run_research_for_input(
+                project_id, task_id, input_id, follow_url, combined_instructions,
+                on_status=stream_status,
+                capture_screenshot=capture_screenshot, company_id=company_id,
+            )
+        )
+
+        while not browse_task.done():
+            try:
+                msg = await asyncio.wait_for(status_queue.get(), timeout=1.0)
+                yield _sse_data({"type": "status", "input_id": input_id, "message": msg})
+            except asyncio.TimeoutError:
+                pass
+
+        while not status_queue.empty():
+            msg = status_queue.get_nowait()
+            yield _sse_data({"type": "status", "input_id": input_id, "message": msg})
+
+        result = browse_task.result()
+        yield _sse_data({
+            "type": "complete" if not result.get("error") else "error",
+            "input_id": input_id, "url": follow_url,
+            "findings": result.get("findings", {}),
+            "summary": result.get("summary", ""),
+            "error": result.get("error"),
+        })
+        yield _sse_data({"type": "done"})
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @router.post("/projects/{project_id}/research-tasks/{task_id}/inputs/{input_id}/retry")
 async def retry_research_input(
     project_id: UUID,

@@ -321,11 +321,14 @@ async def save_research_result(project_id: UUID, task_id: str, input_id: str, re
                             break
 
                     results = task.get("results", [])
+                    # Merge new findings with previous (for follow-up research)
+                    prev = next((r for r in results if r.get("input_id") == input_id), None)
+                    merged_findings = {**(prev.get("findings", {}) if prev else {}), **result.get("findings", {})}
                     results = [r for r in results if r.get("input_id") != input_id]
                     result_entry = {
                         "input_id": input_id,
-                        "findings": result.get("findings", {}),
-                        "summary": result.get("summary", ""),
+                        "findings": merged_findings,
+                        "summary": result.get("summary", "") or (prev.get("summary", "") if prev else ""),
                     }
                     if result.get("screenshot_url"):
                         result_entry["screenshot_url"] = result["screenshot_url"]

@@ -8,7 +8,7 @@ import { useToast } from '../ui'
 import {
   createResearchTask, updateResearchTask, deleteResearchTask,
   addResearchInputs, deleteResearchInput, runResearchStream, retryResearchStream,
-  stopResearch, getProjectDetail, addProjectSectionNew,
+  followUpResearchStream, stopResearch, getProjectDetail, addProjectSectionNew,
 } from '../../api/matchaWork'
 
 interface Props {
@@ -23,6 +23,70 @@ function formatUrl(url: string): string {
 
 function formatKey(key: string): string {
   return key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+}
+
+function RenderValue({ value }: { value: unknown }) {
+  if (value == null) return <span style={{ color: '#6a737d' }}>—</span>
+
+  if (Array.isArray(value)) {
+    // Array of objects → render as mini table
+    if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
+      const keys = [...new Set(value.flatMap(v => Object.keys(v as Record<string, unknown>)))]
+      return (
+        <div className="overflow-x-auto mt-1">
+          <table className="text-[10px] w-full" style={{ borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                {keys.map(k => (
+                  <th key={k} className="text-left px-2 py-1 font-medium" style={{ color: '#6a737d', borderBottom: '1px solid #333' }}>
+                    {formatKey(k)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {value.map((item, i) => (
+                <tr key={i}>
+                  {keys.map(k => (
+                    <td key={k} className="px-2 py-1" style={{ color: '#d4d4d4', borderBottom: '1px solid #2a2a2a' }}>
+                      {String((item as Record<string, unknown>)[k] ?? '—')}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )
+    }
+    // Array of primitives → bullet list
+    return (
+      <ul className="mt-0.5 space-y-0.5">
+        {value.map((v, i) => (
+          <li key={i} className="flex items-start gap-1.5 text-[11px]" style={{ color: '#d4d4d4' }}>
+            <span className="w-1 h-1 rounded-full bg-zinc-600 mt-1.5 shrink-0" />
+            {String(v)}
+          </li>
+        ))}
+      </ul>
+    )
+  }
+
+  if (typeof value === 'object') {
+    // Nested object → render as indented key-value
+    return (
+      <div className="mt-1 pl-3" style={{ borderLeft: '1px solid #333' }}>
+        {Object.entries(value as Record<string, unknown>).map(([k, v]) => (
+          <div key={k} className="mb-1">
+            <span className="text-[10px] font-medium" style={{ color: '#9ca3af' }}>{formatKey(k)}: </span>
+            <span className="text-[11px]" style={{ color: '#d4d4d4' }}>{String(v ?? '—')}</span>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  return <span style={{ color: '#d4d4d4' }}>{String(value)}</span>
 }
 
 export default function ResearchPanel({ project, projectId, onUpdate }: Props) {
@@ -102,6 +166,7 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
   const [urlDraft, setUrlDraft] = useState('')
   const [captureScreenshot, setCaptureScreenshot] = useState(true)
   const [running, setRunning] = useState(false)
+  const [followUpDraft, setFollowUpDraft] = useState<Record<string, string>>({})
   const [streamStatus, setStreamStatus] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const [expandedResult, setExpandedResult] = useState<string | null>(null)
@@ -222,6 +287,29 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
     } catch {
       toast('Failed to add to project', 'error')
     }
+  }
+
+  async function handleFollowUp(inputId: string) {
+    const text = followUpDraft[inputId]?.trim()
+    if (!text) return
+    const abort = new AbortController()
+    abortRef.current = abort
+    setRunning(true)
+    setStreamStatus(null)
+    try {
+      await followUpResearchStream(projectId, task.id, inputId, text, async (event) => {
+        if (event.type === 'status') setStreamStatus(event.message || null)
+        else if (event.type === 'complete' || event.type === 'error' || event.type === 'done') {
+          setStreamStatus(null)
+          await refresh()
+        }
+      }, abort.signal, captureScreenshot)
+    } catch {}
+    abortRef.current = null
+    setRunning(false)
+    setStreamStatus(null)
+    setFollowUpDraft(prev => ({ ...prev, [inputId]: '' }))
+    await refresh()
   }
 
   const pendingOrError = task.inputs?.filter(i => i.status === 'pending' || i.status === 'error').length ?? 0
@@ -405,15 +493,15 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
                         {result.summary && (
                           <p className="text-xs mb-2" style={{ color: '#d4d4d4' }}>{result.summary}</p>
                         )}
-                        <div className="space-y-1">
+                        <div className="space-y-2">
                           {Object.entries(result.findings || {}).map(([key, value]) => (
-                            <div key={key} className="flex gap-2 text-[11px]">
-                              <span className="shrink-0 font-medium" style={{ color: '#ce9178', minWidth: 100 }}>
+                            <div key={key}>
+                              <div className="text-[10px] font-medium mb-0.5" style={{ color: '#ce9178' }}>
                                 {formatKey(key)}
-                              </span>
-                              <span style={{ color: '#d4d4d4' }}>
-                                {typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—')}
-                              </span>
+                              </div>
+                              <div className="text-[11px]">
+                                <RenderValue value={value} />
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -421,14 +509,39 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
                           <p className="text-[11px]" style={{ color: '#6a737d' }}>No findings extracted</p>
                         )}
                         {Object.keys(result.findings || {}).length > 0 && (
-                          <button
-                            onClick={() => handleAddToProject(inp.url, result.findings, result.summary)}
-                            className="flex items-center gap-1 mt-2 text-[10px] font-medium px-2 py-1 rounded transition-colors"
-                            style={{ color: '#ce9178', background: '#2a2d2e' }}
-                          >
-                            <FileOutput size={10} />
-                            Add to Project
-                          </button>
+                          <div className="flex items-center gap-2 mt-2">
+                            <button
+                              onClick={() => handleAddToProject(inp.url, result.findings, result.summary)}
+                              className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors"
+                              style={{ color: '#ce9178', background: '#2a2d2e' }}
+                            >
+                              <FileOutput size={10} />
+                              Add to Project
+                            </button>
+                          </div>
+                        )}
+                        {/* Follow-up research */}
+                        {inp.status === 'completed' && (
+                          <div className="flex items-center gap-1.5 mt-2">
+                            <input
+                              value={followUpDraft[inp.id] || ''}
+                              onChange={e => setFollowUpDraft(prev => ({ ...prev, [inp.id]: e.target.value }))}
+                              onKeyDown={e => { if (e.key === 'Enter' && !running) handleFollowUp(inp.id) }}
+                              placeholder="Need more info? e.g. find deposit and lease terms..."
+                              disabled={running}
+                              className="flex-1 text-[11px] rounded px-2 py-1 border focus:outline-none"
+                              style={{ background: '#1e1e1e', color: '#e8e8e8', borderColor: '#444' }}
+                            />
+                            <button
+                              onClick={() => handleFollowUp(inp.id)}
+                              disabled={running || !followUpDraft[inp.id]?.trim()}
+                              className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors disabled:opacity-30"
+                              style={{ color: '#fff', background: '#3b82f6' }}
+                            >
+                              <Search size={10} />
+                              Research more
+                            </button>
+                          </div>
                         )}
                       </div>
                     )}
