@@ -434,6 +434,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 model=model,
                 config=types.CreateCachedContentConfig(
                     system_instruction=static_prompt,
+                    tools=[_GOOGLE_SEARCH_TOOL],
                     ttl=f"{_CACHE_TTL_SECONDS}s",
                 ),
             )
@@ -564,7 +565,6 @@ class GeminiProvider(MatchaWorkAIProvider):
                     cached_content=cache_name,
                     temperature=0.2,
                     response_mime_type="application/json",
-                    tools=[_GOOGLE_SEARCH_TOOL],
                 ),
             )
         else:
