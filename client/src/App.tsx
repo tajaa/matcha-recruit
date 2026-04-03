@@ -48,6 +48,7 @@ import ERExportDownload from './pages/shared/ERExportDownload'
 import CandidateInterview from './pages/shared/CandidateInterview'
 import SSOCallback from './pages/SSOCallback'
 import BetaRegister from './pages/BetaRegister'
+import ResetPassword from './pages/ResetPassword'
 import WorkLayout from './layouts/WorkLayout'
 import MatchaWorkList from './pages/work/MatchaWorkList'
 import MatchaWorkThread from './pages/work/MatchaWorkThread'
@@ -60,6 +61,7 @@ export default function App() {
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/register/beta" element={<BetaRegister />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       <Route path="/s/:token" element={<ERExportDownload />} />
       <Route path="/candidate-interview/:token" element={<CandidateInterview />} />
       <Route path="/work" element={<WorkLayout />}>

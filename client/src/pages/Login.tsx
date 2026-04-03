@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { Button, Logo } from '../components/ui'
 import { AsciiHalftone } from '../components/AsciiHalftone'
 import { PricingContactModal } from '../components/PricingContactModal'
@@ -140,6 +140,12 @@ export default function Login() {
             >
               Sign in with SSO
             </button>
+            <Link
+              to="/reset-password"
+              className="block w-full text-center text-sm text-zinc-600 hover:text-zinc-400 transition-colors mt-1"
+            >
+              Forgot password?
+            </Link>
           </form>
         )}
 
