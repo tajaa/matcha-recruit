@@ -8,7 +8,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, HTTPException, Depends, Request, UploadFile, File, status
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 from ...database import get_connection
 from uuid import UUID
@@ -2246,6 +2246,97 @@ async def change_password(
         )
 
         return {"status": "password_changed"}
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=8)
+
+
+@router.post("/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Send a password reset email. Always returns 200 to avoid email enumeration."""
+    from ..services.email import get_email_service
+    from ...config import get_settings
+
+    async with get_connection() as conn:
+        user = await conn.fetchrow(
+            "SELECT id, email FROM users WHERE email = $1 AND is_active = true",
+            request.email.lower().strip(),
+        )
+        if not user:
+            return {"status": "ok"}
+
+        token = secrets.token_urlsafe(48)
+        # Store token with 1-hour expiry
+        await conn.execute(
+            """INSERT INTO password_reset_tokens (user_id, token, expires_at)
+               VALUES ($1, $2, NOW() + INTERVAL '1 hour')""",
+            user["id"], token,
+        )
+
+    settings = get_settings()
+    base_url = settings.app_base_url.rstrip("/")
+    reset_url = f"{base_url}/reset-password?token={token}"
+
+    email_svc = get_email_service()
+    try:
+        if email_svc.is_configured():
+            await email_svc.send_email(
+                to_email=user["email"],
+                to_name=user["email"].split("@")[0],
+                subject="Reset your Matcha password",
+                html_content=f"""
+                <div style="font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 480px; margin: 0 auto; padding: 32px 0;">
+                    <h2 style="color: #e4e4e7; font-size: 20px; margin-bottom: 8px;">Password Reset</h2>
+                    <p style="color: #a1a1aa; font-size: 14px; line-height: 1.6; margin-bottom: 24px;">
+                        Click the button below to reset your password. This link expires in 1 hour.
+                    </p>
+                    <a href="{reset_url}"
+                       style="display: inline-block; background: #10b981; color: white; padding: 12px 28px;
+                              border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+                        Reset Password
+                    </a>
+                    <p style="color: #71717a; font-size: 12px; margin-top: 24px;">
+                        If you didn't request this, you can safely ignore this email.
+                    </p>
+                </div>
+                """,
+            )
+    except Exception as e:
+        logger.warning(f"Failed to send password reset email: {e}")
+
+    return {"status": "ok"}
+
+
+@router.post("/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    """Reset password using a valid reset token."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT user_id FROM password_reset_tokens
+               WHERE token = $1 AND expires_at > NOW() AND used_at IS NULL""",
+            request.token,
+        )
+        if not row:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset link")
+
+        new_hash = hash_password(request.new_password)
+        await conn.execute(
+            "UPDATE users SET password_hash = $1 WHERE id = $2",
+            new_hash, row["user_id"],
+        )
+        # Mark token as used
+        await conn.execute(
+            "UPDATE password_reset_tokens SET used_at = NOW() WHERE token = $1",
+            request.token,
+        )
+
+    return {"status": "password_reset"}
 
 
 @router.post("/change-email")
