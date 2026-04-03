@@ -2762,13 +2762,15 @@ async def delete_research_input(
 async def run_research_task(
     project_id: UUID,
     task_id: str,
+    capture_screenshot: bool = Query(False),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Run all pending research inputs sequentially with SSE status streaming."""
     from ..services.research_browse_service import run_research_for_input
     from starlette.responses import StreamingResponse
 
-    await _verify_project_access(project_id, current_user)
+    project, _role = await _verify_project_access(project_id, current_user)
+    company_id = str(project.get("company_id") or await get_client_company_id(current_user))
 
     # Collect pending inputs
     async with get_connection() as conn:
@@ -2821,6 +2823,7 @@ async def run_research_task(
                 run_research_for_input(
                     project_id, task_id, inp["id"], inp["url"], instructions,
                     on_status=stream_status,
+                    capture_screenshot=capture_screenshot, company_id=company_id,
                 )
             )
 

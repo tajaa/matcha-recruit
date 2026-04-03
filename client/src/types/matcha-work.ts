@@ -81,6 +81,7 @@ export interface ResearchResult {
   input_id: string
   findings: Record<string, unknown>
   summary?: string
+  screenshot_url?: string
 }
 
 export interface ResearchTask {

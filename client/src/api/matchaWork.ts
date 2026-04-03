@@ -587,9 +587,11 @@ export async function runResearchStream(
   taskId: string,
   onEvent: (event: { type: string; input_id?: string; message?: string; findings?: Record<string, unknown>; summary?: string; error?: string | null }) => void,
   signal?: AbortSignal,
+  captureScreenshot?: boolean,
 ) {
   const token = localStorage.getItem('matcha_access_token')
-  const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/run`, {
+  const qs = captureScreenshot ? '?capture_screenshot=true' : ''
+  const res = await fetch(`${BASE}/matcha-work/projects/${projectId}/research-tasks/${taskId}/run${qs}`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     signal,

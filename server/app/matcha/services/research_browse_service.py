@@ -77,11 +77,14 @@ async def _execute_action(page, name: str, args: dict) -> None:
         logger.warning("Unknown action: %s %s", name, args)
 
 
-async def browse_and_extract(url: str, instructions: str, model: str | None = None, on_status=None) -> dict:
+async def browse_and_extract(
+    url: str, instructions: str, model: str | None = None,
+    on_status=None, capture_screenshot: bool = False, company_id: str | None = None,
+) -> dict:
     """Browse a URL using Gemini Computer Use and extract structured data."""
     try:
         return await asyncio.wait_for(
-            _browse_and_extract_inner(url, instructions, model, on_status),
+            _browse_and_extract_inner(url, instructions, model, on_status, capture_screenshot, company_id),
             timeout=BROWSE_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError:
@@ -89,7 +92,10 @@ async def browse_and_extract(url: str, instructions: str, model: str | None = No
         return {"findings": {}, "summary": f"Timed out after {BROWSE_TIMEOUT_SECONDS}s", "error": "Timed out"}
 
 
-async def _browse_and_extract_inner(url: str, instructions: str, model: str | None = None, on_status=None) -> dict:
+async def _browse_and_extract_inner(
+    url: str, instructions: str, model: str | None = None,
+    on_status=None, capture_screenshot: bool = False, company_id: str | None = None,
+) -> dict:
     from google import genai
     from google.genai import types
     from ...config import get_settings
@@ -121,6 +127,7 @@ async def _browse_and_extract_inner(url: str, instructions: str, model: str | No
 
     from playwright.async_api import async_playwright
 
+    screenshot_url = None
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(viewport={"width": VIEWPORT_W, "height": VIEWPORT_H})
@@ -269,13 +276,28 @@ async def _browse_and_extract_inner(url: str, instructions: str, model: str | No
             except Exception as exc:
                 logger.warning("Final extraction attempt failed: %s", exc)
 
+        # Capture a reference screenshot before closing
+        if capture_screenshot and company_id:
+            try:
+                final_screenshot = await page.screenshot(type="png", full_page=False)
+                from ...core.services.storage import get_storage
+                import hashlib
+                fname = f"research-{hashlib.md5(url.encode()).hexdigest()[:8]}.png"
+                screenshot_url = await get_storage().upload_file(
+                    final_screenshot, fname,
+                    prefix=f"matcha-work/{company_id}/research-screenshots",
+                    content_type="image/png",
+                )
+            except Exception as exc:
+                logger.warning("Failed to capture reference screenshot: %s", exc)
+
         await browser.close()
 
     if not extracted:
-        return {"findings": {}, "summary": "Could not extract data", "error": "No data extracted"}
+        return {"findings": {}, "summary": "Could not extract data", "error": "No data extracted", "screenshot_url": screenshot_url}
 
     summary = extracted.pop("summary", "")
-    return {"findings": extracted, "summary": summary, "error": None}
+    return {"findings": extracted, "summary": summary, "error": None, "screenshot_url": screenshot_url}
 
 
 async def save_research_result(project_id: UUID, task_id: str, input_id: str, result: dict) -> None:
@@ -300,11 +322,14 @@ async def save_research_result(project_id: UUID, task_id: str, input_id: str, re
 
                     results = task.get("results", [])
                     results = [r for r in results if r.get("input_id") != input_id]
-                    results.append({
+                    result_entry = {
                         "input_id": input_id,
                         "findings": result.get("findings", {}),
                         "summary": result.get("summary", ""),
-                    })
+                    }
+                    if result.get("screenshot_url"):
+                        result_entry["screenshot_url"] = result["screenshot_url"]
+                    results.append(result_entry)
                     task["results"] = results
                     break
 
@@ -317,11 +342,14 @@ async def save_research_result(project_id: UUID, task_id: str, input_id: str, re
 
 async def run_research_for_input(
     project_id: UUID, task_id: str, input_id: str, url: str, instructions: str,
-    on_status=None,
+    on_status=None, capture_screenshot: bool = False, company_id: str | None = None,
 ) -> dict:
     """Browse a URL and save results. Returns the result dict."""
     try:
-        result = await browse_and_extract(url, instructions, on_status=on_status)
+        result = await browse_and_extract(
+            url, instructions, on_status=on_status,
+            capture_screenshot=capture_screenshot, company_id=company_id,
+        )
         await save_research_result(project_id, task_id, input_id, result)
         logger.info("Research complete for %s: %s", url, result.get("summary", "")[:100])
         return result

@@ -1,9 +1,10 @@
 import { useState, useRef } from 'react'
 import {
   Plus, Trash2, Play, ChevronDown, ChevronRight,
-  Globe, Loader2, CheckCircle, Search, AlertCircle, FileOutput,
+  Globe, Loader2, CheckCircle, Search, AlertCircle, FileOutput, Camera,
 } from 'lucide-react'
 import type { MWProject, ResearchTask, ResearchResult } from '../../types/matcha-work'
+import { useToast } from '../ui'
 import {
   createResearchTask, updateResearchTask, deleteResearchTask,
   addResearchInputs, deleteResearchInput, runResearchStream, retryResearchStream,
@@ -25,6 +26,7 @@ function formatKey(key: string): string {
 }
 
 export default function ResearchPanel({ project, projectId, onUpdate }: Props) {
+  const { toast } = useToast()
   const tasks: ResearchTask[] = (project.project_data?.research_tasks as ResearchTask[] | undefined) ?? []
   const [expandedTask, setExpandedTask] = useState<string | null>(tasks[0]?.id ?? null)
   const [creating, setCreating] = useState(false)
@@ -41,7 +43,10 @@ export default function ResearchPanel({ project, projectId, onUpdate }: Props) {
       const updated = await getProjectDetail(projectId)
       onUpdate(updated)
       setExpandedTask(task.id)
-    } catch {}
+      toast('Research task created')
+    } catch {
+      toast('Failed to create task', 'error')
+    }
     setCreating(false)
   }
 
@@ -92,8 +97,10 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
   task: ResearchTask; projectId: string; expanded: boolean
   onToggle: () => void; onUpdate: (p: MWProject) => void
 }) {
+  const { toast } = useToast()
   const [instructionsDraft, setInstructionsDraft] = useState(task.instructions)
   const [urlDraft, setUrlDraft] = useState('')
+  const [captureScreenshot, setCaptureScreenshot] = useState(true)
   const [running, setRunning] = useState(false)
   const [streamStatus, setStreamStatus] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
@@ -149,7 +156,7 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
           setStreamStatus(null)
           await refresh()
         }
-      }, abort.signal)
+      }, abort.signal, captureScreenshot)
     } catch {
       // AbortError or network error — expected on cancel
     }
@@ -211,7 +218,10 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
     try {
       await addProjectSectionNew(projectId, { title, content: html })
       await refresh()
-    } catch {}
+      toast(`Added "${title}" to project sections`)
+    } catch {
+      toast('Failed to add to project', 'error')
+    }
   }
 
   const pendingOrError = task.inputs?.filter(i => i.status === 'pending' || i.status === 'error').length ?? 0
@@ -258,6 +268,16 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
               className="w-full text-xs rounded px-2 py-1.5 border focus:outline-none resize-none font-mono"
               style={{ background: '#252526', color: '#e8e8e8', borderColor: '#444' }}
             />
+            <label className="flex items-center gap-1.5 mt-1.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={captureScreenshot}
+                onChange={e => setCaptureScreenshot(e.target.checked)}
+                className="rounded border-zinc-600 bg-zinc-800 text-emerald-500 focus:ring-0 focus:ring-offset-0"
+              />
+              <Camera size={10} style={{ color: '#6a737d' }} />
+              <span className="text-[10px]" style={{ color: '#6a737d' }}>Capture reference screenshot</span>
+            </label>
             <div className="flex items-center gap-2 mt-1.5">
               {urlDraft.trim() ? (
                 <button
@@ -373,6 +393,15 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
                     {/* Expanded findings */}
                     {isExpanded && result && (
                       <div className="px-3 pb-2 pt-1" style={{ borderTop: '1px solid #333' }}>
+                        {result.screenshot_url && (
+                          <a href={result.screenshot_url} target="_blank" rel="noopener noreferrer" className="block mb-2">
+                            <img
+                              src={result.screenshot_url}
+                              alt={`Screenshot of ${formatUrl(inp.url)}`}
+                              className="rounded border border-zinc-700 w-full max-h-48 object-cover object-top hover:opacity-90 transition-opacity"
+                            />
+                          </a>
+                        )}
                         {result.summary && (
                           <p className="text-xs mb-2" style={{ color: '#d4d4d4' }}>{result.summary}</p>
                         )}

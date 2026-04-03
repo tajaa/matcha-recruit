@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Landing from './pages/Landing'
+import MatchaWorkPage from './pages/landing/MatchaWorkPage'
+import ServicesPage from './pages/landing/ServicesPage'
 import Login from './pages/Login'
 import AppLayout from './layouts/AppLayout'
 import AdminSidebar from './components/AdminSidebar'
@@ -58,6 +60,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<Landing />} />
+      <Route path="/matcha-work" element={<MatchaWorkPage />} />
+      <Route path="/services" element={<ServicesPage />} />
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/register/beta" element={<BetaRegister />} />
