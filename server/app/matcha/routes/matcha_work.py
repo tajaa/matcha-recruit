@@ -3310,6 +3310,175 @@ async def remove_project_collaborator(
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@router.post("/projects/{project_id}/invite")
+async def invite_to_project(
+    project_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Invite a user to a project by email. Creates pending collaborator + inbox notification + email."""
+    from ...core.services.email import get_email_service
+
+    await _verify_project_access(project_id, current_user)
+
+    email = (body.get("email") or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+
+    async with get_connection() as conn:
+        # Look up user by email
+        invitee = await conn.fetchrow("SELECT id, email FROM users WHERE email = $1 AND is_active = true", email)
+        if not invitee:
+            raise HTTPException(status_code=404, detail="User not found. They need to create an account first.")
+
+        invitee_id = invitee["id"]
+
+        if invitee_id == current_user.id:
+            raise HTTPException(status_code=400, detail="You cannot invite yourself")
+
+        # Check if already a collaborator
+        existing = await conn.fetchrow(
+            "SELECT status FROM mw_project_collaborators WHERE project_id = $1 AND user_id = $2",
+            project_id, invitee_id,
+        )
+        if existing:
+            if existing["status"] == "active":
+                raise HTTPException(status_code=400, detail="User is already a collaborator")
+            if existing["status"] == "pending":
+                raise HTTPException(status_code=400, detail="Invitation already pending")
+            # Was removed — re-invite
+            await conn.execute(
+                "UPDATE mw_project_collaborators SET status = 'pending', invited_by = $3, created_at = NOW() WHERE project_id = $1 AND user_id = $2",
+                project_id, invitee_id, current_user.id,
+            )
+        else:
+            await conn.execute(
+                """INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
+                   VALUES ($1, $2, $3, 'collaborator', 'pending')""",
+                project_id, invitee_id, current_user.id,
+            )
+
+        # Get project title and inviter name for notifications
+        project = await conn.fetchrow("SELECT title FROM mw_projects WHERE id = $1", project_id)
+        inviter = await conn.fetchrow("SELECT email FROM users WHERE id = $1", current_user.id)
+        inviter_client = await conn.fetchrow("SELECT name FROM clients WHERE user_id = $1", current_user.id)
+        inviter_name = (inviter_client["name"] if inviter_client else None) or inviter["email"].split("@")[0]
+        project_title = project["title"] if project else "a project"
+
+        # Create inbox notification
+        msg_content = f"**{inviter_name}** has invited you to join the project **{project_title}**. Go to your projects to accept or decline."
+        conversation = await conn.fetchrow(
+            """INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
+               VALUES ($1, false, $2, NOW(), $3)
+               RETURNING id""",
+            f"Project Invite: {project_title}", current_user.id, msg_content[:100],
+        )
+        conv_id = conversation["id"]
+        await conn.execute(
+            "INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, current_user.id,
+        )
+        await conn.execute(
+            "INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, invitee_id,
+        )
+        await conn.execute(
+            """INSERT INTO inbox_messages (conversation_id, sender_id, content)
+               VALUES ($1, $2, $3)""",
+            conv_id, current_user.id, msg_content,
+        )
+
+    # Send email notification
+    email_svc = get_email_service()
+    if email_svc.is_configured():
+        settings = get_settings()
+        base_url = settings.app_base_url.rstrip("/")
+        try:
+            await email_svc.send_email(
+                to_email=email,
+                to_name=email.split("@")[0],
+                subject=f"{inviter_name} invited you to a project on Matcha",
+                html_content=f"""
+                <div style="font-family: -apple-system, sans-serif; max-width: 480px; margin: 0 auto;">
+                    <h2 style="color: #e4e4e7;">Project Invitation</h2>
+                    <p style="color: #a1a1aa;"><strong>{inviter_name}</strong> invited you to join <strong>{project_title}</strong>.</p>
+                    <a href="{base_url}/work"
+                       style="display: inline-block; background: #10b981; color: white; padding: 12px 28px;
+                              border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 600;">
+                        View Projects
+                    </a>
+                </div>
+                """,
+            )
+        except Exception as exc:
+            logger.warning("Failed to send project invite email: %s", exc)
+
+    return {"invited": True, "email": email}
+
+
+@router.post("/projects/{project_id}/invite/accept")
+async def accept_project_invite(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Accept a pending project invitation."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """UPDATE mw_project_collaborators
+               SET status = 'active'
+               WHERE project_id = $1 AND user_id = $2 AND status = 'pending'""",
+            project_id, current_user.id,
+        )
+        if result.endswith("0"):
+            raise HTTPException(status_code=404, detail="No pending invitation found")
+    return {"accepted": True}
+
+
+@router.post("/projects/{project_id}/invite/decline")
+async def decline_project_invite(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Decline a pending project invitation."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """UPDATE mw_project_collaborators
+               SET status = 'removed'
+               WHERE project_id = $1 AND user_id = $2 AND status = 'pending'""",
+            project_id, current_user.id,
+        )
+        if result.endswith("0"):
+            raise HTTPException(status_code=404, detail="No pending invitation found")
+    return {"declined": True}
+
+
+@router.get("/project-invites")
+async def list_pending_invites(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List all pending project invitations for the current user."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT c.project_id, p.title AS project_title,
+                      u.email AS invited_by_email, cl.name AS invited_by_name,
+                      c.created_at
+               FROM mw_project_collaborators c
+               JOIN mw_projects p ON p.id = c.project_id
+               JOIN users u ON u.id = c.invited_by
+               LEFT JOIN clients cl ON cl.user_id = c.invited_by
+               WHERE c.user_id = $1 AND c.status = 'pending'
+               ORDER BY c.created_at DESC""",
+            current_user.id,
+        )
+    return [
+        {
+            "project_id": str(r["project_id"]),
+            "project_title": r["project_title"],
+            "invited_by": r["invited_by_name"] or r["invited_by_email"].split("@")[0],
+            "invited_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
 @router.get("/admin-users/search")
 async def search_admin_users_endpoint(
     q: str = Query(..., min_length=2, max_length=100),
