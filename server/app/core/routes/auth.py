@@ -2591,7 +2591,7 @@ async def validate_beta_invite(token: str):
     return {"valid": True, "email": row["email"]}
 
 
-@router.post("/register/beta", response_model=TokenResponse)
+@router.post("/register/beta")
 async def register_beta(request: BetaRegisterRequest):
     """Register a new individual account via beta invitation token."""
     from ..feature_flags import DEFAULT_COMPANY_FEATURES
@@ -2649,14 +2649,17 @@ async def register_beta(request: BetaRegisterRequest):
                 user["id"], invite["id"],
             )
 
+    settings = get_settings()
     access_token = create_access_token(user["id"], user["email"], user["role"])
     refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
 
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-    )
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.jwt_access_token_expire_minutes * 60,
+        "user": {"id": str(user["id"]), "email": user["email"], "role": user["role"]},
+    }
 
 
 # ── Individual registration ──
@@ -2668,7 +2671,7 @@ class IndividualRegister(BaseModel):
     name: str
 
 
-@router.post("/register/individual", response_model=TokenResponse)
+@router.post("/register/individual")
 async def register_individual(request: IndividualRegister):
     """Register an individual user with a personal workspace for matcha-work."""
     from ..feature_flags import DEFAULT_COMPANY_FEATURES
@@ -2719,14 +2722,17 @@ async def register_individual(request: IndividualRegister):
             # Set owner
             await conn.execute("UPDATE companies SET owner_id = $1 WHERE id = $2", user["id"], company_id)
 
+    settings = get_settings()
     access_token = create_access_token(user["id"], user["email"], user["role"])
     refresh_token = create_refresh_token(user["id"], user["email"], user["role"])
 
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer",
-    )
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": settings.jwt_access_token_expire_minutes * 60,
+        "user": {"id": str(user["id"]), "email": user["email"], "role": user["role"]},
+    }
 
 
 class GoogleAuthRequest(BaseModel):
