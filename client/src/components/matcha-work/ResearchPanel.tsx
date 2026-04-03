@@ -98,7 +98,7 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
   const [streamStatus, setStreamStatus] = useState<string | null>(null)
   const abortRef = useRef<AbortController | null>(null)
   const [expandedResult, setExpandedResult] = useState<string | null>(null)
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>(null)
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const completedCount = task.inputs?.filter(i => i.status === 'completed').length ?? 0
   const totalCount = task.inputs?.length ?? 0
