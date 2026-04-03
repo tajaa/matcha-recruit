@@ -75,11 +75,11 @@ export default function TaskBoard({
   const dismissedSet = new Set(dismissedIds)
   const filteredAuto: UnifiedTask[] = autoItems
     .filter((item) => {
-      const sid = (item as Record<string, unknown>).source_id as string || ''
+      const sid = (item as unknown as Record<string, unknown>).source_id as string || ''
       return !dismissedSet.has(`${item.category}:${sid}`)
     })
     .map((item, i) => {
-      const sid = (item as Record<string, unknown>).source_id as string || ''
+      const sid = (item as unknown as Record<string, unknown>).source_id as string || ''
       return {
         id: `auto-${item.category}-${i}`,
         source: 'auto' as const,
