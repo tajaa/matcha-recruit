@@ -91,18 +91,19 @@ export default function Inbox() {
   }
 
   // Send a message in the active conversation
-  async function handleSendMessage(content: string) {
+  async function handleSendMessage(content: string, files?: File[]) {
     if (!activeConversation) return
-    const msg = await sendMessage(activeConversation.id, content)
+    const msg = await sendMessage(activeConversation.id, content, files)
     // Append the new message locally
     setActiveConversation((prev) =>
       prev ? { ...prev, messages: [...prev.messages, msg] } : prev,
     )
     // Update the preview in the conversation list
+    const preview = content || (msg.attachments.length ? `[${msg.attachments.length} attachment${msg.attachments.length > 1 ? 's' : ''}]` : '')
     setConversations((prev) =>
       prev.map((c) =>
         c.id === activeConversation.id
-          ? { ...c, last_message_preview: content, last_message_at: msg.created_at, unread_count: 0 }
+          ? { ...c, last_message_preview: preview, last_message_at: msg.created_at, unread_count: 0 }
           : c,
       ),
     )

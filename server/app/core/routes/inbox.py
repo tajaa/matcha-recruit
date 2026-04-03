@@ -1,34 +1,92 @@
 """Inbox / messaging routes."""
 
+import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..dependencies import get_current_user
 from ..models.auth import CurrentUser
+from ..services.storage import get_storage
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# File upload constants
+# ---------------------------------------------------------------------------
+
+MAX_FILE_COUNT = 5
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+
+IMAGE_CONTENT_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+ALLOWED_CONTENT_TYPES = IMAGE_CONTENT_TYPES | {
+    "application/pdf",
+    "text/plain",
+    "text/csv",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+ALLOWED_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif",
+    ".pdf", ".txt", ".csv", ".doc", ".docx",
+}
+
+
+async def _process_uploads(files: list[UploadFile]) -> list[dict]:
+    """Validate and upload files to S3. Returns attachment metadata list."""
+    if len(files) > MAX_FILE_COUNT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many files. Maximum is {MAX_FILE_COUNT}.",
+        )
+
+    storage = get_storage()
+    attachments: list[dict] = []
+
+    for file in files:
+        file_bytes = await file.read()
+        filename = file.filename or "upload"
+        ct = file.content_type or "application/octet-stream"
+        ext = os.path.splitext(filename)[1].lower()
+        size = len(file_bytes)
+
+        if ct not in ALLOWED_CONTENT_TYPES and ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"File type not allowed: {filename}")
+
+        if size > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large: {filename} ({size // (1024 * 1024)}MB). Maximum is {MAX_FILE_SIZE // (1024 * 1024)}MB.",
+            )
+
+        url = await storage.upload_file(file_bytes, filename, prefix="inbox", content_type=ct)
+        attachments.append({
+            "url": url,
+            "filename": filename,
+            "content_type": ct,
+            "size": size,
+        })
+
+    return attachments
 
 
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
 
-class CreateConversationRequest(BaseModel):
-    participant_ids: list[UUID] = Field(..., min_length=1, max_length=20)
-    message: str = Field(..., min_length=1, max_length=5000)
-    title: Optional[str] = None
-
-
-class SendMessageRequest(BaseModel):
-    content: str = Field(..., min_length=1, max_length=5000)
+class AttachmentResponse(BaseModel):
+    url: str
+    filename: str
+    content_type: str
+    size: int
 
 
 class MessageResponse(BaseModel):
@@ -37,6 +95,7 @@ class MessageResponse(BaseModel):
     sender_id: UUID
     sender_name: str
     content: str
+    attachments: list[AttachmentResponse] = []
     created_at: datetime
     edited_at: Optional[datetime] = None
 
@@ -327,12 +386,35 @@ async def list_conversations(
 
 @router.post("/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_conversation(
-    body: CreateConversationRequest,
+    participant_ids: str = Form(...),
+    message: str = Form(...),
+    title: Optional[str] = Form(default=None),
+    files: list[UploadFile] = File(default=[]),
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Create a new conversation (or reuse an existing 1:1) and send the first message."""
+    # Parse participant_ids from JSON string (FormData can't send arrays natively)
+    try:
+        parsed_ids = json.loads(participant_ids)
+        if not isinstance(parsed_ids, list) or not parsed_ids:
+            raise ValueError
+        parsed_uuids = [UUID(pid) for pid in parsed_ids]
+    except (json.JSONDecodeError, ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="participant_ids must be a JSON array of UUIDs")
+
+    if not message.strip() and not files:
+        raise HTTPException(status_code=400, detail="Message content or files required")
+    if len(message) > 5000:
+        raise HTTPException(status_code=400, detail="Message too long (max 5000 characters)")
+    if len(parsed_uuids) > 20:
+        raise HTTPException(status_code=400, detail="Too many participants (max 20)")
+
+    attachments = await _process_uploads(files) if files else []
+    attachments_json = json.dumps(attachments) if attachments else "[]"
+    msg_content = message.strip()
+
     async with get_connection() as conn:
-        all_participant_ids = list(set(body.participant_ids))
+        all_participant_ids = list(set(parsed_uuids))
         all_participant_ids = [pid for pid in all_participant_ids if pid != current_user.id]
         if not all_participant_ids:
             raise HTTPException(status_code=400, detail="Must include at least one other participant")
@@ -366,20 +448,23 @@ async def create_conversation(
                 other_id,
             )
 
-        preview = body.message[:100]
+        preview = msg_content[:100]
+        if not preview and attachments:
+            preview = f"[{len(attachments)} attachment{'s' if len(attachments) > 1 else ''}]"
 
         async with conn.transaction():
             if conversation_id:
                 # Existing 1:1 — add message
                 msg_row = await conn.fetchrow(
                     """
-                    INSERT INTO inbox_messages (conversation_id, sender_id, content)
-                    VALUES ($1, $2, $3)
-                    RETURNING id, conversation_id, sender_id, content, created_at, edited_at
+                    INSERT INTO inbox_messages (conversation_id, sender_id, content, attachments)
+                    VALUES ($1, $2, $3, $4::jsonb)
+                    RETURNING id, conversation_id, sender_id, content, attachments, created_at, edited_at
                     """,
                     conversation_id,
                     current_user.id,
-                    body.message,
+                    msg_content,
+                    attachments_json,
                 )
                 await conn.execute(
                     "UPDATE inbox_conversations SET last_message_at = NOW(), last_message_preview = $2, updated_at = NOW() WHERE id = $1",
@@ -399,7 +484,7 @@ async def create_conversation(
                     VALUES ($1, $2, $3, NOW(), $4)
                     RETURNING id, created_at
                     """,
-                    body.title,
+                    title,
                     is_group,
                     current_user.id,
                     preview,
@@ -420,13 +505,14 @@ async def create_conversation(
                 # First message
                 msg_row = await conn.fetchrow(
                     """
-                    INSERT INTO inbox_messages (conversation_id, sender_id, content)
-                    VALUES ($1, $2, $3)
-                    RETURNING id, conversation_id, sender_id, content, created_at, edited_at
+                    INSERT INTO inbox_messages (conversation_id, sender_id, content, attachments)
+                    VALUES ($1, $2, $3, $4::jsonb)
+                    RETURNING id, conversation_id, sender_id, content, attachments, created_at, edited_at
                     """,
                     conversation_id,
                     current_user.id,
-                    body.message,
+                    msg_content,
+                    attachments_json,
                 )
 
         # Email notification (outside transaction, best-effort)
@@ -443,12 +529,14 @@ async def create_conversation(
         participants = await _build_participant_list(conn, conversation_id)
 
         sender_name_for_msg, _, _ = await _resolve_user_display_name(conn, msg_row["sender_id"])
-        message = MessageResponse(
+        msg_attachments = json.loads(msg_row["attachments"]) if msg_row["attachments"] else []
+        message_resp = MessageResponse(
             id=msg_row["id"],
             conversation_id=msg_row["conversation_id"],
             sender_id=msg_row["sender_id"],
             sender_name=sender_name_for_msg,
             content=msg_row["content"],
+            attachments=[AttachmentResponse(**a) for a in msg_attachments],
             created_at=msg_row["created_at"],
             edited_at=msg_row["edited_at"],
         )
@@ -461,7 +549,7 @@ async def create_conversation(
             last_message_at=conv_data["last_message_at"],
             last_message_preview=conv_data["last_message_preview"],
             participants=participants,
-            messages=[message],
+            messages=[message_resp],
             unread_count=0,
             created_at=conv_data["created_at"],
         )
@@ -504,7 +592,7 @@ async def get_conversation(
 
             msg_rows = await conn.fetch(
                 """
-                SELECT id, conversation_id, sender_id, content, created_at, edited_at
+                SELECT id, conversation_id, sender_id, content, attachments, created_at, edited_at
                 FROM inbox_messages
                 WHERE conversation_id = $1 AND created_at < $2
                 ORDER BY created_at DESC
@@ -517,7 +605,7 @@ async def get_conversation(
         else:
             msg_rows = await conn.fetch(
                 """
-                SELECT id, conversation_id, sender_id, content, created_at, edited_at
+                SELECT id, conversation_id, sender_id, content, attachments, created_at, edited_at
                 FROM inbox_messages
                 WHERE conversation_id = $1
                 ORDER BY created_at DESC
@@ -544,18 +632,21 @@ async def get_conversation(
             )
             sender_cache = {r["id"]: r["name"] for r in name_rows}
 
-        messages = [
-            MessageResponse(
-                id=m["id"],
-                conversation_id=m["conversation_id"],
-                sender_id=m["sender_id"],
-                sender_name=sender_cache.get(m["sender_id"], "Unknown"),
-                content=m["content"],
-                created_at=m["created_at"],
-                edited_at=m["edited_at"],
+        messages = []
+        for m in msg_rows:
+            m_attachments = m["attachments"] if isinstance(m["attachments"], list) else []
+            messages.append(
+                MessageResponse(
+                    id=m["id"],
+                    conversation_id=m["conversation_id"],
+                    sender_id=m["sender_id"],
+                    sender_name=sender_cache.get(m["sender_id"], "Unknown"),
+                    content=m["content"],
+                    attachments=[AttachmentResponse(**a) for a in m_attachments],
+                    created_at=m["created_at"],
+                    edited_at=m["edited_at"],
+                )
             )
-            for m in msg_rows
-        ]
 
         participants = await _build_participant_list(conn, conversation_id)
 
@@ -576,26 +667,41 @@ async def get_conversation(
 @router.post("/conversations/{conversation_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
 async def send_message(
     conversation_id: UUID,
-    body: SendMessageRequest,
+    content: str = Form(...),
+    files: list[UploadFile] = File(default=[]),
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Send a message in an existing conversation."""
+    """Send a message in an existing conversation, optionally with file attachments."""
+    if not content.strip() and not files:
+        raise HTTPException(status_code=400, detail="Message content or files required")
+    if len(content) > 5000:
+        raise HTTPException(status_code=400, detail="Message too long (max 5000 characters)")
+
     async with get_connection() as conn:
         await _require_participant(conn, conversation_id, current_user.id)
+
+    # Upload after auth check to avoid orphaned S3 files on 404
+    attachments = await _process_uploads(files) if files else []
+    attachments_json = json.dumps(attachments) if attachments else "[]"
+
+    async with get_connection() as conn:
 
         async with conn.transaction():
             msg = await conn.fetchrow(
                 """
-                INSERT INTO inbox_messages (conversation_id, sender_id, content)
-                VALUES ($1, $2, $3)
-                RETURNING id, conversation_id, sender_id, content, created_at, edited_at
+                INSERT INTO inbox_messages (conversation_id, sender_id, content, attachments)
+                VALUES ($1, $2, $3, $4::jsonb)
+                RETURNING id, conversation_id, sender_id, content, attachments, created_at, edited_at
                 """,
                 conversation_id,
                 current_user.id,
-                body.content,
+                content.strip(),
+                attachments_json,
             )
 
-            preview = body.content[:100]
+            preview = content.strip()[:100]
+            if not preview and attachments:
+                preview = f"[{len(attachments)} attachment{'s' if len(attachments) > 1 else ''}]"
             await conn.execute(
                 "UPDATE inbox_conversations SET last_message_at = NOW(), last_message_preview = $2, updated_at = NOW() WHERE id = $1",
                 conversation_id,
@@ -612,7 +718,9 @@ async def send_message(
 
     # Email notification outside DB connection (fire and forget)
     import asyncio
-    asyncio.create_task(_send_message_notification(conversation_id, current_user.id, sender_name, body.content[:100]))
+    asyncio.create_task(_send_message_notification(conversation_id, current_user.id, sender_name, preview))
+
+    msg_attachments = msg["attachments"] if isinstance(msg["attachments"], list) else []
 
     return MessageResponse(
         id=msg["id"],
@@ -620,6 +728,7 @@ async def send_message(
         sender_id=msg["sender_id"],
         sender_name=sender_name,
         content=msg["content"],
+        attachments=[AttachmentResponse(**a) for a in msg_attachments],
         created_at=msg["created_at"],
         edited_at=msg["edited_at"],
     )

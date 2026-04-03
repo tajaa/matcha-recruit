@@ -4298,6 +4298,7 @@ async def init_db():
                 conversation_id UUID NOT NULL REFERENCES inbox_conversations(id) ON DELETE CASCADE,
                 sender_id UUID NOT NULL REFERENCES users(id),
                 content TEXT NOT NULL,
+                attachments JSONB DEFAULT '[]',
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 edited_at TIMESTAMPTZ
             )

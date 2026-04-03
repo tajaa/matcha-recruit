@@ -1,9 +1,19 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { X, Loader2 } from 'lucide-react'
+import { X, Loader2, Paperclip, FileText } from 'lucide-react'
 import { Modal } from '../ui'
 import { searchUsers, createConversation } from '../../api/inbox'
 import type { UserSearchResult, Conversation } from '../../api/inbox'
 import Avatar from '../Avatar'
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
+const MAX_FILE_COUNT = 5
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.pdf', '.txt', '.csv', '.doc', '.docx']
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
 
 type Props = {
   isOpen: boolean
@@ -17,10 +27,20 @@ export function ComposeModal({ isOpen, onClose, onCreated }: Props) {
   const [searching, setSearching] = useState(false)
   const [selected, setSelected] = useState<UserSearchResult[]>([])
   const [message, setMessage] = useState('')
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const searchTimeout = useRef<ReturnType<typeof setTimeout>>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const blobUrlsRef = useRef<string[]>([])
+
+  function getBlobUrl(file: File): string {
+    const url = URL.createObjectURL(file)
+    blobUrlsRef.current.push(url)
+    return url
+  }
 
   // Focus input when modal opens
   useEffect(() => {
@@ -36,9 +56,13 @@ export function ComposeModal({ isOpen, onClose, onCreated }: Props) {
       setResults([])
       setSelected([])
       setMessage('')
+      setPendingFiles([])
+      setFileError(null)
       setError(null)
       setSearching(false)
       setSending(false)
+      blobUrlsRef.current.forEach(URL.revokeObjectURL)
+      blobUrlsRef.current = []
     }
   }, [isOpen])
 
@@ -77,14 +101,45 @@ export function ComposeModal({ isOpen, onClose, onCreated }: Props) {
     setSelected((prev) => prev.filter((s) => s.id !== userId))
   }
 
+  function addFiles(newFiles: FileList | File[]) {
+    setFileError(null)
+    const incoming = Array.from(newFiles)
+
+    if (pendingFiles.length + incoming.length > MAX_FILE_COUNT) {
+      setFileError(`Maximum ${MAX_FILE_COUNT} files per message`)
+      return
+    }
+
+    for (const f of incoming) {
+      if (f.size > MAX_FILE_SIZE) {
+        setFileError(`${f.name} is too large (max 10 MB)`)
+        return
+      }
+      const ext = '.' + f.name.split('.').pop()?.toLowerCase()
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        setFileError(`${f.name}: file type not supported`)
+        return
+      }
+    }
+
+    setPendingFiles((prev) => [...prev, ...incoming])
+  }
+
+  function removeFile(index: number) {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index))
+    setFileError(null)
+  }
+
   async function handleSend() {
-    if (selected.length === 0 || !message.trim()) return
+    if (selected.length === 0 || (!message.trim() && pendingFiles.length === 0)) return
     setSending(true)
     setError(null)
     try {
       const convo = await createConversation(
         selected.map((s) => s.id),
         message.trim(),
+        undefined,
+        pendingFiles.length > 0 ? pendingFiles : undefined,
       )
       onCreated(convo)
       onClose()
@@ -190,27 +245,76 @@ export function ComposeModal({ isOpen, onClose, onCreated }: Props) {
           />
         </div>
 
+        {/* Pending files */}
+        {pendingFiles.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {pendingFiles.map((f, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300"
+              >
+                {f.type.startsWith('image/') ? (
+                  <img src={getBlobUrl(f)} alt="" className="w-5 h-5 rounded object-cover" />
+                ) : (
+                  <FileText className="w-3.5 h-3.5 text-zinc-500" />
+                )}
+                <span className="max-w-[120px] truncate">{f.name}</span>
+                <span className="text-zinc-500">{formatFileSize(f.size)}</span>
+                <button
+                  onClick={() => removeFile(i)}
+                  className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {fileError && <p className="text-xs text-red-400">{fileError}</p>}
+
         {/* Error */}
         {error && (
           <p className="text-sm text-red-400">{error}</p>
         )}
 
         {/* Actions */}
-        <div className="flex items-center justify-end gap-3 pt-2">
+        <div className="flex items-center justify-between pt-2">
           <button
-            onClick={onClose}
-            className="rounded-lg px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            onClick={() => fileInputRef.current?.click()}
+            className="rounded-lg p-2 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            title="Attach files"
           >
-            Cancel
+            <Paperclip className="w-4 h-4" />
           </button>
-          <button
-            onClick={handleSend}
-            disabled={selected.length === 0 || !message.trim() || sending}
-            className="rounded-lg bg-zinc-700 px-5 py-2 text-sm font-medium text-white hover:bg-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-2"
-          >
-            {sending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            Send
-          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ALLOWED_EXTENSIONS.join(',')}
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) addFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onClose}
+              className="rounded-lg px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSend}
+              disabled={selected.length === 0 || (!message.trim() && pendingFiles.length === 0) || sending}
+              className="rounded-lg bg-zinc-700 px-5 py-2 text-sm font-medium text-white hover:bg-zinc-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors inline-flex items-center gap-2"
+            >
+              {sending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              Send
+            </button>
+          </div>
         </div>
       </div>
     </Modal>

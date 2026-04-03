@@ -2,12 +2,20 @@ import { api } from './client'
 
 // ── Types ──
 
+export interface Attachment {
+  url: string
+  filename: string
+  content_type: string
+  size: number
+}
+
 export interface Message {
   id: string
   conversation_id: string
   sender_id: string
   sender_name: string
   content: string
+  attachments: Attachment[]
   created_at: string
   edited_at: string | null
 }
@@ -62,16 +70,24 @@ export function getConversation(id: string, limit = 50) {
   return api.get<Conversation>(`/inbox/conversations/${id}?${params}`)
 }
 
-export function createConversation(participantIds: string[], message: string, title?: string) {
-  return api.post<Conversation>('/inbox/conversations', {
-    participant_ids: participantIds,
-    message,
-    ...(title ? { title } : {}),
-  })
+export function createConversation(participantIds: string[], message: string, title?: string, files?: File[]) {
+  const fd = new FormData()
+  fd.append('participant_ids', JSON.stringify(participantIds))
+  fd.append('message', message)
+  if (title) fd.append('title', title)
+  if (files) {
+    for (const f of files) fd.append('files', f)
+  }
+  return api.upload<Conversation>('/inbox/conversations', fd)
 }
 
-export function sendMessage(conversationId: string, content: string) {
-  return api.post<Message>(`/inbox/conversations/${conversationId}/messages`, { content })
+export function sendMessage(conversationId: string, content: string, files?: File[]) {
+  const fd = new FormData()
+  fd.append('content', content)
+  if (files) {
+    for (const f of files) fd.append('files', f)
+  }
+  return api.upload<Message>(`/inbox/conversations/${conversationId}/messages`, fd)
 }
 
 export function markRead(conversationId: string) {

@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Send, BellOff, Bell, ArrowLeft } from 'lucide-react'
-import type { Conversation, Participant } from '../../api/inbox'
+import { Send, BellOff, Bell, ArrowLeft, Paperclip, X, FileText, Download } from 'lucide-react'
+import type { Conversation, Participant, Attachment } from '../../api/inbox'
 import { toggleMute as apiToggleMute } from '../../api/inbox'
 import Avatar from '../Avatar'
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024 // 10 MB
+const MAX_FILE_COUNT = 5
+const ALLOWED_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.pdf', '.txt', '.csv', '.doc', '.docx']
 
 type Props = {
   conversation: Conversation
   currentUserId: string
-  onSendMessage: (content: string) => Promise<void>
+  onSendMessage: (content: string, files?: File[]) => Promise<void>
   onMarkRead: () => void
   onBack?: () => void
 }
@@ -53,14 +57,58 @@ function threadDisplayName(participants: Participant[], currentUserId: string, t
   return others.map((p) => p.name).join(', ')
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function isImageType(ct: string): boolean {
+  return ct.startsWith('image/')
+}
+
+function AttachmentDisplay({ attachment }: { attachment: Attachment }) {
+  if (isImageType(attachment.content_type)) {
+    return (
+      <a href={attachment.url} target="_blank" rel="noopener noreferrer" className="block mt-1.5">
+        <img
+          src={attachment.url}
+          alt={attachment.filename}
+          className="rounded-lg max-w-[280px] max-h-[200px] object-cover border border-zinc-700/50"
+          loading="lazy"
+        />
+      </a>
+    )
+  }
+
+  return (
+    <a
+      href={attachment.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="flex items-center gap-2 mt-1.5 px-3 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/50 hover:bg-zinc-700/60 transition-colors max-w-[280px]"
+    >
+      <FileText className="w-4 h-4 text-zinc-400 shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="text-xs text-zinc-300 truncate">{attachment.filename}</p>
+        <p className="text-[10px] text-zinc-500">{formatFileSize(attachment.size)}</p>
+      </div>
+      <Download className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+    </a>
+  )
+}
+
 export function MessageThread({ conversation, currentUserId, onSendMessage, onMarkRead, onBack }: Props) {
   const [draft, setDraft] = useState('')
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [fileError, setFileError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
   const [muted, setMuted] = useState(() =>
     conversation.participants.find((p) => p.user_id === currentUserId)?.is_muted ?? false,
   )
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const hasMarkedRead = useRef(false)
 
   // Mark read on mount / conversation change
@@ -97,13 +145,68 @@ export function MessageThread({ conversation, currentUserId, onSendMessage, onMa
     setMuted(me?.is_muted ?? false)
   }, [conversation.id, conversation.participants, currentUserId])
 
+  // Track blob URLs for cleanup
+  const blobUrlsRef = useRef<string[]>([])
+
+  // Clear pending files when conversation changes
+  useEffect(() => {
+    setPendingFiles([])
+    setFileError(null)
+    return () => {
+      blobUrlsRef.current.forEach(URL.revokeObjectURL)
+      blobUrlsRef.current = []
+    }
+  }, [conversation.id])
+
+  function getBlobUrl(file: File): string {
+    const url = URL.createObjectURL(file)
+    blobUrlsRef.current.push(url)
+    return url
+  }
+
+  function addFiles(newFiles: FileList | File[]) {
+    setFileError(null)
+    const incoming = Array.from(newFiles)
+
+    // Validate count
+    if (pendingFiles.length + incoming.length > MAX_FILE_COUNT) {
+      setFileError(`Maximum ${MAX_FILE_COUNT} files per message`)
+      return
+    }
+
+    // Validate each file
+    for (const f of incoming) {
+      if (f.size > MAX_FILE_SIZE) {
+        setFileError(`${f.name} is too large (max 10 MB)`)
+        return
+      }
+      const ext = '.' + f.name.split('.').pop()?.toLowerCase()
+      if (!ALLOWED_EXTENSIONS.includes(ext)) {
+        setFileError(`${f.name}: file type not supported`)
+        return
+      }
+    }
+
+    setPendingFiles((prev) => [...prev, ...incoming])
+  }
+
+  function removeFile(index: number) {
+    setPendingFiles((prev) => prev.filter((_, i) => i !== index))
+    setFileError(null)
+  }
+
   async function handleSend() {
     const content = draft.trim()
-    if (!content || sending) return
+    if (!content && pendingFiles.length === 0) return
+    if (sending) return
     setSending(true)
     try {
-      await onSendMessage(content)
+      await onSendMessage(content, pendingFiles.length > 0 ? pendingFiles : undefined)
       setDraft('')
+      setPendingFiles([])
+      setFileError(null)
+      blobUrlsRef.current.forEach(URL.revokeObjectURL)
+      blobUrlsRef.current = []
     } finally {
       setSending(false)
     }
@@ -217,7 +320,14 @@ export function MessageThread({ conversation, currentUserId, onSendMessage, onMa
                             : 'bg-zinc-800 text-zinc-200'
                         }`}
                       >
-                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                        {msg.content && <p className="whitespace-pre-wrap break-words">{msg.content}</p>}
+                        {msg.attachments?.length > 0 && (
+                          <div className={`${msg.content ? 'mt-1.5' : ''} space-y-1.5`}>
+                            {msg.attachments.map((att, i) => (
+                              <AttachmentDisplay key={i} attachment={att} />
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <p className={`text-[10px] text-zinc-600 mt-0.5 px-1 ${isMine ? 'text-right' : ''}`}>
                         {formatTime(msg.created_at)}
@@ -236,7 +346,59 @@ export function MessageThread({ conversation, currentUserId, onSendMessage, onMa
 
       {/* Input bar */}
       <div className="border-t border-zinc-800 px-4 py-3">
+        {/* Pending files */}
+        {pendingFiles.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {pendingFiles.map((f, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-zinc-800 border border-zinc-700 px-2.5 py-1 text-xs text-zinc-300"
+              >
+                {f.type.startsWith('image/') ? (
+                  <img
+                    src={getBlobUrl(f)}
+                    alt=""
+                    className="w-5 h-5 rounded object-cover"
+                  />
+                ) : (
+                  <FileText className="w-3.5 h-3.5 text-zinc-500" />
+                )}
+                <span className="max-w-[120px] truncate">{f.name}</span>
+                <span className="text-zinc-500">{formatFileSize(f.size)}</span>
+                <button
+                  onClick={() => removeFile(i)}
+                  className="text-zinc-500 hover:text-zinc-300 transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {fileError && (
+          <p className="text-xs text-red-400 mb-1.5">{fileError}</p>
+        )}
+
         <div className="flex items-end gap-2">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="shrink-0 rounded-xl p-2.5 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 transition-colors"
+            title="Attach files"
+          >
+            <Paperclip className="w-4 h-4" />
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            accept={ALLOWED_EXTENSIONS.join(',')}
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) addFiles(e.target.files)
+              e.target.value = ''
+            }}
+          />
           <textarea
             ref={textareaRef}
             value={draft}
@@ -249,7 +411,7 @@ export function MessageThread({ conversation, currentUserId, onSendMessage, onMa
           />
           <button
             onClick={handleSend}
-            disabled={!draft.trim() || sending}
+            disabled={(!draft.trim() && pendingFiles.length === 0) || sending}
             className="shrink-0 rounded-xl bg-emerald-700 p-2.5 text-white hover:bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
           >
             <Send className="w-4 h-4" />
