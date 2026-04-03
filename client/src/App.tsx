@@ -5,6 +5,7 @@ import AppLayout from './layouts/AppLayout'
 import AdminSidebar from './components/AdminSidebar'
 import ClientSidebar from './components/ClientSidebar'
 import Companies from './pages/admin/Companies'
+import AdminCompanyDetail from './pages/admin/AdminCompanyDetail'
 import Features from './pages/admin/Features'
 import Settings from './pages/admin/Settings'
 import JurisdictionData from './pages/admin/JurisdictionData'
@@ -69,6 +70,7 @@ export default function App() {
       <Route path="/admin" element={<AppLayout sidebar={<AdminSidebar />} />}>
         <Route index element={<Navigate to="companies" replace />} />
         <Route path="companies" element={<Companies />} />
+        <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
         <Route path="features" element={<Features />} />
         <Route path="settings" element={<Settings />} />
         <Route path="jurisdiction-data" element={<JurisdictionData />} />

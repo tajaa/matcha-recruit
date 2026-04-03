@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { Badge, Button, Input, Modal } from '../../components/ui'
 import { api } from '../../api/client'
 import {
@@ -210,7 +211,7 @@ export default function Companies() {
                 {filtered.map((c) => (
                   <tr key={c.id} className="text-zinc-300">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-zinc-100">{c.company_name}</p>
+                      <Link to={`/admin/companies/${c.id}`} className="font-medium text-zinc-100 hover:text-emerald-400 transition-colors">{c.company_name}</Link>
                       <p className="text-xs text-zinc-500">{c.owner_email}</p>
                     </td>
                     <td className="px-4 py-3">

@@ -8585,6 +8585,171 @@ async def get_company_admin(company_id: UUID):
         }
 
 
+@router.get("/companies/{company_id}/overview", dependencies=[Depends(require_admin)])
+async def get_company_overview_admin(company_id: UUID):
+    """Comprehensive company overview for admin detail page."""
+    async with get_connection() as conn:
+        company = await conn.fetchrow("""
+            SELECT id, name, industry, healthcare_specialties, size, status,
+                   headquarters_state, created_at, enabled_features
+            FROM companies WHERE id = $1
+        """, company_id)
+        if not company:
+            raise HTTPException(status_code=404, detail="Company not found")
+
+        # Employees with department/job info
+        employees = await conn.fetch("""
+            SELECT id, email, first_name, last_name, department, job_title,
+                   employment_type, work_state, start_date, termination_date
+            FROM employees WHERE org_id = $1
+            ORDER BY termination_date NULLS FIRST, first_name
+        """, company_id)
+
+        active_count = sum(1 for e in employees if e["termination_date"] is None)
+
+        # Risk assessment snapshot
+        risk_row = await conn.fetchrow("""
+            SELECT overall_score, overall_band, computed_at
+            FROM risk_assessment_snapshots WHERE company_id = $1
+        """, company_id)
+
+        # IR summary
+        ir_rows = await conn.fetch("""
+            SELECT severity, COUNT(*) AS cnt
+            FROM ir_incidents
+            WHERE company_id = $1 AND status IN ('reported','investigating','action_required')
+            GROUP BY severity
+        """, company_id)
+        ir_map = {r["severity"]: r["cnt"] for r in ir_rows}
+        ir_total = sum(ir_map.values())
+        ir_recent = await conn.fetchval("""
+            SELECT COUNT(*) FROM ir_incidents
+            WHERE company_id = $1 AND created_at > NOW() - INTERVAL '30 days'
+        """, company_id)
+
+        # ER summary
+        er_rows = await conn.fetch("""
+            SELECT status, COUNT(*) AS cnt
+            FROM er_cases WHERE company_id = $1 AND status NOT IN ('closed','resolved')
+            GROUP BY status
+        """, company_id)
+        er_map = {r["status"]: r["cnt"] for r in er_rows}
+        er_total = sum(er_map.values())
+
+        # Compliance summary
+        location_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM business_locations WHERE company_id = $1 AND is_active = true", company_id)
+        req_count = await conn.fetchval("""
+            SELECT COUNT(*) FROM compliance_requirements cr
+            JOIN business_locations bl ON bl.id = cr.location_id
+            WHERE bl.company_id = $1 AND bl.is_active = true
+        """, company_id)
+        critical_alerts = await conn.fetchval("""
+            SELECT COUNT(*) FROM compliance_alerts
+            WHERE company_id = $1 AND severity = 'critical' AND status != 'resolved'
+        """, company_id)
+        warning_alerts = await conn.fetchval("""
+            SELECT COUNT(*) FROM compliance_alerts
+            WHERE company_id = $1 AND severity = 'warning' AND status != 'resolved'
+        """, company_id)
+
+        # Policies
+        active_policies = await conn.fetchval(
+            "SELECT COUNT(*) FROM policies WHERE company_id = $1 AND status = 'active'", company_id)
+        stale_policies = await conn.fetchval("""
+            SELECT COUNT(*) FROM policies
+            WHERE company_id = $1 AND status = 'active'
+              AND updated_at < NOW() - INTERVAL '180 days'
+        """, company_id)
+
+        # Recent incidents for table
+        recent_incidents = await conn.fetch("""
+            SELECT id, incident_number, title, severity, status, created_at
+            FROM ir_incidents WHERE company_id = $1
+            ORDER BY created_at DESC LIMIT 10
+        """, company_id)
+
+        # Recent ER cases for table
+        recent_er = await conn.fetch("""
+            SELECT id, case_number, title, status, category, created_at
+            FROM er_cases WHERE company_id = $1
+            ORDER BY created_at DESC LIMIT 10
+        """, company_id)
+
+    return {
+        "company": {
+            "id": str(company["id"]),
+            "name": company["name"],
+            "industry": company["industry"],
+            "healthcare_specialties": list(company["healthcare_specialties"] or []),
+            "size": company["size"],
+            "status": company["status"] or "approved",
+            "headquarters_state": company["headquarters_state"],
+            "created_at": company["created_at"].isoformat() if company["created_at"] else None,
+            "enabled_features": company["enabled_features"] or {},
+            "active_employee_count": active_count,
+        },
+        "employees": [
+            {
+                "id": str(e["id"]), "email": e["email"],
+                "name": f"{e['first_name']} {e['last_name']}".strip(),
+                "department": e["department"], "job_title": e["job_title"],
+                "employment_type": e["employment_type"], "work_state": e["work_state"],
+                "start_date": e["start_date"].isoformat() if e["start_date"] else None,
+                "active": e["termination_date"] is None,
+            }
+            for e in employees
+        ],
+        "risk": {
+            "overall_score": risk_row["overall_score"],
+            "overall_band": risk_row["overall_band"],
+            "computed_at": risk_row["computed_at"].isoformat() if risk_row["computed_at"] else None,
+        } if risk_row else None,
+        "ir_summary": {
+            "total_open": ir_total,
+            "critical": ir_map.get("critical", 0),
+            "high": ir_map.get("high", 0),
+            "medium": ir_map.get("medium", 0),
+            "low": ir_map.get("low", 0),
+            "recent_30_days": ir_recent or 0,
+        },
+        "er_summary": {
+            "total_open": er_total,
+            "open": er_map.get("open", 0),
+            "in_review": er_map.get("in_review", 0),
+            "pending_determination": er_map.get("pending_determination", 0),
+        },
+        "compliance": {
+            "total_locations": location_count or 0,
+            "total_requirements": req_count or 0,
+            "critical_alerts": critical_alerts or 0,
+            "warning_alerts": warning_alerts or 0,
+        },
+        "policies": {
+            "total_active": active_policies or 0,
+            "stale_count": stale_policies or 0,
+        },
+        "recent_incidents": [
+            {
+                "id": str(r["id"]), "incident_number": r["incident_number"],
+                "title": r["title"], "severity": r["severity"],
+                "status": r["status"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in recent_incidents
+        ],
+        "recent_er_cases": [
+            {
+                "id": str(r["id"]), "case_number": r["case_number"],
+                "title": r["title"], "status": r["status"],
+                "category": r["category"],
+                "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in recent_er
+        ],
+    }
+
+
 @router.get("/companies/{company_id}/employees", dependencies=[Depends(require_admin)])
 async def get_company_employees_admin(company_id: UUID):
     """Lazy-load full employee list for a company."""
