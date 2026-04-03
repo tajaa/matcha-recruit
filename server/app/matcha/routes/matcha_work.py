@@ -2350,10 +2350,12 @@ async def _verify_project_access(project_id: UUID, current_user: CurrentUser) ->
     company_id = await get_client_company_id(current_user)
     if not company_id:
         raise HTTPException(status_code=404, detail="Project not found")
-    project = await proj_svc.get_project(project_id, company_id)
+    project = await proj_svc.get_project(project_id, company_id, user_id=current_user.id)
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-    return project, "owner"
+    if not project.get("collaborator_role"):
+        project["collaborator_role"] = "owner"
+    return project, project["collaborator_role"]
 
 
 @router.get("/projects")

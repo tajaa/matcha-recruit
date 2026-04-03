@@ -21,7 +21,7 @@ const INVENTORY_EXTENSIONS = ['.csv', '.xlsx', '.xls']
 // INVENTORY_EXTENSIONS is used in handleFileUpload for routing detection
 
 // Skills available in the chat — requiresCompany gates visibility for individual users
-const SKILLS = [
+const HR_SKILLS = [
   { id: 'chat', icon: MessageSquare, label: 'HR Chat', desc: 'Ask any HR question', prompt: '', requiresCompany: false },
   { id: 'project', icon: FileText, label: 'Project', desc: 'Build reports & plans from chat', prompt: 'Create a new project called ', requiresCompany: false },
   { id: 'presentation', icon: Presentation, label: 'Presentation', desc: 'Generate slide decks', prompt: 'Create a presentation about ', requiresCompany: false },
@@ -32,6 +32,14 @@ const SKILLS = [
   { id: 'policy', icon: Scale, label: 'Policy', desc: 'Draft compliance policies', prompt: 'Draft a policy for ', requiresCompany: true },
   { id: 'onboarding', icon: Users, label: 'Onboarding', desc: 'Create employee records', prompt: 'Onboard a new employee', requiresCompany: true },
   { id: 'review', icon: Briefcase, label: 'Review', desc: 'Run performance reviews', prompt: 'Create a performance review for ', requiresCompany: true },
+] as const
+
+const PERSONAL_SKILLS = [
+  { id: 'chat', icon: MessageSquare, label: 'Chat', desc: 'Research any topic', prompt: '', requiresCompany: false },
+  { id: 'project', icon: FileText, label: 'Project', desc: 'Build documents from chat', prompt: 'Create a new project called ', requiresCompany: false },
+  { id: 'presentation', icon: Presentation, label: 'Presentation', desc: 'Generate slide decks', prompt: 'Create a presentation about ', requiresCompany: false },
+  { id: 'resume_batch', icon: ClipboardList, label: 'Resume Batch', desc: 'Analyze candidate resumes', prompt: '', requiresCompany: false, dropHint: 'Drop resumes to start' },
+  { id: 'inventory', icon: Package, label: 'Inventory', desc: 'Process invoices & track stock', prompt: '', requiresCompany: false, dropHint: 'Drop invoices to start' },
 ] as const
 
 const TASK_LABELS: Record<string, string> = {
@@ -649,7 +657,7 @@ export default function MatchaWorkThread() {
                 What would you like to work on?
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-w-md w-full">
-                {SKILLS.filter((s) => !s.requiresCompany || !isIndividual).map((skill) => {
+                {(isIndividual ? PERSONAL_SKILLS : HR_SKILLS).filter((s) => !s.requiresCompany || !isIndividual).map((skill) => {
                   const Icon = skill.icon
                   return (
                     <button

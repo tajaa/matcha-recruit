@@ -57,7 +57,7 @@ def _parse_project(row) -> dict:
     return d
 
 
-async def get_project(project_id: UUID, company_id: UUID) -> Optional[dict]:
+async def get_project(project_id: UUID, company_id: UUID, user_id: UUID | None = None) -> Optional[dict]:
     async with get_connection() as conn:
         row = await conn.fetchrow(
             "SELECT * FROM mw_projects WHERE id = $1 AND company_id = $2",
@@ -78,6 +78,17 @@ async def get_project(project_id: UUID, company_id: UUID) -> Optional[dict]:
         )
         project["chats"] = [dict(c) for c in chats]
         project["chat_count"] = len(chats)
+
+        # Resolve collaborator role for the requesting user
+        if user_id:
+            collab = await conn.fetchrow(
+                "SELECT role FROM mw_project_collaborators WHERE project_id = $1 AND user_id = $2 AND status = 'active'",
+                project_id, user_id,
+            )
+            project["collaborator_role"] = collab["role"] if collab else None
+        elif project.get("created_by") is not None:
+            # Default: project creator is the owner
+            project["collaborator_role"] = "owner"
     return project
 
 
