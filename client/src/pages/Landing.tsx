@@ -68,7 +68,7 @@ export default function Landing() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
 
   return (
-    <div className="relative bg-zinc-900 text-zinc-100 overflow-hidden">
+    <div className="relative bg-zinc-900 text-zinc-100 overflow-x-hidden">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <div className="relative z-10">
         {/* Nav */}
@@ -119,7 +119,7 @@ export default function Landing() {
         {/* Hero */}
         <div className="relative pt-16">
           <AsciiHalftone />
-        <section className="relative max-w-7xl mx-auto px-8 min-h-[90vh] flex items-center">
+        <section className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-[80vh] sm:min-h-[90vh] flex items-center py-12 sm:py-0">
           {/* System tag */}
           <div className="absolute top-8 left-8 text-[11px] text-zinc-600 border border-zinc-700/40 px-3 py-1.5 rounded-sm">
             SYSTEM CORE // OFFLINE MODE
@@ -212,7 +212,7 @@ export default function Landing() {
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, margin: '-80px' }}
           transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-          className="relative border-t border-zinc-700/40 py-24 px-8 overflow-hidden"
+          className="relative border-t border-zinc-700/40 py-24 px-4 sm:px-8 overflow-x-hidden"
         >
           <div
             className="absolute inset-0 opacity-[0.04]"

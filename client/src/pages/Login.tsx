@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Logo } from '../components/ui'
 import { AsciiHalftone } from '../components/AsciiHalftone'
+import { PricingContactModal } from '../components/PricingContactModal'
 import { api } from '../api/client'
 
 type LoginResponse = {
@@ -40,6 +41,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false)
   const [ssoMode, setSsoMode] = useState(false)
   const [ssoLoading, setSsoLoading] = useState(false)
+  const [contactOpen, setContactOpen] = useState(false)
   const navigate = useNavigate()
 
   async function handleSubmit(e: React.FormEvent) {
@@ -69,7 +71,7 @@ export default function Login() {
   }
 
   return (
-    <div className="relative min-h-screen bg-zinc-900 flex items-center justify-center px-4 overflow-hidden">
+    <div className="relative min-h-screen bg-zinc-900 flex items-center justify-center px-4 overflow-x-hidden overflow-y-auto">
       <AsciiHalftone />
       <div className="relative z-10 w-full max-w-sm">
         <Logo className="justify-center mb-10 grayscale" />
@@ -143,11 +145,16 @@ export default function Login() {
 
         <p className="mt-6 text-center text-sm text-zinc-500">
           Don&apos;t have an account?{' '}
-          <span className="text-zinc-300 cursor-pointer hover:text-zinc-100 transition-colors">
+          <button
+            type="button"
+            onClick={() => setContactOpen(true)}
+            className="text-zinc-300 hover:text-zinc-100 transition-colors"
+          >
             Contact sales
-          </span>
+          </button>
         </p>
       </div>
+      <PricingContactModal isOpen={contactOpen} onClose={() => setContactOpen(false)} />
     </div>
   )
 }

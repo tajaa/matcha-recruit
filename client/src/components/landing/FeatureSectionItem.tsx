@@ -47,7 +47,7 @@ export function FeatureSectionItem({ section, idx }: { section: Section, idx: nu
       viewport={{ once: true, margin: '-60px' }}
       transition={{ duration: 0.8 }}
       onMouseMove={handleMouseMove}
-      className="relative border-t border-zinc-700/40 py-20 sm:py-24 px-8 overflow-hidden group"
+      className="relative border-t border-zinc-700/40 py-16 sm:py-24 px-4 sm:px-8 overflow-x-hidden group"
     >
       {/* Interactive Spotlight */}
       <motion.div

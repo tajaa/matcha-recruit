@@ -15,7 +15,6 @@ import {
   StatCard,
   ProfileBanner,
   GettingStarted,
-  PendingActions,
   ComplianceImpact,
   CompliancePinned,
   IncidentGrid,
@@ -104,23 +103,6 @@ export default function Dashboard() {
   const isClient = me?.user?.role === 'client'
   const hasZeroEmployees = (stats?.total_employees ?? 0) === 0
   const hasZeroPolicies = (stats?.active_policies ?? 0) === 0
-
-  // Score + sort compliance actions for PendingActions (top 3)
-  const compliancePendingActions = (() => {
-    if (!complianceDash?.coming_up) return []
-    const severityScore: Record<string, number> = { critical: 50, warning: 20, info: 5 }
-    const slaScore: Record<string, number> = { overdue: 100, due_soon: 50, unassigned: 30, on_track: 10, completed: 0 }
-    return [...complianceDash.coming_up]
-      .filter(item => item.sla_state !== 'completed')
-      .sort((a, b) => {
-        const aTime = a.days_until ?? 365
-        const bTime = b.days_until ?? 365
-        const aS = (severityScore[a.severity] ?? 0) + (slaScore[a.sla_state] ?? 0) + Math.max(0, 30 - aTime)
-        const bS = (severityScore[b.severity] ?? 0) + (slaScore[b.sla_state] ?? 0) + Math.max(0, 30 - bTime)
-        return bS - aS
-      })
-      .slice(0, 3)
-  })()
 
   return (
     <div>

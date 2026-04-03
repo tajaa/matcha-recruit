@@ -30,6 +30,9 @@ export interface WageAlertSummary {
 
 export interface ERCaseSummary {
   open_cases: number
+  open: number
+  in_review: number
+  pending_determination: number
   investigating: number
   pending_action: number
 }
