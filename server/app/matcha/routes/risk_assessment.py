@@ -308,6 +308,23 @@ async def run_risk_assessment(
             company_id,
         )
 
+    # Auto-run Monte Carlo simulation after assessment
+    try:
+        line_items = extract_cost_of_risk_items(
+            {key: asdict(dim) for key, dim in result.dimensions.items()}
+        )
+        if line_items:
+            mc_result = run_monte_carlo(line_items)
+            async with get_connection() as conn2:
+                await conn2.execute(
+                    "UPDATE risk_assessment_snapshots SET monte_carlo = $1::jsonb WHERE company_id = $2",
+                    json.dumps(mc_result.to_dict()),
+                    company_id,
+                )
+            logger.info(f"Monte Carlo simulation completed for {company_id}")
+    except Exception as e:
+        logger.warning(f"Monte Carlo auto-run failed for {company_id}: {e}")
+
     return _snapshot_to_response(row)
 
 

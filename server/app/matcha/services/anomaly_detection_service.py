@@ -210,7 +210,7 @@ async def detect_anomalies(
     Returns:
         AnomalyDetectionResult with all detected anomalies.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=months * 30)
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=months * 30)).replace(tzinfo=None)
 
     async with get_connection() as conn:
         # 1. Risk assessment history (monthly snapshots)
