@@ -154,6 +154,7 @@ async def _browse_and_extract_inner(
         ]
 
         extracted = None
+        total_tokens_used = 0
         for turn in range(MAX_TURNS):
             logger.info("Research browse %s turn %d/%d", url, turn + 1, MAX_TURNS)
             if on_status:
@@ -177,6 +178,12 @@ async def _browse_and_extract_inner(
             except Exception as exc:
                 logger.error("Gemini API error on turn %d: %s", turn, exc)
                 break
+
+            # Track token usage from response metadata
+            if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                um = response.usage_metadata
+                turn_tokens = getattr(um, 'total_token_count', 0) or 0
+                total_tokens_used += turn_tokens
 
             if not response.candidates:
                 break
@@ -294,10 +301,10 @@ async def _browse_and_extract_inner(
         await browser.close()
 
     if not extracted:
-        return {"findings": {}, "summary": "Could not extract data", "error": "No data extracted", "screenshot_url": screenshot_url}
+        return {"findings": {}, "summary": "Could not extract data", "error": "No data extracted", "screenshot_url": screenshot_url, "total_tokens": total_tokens_used}
 
     summary = extracted.pop("summary", "")
-    return {"findings": extracted, "summary": summary, "error": None, "screenshot_url": screenshot_url}
+    return {"findings": extracted, "summary": summary, "error": None, "screenshot_url": screenshot_url, "total_tokens": total_tokens_used}
 
 
 async def save_research_result(project_id: UUID, task_id: str, input_id: str, result: dict) -> None:
@@ -348,13 +355,36 @@ async def run_research_for_input(
     on_status=None, capture_screenshot: bool = False, company_id: str | None = None,
 ) -> dict:
     """Browse a URL and save results. Returns the result dict."""
+    from . import token_budget_service
+
+    # Check token budget before starting (if company_id available)
+    if company_id:
+        try:
+            await token_budget_service.check_token_budget(UUID(company_id))
+        except Exception:
+            error_result = {"findings": {}, "summary": "", "error": "Token budget exhausted"}
+            await save_research_result(project_id, task_id, input_id, error_result)
+            return error_result
+
     try:
         result = await browse_and_extract(
             url, instructions, on_status=on_status,
             capture_screenshot=capture_screenshot, company_id=company_id,
         )
         await save_research_result(project_id, task_id, input_id, result)
-        logger.info("Research complete for %s: %s", url, result.get("summary", "")[:100])
+
+        # Deduct tokens used
+        total_tokens = result.get("total_tokens", 0)
+        if total_tokens > 0 and company_id:
+            try:
+                async with get_connection() as conn:
+                    async with conn.transaction():
+                        await token_budget_service.deduct_tokens(conn, UUID(company_id), total_tokens)
+                logger.info("Research deducted %d tokens for %s", total_tokens, url)
+            except Exception as exc:
+                logger.warning("Failed to deduct research tokens: %s", exc)
+
+        logger.info("Research complete for %s (%d tokens): %s", url, total_tokens, result.get("summary", "")[:100])
         return result
     except Exception as exc:
         logger.error("Research failed for %s: %s", url, exc)
