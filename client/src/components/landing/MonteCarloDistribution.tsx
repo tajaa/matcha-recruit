@@ -46,7 +46,7 @@ export function MonteCarloDistribution() {
       
       {/* 3D Container */}
       <motion.div 
-        className="relative w-[120%] h-full flex items-end justify-center pb-12 gap-1 sm:gap-1.5"
+        className="relative w-full sm:w-[120%] h-full flex items-end justify-center pb-12 gap-0.5 sm:gap-1.5"
         initial={{ rotateX: 45, rotateZ: -10, scale: 1.1, y: 40 }}
         animate={inView ? { rotateX: 15, rotateZ: 0, scale: 1, y: 10 } : {}}
         transition={{ duration: 1.5, ease: [0.16, 1, 0.3, 1] }}
