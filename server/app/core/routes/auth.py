@@ -1552,33 +1552,13 @@ async def register_business(request: BusinessRegister):
             )
             company_id = company["id"]
 
-            # Grant free signup credits ($50 equivalent = 250 credits)
-            from ...core.services.stripe_service import FREE_SIGNUP_CREDITS
+            # Grant free token budget (1M tokens)
+            from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
             await conn.execute(
-                """
-                INSERT INTO mw_credit_balances (
-                    company_id, credits_remaining,
-                    total_credits_purchased, total_credits_granted
-                )
-                VALUES ($1, $2, 0, $2)
-                ON CONFLICT (company_id) DO UPDATE
-                SET credits_remaining = mw_credit_balances.credits_remaining + $2,
-                    total_credits_granted = mw_credit_balances.total_credits_granted + $2,
-                    updated_at = NOW()
-                """,
-                company_id,
-                FREE_SIGNUP_CREDITS,
-            )
-            await conn.execute(
-                """
-                INSERT INTO mw_credit_transactions (
-                    company_id, transaction_type, credits_delta,
-                    credits_after, description
-                )
-                VALUES ($1, 'grant', $2, $2, 'Welcome gift — $5 free AI credits')
-                """,
-                company_id,
-                FREE_SIGNUP_CREDITS,
+                """INSERT INTO mw_token_budgets (company_id, free_tokens_used, free_token_limit)
+                   VALUES ($1, 0, $2)
+                   ON CONFLICT (company_id) DO NOTHING""",
+                company_id, FREE_TOKEN_GRANT,
             )
 
             # Step 2: Create user with 'client' role
@@ -2688,7 +2668,7 @@ async def validate_beta_invite(token: str):
 async def register_beta(request: BetaRegisterRequest):
     """Register a new individual account via beta invitation token."""
     from ..feature_flags import DEFAULT_COMPANY_FEATURES
-    from ...core.services.stripe_service import FREE_SIGNUP_CREDITS
+    from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -2717,9 +2697,9 @@ async def register_beta(request: BetaRegisterRequest):
             company_id = company["id"]
 
             await conn.execute(
-                """INSERT INTO mw_credit_balances (company_id, credits_remaining, total_credits_purchased, total_credits_granted)
-                   VALUES ($1, $2, 0, $2) ON CONFLICT (company_id) DO NOTHING""",
-                company_id, FREE_SIGNUP_CREDITS,
+                """INSERT INTO mw_token_budgets (company_id, free_tokens_used, free_token_limit)
+                   VALUES ($1, 0, $2) ON CONFLICT (company_id) DO NOTHING""",
+                company_id, FREE_TOKEN_GRANT,
             )
 
             password_hash = hash_password(request.password)
@@ -2768,7 +2748,7 @@ class IndividualRegister(BaseModel):
 async def register_individual(request: IndividualRegister):
     """Register an individual user with a personal workspace for matcha-work."""
     from ..feature_flags import DEFAULT_COMPANY_FEATURES
-    from ...core.services.stripe_service import FREE_SIGNUP_CREDITS
+    from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
 
     async with get_connection() as conn:
         async with conn.transaction():
@@ -2787,14 +2767,10 @@ async def register_individual(request: IndividualRegister):
             )
             company_id = company["id"]
 
-            # Grant free credits
             await conn.execute(
-                """
-                INSERT INTO mw_credit_balances (company_id, credits_remaining, total_credits_purchased, total_credits_granted)
-                VALUES ($1, $2, 0, $2)
-                ON CONFLICT (company_id) DO NOTHING
-                """,
-                company_id, FREE_SIGNUP_CREDITS,
+                """INSERT INTO mw_token_budgets (company_id, free_tokens_used, free_token_limit)
+                   VALUES ($1, 0, $2) ON CONFLICT (company_id) DO NOTHING""",
+                company_id, FREE_TOKEN_GRANT,
             )
 
             # Create user with 'individual' role
@@ -2838,7 +2814,7 @@ async def google_auth(request: GoogleAuthRequest):
     from google.oauth2 import id_token as google_id_token
     from google.auth.transport import requests as google_requests
     from ..feature_flags import DEFAULT_COMPANY_FEATURES
-    from ...core.services.stripe_service import FREE_SIGNUP_CREDITS
+    from ...matcha.services.token_budget_service import FREE_TOKEN_GRANT
 
     try:
         idinfo = google_id_token.verify_oauth2_token(
@@ -2877,9 +2853,9 @@ async def google_auth(request: GoogleAuthRequest):
             company_id = company["id"]
 
             await conn.execute(
-                """INSERT INTO mw_credit_balances (company_id, credits_remaining, total_credits_purchased, total_credits_granted)
-                   VALUES ($1, $2, 0, $2) ON CONFLICT (company_id) DO NOTHING""",
-                company_id, FREE_SIGNUP_CREDITS,
+                """INSERT INTO mw_token_budgets (company_id, free_tokens_used, free_token_limit)
+                   VALUES ($1, 0, $2) ON CONFLICT (company_id) DO NOTHING""",
+                company_id, FREE_TOKEN_GRANT,
             )
 
             # Use a random password since Google users don't need one

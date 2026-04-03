@@ -524,6 +524,23 @@ async def get_active_subscription(company_id: UUID) -> Optional[dict[str, Any]]:
     return dict(row)
 
 
+async def get_subscription_by_stripe_id(stripe_subscription_id: str) -> Optional[dict[str, Any]]:
+    """Look up a subscription by its Stripe subscription ID."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """SELECT id, company_id, stripe_subscription_id, stripe_customer_id,
+                      pack_id, credits_per_cycle, amount_cents, status,
+                      current_period_end, created_at, canceled_at
+               FROM mw_subscriptions
+               WHERE stripe_subscription_id = $1
+               LIMIT 1""",
+            stripe_subscription_id,
+        )
+    if row is None:
+        return None
+    return dict(row)
+
+
 async def upsert_subscription(
     company_id: UUID,
     stripe_subscription_id: str,

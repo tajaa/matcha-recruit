@@ -65,6 +65,7 @@ from ..models.matcha_work import (
 )
 from ..services import matcha_work_document as doc_svc
 from ..services import billing_service
+from ..services import token_budget_service
 from ..services.er_document_parser import ERDocumentParser
 from ..services.matcha_work_handbook_upload import (
     AuditedLocation,
@@ -1899,7 +1900,7 @@ async def upload_thread_resume(
         raise HTTPException(status_code=400, detail=f"Cannot upload to a {thread['status']} thread")
 
     if current_user.role != "admin":
-        await billing_service.check_credits(company_id)
+        await token_budget_service.check_token_budget(company_id)
 
     # Validate all files upfront
     parsed_files: list[tuple[str, bytes, str]] = []  # (filename, content, content_type)
@@ -3872,7 +3873,7 @@ async def upload_thread_inventory(
         raise HTTPException(status_code=400, detail=f"Cannot upload to a {thread['status']} thread")
 
     if current_user.role != "admin":
-        await billing_service.check_credits(company_id)
+        await token_budget_service.check_token_budget(company_id)
 
     parsed_files: list[tuple[str, bytes, str]] = []
     for f in files:
@@ -4316,7 +4317,7 @@ async def send_message(
         raise HTTPException(status_code=400, detail="Cannot send messages to an archived thread")
 
     if current_user.role != "admin":
-        await billing_service.check_credits(company_id)
+        await token_budget_service.check_token_budget(company_id)
 
     # Save user message
     user_msg = await doc_svc.add_message(thread_id, "user", body.content)
@@ -4465,27 +4466,16 @@ async def send_message(
         logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
 
     if current_user.role != "admin":
-        try:
-            async with get_connection() as conn:
-                async with conn.transaction():
-                    await billing_service.deduct_credit(
-                        conn,
-                        company_id=company_id,
-                        thread_id=thread_id,
-                        user_id=current_user.id,
-                        cost=cost,
-                        model=str((final_usage or {}).get("model") or "unknown"),
-                    )
-        except HTTPException as exc:
-            if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED:
-                logger.warning(
-                    "Credits ran out before deduction could be recorded for thread %s",
-                    thread_id,
-                )
-            else:
-                logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
-        except Exception as exc:
-            logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
+        total_tokens = (final_usage or {}).get("total_tokens") or 0
+        if total_tokens > 0:
+            try:
+                async with get_connection() as conn:
+                    async with conn.transaction():
+                        await token_budget_service.deduct_tokens(conn, company_id, total_tokens)
+            except HTTPException:
+                logger.warning("Token budget exhausted during deduction for thread %s", thread_id)
+            except Exception as exc:
+                logger.warning("Failed to deduct tokens for thread %s: %s", thread_id, exc)
 
     # Trigger conversation compaction in the background if needed
     asyncio.create_task(_maybe_compact(thread_id, ai_provider, summary_at_count))
@@ -4551,7 +4541,7 @@ async def send_message_stream(
         raise HTTPException(status_code=400, detail="Cannot send messages to an archived thread")
 
     if current_user.role != "admin":
-        await billing_service.check_credits(company_id)
+        await token_budget_service.check_token_budget(company_id)
 
     # Check token quota
     quota = await doc_svc.check_token_quota(current_user.id, company_id)
@@ -4746,27 +4736,16 @@ async def send_message_stream(
                 logger.warning("Failed to log Matcha Work token usage for thread %s: %s", thread_id, e)
 
             if current_user.role != "admin":
-                try:
-                    async with get_connection() as conn:
-                        async with conn.transaction():
-                            await billing_service.deduct_credit(
-                                conn,
-                                company_id=company_id,
-                                thread_id=thread_id,
-                                user_id=current_user.id,
-                                cost=stream_cost,
-                                model=str((final_usage or {}).get("model") or "unknown"),
-                            )
-                except HTTPException as exc:
-                    if exc.status_code == status.HTTP_402_PAYMENT_REQUIRED:
-                        logger.warning(
-                            "Credits ran out before stream deduction could be recorded for thread %s",
-                            thread_id,
-                        )
-                    else:
-                        logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
-                except Exception as exc:
-                    logger.warning("Failed to deduct Matcha Work credit for thread %s: %s", thread_id, exc)
+                total_tokens = (final_usage or {}).get("total_tokens") or 0
+                if total_tokens > 0:
+                    try:
+                        async with get_connection() as conn:
+                            async with conn.transaction():
+                                await token_budget_service.deduct_tokens(conn, company_id, total_tokens)
+                    except HTTPException:
+                        logger.warning("Token budget exhausted during stream deduction for thread %s", thread_id)
+                    except Exception as exc:
+                        logger.warning("Failed to deduct tokens for thread %s: %s", thread_id, exc)
 
             if final_usage:
                 yield _sse_data(

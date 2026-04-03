@@ -179,6 +179,55 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Stripe subscription session: {exc}") from exc
 
+    async def create_token_subscription_checkout(
+        self,
+        company_id: UUID,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Create a $40/month token subscription checkout."""
+        self._ensure_secret_key()
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        metadata = {
+            "company_id": str(company_id),
+            "pack_id": "matcha_work_pro",
+            "billing_type": "token_budget",
+            "tokens_per_cycle": "5000000",
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": 4000,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": "Matcha Work Pro",
+                                "description": "5M AI tokens per month",
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create token subscription session: {exc}") from exc
+
     async def cancel_subscription(self, stripe_subscription_id: str):
         """Cancel a Stripe subscription at period end."""
         self._ensure_secret_key()

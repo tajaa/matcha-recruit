@@ -4910,6 +4910,27 @@ async def init_db():
             ON CONFLICT (company_id) DO NOTHING
         """)
 
+        # ===========================================
+        # Token Budgets (token-based billing)
+        # ===========================================
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_token_budgets (
+                company_id UUID PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+                free_tokens_used BIGINT NOT NULL DEFAULT 0,
+                free_token_limit BIGINT NOT NULL DEFAULT 1000000,
+                subscription_tokens_used BIGINT NOT NULL DEFAULT 0,
+                subscription_token_limit BIGINT NOT NULL DEFAULT 0,
+                subscription_period_start TIMESTAMPTZ,
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            INSERT INTO mw_token_budgets (company_id, free_tokens_used, free_token_limit)
+            SELECT c.id, 0, 1000000
+            FROM companies c
+            ON CONFLICT (company_id) DO NOTHING
+        """)
+
         # Training compliance tables
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS training_requirements (
