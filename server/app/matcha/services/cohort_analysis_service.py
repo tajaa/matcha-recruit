@@ -111,54 +111,23 @@ async def compute_cohort_analysis(
 
         total_headcount = len(employees)
 
-        # Fetch incident counts by employee email (ir_incidents uses reported_by_email)
+        # Fetch incidents with involved employee IDs
         incident_rows = await conn.fetch(
             """
-            SELECT i.reported_by_email, COUNT(*) AS cnt
-            FROM ir_incidents i
-            WHERE i.company_id = $1
-              AND i.status NOT IN ('resolved', 'closed')
-            GROUP BY i.reported_by_email
+            SELECT id, involved_employee_ids
+            FROM ir_incidents
+            WHERE company_id = $1
+              AND status NOT IN ('resolved', 'closed')
             """,
             company_id,
         )
-        # Build a lookup of employee email -> incident count
-        incident_by_email: dict[str, int] = {}
+        # Build a lookup of employee_id -> incident count
+        incident_by_emp_id: dict[UUID, int] = {}
         total_incidents = 0
         for row in incident_rows:
-            email = row["reported_by_email"]
-            if email:
-                incident_by_email[email] = int(row["cnt"])
-            total_incidents += int(row["cnt"])
-
-        # Map employee IDs to emails for lookup
-        emp_emails = await conn.fetch(
-            "SELECT id, email FROM employees WHERE org_id = $1 AND termination_date IS NULL",
-            company_id,
-        )
-        emp_id_to_email: dict[UUID, str] = {
-            row["id"]: row["email"] for row in emp_emails if row["email"]
-        }
-
-        # Try to count incidents by department directly if the column exists
-        incident_by_dept: dict[str, int] = {}
-        try:
-            dept_incident_rows = await conn.fetch(
-                """
-                SELECT department, COUNT(*) AS cnt
-                FROM ir_incidents
-                WHERE company_id = $1
-                  AND status NOT IN ('resolved', 'closed')
-                  AND department IS NOT NULL
-                GROUP BY department
-                """,
-                company_id,
-            )
-            incident_by_dept = {
-                row["department"]: int(row["cnt"]) for row in dept_incident_rows
-            }
-        except Exception:
-            pass
+            total_incidents += 1
+            for eid in (row["involved_employee_ids"] or []):
+                incident_by_emp_id[eid] = incident_by_emp_id.get(eid, 0) + 1
 
         # Fetch ER case counts
         er_rows = await conn.fetch(
@@ -179,14 +148,10 @@ async def compute_cohort_analysis(
             headcount = len(emps)
             headcount_pct = round((headcount / total_headcount) * 100, 1)
 
-            # Count incidents for this cohort
+            # Count incidents for this cohort via involved_employee_ids
             cohort_incidents = 0
-            if dimension == "department" and label in incident_by_dept:
-                cohort_incidents = incident_by_dept[label]
-            else:
-                for emp in emps:
-                    email = emp_id_to_email.get(emp["id"], "")
-                    cohort_incidents += incident_by_email.get(email, 0)
+            for emp in emps:
+                cohort_incidents += incident_by_emp_id.get(emp["id"], 0)
 
             # Annualized incident rate per 100 FTE
             incident_rate = round((cohort_incidents / headcount) * 100, 2) if headcount > 0 else 0.0
