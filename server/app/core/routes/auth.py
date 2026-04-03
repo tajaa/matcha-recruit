@@ -1938,7 +1938,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 "visible_features": visible_features,
             }
 
-        elif current_user.role == "client":
+        elif current_user.role in ("client", "individual"):
             profile = await conn.fetchrow(
                 """
                 SELECT c.id, c.user_id, c.company_id, comp.name as company_name,

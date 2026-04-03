@@ -70,7 +70,7 @@ async def resolve_accessible_company_scope(
                 "terms_accepted": True,
             }
 
-        if current_user.role == "client":
+        if current_user.role in ("client", "individual"):
             company = await conn.fetchrow(
                 """
                 SELECT c.company_id, comp.status, comp.rejection_reason
