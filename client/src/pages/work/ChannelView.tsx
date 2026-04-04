@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut } from 'lucide-react'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus } from 'lucide-react'
 import { getChannel, joinChannel, leaveChannel } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
+import AddMembersModal from '../../components/channels/AddMembersModal'
 
 export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -22,6 +23,7 @@ export default function ChannelView() {
   const [showMembers, setShowMembers] = useState(false)
   const [isMember, setIsMember] = useState(false)
   const [joining, setJoining] = useState(false)
+  const [showAddMembers, setShowAddMembers] = useState(false)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -215,6 +217,13 @@ export default function ChannelView() {
             </span>
           )}
           <button
+            onClick={() => setShowAddMembers(true)}
+            className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-emerald-400"
+            title="Add members"
+          >
+            <UserPlus size={16} />
+          </button>
+          <button
             onClick={() => setShowMembers(!showMembers)}
             className={`p-1.5 rounded hover:bg-zinc-800 ${showMembers ? 'text-emerald-400' : 'text-zinc-500'}`}
             title="Members"
@@ -314,6 +323,23 @@ export default function ChannelView() {
           </div>
         )}
       </div>
+
+      {showAddMembers && channel && (
+        <AddMembersModal
+          channelId={channel.id}
+          channelName={channel.name}
+          existingMemberIds={channel.members.map((m) => m.user_id)}
+          onClose={() => setShowAddMembers(false)}
+          onAdded={async () => {
+            setShowAddMembers(false)
+            // Refresh channel to update member list
+            if (channelId) {
+              const data = await getChannel(channelId)
+              setChannel(data)
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

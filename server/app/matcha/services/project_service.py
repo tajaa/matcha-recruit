@@ -387,15 +387,14 @@ async def list_collaborators(project_id: UUID) -> list[dict]:
 
 
 async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) -> list[dict]:
-    """Add an admin user as a collaborator. Returns updated collaborator list."""
+    """Add a user as a collaborator. Returns updated collaborator list."""
     async with get_connection() as conn:
-        # Validate target is an admin
         target = await conn.fetchrow(
-            "SELECT id, role FROM users WHERE id = $1 AND is_active = true",
+            "SELECT id FROM users WHERE id = $1 AND is_active = true",
             user_id,
         )
-        if not target or target["role"] != "admin":
-            raise ValueError("User not found or is not an admin")
+        if not target:
+            raise ValueError("User not found")
         await conn.execute(
             """
             INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role)

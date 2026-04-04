@@ -1,13 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Pin, Archive, Loader2, FolderOpen, FileText, Presentation, Users, X, Hash } from 'lucide-react'
-import type { MWThread, MWProject } from '../../types/matcha-work'
-import { listThreads, createThread, pinThread, archiveThread, listProjects, createProjectNew, fetchTaskBoard, createTask, updateTask, deleteTask, dismissAutoTask } from '../../api/matchaWork'
+import { Plus, Pin, Archive, Loader2, FileText, Presentation, Users, X } from 'lucide-react'
+import type { MWThread } from '../../types/matcha-work'
+import { listThreads, createThread, pinThread, archiveThread, createProjectNew, fetchTaskBoard, createTask, updateTask, deleteTask, dismissAutoTask } from '../../api/matchaWork'
 import type { TaskBoardResponse } from '../../api/matchaWork'
 import TaskBoard from '../../components/work/TaskBoard'
-import { listChannels } from '../../api/channels'
-import type { ChannelSummary } from '../../api/channels'
-import CreateChannelModal from '../../components/channels/CreateChannelModal'
 import { useMe } from '../../hooks/useMe'
 
 const TASK_LABELS: Record<string, string> = {
@@ -21,36 +18,26 @@ const TASK_LABELS: Record<string, string> = {
   policy: 'Policy',
 }
 
-type Tab = 'all' | 'active' | 'pinned' | 'archived' | 'projects' | 'tasks' | 'channels'
+type Tab = 'all' | 'active' | 'pinned' | 'archived' | 'tasks'
 
 export default function MatchaWorkList() {
   const navigate = useNavigate()
-  const { me } = useMe()
-  const canCreateChannel = me?.user?.role === 'client' || me?.user?.role === 'admin'
+  useMe() // auth guard
   const [threads, setThreads] = useState<MWThread[]>([])
-  const [projects, setProjects] = useState<MWProject[]>([])
-  const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [taskBoard, setTaskBoard] = useState<TaskBoardResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
   const [showTypePicker, setShowTypePicker] = useState(false)
-  const [showCreateChannel, setShowCreateChannel] = useState(false)
-  const [tab, setTab] = useState<Tab>('projects')
+  const [tab, setTab] = useState<Tab>('all')
   const [error, setError] = useState('')
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      if (tab === 'channels') {
-        const data = await listChannels()
-        setChannels(data)
-      } else if (tab === 'tasks') {
+      if (tab === 'tasks') {
         const data = await fetchTaskBoard()
         setTaskBoard(data)
-      } else if (tab === 'projects') {
-        const data = await listProjects()
-        setProjects(data)
       } else {
         const status = tab === 'active' ? 'active' : tab === 'archived' ? 'archived' : undefined
         const data = await listThreads(status)
@@ -68,10 +55,6 @@ export default function MatchaWorkList() {
   const filtered = tab === 'pinned' ? threads.filter((t) => t.is_pinned) : threads
 
   async function handleCreate() {
-    if (tab === 'projects') {
-      setShowTypePicker(true)
-      return
-    }
     setCreating(true)
     try {
       const res = await createThread()
@@ -118,37 +101,25 @@ export default function MatchaWorkList() {
   }
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: 'all', label: 'All' },
+    { key: 'all', label: 'All Threads' },
     { key: 'active', label: 'Active' },
     { key: 'pinned', label: 'Pinned' },
     { key: 'archived', label: 'Archived' },
-    { key: 'projects', label: 'Projects' },
     { key: 'tasks', label: 'Tasks' },
-    { key: 'channels', label: 'Channels' },
   ]
 
   return (
     <div className="max-w-4xl mx-auto px-3 sm:px-6 py-4 sm:py-8">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-white">Matcha Work</h1>
-        {tab === 'channels' ? (
-          canCreateChannel && (
-            <button
-              onClick={() => setShowCreateChannel(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              <Plus size={16} />
-              New Channel
-            </button>
-          )
-        ) : tab !== 'tasks' && (
+        {tab !== 'tasks' && (
           <button
             onClick={handleCreate}
             disabled={creating}
             className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
           >
             {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-            {tab === 'projects' ? 'New Project' : 'New Thread'}
+            New Thread
           </button>
         )}
       </div>
@@ -219,78 +190,6 @@ export default function MatchaWorkList() {
             } : prev)
           }}
         />
-      ) : tab === 'channels' ? (
-        channels.length === 0 ? (
-          <div className="text-center py-16 text-zinc-500">No channels yet.{canCreateChannel ? ' Create one to get started.' : ''}</div>
-        ) : (
-          <div className="space-y-2">
-            {channels.map((ch) => (
-              <div
-                key={ch.id}
-                onClick={() => navigate(`/work/channels/${ch.id}`)}
-                className="group flex items-center gap-4 p-4 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-lg cursor-pointer transition-colors"
-              >
-                <Hash size={18} className="text-emerald-500 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-white font-medium truncate">{ch.name}</span>
-                    <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-700 text-zinc-300">
-                      {ch.member_count} member{ch.member_count !== 1 ? 's' : ''}
-                    </span>
-                    {!ch.is_member && (
-                      <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-700 text-amber-300">
-                        Not joined
-                      </span>
-                    )}
-                    {ch.unread_count > 0 && (
-                      <span className="shrink-0 w-5 h-5 flex items-center justify-center text-[10px] font-bold rounded-full bg-emerald-600 text-white">
-                        {ch.unread_count > 9 ? '9+' : ch.unread_count}
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
-                    {ch.last_message_preview && <span className="truncate max-w-[250px]">{ch.last_message_preview}</span>}
-                    {ch.last_message_at && <span>{new Date(ch.last_message_at).toLocaleDateString()}</span>}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )
-      ) : tab === 'projects' ? (
-        projects.length === 0 ? (
-          <div className="text-center py-16 text-zinc-500">No projects yet. Create one to get started.</div>
-        ) : (
-          <div className="space-y-2">
-            {projects.map((p) => (
-              <div
-                key={p.id}
-                onClick={() => navigate(`/work/projects/${p.id}`)}
-                className="group flex items-center gap-4 p-4 bg-zinc-900 hover:bg-zinc-800/80 border border-zinc-800 rounded-lg cursor-pointer transition-colors"
-              >
-                <FolderOpen size={18} className="text-[#ce9178] shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    {p.is_pinned && <Pin size={12} className="text-amber-400 shrink-0" />}
-                    <span className="text-white font-medium truncate">{p.title}</span>
-                    <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-700 text-zinc-300">
-                      {p.chat_count} chat{p.chat_count !== 1 ? 's' : ''}
-                    </span>
-                    {p.collaborator_role === 'collaborator' && (
-                      <span className="shrink-0 px-2 py-0.5 text-xs font-medium rounded-full bg-blue-900/40 text-blue-300 flex items-center gap-1">
-                        <Users size={10} />Shared
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 flex items-center gap-3 text-xs text-zinc-500">
-                    <span>{p.sections?.length ?? 0} sections</span>
-                    <span>{new Date(p.updated_at).toLocaleDateString()}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-zinc-500">
           {tab === 'pinned' ? 'No pinned threads' : 'No threads yet. Create one to get started.'}
@@ -356,17 +255,6 @@ export default function MatchaWorkList() {
           ))}
         </div>
       )}
-      {/* Create channel modal */}
-      {showCreateChannel && (
-        <CreateChannelModal
-          onClose={() => setShowCreateChannel(false)}
-          onCreated={(ch) => {
-            setShowCreateChannel(false)
-            navigate(`/work/channels/${ch.id}`)
-          }}
-        />
-      )}
-
       {/* Project type picker modal */}
       {showTypePicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">

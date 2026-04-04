@@ -60,5 +60,13 @@ export const getChannelMessages = (id: string, before?: string) =>
 export const joinChannel = (id: string) =>
   api.post(`/channels/${id}/join`)
 
+export const addChannelMembers = (id: string, userIds: string[]) =>
+  api.post(`/channels/${id}/members`, { user_ids: userIds })
+
 export const leaveChannel = (id: string) =>
   api.post(`/channels/${id}/leave`)
+
+export const searchInvitableUsers = (q: string, channelId?: string) =>
+  api.get<{ id: string; name: string; email: string; role: string; avatar_url: string | null }[]>(
+    `/channels/invitable-users?q=${encodeURIComponent(q)}${channelId ? `&channel_id=${channelId}` : ''}`
+  )

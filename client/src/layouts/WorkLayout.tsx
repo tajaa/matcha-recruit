@@ -1,9 +1,9 @@
 import { Link, Outlet } from 'react-router-dom'
-import { ArrowLeft, Mail, Zap } from 'lucide-react'
+import { ArrowLeft, Zap } from 'lucide-react'
 import { usePresenceHeartbeat } from '../hooks/usePresenceHeartbeat'
 import { OnlineUsersPanel } from '../components/work/OnlineUsersPanel'
+import WorkSidebar from '../components/work/WorkSidebar'
 import { useEffect, useState } from 'react'
-import { getUnreadCount } from '../api/inbox'
 import { useMe } from '../hooks/useMe'
 import { api } from '../api/client'
 
@@ -81,15 +81,18 @@ function TokenIndicator() {
 export default function WorkLayout() {
   usePresenceHeartbeat()
   const { isPersonal } = useMe()
-  const [unread, setUnread] = useState(0)
+  const [sidebarOpen, setSidebarOpen] = useState(() => {
+    const saved = localStorage.getItem('mw-sidebar')
+    return saved !== 'closed'
+  })
 
-  useEffect(() => {
-    getUnreadCount().then((r) => setUnread(r.count)).catch(() => {})
-    const id = setInterval(() => {
-      getUnreadCount().then((r) => setUnread(r.count)).catch(() => {})
-    }, 60_000)
-    return () => clearInterval(id)
-  }, [])
+  function toggleSidebar() {
+    setSidebarOpen((prev) => {
+      const next = !prev
+      localStorage.setItem('mw-sidebar', next ? 'open' : 'closed')
+      return next
+    })
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950 flex flex-col">
@@ -111,23 +114,16 @@ export default function WorkLayout() {
         <div className="ml-auto flex items-center gap-4">
           <TokenIndicator />
           <OnlineUsersPanel />
-          <Link
-            to={isPersonal ? '/work' : '/app/inbox'}
-            className="relative flex items-center gap-1.5 text-sm text-zinc-400 hover:text-white transition-colors"
-          >
-            <Mail size={16} />
-            <span className="hidden sm:inline">Inbox</span>
-            {unread > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-blue-500 text-[9px] font-bold text-white flex items-center justify-center">
-                {unread > 9 ? '9+' : unread}
-              </span>
-            )}
-          </Link>
         </div>
       </header>
-      <main className="flex-1">
-        <Outlet />
-      </main>
+      <div className="flex flex-1 min-h-0 relative">
+        <div className="hidden sm:flex">
+          <WorkSidebar open={sidebarOpen} onToggle={toggleSidebar} />
+        </div>
+        <main className="flex-1 min-w-0 overflow-auto">
+          <Outlet />
+        </main>
+      </div>
     </div>
   )
 }

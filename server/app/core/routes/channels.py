@@ -201,6 +201,116 @@ async def create_channel(
         )
 
 
+class InvitableUser(BaseModel):
+    id: UUID
+    name: str
+    email: str
+    role: str
+    avatar_url: Optional[str] = None
+
+
+@router.get("/invitable-users", response_model=list[InvitableUser])
+async def search_invitable_users(
+    q: str = Query(default="", max_length=100),
+    channel_id: Optional[UUID] = Query(default=None),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Search for users that can be invited to a channel or project.
+
+    Company accounts: returns users in the same company.
+    Personal/individual accounts: returns users from inbox conversations.
+    """
+    async with get_connection() as conn:
+        search = f"%{q}%" if q else "%%"
+        has_search = len(q) >= 2
+
+        # Determine if this is a real company or a personal workspace
+        # Personal workspaces (is_personal=true) search inbox contacts
+        # Real companies search company users
+        company_id = None
+        is_personal = True
+
+        if current_user.role in ("client", "individual"):
+            row = await conn.fetchrow(
+                """
+                SELECT c.company_id, COALESCE(comp.is_personal, false) AS is_personal
+                FROM clients c JOIN companies comp ON c.company_id = comp.id
+                WHERE c.user_id = $1
+                """,
+                current_user.id,
+            )
+            if row:
+                company_id = row["company_id"]
+                is_personal = row["is_personal"]
+        elif current_user.role == "employee":
+            company_id = await conn.fetchval(
+                "SELECT org_id FROM employees WHERE user_id = $1", current_user.id
+            )
+            is_personal = False
+        elif current_user.role == "admin":
+            scope = await resolve_accessible_company_scope(current_user)
+            company_id = scope.get("company_id")
+            is_personal = False
+
+        name_filter_2 = f"""AND (
+                    c.name ILIKE $2
+                    OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $2
+                    OR a.name ILIKE $2
+                    OR u.email ILIKE $2
+                  )""" if has_search else ""
+        name_filter_3 = f"""AND (
+                    c.name ILIKE $3
+                    OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $3
+                    OR a.name ILIKE $3
+                    OR u.email ILIKE $3
+                  )""" if has_search else ""
+
+        if company_id and not is_personal:
+            rows = await conn.fetch(
+                f"""
+                SELECT u.id, u.email, u.role, u.avatar_url,
+                       {_USER_NAME_EXPR} AS name
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE u.id != $1 AND u.is_active = true
+                  AND (c.company_id = $2 OR e.org_id = $2)
+                  {name_filter_3}
+                ORDER BY {_USER_NAME_EXPR}
+                LIMIT 20
+                """,
+                current_user.id, company_id, *([search] if has_search else []),
+            )
+        else:
+            # Personal account: show inbox contacts
+            rows = await conn.fetch(
+                f"""
+                SELECT DISTINCT u.id, u.email, u.role, u.avatar_url,
+                       {_USER_NAME_EXPR} AS name
+                FROM users u
+                LEFT JOIN clients c ON c.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                JOIN inbox_participants ip ON ip.user_id = u.id
+                JOIN inbox_participants my ON my.conversation_id = ip.conversation_id AND my.user_id = $1
+                WHERE u.id != $1 AND u.is_active = true
+                  {name_filter_2}
+                ORDER BY {_USER_NAME_EXPR}
+                LIMIT 20
+                """,
+                current_user.id, *([search] if has_search else []),
+            )
+
+        return [
+            InvitableUser(
+                id=r["id"], name=r["name"], email=r["email"],
+                role=r["role"], avatar_url=r["avatar_url"],
+            )
+            for r in rows
+        ]
+
+
 @router.get("/{channel_id}", response_model=ChannelDetail)
 async def get_channel(
     channel_id: UUID,
@@ -387,6 +497,63 @@ async def join_channel(
             """,
             channel_id, current_user.id,
         )
+
+    return {"ok": True}
+
+
+class AddMembersRequest(BaseModel):
+    user_ids: list[UUID]
+
+
+@router.post("/{channel_id}/members", status_code=status.HTTP_200_OK)
+async def add_members(
+    channel_id: UUID,
+    body: AddMembersRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Add members to a channel. Any current member can invite others from the same company."""
+    company_id = await _get_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify channel exists + requester is a member
+        is_member = await conn.fetchval(
+            """
+            SELECT EXISTS(
+                SELECT 1 FROM channels ch
+                JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $2
+                WHERE ch.id = $1 AND ch.company_id = $3
+            )
+            """,
+            channel_id, current_user.id, company_id,
+        )
+        if not is_member:
+            raise HTTPException(status_code=404, detail="Channel not found or not a member")
+
+        # Verify all user_ids belong to the same company
+        for uid in body.user_ids:
+            in_company = await conn.fetchval(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    WHERE u.id = $1 AND u.is_active = true
+                      AND (c.company_id = $2 OR e.org_id = $2)
+                )
+                """,
+                uid, company_id,
+            )
+            if not in_company:
+                continue  # silently skip users not in the company
+
+            await conn.execute(
+                """
+                INSERT INTO channel_members (channel_id, user_id)
+                VALUES ($1, $2)
+                ON CONFLICT (channel_id, user_id) DO NOTHING
+                """,
+                channel_id, uid,
+            )
 
     return {"ok": True}
 

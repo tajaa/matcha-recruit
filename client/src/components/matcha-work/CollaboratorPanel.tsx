@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { X, Search, UserPlus, Crown, Users } from 'lucide-react'
-import { listCollaborators, addCollaborator, removeCollaborator, searchAdminUsers } from '../../api/matchaWork'
+import { listCollaborators, addCollaborator, removeCollaborator } from '../../api/matchaWork'
+import { searchInvitableUsers } from '../../api/channels'
 import type { ProjectCollaborator } from '../../types/matcha-work'
 
 interface Props {
@@ -45,9 +46,9 @@ export default function CollaboratorPanel({ projectId, currentUserRole, onClose 
     setSearching(true)
     searchTimeout.current = setTimeout(async () => {
       try {
-        const results = await searchAdminUsers(q)
+        const results = await searchInvitableUsers(q)
         const existingIds = new Set(collaborators.map((c) => c.user_id))
-        setSearchResults(results.filter((r) => !existingIds.has(r.user_id)))
+        setSearchResults(results.filter((r) => !existingIds.has(r.id)).map((r) => ({ user_id: r.id, name: r.name, email: r.email, avatar_url: r.avatar_url })))
       } catch {
         setSearchResults([])
       }

@@ -71,6 +71,7 @@ export default function App() {
       <Route path="/candidate-interview/:token" element={<CandidateInterview />} />
       <Route path="/work" element={<WorkLayout />}>
         <Route index element={<MatchaWorkList />} />
+        <Route path="inbox" element={<Inbox />} />
         <Route path="channels/:channelId" element={<ChannelView />} />
         <Route path=":threadId" element={<MatchaWorkThread />} />
         <Route path="projects/:projectId" element={<ProjectView />} />

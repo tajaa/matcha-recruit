@@ -288,7 +288,7 @@ function TaskCard({ task, projectId, expanded, onToggle, onUpdate }: {
     if (value == null) return '—'
     if (Array.isArray(value)) {
       if (value.length > 0 && typeof value[0] === 'object' && value[0] !== null) {
-        return value.map((item, i) => {
+        return value.map((item) => {
           const obj = item as Record<string, unknown>
           const parts = Object.entries(obj).map(([k, v]) => {
             if (Array.isArray(v)) return `${formatKey(k)}: ${v.map(x => typeof x === 'object' && x !== null ? Object.values(x as Record<string, unknown>).join(' · ') : String(x)).join(', ')}`

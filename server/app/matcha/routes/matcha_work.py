@@ -3279,11 +3279,11 @@ async def add_project_collaborator(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Add an admin user as a collaborator."""
+    """Add a user as a collaborator. Only the project owner can invite."""
     from ..services import project_service as proj_svc
-    if current_user.role != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can add collaborators")
-    await _verify_project_access(project_id, current_user)
+    _project, role = await _verify_project_access(project_id, current_user)
+    if role != "owner":
+        raise HTTPException(status_code=403, detail="Only the project owner can add collaborators")
     user_id = body.get("user_id")
     if not user_id:
         raise HTTPException(status_code=400, detail="user_id is required")
