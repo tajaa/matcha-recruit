@@ -269,8 +269,8 @@ export function reorderProjectSectionsNew(projectId: string, sectionIds: string[
   return api.put(`/matcha-work/projects/${projectId}/sections/reorder`, { section_ids: sectionIds })
 }
 
-export function editDiagramAI(projectId: string, sectionId: string, instruction: string) {
-  return api.post<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/edit-diagram`, { instruction })
+export function editDiagramAI(projectId: string, sectionId: string, instruction: string, region?: { x: number; y: number; width: number; height: number }) {
+  return api.post<import('../types/matcha-work').MWProject>(`/matcha-work/projects/${projectId}/sections/${sectionId}/edit-diagram`, { instruction, ...(region ? { region } : {}) })
 }
 
 export function editDiagramText(projectId: string, sectionId: string, edits: { old_text: string; new_text: string }[]) {

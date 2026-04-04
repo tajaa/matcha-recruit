@@ -3113,13 +3113,58 @@ async def edit_diagram_ai(
     if not svg_source:
         raise HTTPException(status_code=400, detail="No SVG source available for editing")
 
+    # Optional region selection (percentages of image dimensions)
+    region = body.get("region")  # { x, y, width, height } in %
+
     # Call Gemini to modify the SVG
     import google.genai as genai
+    import re as _re_vb
     from ...config import get_settings
     settings = get_settings()
 
     client = genai.Client(api_key=settings.gemini_api_key)
-    prompt = f"""You are an SVG diagram editor. Here is an SVG diagram:
+
+    # Build prompt — region-constrained or full edit
+    if region and isinstance(region, dict):
+        # Parse viewBox to convert % region to absolute SVG coordinates
+        vb_match = _re_vb.search(r'viewBox=["\']([^"\']+)["\']', svg_source)
+        if vb_match:
+            vb_parts = vb_match.group(1).split()
+            vb_x, vb_y, vb_w, vb_h = float(vb_parts[0]), float(vb_parts[1]), float(vb_parts[2]), float(vb_parts[3])
+        else:
+            w_match = _re_vb.search(r'\bwidth=["\'](\d+)', svg_source)
+            h_match = _re_vb.search(r'\bheight=["\'](\d+)', svg_source)
+            vb_x, vb_y = 0.0, 0.0
+            vb_w = float(w_match.group(1)) if w_match else 480.0
+            vb_h = float(h_match.group(1)) if h_match else 300.0
+
+        rx, ry, rw, rh = float(region["x"]), float(region["y"]), float(region["width"]), float(region["height"])
+        abs_x1 = vb_x + (rx / 100) * vb_w
+        abs_y1 = vb_y + (ry / 100) * vb_h
+        abs_x2 = vb_x + ((rx + rw) / 100) * vb_w
+        abs_y2 = vb_y + ((ry + rh) / 100) * vb_h
+
+        prompt = f"""You are an SVG diagram editor. Here is an SVG diagram:
+
+{svg_source}
+
+IMPORTANT CONSTRAINT — REGION-ONLY EDIT:
+The user has selected a specific region of the diagram for editing.
+The selected region in SVG coordinates is: top-left ({abs_x1:.1f}, {abs_y1:.1f}) to bottom-right ({abs_x2:.1f}, {abs_y2:.1f}).
+
+Rules:
+1. ONLY modify SVG elements that are within or overlap this bounding box.
+2. DO NOT move, resize, restyle, recolor, or delete ANY element outside this region.
+3. DO NOT change the viewBox, overall SVG dimensions, or add new elements outside this region.
+4. Elements partially inside the region may be modified, but preserve their parts outside the region as much as possible.
+5. The rest of the SVG MUST remain EXACTLY as-is, character for character.
+
+User's instruction (applies ONLY to the selected region):
+{instruction}
+
+Return ONLY the modified SVG code, nothing else. No markdown fences, no explanation. Just the raw <svg>...</svg> content."""
+    else:
+        prompt = f"""You are an SVG diagram editor. Here is an SVG diagram:
 
 {svg_source}
 
@@ -3163,7 +3208,8 @@ Return ONLY the modified SVG code, nothing else. No markdown fences, no explanat
     if updated_content == old_content:
         updated_content = old_content + new_img
 
-    new_diagram_data = [{"svg_source": new_svg, "storage_url": new_url, "created_from": "ai_edit"}]
+    edit_source = "ai_region_edit" if (region and isinstance(region, dict)) else "ai_edit"
+    new_diagram_data = [{"svg_source": new_svg, "storage_url": new_url, "created_from": edit_source}]
     await proj_svc.update_section(project_id, section_id, {
         "content": updated_content,
         "diagram_data": new_diagram_data,
