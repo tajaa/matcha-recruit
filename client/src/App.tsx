@@ -55,6 +55,7 @@ import WorkLayout from './layouts/WorkLayout'
 import MatchaWorkList from './pages/work/MatchaWorkList'
 import MatchaWorkThread from './pages/work/MatchaWorkThread'
 import ProjectView from './pages/work/ProjectView'
+import ChannelView from './pages/work/ChannelView'
 
 export default function App() {
   return (
@@ -70,6 +71,7 @@ export default function App() {
       <Route path="/candidate-interview/:token" element={<CandidateInterview />} />
       <Route path="/work" element={<WorkLayout />}>
         <Route index element={<MatchaWorkList />} />
+        <Route path="channels/:channelId" element={<ChannelView />} />
         <Route path=":threadId" element={<MatchaWorkThread />} />
         <Route path="projects/:projectId" element={<ProjectView />} />
       </Route>

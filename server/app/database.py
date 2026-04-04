@@ -5164,4 +5164,53 @@ async def init_db():
             ON error_logs(path)
         """)
 
+        # ── Channels (group chat) ────────────────────────────────
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS channels (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id),
+                name VARCHAR(100) NOT NULL,
+                slug VARCHAR(120) NOT NULL,
+                description TEXT,
+                created_by UUID NOT NULL REFERENCES users(id),
+                is_archived BOOLEAN DEFAULT false,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE(company_id, slug)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_channels_company
+            ON channels(company_id, is_archived, updated_at DESC)
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS channel_members (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                joined_at TIMESTAMPTZ DEFAULT NOW(),
+                last_read_at TIMESTAMPTZ,
+                is_muted BOOLEAN DEFAULT false,
+                UNIQUE(channel_id, user_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_channel_members_user
+            ON channel_members(user_id)
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS channel_messages (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+                sender_id UUID NOT NULL REFERENCES users(id),
+                content TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                edited_at TIMESTAMPTZ
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_channel_messages_channel
+            ON channel_messages(channel_id, created_at DESC)
+        """)
+
         print("[DB] Tables initialized")

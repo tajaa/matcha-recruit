@@ -217,7 +217,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 
 # Import and include domain routers
-from .core.routes import core_router, chat_ws_router
+from .core.routes import core_router, chat_ws_router, channels_ws_router
 from .core.routes.stripe_webhook import router as stripe_webhook_router
 from .matcha.routes import matcha_router
 
@@ -228,6 +228,7 @@ app.include_router(stripe_webhook_router)
 
 # WebSocket routes (separate prefix)
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
+app.include_router(channels_ws_router, prefix="/ws/channels", tags=["channels-websocket"])
 
 
 # Serve locally-uploaded files (logos, resumes, etc.) when S3 is not configured
