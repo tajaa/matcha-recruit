@@ -81,10 +81,10 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
           <p className="text-3xl font-bold text-vsc-text mt-1">{totalFlags}</p>
         </div>
         <div className={`rounded-xl border px-6 py-4 min-w-[180px] ${
-          criticalCount > 0 ? 'border-red-800/50 bg-red-950/30' : 'border-vsc-border bg-vsc-panel'
+          criticalCount > 0 ? 'border-sev-critical-border bg-sev-critical-bg' : 'border-vsc-border bg-vsc-panel'
         }`}>
           <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Critical Risks</p>
-          <p className={`text-3xl font-bold mt-1 ${criticalCount > 0 ? 'text-red-400' : 'text-zinc-100'}`}>
+          <p className={`text-3xl font-bold mt-1 ${criticalCount > 0 ? 'text-sev-critical' : 'text-vsc-text'}`}>
             {criticalCount}
           </p>
         </div>
