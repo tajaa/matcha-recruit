@@ -93,7 +93,7 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user }: SidebarSh
   }
 
   return (
-    <aside className="h-full w-full bg-[#0c0c0e] border-r border-zinc-800/30 flex flex-col">
+    <aside className="h-full w-full bg-[#2d2d30] border-r border-vsc-border/30 flex flex-col">
       {/* Logo area */}
       <div className="px-4 pt-5 pb-4">
         <Logo to={logoTo} label={logoLabel} />

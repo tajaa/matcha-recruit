@@ -23,7 +23,7 @@ export default function AppLayout({ sidebar }: { sidebar: ReactNode }) {
   return (
     <div className="min-h-screen bg-vsc-bg flex flex-col md:block">
       {/* Mobile Header */}
-      <header className="md:hidden flex items-center justify-between p-4 bg-[#0c0c0e] border-b border-zinc-800/30 sticky top-0 z-40">
+      <header className="md:hidden flex items-center justify-between p-4 bg-[#2d2d30] border-b border-vsc-border/30 sticky top-0 z-40">
         <div className="font-semibold text-zinc-100 tracking-tight">Matcha</div>
         <button 
           onClick={() => setMobileMenuOpen(true)}
