@@ -863,8 +863,16 @@ class GeminiProvider(MatchaWorkAIProvider):
         completion_tokens = _to_int(
             _get("candidates_token_count", "output_token_count", "candidatesTokenCount")
         )
+        cached_tokens = _to_int(_get("cached_content_token_count")) or 0
         total_tokens = _to_int(_get("total_token_count", "totalTokenCount"))
-        if total_tokens is None and (prompt_tokens is not None or completion_tokens is not None):
+
+        # Gemini's prompt_token_count includes cached tokens. Subtract them
+        # so users aren't charged for cached content.
+        if cached_tokens > 0 and prompt_tokens is not None:
+            prompt_tokens = max(0, prompt_tokens - cached_tokens)
+
+        # Recompute total from the adjusted prompt + completion
+        if prompt_tokens is not None or completion_tokens is not None:
             total_tokens = (prompt_tokens or 0) + (completion_tokens or 0)
 
         if prompt_tokens is None and completion_tokens is None and total_tokens is None:
@@ -874,6 +882,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
             "total_tokens": total_tokens,
+            "cached_tokens": cached_tokens,
             "estimated": False,
             "model": model,
         }
