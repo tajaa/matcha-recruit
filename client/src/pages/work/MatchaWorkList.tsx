@@ -125,7 +125,7 @@ export default function MatchaWorkList() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-6 border-b border-zinc-800 overflow-x-auto flex-nowrap">
+      <div className="flex gap-1 mb-6 border-b border-zinc-800 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {tabs.map((t) => (
           <button
             key={t.key}

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Search, Plus } from 'lucide-react'
+import { Search, Plus, Menu } from 'lucide-react'
 import type { ConversationSummary } from '../../api/inbox'
 import Avatar from '../Avatar'
 
@@ -9,6 +9,7 @@ type Props = {
   currentUserId: string
   onSelect: (id: string) => void
   onCompose: () => void
+  onMenuToggle?: () => void
 }
 
 function relativeTime(iso: string | null): string {
@@ -48,7 +49,7 @@ function displayName(convo: ConversationSummary, currentUserId: string): string 
   return `${others[0].name}, ${others[1].name} +${others.length - 2}`
 }
 
-export function ConversationList({ conversations, selectedId, currentUserId, onSelect, onCompose }: Props) {
+export function ConversationList({ conversations, selectedId, currentUserId, onSelect, onCompose, onMenuToggle }: Props) {
   const [filter, setFilter] = useState('')
 
   const filtered = filter.trim()
@@ -64,7 +65,17 @@ export function ConversationList({ conversations, selectedId, currentUserId, onS
     <div className="flex flex-col h-full">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-        <h2 className="text-lg font-semibold text-zinc-100">Inbox</h2>
+        <div className="flex items-center gap-3">
+          {onMenuToggle && (
+            <button
+              onClick={onMenuToggle}
+              className="sm:hidden text-zinc-400 hover:text-zinc-100"
+            >
+              <Menu size={18} />
+            </button>
+          )}
+          <h2 className="text-lg font-semibold text-zinc-100">Inbox</h2>
+        </div>
         <button
           onClick={onCompose}
           className="flex items-center gap-1.5 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100 transition-colors"

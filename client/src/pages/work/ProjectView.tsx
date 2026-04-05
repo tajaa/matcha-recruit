@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil, Menu } from 'lucide-react'
 import { listConversations, getConversation, sendMessage as sendInboxMessage, getUnreadCount } from '../../api/inbox'
 import type { ConversationSummary, Conversation } from '../../api/inbox'
 import { ConversationList } from '../../components/inbox/ConversationList'
@@ -40,6 +40,7 @@ export default function ProjectView() {
 
   // Sidebar mode: 'chats' or 'inbox'
   const [sidebarMode, setSidebarMode] = useState<'chats' | 'inbox'>('chats')
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [inboxConversations, setInboxConversations] = useState<ConversationSummary[]>([])
   const [inboxActiveConvo, setInboxActiveConvo] = useState<Conversation | null>(null)
   const [inboxLoading, setInboxLoading] = useState(false)
@@ -428,106 +429,125 @@ export default function ProjectView() {
     )
   }
 
-  return (
-    <div className="flex h-[calc(100vh-49px)]" style={{ background: '#1e1e1e' }}>
-      {/* Chat sidebar */}
-      <div className="hidden sm:flex flex-col w-[180px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
-        {/* Top: back + new chat */}
-        <div className="px-3 py-3 flex items-center justify-between" style={{ borderBottom: '1px solid #333' }}>
-          <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]">
-            <ArrowLeft size={14} />
-          </Link>
-          <button
-            onClick={handleNewChat}
-            title="New chat"
-            className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
-          >
-            <Plus size={14} />
-          </button>
-        </div>
+  const SidebarContent = (
+    <>
+      {/* Top: back + new chat */}
+      <div className="px-3 py-3 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid #333' }}>
+        <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]">
+          <ArrowLeft size={14} />
+        </Link>
+        <button
+          onClick={handleNewChat}
+          title="New chat"
+          className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
+        >
+          <Plus size={14} />
+        </button>
+      </div>
 
-        {/* Chat list */}
-        <div className="flex-1 overflow-y-auto py-1">
-          {[...(chats || [])].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0)).map((c) => (
-            <div
-              key={c.id}
-              className={`group flex items-center px-3 py-2 transition-colors cursor-pointer ${
-                activeChatId === c.id && sidebarMode === 'chats'
-                  ? 'text-[#e8e8e8]'
-                  : 'text-[#6a737d] hover:text-[#d4d4d4]'
-              }`}
-              style={activeChatId === c.id && sidebarMode === 'chats' ? { background: '#2a2d2e' } : {}}
-              onClick={() => { setActiveChatId(c.id); setSidebarMode('chats') }}
-            >
-              {renamingChatId === c.id ? (
-                <input
-                  ref={renameInputRef}
-                  value={renameDraft}
-                  onChange={(e) => setRenameDraft(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleRenameChat(c.id); if (e.key === 'Escape') setRenamingChatId(null) }}
-                  onBlur={() => handleRenameChat(c.id)}
-                  autoFocus
-                  className="flex-1 text-xs bg-transparent border-b border-[#ce9178] outline-none text-[#e8e8e8] min-w-0"
-                  onClick={(e) => e.stopPropagation()}
-                />
-              ) : (
-                <>
-                  {c.is_pinned && <Pin size={8} className="shrink-0 mr-1 text-[#ce9178]" />}
-                  <MessageSquare size={10} className="shrink-0 mr-1.5" />
-                  <span className="flex-1 text-xs truncate">{c.title}</span>
-                  <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 ml-1">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); setRenamingChatId(c.id); setRenameDraft(c.title) }}
-                      className="p-0.5 rounded hover:text-[#ce9178]"
-                      title="Rename"
-                    >
-                      <Pencil size={9} />
-                    </button>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); handlePinChat(c.id, c.is_pinned) }}
-                      className="p-0.5 rounded hover:text-[#ce9178]"
-                      title={c.is_pinned ? 'Unpin' : 'Pin'}
-                    >
-                      {c.is_pinned ? <PinOff size={9} /> : <Pin size={9} />}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Bottom: Inbox + User */}
-        <div style={{ borderTop: '1px solid #333' }}>
-          <button
-            onClick={() => { setSidebarMode(sidebarMode === 'inbox' ? 'chats' : 'inbox') }}
-            className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-xs transition-colors ${
-              sidebarMode === 'inbox' ? 'text-[#e8e8e8]' : 'text-[#6a737d] hover:text-[#d4d4d4]'
+      {/* Chat list */}
+      <div className="flex-1 overflow-y-auto py-1">
+        {[...(chats || [])].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0)).map((c) => (
+          <div
+            key={c.id}
+            className={`group flex items-center px-3 py-2 transition-colors cursor-pointer ${
+              activeChatId === c.id && sidebarMode === 'chats'
+                ? 'text-[#e8e8e8]'
+                : 'text-[#6a737d] hover:text-[#d4d4d4]'
             }`}
-            style={sidebarMode === 'inbox' ? { background: '#2a2d2e' } : {}}
+            style={activeChatId === c.id && sidebarMode === 'chats' ? { background: '#2a2d2e' } : {}}
+            onClick={() => { setActiveChatId(c.id); setSidebarMode('chats'); setMobileMenuOpen(false) }}
           >
-            <Mail size={12} />
-            <span className="flex-1 text-left">Inbox</span>
-            {inboxUnread > 0 && (
-              <span className="w-4 h-4 rounded-full bg-blue-500 text-[8px] font-bold text-white flex items-center justify-center">
-                {inboxUnread > 9 ? '9+' : inboxUnread}
-              </span>
-            )}
-          </button>
-          <Link
-            to="/app/settings"
-            className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-[#6a737d] hover:text-[#d4d4d4] transition-colors"
-          >
-            {me?.user?.avatar_url ? (
-              <img src={me.user.avatar_url} className="w-5 h-5 rounded-full object-cover" alt="" />
+            {renamingChatId === c.id ? (
+              <input
+                ref={renameInputRef}
+                value={renameDraft}
+                onChange={(e) => setRenameDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleRenameChat(c.id); if (e.key === 'Escape') setRenamingChatId(null) }}
+                onBlur={() => handleRenameChat(c.id)}
+                autoFocus
+                className="flex-1 text-xs bg-transparent border-b border-[#ce9178] outline-none text-[#e8e8e8] min-w-0"
+                onClick={(e) => e.stopPropagation()}
+              />
             ) : (
-              <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center text-[8px] font-bold text-zinc-300">
-                {(me?.profile?.name || me?.user?.email || '?')[0].toUpperCase()}
-              </div>
+              <>
+                {c.is_pinned && <Pin size={8} className="shrink-0 mr-1 text-[#ce9178]" />}
+                <MessageSquare size={10} className="shrink-0 mr-1.5" />
+                <span className="flex-1 text-xs truncate">{c.title}</span>
+                <div className="hidden group-hover:flex items-center gap-0.5 shrink-0 ml-1">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setRenamingChatId(c.id); setRenameDraft(c.title) }}
+                    className="p-0.5 rounded hover:text-[#ce9178]"
+                    title="Rename"
+                  >
+                    <Pencil size={9} />
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handlePinChat(c.id, c.is_pinned) }}
+                    className="p-0.5 rounded hover:text-[#ce9178]"
+                    title={c.is_pinned ? 'Unpin' : 'Pin'}
+                  >
+                    {c.is_pinned ? <PinOff size={9} /> : <Pin size={9} />}
+                  </button>
+                </div>
+              </>
             )}
-            <span className="truncate">{me?.profile?.name || me?.user?.email || 'Settings'}</span>
-          </Link>
-        </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bottom: Inbox + User */}
+      <div style={{ borderTop: '1px solid #333' }} className="shrink-0">
+        <button
+          onClick={() => { setSidebarMode(sidebarMode === 'inbox' ? 'chats' : 'inbox'); setMobileMenuOpen(false) }}
+          className={`w-full flex items-center gap-1.5 px-3 py-2.5 text-xs transition-colors ${
+            sidebarMode === 'inbox' ? 'text-[#e8e8e8]' : 'text-[#6a737d] hover:text-[#d4d4d4]'
+          }`}
+          style={sidebarMode === 'inbox' ? { background: '#2a2d2e' } : {}}
+        >
+          <Mail size={12} />
+          <span className="flex-1 text-left">Inbox</span>
+          {inboxUnread > 0 && (
+            <span className="w-4 h-4 rounded-full bg-blue-500 text-[8px] font-bold text-white flex items-center justify-center">
+              {inboxUnread > 9 ? '9+' : inboxUnread}
+            </span>
+          )}
+        </button>
+        <Link
+          to="/app/settings"
+          className="flex items-center gap-1.5 px-3 py-2.5 text-xs text-[#6a737d] hover:text-[#d4d4d4] transition-colors"
+        >
+          {me?.user?.avatar_url ? (
+            <img src={me.user.avatar_url} className="w-5 h-5 rounded-full object-cover" alt="" />
+          ) : (
+            <div className="w-5 h-5 rounded-full bg-zinc-700 flex items-center justify-center text-[8px] font-bold text-zinc-300">
+              {(me?.profile?.name || me?.user?.email || '?')[0].toUpperCase()}
+            </div>
+          )}
+          <span className="truncate">{me?.profile?.name || me?.user?.email || 'Settings'}</span>
+        </Link>
+      </div>
+    </>
+  )
+
+  return (
+    <div className="flex h-[calc(100vh-49px)] relative overflow-hidden" style={{ background: '#1e1e1e' }}>
+      {/* Mobile Sidebar Overlay */}
+      {mobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 z-40 md:hidden"
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Mobile Chat Sidebar */}
+      <div className={`fixed inset-y-0 left-0 z-50 transform transition-transform duration-200 ease-in-out md:hidden flex flex-col w-[240px] shrink-0 h-[calc(100vh-49px)] top-[49px] ${mobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`} style={{ borderRight: '1px solid #333', background: '#252526' }}>
+        {SidebarContent}
+      </div>
+
+      {/* Desktop Chat Sidebar */}
+      <div className="hidden md:flex flex-col w-[180px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
+        {SidebarContent}
       </div>
 
       {/* Center — inbox view when sidebar is in inbox mode */}
@@ -560,6 +580,7 @@ export default function ProjectView() {
                 } catch {}
               }}
               onCompose={() => setInboxComposeOpen(true)}
+              onMenuToggle={() => setMobileMenuOpen(true)}
             />
           )}
           <ComposeModal
@@ -579,9 +600,9 @@ export default function ProjectView() {
       <div className={`flex-1 flex flex-col min-w-0 ${mobileView === 'panel' ? 'hidden md:flex' : 'flex'}`} style={{ borderRight: '1px solid #333' }}>
         {/* Header */}
         <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid #333' }}>
-          <Link to="/work" className="sm:hidden text-[#6a737d] hover:text-[#e8e8e8]">
-            <ArrowLeft size={14} />
-          </Link>
+          <button onClick={() => setMobileMenuOpen(true)} className="sm:hidden text-[#6a737d] hover:text-[#e8e8e8]">
+            <Menu size={14} />
+          </button>
           <h2 className="text-xs font-medium truncate" style={{ color: '#e8e8e8' }}>
             {project.title}
           </h2>
