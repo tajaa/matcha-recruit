@@ -6,6 +6,7 @@ import {
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
 import { useMe } from '../hooks/useMe'
+import { useSidebarBadges } from '../hooks/useSidebarBadges'
 
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app', icon: LayoutDashboard, label: 'Dashboard' },
@@ -63,12 +64,27 @@ const personalNav: (NavItem | NavGroup)[] = [
 
 export default function ClientSidebar() {
   const { me, loading, isPersonal } = useMe()
+  const { badges, markSeen } = useSidebarBadges()
+
+  function withBadges(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {
+    return items.map((item) => {
+      if ('items' in item) {
+        return { ...item, items: item.items.map((child) => withBadges([child])[0] as NavItem) }
+      }
+      if (item.to === '/app/ir') return { ...item, badge: badges.ir || undefined, onSeen: () => markSeen('ir') }
+      if (item.to === '/app/er-copilot') return { ...item, badge: badges.er || undefined, onSeen: () => markSeen('er') }
+      if (item.to === '/app/escalated-queries') return { ...item, badge: badges.escalations || undefined, onSeen: () => markSeen('escalations') }
+      if (item.to === '/app/inbox') return { ...item, badge: badges.inbox || undefined, onSeen: () => markSeen('inbox') }
+      if (item.to === '/app/notifications') return { ...item, badge: badges.notifications || undefined, onSeen: () => markSeen('notifications') }
+      return item
+    })
+  }
 
   return (
     <SidebarShell
       logoTo={isPersonal ? '/work' : '/app'}
       logoLabel="Matcha"
-      nav={loading ? [] : isPersonal ? personalNav : nav}
+      nav={loading ? [] : isPersonal ? personalNav : withBadges(nav)}
       user={me?.profile ? {
         name: me.profile.name,
         avatarUrl: me.user?.avatar_url,

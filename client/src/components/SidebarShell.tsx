@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { LogOut, Settings, ChevronDown } from 'lucide-react'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Logo } from './ui'
 import Avatar from './Avatar'
 
@@ -9,6 +9,8 @@ export type NavItem = {
   to: string
   icon: LucideIcon
   label: string
+  badge?: number
+  onSeen?: () => void
 }
 
 export type NavGroup = {
@@ -33,6 +35,17 @@ function NavItemLink({ item, location }: { item: NavItem; location: ReturnType<t
     ? location.pathname === item.to
     : location.pathname.startsWith(item.to)
 
+  const seenRef = useRef(false)
+  const onSeenRef = useRef(item.onSeen)
+  onSeenRef.current = item.onSeen
+  useEffect(() => {
+    if (isActive && item.badge && item.badge > 0 && !seenRef.current) {
+      seenRef.current = true
+      onSeenRef.current?.()
+    }
+    if (!isActive) seenRef.current = false
+  }, [isActive, item.badge])
+
   return (
     <NavLink
       to={item.to}
@@ -45,7 +58,12 @@ function NavItemLink({ item, location }: { item: NavItem; location: ReturnType<t
       }
     >
       <item.icon className={`h-4 w-4 flex-shrink-0 ${isActive ? 'text-white' : 'text-zinc-50 group-hover:text-white'}`} strokeWidth={1.6} />
-      {item.label}
+      <span className="flex-1">{item.label}</span>
+      {!!item.badge && item.badge > 0 && (
+        <span className="ml-auto min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-vsc-accent/20 border border-vsc-accent/30 text-[10px] font-semibold text-vsc-accent/80 px-1 leading-none">
+          +{item.badge > 99 ? '99' : item.badge}
+        </span>
+      )}
     </NavLink>
   )
 }
