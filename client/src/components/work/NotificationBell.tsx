@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bell, Check, ExternalLink, FolderOpen, Hash, Mail, UserPlus, X } from 'lucide-react'
+import { Bell, ExternalLink, FolderOpen, Hash, Mail, UserPlus, X } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import {
   getNotifications,
