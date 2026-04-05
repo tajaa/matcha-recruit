@@ -25,7 +25,7 @@ function timeAgo(iso: string): string {
   return `${hrs}h ago`
 }
 
-export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzedAt, onRefresh, refreshing }: Props) {
+export function FlagsTable({ flags, heatMap, totalFlags: _totalFlags, criticalCount: _criticalCount, analyzedAt, onRefresh, refreshing }: Props) {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<string>('all')

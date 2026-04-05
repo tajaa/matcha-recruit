@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Zap } from 'lucide-react'
+import { Button } from '../../components/ui'
 
 import { useMe } from '../../hooks/useMe'
 import { fetchDashboardStats, fetchDashboardFlags } from '../../api/dashboard'
@@ -14,7 +15,7 @@ import {
 import type { DashboardStats, DashboardFlagsResponse } from '../../types/dashboard'
 
 export default function Dashboard() {
-  const { me, loading: meLoading, hasFeature } = useMe()
+  const { me, loading: meLoading } = useMe()
   const navigate = useNavigate()
 
   const [stats, setStats] = useState<DashboardStats | null>(null)
