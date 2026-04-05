@@ -1,64 +1,50 @@
 import { useMemo } from 'react'
-import type { DashboardFlag } from '../../types/dashboard'
+import type { HeatMapCell } from '../../types/dashboard'
 
 interface Props {
-  flags: DashboardFlag[]
+  cells: HeatMapCell[]
 }
 
-const SEV_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
+const SEV_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, warning: 1 }
 
 const CELL_STYLES: Record<string, string> = {
   critical: 'bg-red-600/40 text-red-300 border-red-700/40',
   high: 'bg-orange-600/30 text-orange-300 border-orange-700/30',
   medium: 'bg-amber-600/20 text-amber-300 border-amber-700/20',
   low: 'bg-blue-600/15 text-blue-300 border-blue-700/20',
+  warning: 'bg-orange-600/30 text-orange-300 border-orange-700/30',
   empty: 'bg-zinc-900/50 text-zinc-700 border-zinc-800/30',
 }
 
-export function RiskHeatMap({ flags }: Props) {
+export function RiskHeatMap({ cells }: Props) {
   const { locations, categories, grid } = useMemo(() => {
-    if (flags.length === 0) return { locations: [], categories: [], grid: new Map() }
+    if (cells.length === 0) return { locations: [], categories: [], grid: new Map<string, HeatMapCell>() }
 
-    const locSet = new Set<string>()
+    const locCounts = new Map<string, number>()
     const catSet = new Set<string>()
-    const cells = new Map<string, { count: number; worstSev: string }>()
+    const gridMap = new Map<string, HeatMapCell>()
 
-    for (const f of flags) {
-      const loc = f.location_subject || 'Other'
-      const cat = f.category || 'Other'
-      locSet.add(loc)
-      catSet.add(cat)
-
-      const key = `${loc}||${cat}`
-      const existing = cells.get(key)
-      if (existing) {
-        existing.count++
-        if ((SEV_RANK[f.severity] ?? 99) < (SEV_RANK[existing.worstSev] ?? 99)) {
-          existing.worstSev = f.severity
-        }
-      } else {
-        cells.set(key, { count: 1, worstSev: f.severity })
-      }
+    for (const c of cells) {
+      locCounts.set(c.location, (locCounts.get(c.location) || 0) + c.count)
+      catSet.add(c.category)
+      gridMap.set(`${c.location}||${c.category}`, c)
     }
 
-    // Sort locations by total flag count descending
-    const locArr = [...locSet].sort((a, b) => {
-      const aCount = [...cells.entries()].filter(([k]) => k.startsWith(`${a}||`)).reduce((s, [, v]) => s + v.count, 0)
-      const bCount = [...cells.entries()].filter(([k]) => k.startsWith(`${b}||`)).reduce((s, [, v]) => s + v.count, 0)
-      return bCount - aCount
-    })
+    // Sort locations by total count descending
+    const locArr = [...locCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([loc]) => loc)
 
     // Stable category order
-    const catOrder = ['Compliance', 'Compliance (HR)', 'Safety', 'HR Policy / Legal', 'Workforce Risk']
+    const catOrder = ['Compliance', 'Safety', 'HR Policy / Legal', 'Workforce Risk']
     const catArr = catOrder.filter(c => catSet.has(c))
     for (const c of catSet) {
       if (!catArr.includes(c)) catArr.push(c)
     }
 
-    return { locations: locArr, categories: catArr, grid: cells }
-  }, [flags])
+    return { locations: locArr, categories: catArr, grid: gridMap }
+  }, [cells])
 
-  // Don't render if fewer than 2 locations or no flags
   if (locations.length < 2 || categories.length === 0) return null
 
   return (
@@ -84,12 +70,12 @@ export function RiskHeatMap({ flags }: Props) {
                 </td>
                 {categories.map((cat) => {
                   const cell = grid.get(`${loc}||${cat}`)
-                  const style = cell ? CELL_STYLES[cell.worstSev] || CELL_STYLES.low : CELL_STYLES.empty
+                  const style = cell ? CELL_STYLES[cell.worst_severity] || CELL_STYLES.low : CELL_STYLES.empty
                   return (
                     <td key={cat} className="px-3 py-2 text-center">
                       <span
                         className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border text-[11px] font-semibold ${style}`}
-                        title={cell ? `${cell.count} flag(s), worst: ${cell.worstSev}` : 'No flags'}
+                        title={cell ? `${cell.count} flag(s), worst: ${cell.worst_severity}` : 'No flags'}
                       >
                         {cell ? cell.count : '--'}
                       </span>

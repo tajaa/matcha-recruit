@@ -188,10 +188,18 @@ export interface DashboardFlag {
   link: string | null
 }
 
+export interface HeatMapCell {
+  location: string
+  category: string
+  count: number
+  worst_severity: string
+}
+
 export interface DashboardFlagsResponse {
   total_flags: number
   critical_count: number
   flags: DashboardFlag[]
+  heat_map: HeatMapCell[]
   analyzed_at: string | null
 }
 

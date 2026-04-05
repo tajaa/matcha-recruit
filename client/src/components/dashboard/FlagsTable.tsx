@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, ChevronUp, ChevronDown, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react'
-import type { DashboardFlag } from '../../types/dashboard'
+import type { DashboardFlag, HeatMapCell } from '../../types/dashboard'
 import { RiskHeatMap } from './RiskHeatMap'
 
 interface Props {
   flags: DashboardFlag[]
+  heatMap: HeatMapCell[]
   totalFlags: number
   criticalCount: number
   analyzedAt: string | null
@@ -24,7 +25,7 @@ function timeAgo(iso: string): string {
   return `${hrs}h ago`
 }
 
-export function FlagsTable({ flags, totalFlags, criticalCount, analyzedAt, onRefresh, refreshing }: Props) {
+export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzedAt, onRefresh, refreshing }: Props) {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<string>('all')
@@ -90,7 +91,7 @@ export function FlagsTable({ flags, totalFlags, criticalCount, analyzedAt, onRef
       </div>
 
       {/* Heat map */}
-      <RiskHeatMap flags={flags} />
+      <RiskHeatMap cells={heatMap} />
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
