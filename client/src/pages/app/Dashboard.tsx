@@ -4,7 +4,7 @@ import { Zap } from 'lucide-react'
 import { Button } from '../../components/ui'
 
 import { useMe } from '../../hooks/useMe'
-import { fetchDashboardStats, fetchDashboardFlags } from '../../api/dashboard'
+import { fetchDashboardStats, fetchDashboardFlags, analyzeDashboardFlags } from '../../api/dashboard'
 
 import {
   ProfileBanner,
@@ -109,7 +109,8 @@ export default function Dashboard() {
         onRefresh={async () => {
           setFlagsRefreshing(true)
           try {
-            const fresh = await fetchDashboardFlags(true)
+            await analyzeDashboardFlags()
+            const fresh = await fetchDashboardFlags()
             setFlagsData(fresh)
           } catch {}
           setFlagsRefreshing(false)

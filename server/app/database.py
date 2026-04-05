@@ -5218,6 +5218,31 @@ async def init_db():
             ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'::jsonb
         """)
 
+        # Risk flags (pre-computed by background analysis)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_risk_flags (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                priority INT NOT NULL DEFAULT 0,
+                category TEXT NOT NULL,
+                location_subject TEXT NOT NULL,
+                description TEXT NOT NULL,
+                recommendation TEXT NOT NULL,
+                severity TEXT NOT NULL DEFAULT 'medium',
+                source_type TEXT NOT NULL DEFAULT 'pattern',
+                source_id TEXT,
+                link TEXT,
+                group_label TEXT DEFAULT 'Locations',
+                is_ai_generated BOOLEAN DEFAULT FALSE,
+                analyzed_at TIMESTAMPTZ DEFAULT NOW(),
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mw_risk_flags_company
+            ON mw_risk_flags(company_id, priority)
+        """)
+
         # Matcha Work notifications
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS mw_notifications (

@@ -719,122 +719,133 @@ def _deterministic_flags_from_patterns(patterns: dict) -> list[dict]:
 
 @router.get("/flags", response_model=DashboardFlagsResponse)
 async def get_dashboard_flags(
-    refresh: bool = Query(False),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Return AI-synthesized risk flags from aggregated company data."""
+    """Read pre-computed risk flags from the database. Instant — no AI calls."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return DashboardFlagsResponse(total_flags=0, critical_count=0, flags=[])
 
-    cache_key = f"risk_analysis:{company_id}"
-    redis = get_redis_cache()
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT id, priority, category, location_subject, description, recommendation,
+                      severity, source_type, source_id, link, group_label, is_ai_generated, analyzed_at
+               FROM mw_risk_flags
+               WHERE company_id = $1
+               ORDER BY priority""",
+            company_id,
+        )
+        analyzed_at_val = rows[0]["analyzed_at"] if rows else None
 
-    if not refresh and redis:
-        cached = await cache_get(redis, cache_key)
-        if cached is not None:
-            return cached
+    flags = [
+        DashboardFlag(
+            priority=r["priority"],
+            category=r["category"],
+            location_subject=r["location_subject"],
+            description=r["description"],
+            recommendation=r["recommendation"],
+            severity=r["severity"],
+            source_type=r["source_type"],
+            source_id=r["source_id"],
+            link=r["link"],
+        )
+        for r in rows
+    ]
+    critical_count = sum(1 for f in flags if f.severity == "critical")
 
-    # Layer 1: Detect patterns from DB
-    patterns = await _detect_risk_patterns(company_id)
-
-    # Layer 2: AI synthesis (with deterministic fallback)
-    ai_flags = await _analyze_with_ai(patterns)
-
-    if ai_flags is not None:
-        raw_flags = ai_flags
-    else:
-        raw_flags = _deterministic_flags_from_patterns(patterns)
-
-    # Build response
-    result_flags = []
-    for i, f in enumerate(raw_flags):
-        try:
-            result_flags.append(DashboardFlag(
-                priority=f.get("priority", i + 1),
-                category=f.get("category", ""),
-                location_subject=f.get("location_subject", ""),
-                description=f.get("description", ""),
-                recommendation=f.get("recommendation", ""),
-                severity=f.get("severity", "medium"),
-                source_type=f.get("source_type", "pattern"),
-                source_id=f.get("source_id"),
-                link=f.get("link"),
-            ))
-        except Exception:
-            continue
-
-    # Re-number priorities sequentially
-    for i, flag in enumerate(result_flags):
-        flag.priority = i + 1
-
-    critical_count = sum(1 for f in result_flags if f.severity == "critical")
-    analyzed_at = datetime.now(timezone.utc)
-
-    # Build heat map from raw patterns (real locations, not AI-generated labels)
+    # Build heat map from stored flags
     heat_cells: dict[tuple[str, str], dict] = {}
-
-    # Collect known department names and location names for classification
-    dept_names: set[str] = set()
-    for dept in patterns.get("departments_with_multiple_incidents", []):
-        dept_names.add(dept["department"])
-
     import re as _loc_re
-    _LOCATION_PATTERN = _loc_re.compile(r',\s*[A-Z]{2}')  # "City, ST" pattern
-
-    def _classify(name: str) -> str:
-        if name.lower() in ("company-wide", "company wide"):
-            return "Company-wide"
-        if name in dept_names:
-            return "Departments"
-        if _LOCATION_PATTERN.search(name):
-            return "Locations"
-        # Fallback: if it looks like a place name (has comma or state abbrev), it's a location
-        return "Locations"
-
-    def _add(loc: str, cat: str, count: int, severity: str):
+    _LOC_PAT = _loc_re.compile(r',\s*[A-Z]{2}')
+    for r in rows:
+        loc = r["location_subject"] or "Unknown"
+        cat = r["category"] or "Other"
+        grp = r["group_label"] or ("Company-wide" if loc.lower() in ("company-wide", "company wide") else "Departments" if not _LOC_PAT.search(loc) else "Locations")
         key = (loc, cat)
         cell = heat_cells.get(key)
         if cell:
-            cell["count"] += count
-            if _SEVERITY_ORDER.get(severity, 99) < _SEVERITY_ORDER.get(cell["worst"], 99):
-                cell["worst"] = severity
+            cell["count"] += 1
+            if _SEVERITY_ORDER.get(r["severity"], 99) < _SEVERITY_ORDER.get(cell["worst"], 99):
+                cell["worst"] = r["severity"]
         else:
-            heat_cells[key] = {"count": count, "worst": severity, "group": _classify(loc)}
-
-    for inc in patterns.get("incidents_by_location", []):
-        _add(inc.get("location") or "Unknown", "Safety", inc.get("count", 1), inc.get("severity", "medium"))
-
-    for alert in patterns.get("compliance_alerts", []):
-        _add(alert.get("location") or "Company-wide", "Compliance", alert.get("count", 1), alert.get("severity", "warning"))
-
-    for er in patterns.get("open_er_cases", []):
-        _add("Company-wide", "HR Policy / Legal", er.get("count", 1), "high")
-
-    for wv in patterns.get("wage_violations", []):
-        _add(wv.get("location") or "Unknown", "Compliance", 1, "critical")
-
-    for dept in patterns.get("departments_with_multiple_incidents", []):
-        sev = "high" if dept["incident_count"] >= 4 else "medium"
-        _add(dept["department"], "Workforce Risk", dept["incident_count"], sev)
+            heat_cells[key] = {"count": 1, "worst": r["severity"], "group": grp}
 
     heat_map = [
         HeatMapCell(location=loc, category=cat, count=v["count"], worst_severity=v["worst"], group=v["group"])
         for (loc, cat), v in heat_cells.items()
     ]
 
-    response = DashboardFlagsResponse(
-        total_flags=len(result_flags),
+    return DashboardFlagsResponse(
+        total_flags=len(flags),
         critical_count=critical_count,
-        flags=result_flags,
+        flags=flags,
         heat_map=heat_map,
-        analyzed_at=analyzed_at,
+        analyzed_at=analyzed_at_val,
     )
 
-    if redis:
-        await cache_set(redis, cache_key, response.model_dump(mode="json"), ttl=3600)
 
-    return response
+@router.post("/flags/analyze")
+async def analyze_risk_flags(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Run risk analysis (patterns + optional AI) and store results in mw_risk_flags."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return {"analyzed": 0}
+
+    patterns = await _detect_risk_patterns(company_id)
+
+    # Try AI synthesis, fall back to deterministic
+    ai_flags = await _analyze_with_ai(patterns)
+    if ai_flags is not None:
+        raw_flags = ai_flags
+        is_ai = True
+    else:
+        raw_flags = _deterministic_flags_from_patterns(patterns)
+        is_ai = False
+
+    # Classify locations for heat map grouping
+    import re as _loc_re2
+    _LOC_PAT2 = _loc_re2.compile(r',\s*[A-Z]{2}')
+    dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
+
+    def _classify(name: str) -> str:
+        if name.lower() in ("company-wide", "company wide"):
+            return "Company-wide"
+        if name in dept_names:
+            return "Departments"
+        return "Locations"
+
+    now = datetime.now(timezone.utc)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            # Clear old flags for this company
+            await conn.execute("DELETE FROM mw_risk_flags WHERE company_id = $1", company_id)
+
+            for i, f in enumerate(raw_flags):
+                loc_subj = f.get("location_subject", "")
+                await conn.execute(
+                    """INSERT INTO mw_risk_flags
+                       (company_id, priority, category, location_subject, description,
+                        recommendation, severity, source_type, source_id, link,
+                        group_label, is_ai_generated, analyzed_at)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+                    company_id, i + 1,
+                    f.get("category", ""),
+                    loc_subj,
+                    f.get("description", ""),
+                    f.get("recommendation", ""),
+                    f.get("severity", "medium"),
+                    f.get("source_type", "pattern"),
+                    f.get("source_id"),
+                    f.get("link"),
+                    _classify(loc_subj),
+                    is_ai,
+                    now,
+                )
+
+    return {"analyzed": len(raw_flags), "is_ai": is_ai, "analyzed_at": now.isoformat()}
 
 
 def _format_action(action: str, details: dict | None) -> str:
