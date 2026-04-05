@@ -1,8 +1,9 @@
-import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList, Microscope, FileText, Briefcase, ShieldCheck } from 'lucide-react'
+import { Building2, ToggleRight, Settings, MapPin, Globe, ClipboardList, Microscope, FileText, Briefcase, ShieldCheck, User } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 
 const nav = [
   { to: '/admin/companies', icon: Building2, label: 'Companies' },
+  { to: '/admin/individuals', icon: User, label: 'Individuals' },
   { to: '/admin/brokers', icon: Briefcase, label: 'Brokers' },
   { to: '/admin/features', icon: ToggleRight, label: 'Business Features' },
   { to: '/admin/compliance-mgmt', icon: ShieldCheck, label: 'Compliance Mgmt' },

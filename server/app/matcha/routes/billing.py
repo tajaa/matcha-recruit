@@ -239,6 +239,60 @@ class CompanyTokenDetailResponse(BaseModel):
     recent_usage: list[TokenUsageEvent]
 
 
+class IndividualUserSummary(BaseModel):
+    user_id: UUID
+    email: str
+    name: Optional[str] = None
+    company_id: UUID
+    created_at: Optional[datetime] = None
+    free_tokens_used: int = 0
+    free_token_limit: int = 0
+    free_tokens_remaining: int = 0
+    subscription_token_limit: int = 0
+    subscription_tokens_remaining: int = 0
+    has_active_subscription: bool = False
+
+
+@admin_router.get("/admin/individuals")
+async def admin_list_individual_users(
+    current_user: CurrentUser = Depends(require_platform_admin),
+):
+    """List all individual/personal account users with token budgets."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT u.id AS user_id, u.email, u.created_at,
+                   c.id AS company_id, c.name,
+                   COALESCE(t.free_tokens_used, 0) AS free_tokens_used,
+                   COALESCE(t.free_token_limit, 0) AS free_token_limit,
+                   COALESCE(t.subscription_tokens_used, 0) AS subscription_tokens_used,
+                   COALESCE(t.subscription_token_limit, 0) AS subscription_token_limit
+            FROM users u
+            JOIN clients cl ON cl.user_id = u.id
+            JOIN companies c ON c.id = cl.company_id
+            LEFT JOIN mw_token_budgets t ON t.company_id = c.id
+            WHERE u.role = 'individual' AND c.is_personal = true
+            ORDER BY u.created_at DESC
+            """
+        )
+    return [
+        IndividualUserSummary(
+            user_id=r["user_id"],
+            email=r["email"],
+            name=r["name"],
+            company_id=r["company_id"],
+            created_at=r["created_at"],
+            free_tokens_used=r["free_tokens_used"],
+            free_token_limit=r["free_token_limit"],
+            free_tokens_remaining=max(0, r["free_token_limit"] - r["free_tokens_used"]),
+            subscription_token_limit=r["subscription_token_limit"],
+            subscription_tokens_remaining=max(0, r["subscription_token_limit"] - r["subscription_tokens_used"]),
+            has_active_subscription=r["subscription_token_limit"] > 0,
+        )
+        for r in rows
+    ]
+
+
 @admin_router.get("/admin/companies")
 async def admin_list_company_tokens(
     current_user: CurrentUser = Depends(require_platform_admin),
