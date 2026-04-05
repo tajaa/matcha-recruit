@@ -7,11 +7,11 @@ interface Props {
 }
 
 const SEV_BG: Record<string, string> = {
-  critical: 'bg-red-600/50 border-red-700/50 text-red-200',
-  high: 'bg-orange-600/40 border-orange-700/40 text-orange-200',
-  medium: 'bg-amber-600/30 border-amber-700/30 text-amber-200',
-  low: 'bg-blue-600/20 border-blue-700/30 text-blue-200',
-  warning: 'bg-orange-600/40 border-orange-700/40 text-orange-200',
+  critical: 'bg-red-900/80 border-red-800/60 text-red-100',
+  high: 'bg-orange-900/60 border-orange-800/40 text-orange-100',
+  medium: 'bg-amber-900/50 border-amber-800/30 text-amber-100',
+  low: 'bg-zinc-800/80 border-zinc-700/40 text-zinc-300',
+  warning: 'bg-orange-900/60 border-orange-800/40 text-orange-100',
 }
 
 const SEV_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, warning: 1 }
@@ -75,13 +75,13 @@ export function RiskHeatMap({ cells }: Props) {
   return (
     <div className="mb-5">
       <div className="flex items-center gap-4 mb-2.5">
-        <h3 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Risk Concentration</h3>
-        <div className="flex items-center gap-3 text-[9px] text-zinc-600">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-600/50" />Critical</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-600/40" />High</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-600/30" />Medium</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-600/20" />Low</span>
-          <span className="text-zinc-700 mx-1">|</span>
+        <h3 className="text-[11px] font-medium text-vsc-text/50 uppercase tracking-wider">Risk Concentration</h3>
+        <div className="flex items-center gap-3 text-[9px] text-vsc-text/40">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-700" />Critical</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-700" />High</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-700" />Medium</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-zinc-600" />Low</span>
+          <span className="text-vsc-border mx-1">|</span>
           <span>CMP = Compliance</span>
           <span>SAF = Safety</span>
           <span>HR = HR Policy</span>
@@ -93,7 +93,7 @@ export function RiskHeatMap({ cells }: Props) {
           const Icon = GROUP_ICONS[grp.name] || MapPin
           return (
             <div key={grp.name} className="flex items-start gap-2">
-              <span className="flex items-center gap-1 text-[10px] text-zinc-600 uppercase tracking-wider pt-0.5 shrink-0 w-24">
+              <span className="flex items-center gap-1 text-[10px] text-vsc-text/40 uppercase tracking-wider pt-0.5 shrink-0 w-24">
                 <Icon size={9} />
                 {grp.name}
               </span>
@@ -101,9 +101,9 @@ export function RiskHeatMap({ cells }: Props) {
                 {grp.items.map(({ location, badges }) => (
                   <div
                     key={location}
-                    className="flex items-center gap-1 rounded-lg border border-zinc-800 bg-zinc-900/60 px-2 py-1"
+                    className="flex items-center gap-1 rounded-lg border border-vsc-border bg-vsc-panel px-2 py-1"
                   >
-                    <span className="text-[11px] text-zinc-300 font-medium whitespace-nowrap">{location}</span>
+                    <span className="text-[11px] text-vsc-text/75 font-medium whitespace-nowrap">{location}</span>
                     {badges.map((b, i) => (
                       <span
                         key={i}

@@ -68,7 +68,7 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
     })
 
   const SortIcon = ({ col }: { col: SortKey }) => {
-    if (sortKey !== col) return <ChevronUp size={10} className="text-zinc-600" />
+    if (sortKey !== col) return <ChevronUp size={10} className="text-vsc-text/30" />
     return sortDir === 'asc' ? <ChevronUp size={10} /> : <ChevronDown size={10} />
   }
 
@@ -76,14 +76,14 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
     <div>
       {/* Summary stats */}
       <div className="flex gap-4 mb-6">
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 px-6 py-4 min-w-[180px]">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Total Open Flags</p>
-          <p className="text-3xl font-bold text-zinc-100 mt-1">{totalFlags}</p>
+        <div className="rounded-xl border border-vsc-border bg-vsc-panel px-6 py-4 min-w-[180px]">
+          <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Total Open Flags</p>
+          <p className="text-3xl font-bold text-vsc-text mt-1">{totalFlags}</p>
         </div>
         <div className={`rounded-xl border px-6 py-4 min-w-[180px] ${
-          criticalCount > 0 ? 'border-red-800/50 bg-red-950/30' : 'border-zinc-800 bg-zinc-900/50'
+          criticalCount > 0 ? 'border-red-800/50 bg-red-950/30' : 'border-vsc-border bg-vsc-panel'
         }`}>
-          <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">Critical Risks</p>
+          <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Critical Risks</p>
           <p className={`text-3xl font-bold mt-1 ${criticalCount > 0 ? 'text-red-400' : 'text-zinc-100'}`}>
             {criticalCount}
           </p>
@@ -96,18 +96,18 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
         <div className="flex-1 w-full">
-          <h2 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider">
+          <h2 className="text-sm font-semibold text-vsc-text uppercase tracking-wider">
             System Flags & Recommendations
           </h2>
           <div className="flex items-center gap-2 mt-1">
             {analyzedAt && (
-              <span className="text-[10px] text-zinc-600">Analyzed {timeAgo(analyzedAt)}</span>
+              <span className="text-[10px] text-vsc-text/40">Analyzed {timeAgo(analyzedAt)}</span>
             )}
             {onRefresh && (
               <button
                 onClick={onRefresh}
                 disabled={refreshing}
-                className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-emerald-400 transition-colors disabled:opacity-40"
+                className="flex items-center gap-1 text-[10px] text-vsc-text/40 hover:text-emerald-400 transition-colors disabled:opacity-40"
               >
                 {refreshing ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
                 Re-analyze
@@ -122,13 +122,13 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search Flags..."
-              className="pl-8 pr-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500 w-full sm:w-48"
+              className="pl-8 pr-3 py-1.5 rounded-lg border border-vsc-border bg-vsc-bg text-xs text-vsc-text placeholder-vsc-text/30 outline-none focus:border-vsc-text/40 w-full sm:w-48"
             />
           </div>
           <select
             value={priorityFilter}
             onChange={(e) => setPriorityFilter(e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-300 px-3 py-1.5 outline-none focus:border-zinc-500 w-full sm:w-auto"
+            className="rounded-lg border border-vsc-border bg-vsc-bg text-xs text-vsc-text px-3 py-1.5 outline-none focus:border-vsc-text/40 w-full sm:w-auto"
           >
             <option value="all">Priority: All</option>
             <option value="critical">Critical</option>
@@ -140,36 +140,36 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-zinc-800 overflow-x-auto">
+      <div className="rounded-xl border border-vsc-border overflow-x-auto">
         <table className="w-full text-xs min-w-[800px]">
           <thead>
-            <tr className="bg-zinc-900/80 border-b border-zinc-800">
+            <tr className="bg-vsc-panel border-b border-vsc-border">
               <th
                 onClick={() => toggleSort('priority')}
-                className="text-left px-4 py-2.5 font-medium text-zinc-400 cursor-pointer hover:text-zinc-200 w-20"
+                className="text-left px-4 py-2.5 font-medium text-vsc-text/60 cursor-pointer hover:text-vsc-text w-20"
               >
                 <span className="flex items-center gap-1">Priority <SortIcon col="priority" /></span>
               </th>
               <th
                 onClick={() => toggleSort('category')}
-                className="text-left px-4 py-2.5 font-medium text-zinc-400 cursor-pointer hover:text-zinc-200 w-36"
+                className="text-left px-4 py-2.5 font-medium text-vsc-text/60 cursor-pointer hover:text-vsc-text w-36"
               >
                 <span className="flex items-center gap-1">Risk Category <SortIcon col="category" /></span>
               </th>
               <th
                 onClick={() => toggleSort('location_subject')}
-                className="text-left px-4 py-2.5 font-medium text-zinc-400 cursor-pointer hover:text-zinc-200 w-40"
+                className="text-left px-4 py-2.5 font-medium text-vsc-text/60 cursor-pointer hover:text-vsc-text w-40"
               >
                 <span className="flex items-center gap-1">Location/Subject <SortIcon col="location_subject" /></span>
               </th>
-              <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Flag Description</th>
-              <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Recommendation</th>
+              <th className="text-left px-4 py-2.5 font-medium text-vsc-text/60">Flag Description</th>
+              <th className="text-left px-4 py-2.5 font-medium text-vsc-text/60">Recommendation</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={5} className="px-4 py-8 text-center text-zinc-500">
+                <td colSpan={5} className="px-4 py-8 text-center text-vsc-text/40">
                   {search || priorityFilter !== 'all' ? 'No flags match your filters.' : 'No open flags. All clear.'}
                 </td>
               </tr>
@@ -184,32 +184,32 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
                     flag.link ? 'cursor-pointer' : ''
                   } ${
                     isCriticalRow
-                      ? 'bg-gradient-to-r from-red-950/60 via-red-950/30 to-transparent hover:from-red-950/80'
+                      ? 'bg-gradient-to-r from-red-950/80 via-red-950/40 to-transparent hover:from-red-900/70'
                       : 'hover:bg-zinc-800/30'
                   }`}
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
-                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-md text-[11px] font-bold ${
+                      <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-bold ${
                         isCriticalRow
-                          ? 'bg-red-600 text-white'
+                          ? 'bg-red-700 text-white'
                           : flag.severity === 'high'
-                            ? 'bg-orange-700/50 text-orange-300'
+                            ? 'bg-orange-800/60 text-orange-200'
                             : 'bg-zinc-800 text-zinc-400'
                       }`}>
                         {flag.priority}
                       </span>
-                      {isCriticalRow && <AlertTriangle size={12} className="text-red-400" />}
+                      {isCriticalRow && <AlertTriangle size={12} className="text-red-500" />}
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`font-medium ${isCriticalRow ? 'text-red-300' : 'text-zinc-200'}`}>
+                    <span className={`font-medium ${isCriticalRow ? 'text-red-300' : 'text-vsc-accent/75'}`}>
                       {flag.category}
                     </span>
                   </td>
-                  <td className="px-4 py-3 text-zinc-300">{flag.location_subject}</td>
-                  <td className="px-4 py-3 text-zinc-300 max-w-xs">{flag.description}</td>
-                  <td className="px-4 py-3 text-zinc-400 max-w-sm">{flag.recommendation}</td>
+                  <td className="px-4 py-3 text-vsc-blue/70">{flag.location_subject}</td>
+                  <td className="px-4 py-3 text-vsc-text/80 max-w-xs">{flag.description}</td>
+                  <td className="px-4 py-3 text-vsc-text/50 max-w-sm">{flag.recommendation}</td>
                 </tr>
               )
             })}
