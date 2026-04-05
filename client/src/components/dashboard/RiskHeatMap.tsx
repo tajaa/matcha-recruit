@@ -74,7 +74,20 @@ export function RiskHeatMap({ cells }: Props) {
 
   return (
     <div className="mb-5">
-      <h3 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider mb-2.5">Risk Concentration</h3>
+      <div className="flex items-center gap-4 mb-2.5">
+        <h3 className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">Risk Concentration</h3>
+        <div className="flex items-center gap-3 text-[9px] text-zinc-600">
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-600/50" />Critical</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-600/40" />High</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-600/30" />Medium</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-blue-600/20" />Low</span>
+          <span className="text-zinc-700 mx-1">|</span>
+          <span>CMP = Compliance</span>
+          <span>SAF = Safety</span>
+          <span>HR = HR Policy</span>
+          <span>WRK = Workforce</span>
+        </div>
+      </div>
       <div className="flex flex-wrap gap-x-6 gap-y-3">
         {groups.map((grp) => {
           const Icon = GROUP_ICONS[grp.name] || MapPin
