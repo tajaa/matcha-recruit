@@ -192,6 +192,7 @@ export interface DashboardFlagsResponse {
   total_flags: number
   critical_count: number
   flags: DashboardFlag[]
+  analyzed_at: string | null
 }
 
 // ── /auth/me Response ──

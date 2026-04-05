@@ -38,6 +38,7 @@ export default function Dashboard() {
   const [pinned, setPinned] = useState<PinnedRequirement[]>([])
   const [complianceDash, setComplianceDash] = useState<ComplianceDashboard | null>(null)
   const [flagsData, setFlagsData] = useState<DashboardFlagsResponse | null>(null)
+  const [flagsRefreshing, setFlagsRefreshing] = useState(false)
   const [loading, setLoading] = useState(true)
   const [pinnedLoading, setPinnedLoading] = useState(true)
   const [upcomingLoading, setUpcomingLoading] = useState(true)
@@ -313,6 +314,16 @@ export default function Dashboard() {
           flags={flagsData?.flags ?? []}
           totalFlags={flagsData?.total_flags ?? 0}
           criticalCount={flagsData?.critical_count ?? 0}
+          analyzedAt={flagsData?.analyzed_at ?? null}
+          refreshing={flagsRefreshing}
+          onRefresh={async () => {
+            setFlagsRefreshing(true)
+            try {
+              const fresh = await fetchDashboardFlags(true)
+              setFlagsData(fresh)
+            } catch {}
+            setFlagsRefreshing(false)
+          }}
         />
       )}
 

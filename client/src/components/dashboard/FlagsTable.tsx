@@ -1,18 +1,29 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, ChevronUp, ChevronDown, AlertTriangle } from 'lucide-react'
+import { Search, ChevronUp, ChevronDown, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react'
 import type { DashboardFlag } from '../../types/dashboard'
 
 interface Props {
   flags: DashboardFlag[]
   totalFlags: number
   criticalCount: number
+  analyzedAt: string | null
+  onRefresh?: () => void
+  refreshing?: boolean
 }
 
 type SortKey = 'priority' | 'category' | 'location_subject'
 type SortDir = 'asc' | 'desc'
 
-export function FlagsTable({ flags, totalFlags, criticalCount }: Props) {
+function timeAgo(iso: string): string {
+  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hrs = Math.floor(mins / 60)
+  return `${hrs}h ago`
+}
+
+export function FlagsTable({ flags, totalFlags, criticalCount, analyzedAt, onRefresh, refreshing }: Props) {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<string>('all')
@@ -79,9 +90,26 @@ export function FlagsTable({ flags, totalFlags, criticalCount }: Props) {
 
       {/* Toolbar */}
       <div className="flex items-center gap-3 mb-4">
-        <h2 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider flex-1">
-          System Flags & Recommendations
-        </h2>
+        <div className="flex-1">
+          <h2 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider">
+            System Flags & Recommendations
+          </h2>
+          <div className="flex items-center gap-2 mt-1">
+            {analyzedAt && (
+              <span className="text-[10px] text-zinc-600">Analyzed {timeAgo(analyzedAt)}</span>
+            )}
+            {onRefresh && (
+              <button
+                onClick={onRefresh}
+                disabled={refreshing}
+                className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-emerald-400 transition-colors disabled:opacity-40"
+              >
+                {refreshing ? <Loader2 size={9} className="animate-spin" /> : <RefreshCw size={9} />}
+                Re-analyze
+              </button>
+            )}
+          </div>
+        </div>
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
           <input

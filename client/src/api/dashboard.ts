@@ -44,6 +44,6 @@ export function updateEscalatedQueryStatus(id: string, status: 'in_review') {
   return api.put(`/dashboard/escalated-queries/${id}/status`, { status })
 }
 
-export function fetchDashboardFlags() {
-  return api.get<DashboardFlagsResponse>('/dashboard/flags')
+export function fetchDashboardFlags(refresh = false) {
+  return api.get<DashboardFlagsResponse>(`/dashboard/flags${refresh ? '?refresh=true' : ''}`)
 }
