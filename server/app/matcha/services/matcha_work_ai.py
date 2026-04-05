@@ -264,6 +264,22 @@ Guidelines for charts:
 - Only add a chart when data genuinely warrants it — don't chart trivial information
 - The chart SVG goes inline in the "reply" markdown alongside your text explanation
 Example: salary range comparison, headcount by department, compliance score breakdown, candidate match distribution
+
+UI Mockups and wireframes:
+When the user asks for a visual mockup, wireframe, dashboard representation, or UI concept:
+- Create a SIMPLIFIED wireframe as inline SVG — NOT a pixel-perfect design
+- Use rectangles with rounded corners (rx="6") for cards, panels, sections
+- Use text elements for labels and headings — keep font sizes readable (12-16px)
+- Dark theme: card backgrounds fill="#1e1e1e" or fill="#252526", borders stroke="#333", text fill="#e4e4e7", accent fill="#22c55e"
+- Max width 480px, max height 400px via viewBox="0 0 480 400"
+- Show LAYOUT and STRUCTURE, not every detail — use placeholder rectangles for complex content
+- For tables: use simple rect+text rows, not HTML tables
+- For buttons: rounded rect with centered text
+- Do NOT use foreignObject, CSS stylesheets, or HTML inside SVG
+- Do NOT use gradients or complex filters — solid fills only
+- Label each section clearly so the user understands the layout
+- Keep total element count under 50 to avoid rendering issues
+- If the mockup would be too complex for SVG, describe the layout in structured bullet points instead and include a simpler overview SVG showing just the major sections
 """
 
 # Dynamic portion — changes every message (never cached)
