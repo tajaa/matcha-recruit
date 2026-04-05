@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home, Pencil, Check, X } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home, Pencil } from 'lucide-react'
 import { listChannels, updateChannel } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { listThreads, listProjects, updateTitle, updateProjectMeta } from '../../api/matchaWork'
@@ -14,7 +14,7 @@ interface Props {
   onToggle: () => void
 }
 
-type RenameTarget = { type: 'channel' | 'project' | 'thread'; id: string; name: string } | null
+type RenameItem = { type: 'channel' | 'project' | 'thread'; id: string; name: string }
 
 export default function WorkSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
@@ -33,7 +33,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [threadsOpen, setThreadsOpen] = useState(false)
 
   // Inline rename state
-  const [renaming, setRenaming] = useState<RenameTarget>(null)
+  const [renaming, setRenaming] = useState<RenameItem | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const renameRef = useRef<HTMLInputElement>(null)
 
@@ -63,7 +63,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     if (renaming) renameRef.current?.focus()
   }, [renaming])
 
-  function startRename(type: RenameTarget['type'], id: string, name: string) {
+  function startRename(type: RenameItem['type'], id: string, name: string) {
     setRenaming({ type: type!, id, name })
     setRenameDraft(name)
   }
