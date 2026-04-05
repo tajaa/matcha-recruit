@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react'
-import { GripVertical, Plus, Trash2, Download, ChevronDown, FileText, Loader2, Eye, PenLine, Pencil, Paperclip, Upload } from 'lucide-react'
+import { GripVertical, Plus, Trash2, Download, ChevronDown, ChevronRight, FileText, Loader2, Eye, PenLine, Pencil, Paperclip, Upload } from 'lucide-react'
 import type { ProjectSection, MWProject } from '../../types/matcha-work'
-import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta, listProjectFiles, uploadProjectFile, deleteProjectFile } from '../../api/matchaWork'
+import { updateProjectSection, deleteProjectSection, addProjectSection, exportProject, initProject, uploadProjectImage, updateProjectSectionNew, deleteProjectSectionNew, addProjectSectionNew, exportProjectNew, updateProjectMeta, listProjectFiles, uploadProjectFile, deleteProjectFile, reorderProjectSectionsNew, reorderProjectSections } from '../../api/matchaWork'
 import type { ProjectFile } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
@@ -58,6 +58,37 @@ export default function ProjectPanel(props: ProjectPanelProps) {
   const [loadingPreview, setLoadingPreview] = useState(false)
   const exportRef = useRef<HTMLDivElement>(null)
   const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({})
+
+  // Collapsible sections
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set())
+  function toggleCollapse(id: string) {
+    setCollapsedSections(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  // Drag-and-drop reorder
+  const [dragIdx, setDragIdx] = useState<number | null>(null)
+  const [overIdx, setOverIdx] = useState<number | null>(null)
+
+  async function handleReorder(fromIdx: number, toIdx: number) {
+    if (fromIdx === toIdx) return
+    const ids = sections.map(s => s.id)
+    const [moved] = ids.splice(fromIdx, 1)
+    ids.splice(toIdx, 0, moved)
+    try {
+      if (isNewMode) {
+        const { getProjectDetail } = await import('../../api/matchaWork')
+        await reorderProjectSectionsNew(projectId, ids)
+        props.onProjectUpdate?.(await getProjectDetail(projectId))
+      } else {
+        const result = await reorderProjectSections(threadId, ids)
+        props.onStateUpdate?.(result.current_state, result.version)
+      }
+    } catch {}
+  }
 
   // File attachments
   const [files, setFiles] = useState<ProjectFile[]>([])
@@ -468,11 +499,44 @@ export default function ProjectPanel(props: ProjectPanelProps) {
           </div>
         )}
 
-        {sections.map((s) => (
-          <div key={s.id} style={{ borderBottom: '1px solid #333' }}>
+        {sections.map((s, idx) => {
+          const isCollapsed = collapsedSections.has(s.id)
+          return (
+          <div
+            key={s.id}
+            style={{
+              borderBottom: '1px solid #333',
+              ...(overIdx === idx && dragIdx !== null && dragIdx !== idx
+                ? { borderTop: '2px solid #ce9178' }
+                : {}),
+            }}
+            onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setOverIdx(idx) }}
+            onDrop={(e) => {
+              e.preventDefault(); e.stopPropagation()
+              if (dragIdx !== null && dragIdx !== idx) handleReorder(dragIdx, idx)
+              setDragIdx(null); setOverIdx(null)
+            }}
+          >
             {/* Section header */}
-            <div className="flex items-center gap-1.5 px-4 py-1.5" style={{ background: '#252526' }}>
-              <GripVertical size={12} className="shrink-0 cursor-grab" style={{ color: '#6a737d' }} />
+            <div
+              className="flex items-center gap-1.5 px-4 py-1.5"
+              style={{ background: dragIdx === idx ? '#333' : '#252526' }}
+            >
+              <div
+                draggable
+                onDragStart={(e) => { setDragIdx(idx); e.dataTransfer.effectAllowed = 'move' }}
+                onDragEnd={() => { setDragIdx(null); setOverIdx(null) }}
+                className="shrink-0 cursor-grab active:cursor-grabbing"
+              >
+                <GripVertical size={12} style={{ color: '#6a737d' }} />
+              </div>
+              <button
+                onClick={() => toggleCollapse(s.id)}
+                className="shrink-0 p-0.5 transition-colors"
+                style={{ color: '#6a737d' }}
+              >
+                {isCollapsed ? <ChevronRight size={12} /> : <ChevronDown size={12} />}
+              </button>
               {sectionTitleEditing === s.id ? (
                 <input
                   value={sectionTitleDraft}
@@ -501,31 +565,36 @@ export default function ProjectPanel(props: ProjectPanelProps) {
               </button>
             </div>
 
-            {/* Rich text editor */}
-            <SectionEditor
-              content={sectionToHtml(s)}
-              onUpdate={(html) => handleSectionContentUpdate(s.id, html)}
-              onImageUpload={handleImageUpload}
-              uploadingImage={uploadingImage}
-            />
+            {/* Rich text editor — hidden when collapsed */}
+            {!isCollapsed && (
+              <>
+                <SectionEditor
+                  content={sectionToHtml(s)}
+                  onUpdate={(html) => handleSectionContentUpdate(s.id, html)}
+                  onImageUpload={handleImageUpload}
+                  uploadingImage={uploadingImage}
+                />
 
-            {/* Edit Diagram button for sections with diagram data */}
-            {s.diagram_data && s.diagram_data.length > 0 && (
-              <button
-                onClick={() => setEditingDiagram({
-                  sectionId: s.id,
-                  diagramData: s.diagram_data!,
-                  imageUrl: s.diagram_data![0].storage_url,
-                })}
-                className="flex items-center gap-1.5 mx-3 mb-2 px-2.5 py-1.5 text-[10px] font-medium rounded transition-colors"
-                style={{ color: '#ce9178', background: '#2a2d2e' }}
-              >
-                <Pencil size={10} />
-                Edit Diagram
-              </button>
+                {/* Edit Diagram button for sections with diagram data */}
+                {s.diagram_data && s.diagram_data.length > 0 && (
+                  <button
+                    onClick={() => setEditingDiagram({
+                      sectionId: s.id,
+                      diagramData: s.diagram_data!,
+                      imageUrl: s.diagram_data![0].storage_url,
+                    })}
+                    className="flex items-center gap-1.5 mx-3 mb-2 px-2.5 py-1.5 text-[10px] font-medium rounded transition-colors"
+                    style={{ color: '#ce9178', background: '#2a2d2e' }}
+                  >
+                    <Pencil size={10} />
+                    Edit Diagram
+                  </button>
+                )}
+              </>
             )}
           </div>
-        ))}
+          )
+        })}
 
         {/* Add section button */}
         <div className="px-4 py-3">
