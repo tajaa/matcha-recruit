@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, ChevronUp, ChevronDown, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react'
 import type { DashboardFlag } from '../../types/dashboard'
+import { RiskHeatMap } from './RiskHeatMap'
 
 interface Props {
   flags: DashboardFlag[]
@@ -87,6 +88,9 @@ export function FlagsTable({ flags, totalFlags, criticalCount, analyzedAt, onRef
           </p>
         </div>
       </div>
+
+      {/* Heat map */}
+      <RiskHeatMap flags={flags} />
 
       {/* Toolbar */}
       <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
