@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button } from '../../components/ui'
-import { Plus, FileSignature, Zap } from 'lucide-react'
+import { Zap } from 'lucide-react'
 
 import { useMe } from '../../hooks/useMe'
 import { fetchDashboardStats, fetchDashboardFlags } from '../../api/dashboard'
@@ -57,29 +56,24 @@ export default function Dashboard() {
       )}
 
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
-        <div>
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-semibold text-vsc-text">
-              Command Center
-            </h1>
-            <span className="flex items-center gap-1.5 rounded-full bg-emerald-950/60 border border-emerald-800/30 px-2.5 py-0.5 text-[10px] font-medium text-emerald-400/90 uppercase tracking-wider">
-              <Zap className="h-2.5 w-2.5" /> Live
-            </span>
+      <div className="flex items-center gap-4 mb-8 flex-wrap">
+        <h1 className="text-2xl font-semibold text-vsc-text">Command Center</h1>
+        <span className="flex items-center gap-1.5 rounded-full bg-amber-950/60 border border-amber-800/30 px-2.5 py-0.5 text-[10px] font-medium text-amber-400/80 uppercase tracking-wider">
+          <Zap className="h-2.5 w-2.5" /> Live
+        </span>
+        <div className="flex items-center gap-2 ml-auto">
+          <div className="rounded-lg border border-vsc-border bg-vsc-panel px-4 py-2 flex items-center gap-3">
+            <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Open Flags</p>
+            <p className="text-xl font-bold text-vsc-text">{flagsData?.total_flags ?? 0}</p>
           </div>
-          <p className="text-sm text-vsc-text/40 mt-1">AI-analyzed risk flags and recommended actions.</p>
-        </div>
-        <div className="flex gap-2">
-          {hasFeature('policies') && (
-            <Button size="sm" variant="secondary" onClick={() => navigate('/app/handbooks')}>
-              <Plus className="h-3.5 w-3.5" /> New Policy
-            </Button>
-          )}
-          {hasFeature('offer_letters') && (
-            <Button size="sm" variant="secondary" onClick={() => navigate('/app/offer-letters')}>
-              <FileSignature className="h-3.5 w-3.5" /> Create Offer
-            </Button>
-          )}
+          <div className={`rounded-lg border px-4 py-2 flex items-center gap-3 ${
+            (flagsData?.critical_count ?? 0) > 0 ? 'border-sev-critical-border bg-sev-critical-bg' : 'border-vsc-border bg-vsc-panel'
+          }`}>
+            <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Critical</p>
+            <p className={`text-xl font-bold ${(flagsData?.critical_count ?? 0) > 0 ? 'text-sev-critical' : 'text-vsc-text'}`}>
+              {flagsData?.critical_count ?? 0}
+            </p>
+          </div>
         </div>
       </div>
 

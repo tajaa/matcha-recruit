@@ -74,22 +74,6 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
 
   return (
     <div>
-      {/* Summary stats */}
-      <div className="flex gap-4 mb-6">
-        <div className="rounded-xl border border-vsc-border bg-vsc-panel px-6 py-4 min-w-[180px]">
-          <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Total Open Flags</p>
-          <p className="text-3xl font-bold text-vsc-text mt-1">{totalFlags}</p>
-        </div>
-        <div className={`rounded-xl border px-6 py-4 min-w-[180px] ${
-          criticalCount > 0 ? 'border-sev-critical-border bg-sev-critical-bg' : 'border-vsc-border bg-vsc-panel'
-        }`}>
-          <p className="text-[10px] font-medium uppercase tracking-wider text-vsc-text/50">Critical Risks</p>
-          <p className={`text-3xl font-bold mt-1 ${criticalCount > 0 ? 'text-sev-critical' : 'text-vsc-text'}`}>
-            {criticalCount}
-          </p>
-        </div>
-      </div>
-
       {/* Heat map */}
       <RiskHeatMap cells={heatMap} />
 
