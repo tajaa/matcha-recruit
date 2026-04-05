@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus } from 'lucide-react'
-import { getChannel, joinChannel, leaveChannel } from '../../api/channels'
-import type { ChannelDetail, ChannelMessage, ChannelMember } from '../../api/channels'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
+import { getChannel, joinChannel, leaveChannel, uploadChannelFiles } from '../../api/channels'
+import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
 import AddMembersModal from '../../components/channels/AddMembersModal'
@@ -24,6 +24,9 @@ export default function ChannelView() {
   const [isMember, setIsMember] = useState(false)
   const [joining, setJoining] = useState(false)
   const [showAddMembers, setShowAddMembers] = useState(false)
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -106,10 +109,24 @@ export default function ChannelView() {
     }
   }, [channelId, isMember, userId, scrollToBottom])
 
-  function handleSend() {
+  async function handleSend() {
     const content = input.trim()
-    if (!content || !channelId) return
-    socketRef.current?.sendMessage(channelId, content)
+    if ((!content && pendingFiles.length === 0) || !channelId) return
+
+    let attachments: ChannelAttachment[] | undefined
+    if (pendingFiles.length > 0) {
+      setUploading(true)
+      try {
+        attachments = await uploadChannelFiles(channelId, pendingFiles)
+      } catch {
+        setUploading(false)
+        return
+      }
+      setUploading(false)
+      setPendingFiles([])
+    }
+
+    socketRef.current?.sendMessage(channelId, content, attachments)
     setInput('')
   }
 
@@ -264,9 +281,36 @@ export default function ChannelView() {
                       </span>
                     </div>
                   )}
-                  <p className="text-sm text-zinc-200 whitespace-pre-wrap break-words pl-0">
-                    {msg.content}
-                  </p>
+                  {msg.content && (
+                    <p className="text-sm text-zinc-200 whitespace-pre-wrap break-words pl-0">
+                      {msg.content}
+                    </p>
+                  )}
+                  {msg.attachments && msg.attachments.length > 0 && (
+                    <div className="flex flex-wrap gap-2 mt-1">
+                      {msg.attachments.map((att, ai) =>
+                        att.content_type.startsWith('image/') ? (
+                          <a key={ai} href={att.url} target="_blank" rel="noopener noreferrer">
+                            <img src={att.url} alt={att.filename} className="max-w-xs max-h-48 rounded-md border border-zinc-700" />
+                          </a>
+                        ) : (
+                          <a
+                            key={ai}
+                            href={att.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-300 hover:text-white hover:border-zinc-600 transition-colors"
+                          >
+                            <FileText size={12} className="shrink-0" />
+                            <span className="truncate max-w-[200px]">{att.filename}</span>
+                            <span className="text-zinc-500 shrink-0">
+                              {att.size >= 1_000_000 ? `${(att.size / 1_000_000).toFixed(1)}MB` : `${Math.round(att.size / 1_000)}KB`}
+                            </span>
+                          </a>
+                        )
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -282,7 +326,39 @@ export default function ChannelView() {
 
           {/* Input */}
           <div className="px-4 py-3 border-t border-zinc-800 shrink-0">
+            {/* Pending file previews */}
+            {pendingFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {pendingFiles.map((f, i) => (
+                  <div key={i} className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-zinc-800 border border-zinc-700 text-xs text-zinc-300">
+                    {f.type.startsWith('image/') ? <ImageIcon size={11} /> : <FileText size={11} />}
+                    <span className="truncate max-w-[150px]">{f.name}</span>
+                    <button onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))} className="text-zinc-500 hover:text-zinc-300">
+                      <X size={10} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <div className="flex items-end gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="p-2 text-zinc-500 hover:text-zinc-300 transition-colors shrink-0"
+                title="Attach files"
+              >
+                <Paperclip size={16} />
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                hidden
+                onChange={(e) => {
+                  const files = Array.from(e.target.files ?? [])
+                  if (files.length) setPendingFiles(prev => [...prev, ...files].slice(0, 5))
+                  e.target.value = ''
+                }}
+              />
               <textarea
                 value={input}
                 onChange={handleInputChange}
@@ -294,10 +370,10 @@ export default function ChannelView() {
               />
               <button
                 onClick={handleSend}
-                disabled={!input.trim()}
+                disabled={(!input.trim() && pendingFiles.length === 0) || uploading}
                 className="p-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition-colors disabled:opacity-30 shrink-0"
               >
-                <Send size={16} />
+                {uploading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
               </button>
             </div>
           </div>

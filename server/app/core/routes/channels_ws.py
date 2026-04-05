@@ -278,12 +278,15 @@ async def channel_websocket(
             elif msg_type == "message":
                 channel_id = data.get("channel_id")
                 content = (data.get("content") or "").strip()
-                if channel_id and content and len(content) <= 4000:
+                attachments = data.get("attachments") or []
+                if channel_id and (content or attachments) and len(content) <= 4000:
                     try:
                         ch_uuid = UUID(channel_id)
                     except (ValueError, TypeError):
                         continue
                     room_key = str(channel_id)
+                    import json as _json
+                    attachments_json = _json.dumps(attachments) if attachments else "[]"
                     async with get_connection() as conn:
                         # Verify membership
                         is_member = await conn.fetchval(
@@ -293,11 +296,11 @@ async def channel_websocket(
                         if is_member:
                             row = await conn.fetchrow(
                                 """
-                                INSERT INTO channel_messages (channel_id, sender_id, content)
-                                VALUES ($1, $2, $3)
-                                RETURNING id, channel_id, sender_id, content, created_at, edited_at
+                                INSERT INTO channel_messages (channel_id, sender_id, content, attachments)
+                                VALUES ($1, $2, $3, $4::jsonb)
+                                RETURNING id, channel_id, sender_id, content, attachments, created_at, edited_at
                                 """,
-                                ch_uuid, user.id, content,
+                                ch_uuid, user.id, content or "", attachments_json,
                             )
                             # Update channel activity timestamp
                             await conn.execute(
@@ -305,12 +308,14 @@ async def channel_websocket(
                                 ch_uuid,
                             )
 
+                            broadcast_attachments = _json.loads(row["attachments"]) if row["attachments"] else []
                             await manager.broadcast_message(room_key, {
                                 "id": str(row["id"]),
                                 "channel_id": str(row["channel_id"]),
                                 "sender_id": str(row["sender_id"]),
                                 "sender_name": user.name,
                                 "content": row["content"],
+                                "attachments": broadcast_attachments,
                                 "created_at": row["created_at"].isoformat(),
                                 "edited_at": None,
                             })

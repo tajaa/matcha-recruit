@@ -109,8 +109,8 @@ export class ChannelSocket {
     if (this.currentRoom === channelId) this.currentRoom = null
   }
 
-  sendMessage(channelId: string, content: string) {
-    this._send({ type: 'message', channel_id: channelId, content })
+  sendMessage(channelId: string, content: string, attachments?: { url: string; filename: string; content_type: string; size: number }[]) {
+    this._send({ type: 'message', channel_id: channelId, content, ...(attachments?.length ? { attachments } : {}) })
   }
 
   sendTyping(channelId: string) {

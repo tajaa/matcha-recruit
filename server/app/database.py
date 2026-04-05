@@ -5204,6 +5204,7 @@ async def init_db():
                 channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
                 sender_id UUID NOT NULL REFERENCES users(id),
                 content TEXT NOT NULL,
+                attachments JSONB DEFAULT '[]'::jsonb,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 edited_at TIMESTAMPTZ
             )
@@ -5211,6 +5212,10 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_channel_messages_channel
             ON channel_messages(channel_id, created_at DESC)
+        """)
+        # Add attachments column if missing (for existing tables)
+        await conn.execute("""
+            ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'::jsonb
         """)
 
         print("[DB] Tables initialized")

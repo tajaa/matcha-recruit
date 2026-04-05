@@ -1,18 +1,21 @@
 """Channel routes for Slack-style group chat in Matcha Work."""
 
+import json
+import os
 import re
 import logging
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 
 from ...database import get_connection
 from ..dependencies import get_current_user
 from ..models.auth import CurrentUser
 from ...matcha.dependencies import resolve_accessible_company_scope, require_admin_or_client
+from ..services.storage import get_storage
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +37,20 @@ class ChannelMember(BaseModel):
     joined_at: datetime
 
 
+class ChannelAttachment(BaseModel):
+    url: str
+    filename: str
+    content_type: str
+    size: int
+
+
 class ChannelMessage(BaseModel):
     id: UUID
     channel_id: UUID
     sender_id: UUID
     sender_name: str
     content: str
+    attachments: list[ChannelAttachment] = []
     created_at: datetime
     edited_at: Optional[datetime] = None
 
@@ -352,7 +363,7 @@ async def get_channel(
         # Recent messages
         messages = await conn.fetch(
             f"""
-            SELECT m.id, m.channel_id, m.sender_id, m.content, m.created_at, m.edited_at,
+            SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
                    {_USER_NAME_EXPR} AS sender_name
             FROM channel_messages m
             JOIN users u ON u.id = m.sender_id
@@ -394,6 +405,7 @@ async def get_channel(
                 ChannelMessage(
                     id=m["id"], channel_id=m["channel_id"], sender_id=m["sender_id"],
                     sender_name=m["sender_name"], content=m["content"],
+                    attachments=json.loads(m["attachments"]) if isinstance(m["attachments"], str) else (m["attachments"] or []),
                     created_at=m["created_at"], edited_at=m["edited_at"],
                 )
                 for m in reversed(messages)  # Return chronological order
@@ -433,7 +445,7 @@ async def get_channel_messages(
                 raise HTTPException(status_code=400, detail="Invalid 'before' cursor format")
             rows = await conn.fetch(
                 f"""
-                SELECT m.id, m.channel_id, m.sender_id, m.content, m.created_at, m.edited_at,
+                SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
                        {_USER_NAME_EXPR} AS sender_name
                 FROM channel_messages m
                 JOIN users u ON u.id = m.sender_id
@@ -449,7 +461,7 @@ async def get_channel_messages(
         else:
             rows = await conn.fetch(
                 f"""
-                SELECT m.id, m.channel_id, m.sender_id, m.content, m.created_at, m.edited_at,
+                SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
                        {_USER_NAME_EXPR} AS sender_name
                 FROM channel_messages m
                 JOIN users u ON u.id = m.sender_id
@@ -467,6 +479,7 @@ async def get_channel_messages(
             ChannelMessage(
                 id=r["id"], channel_id=r["channel_id"], sender_id=r["sender_id"],
                 sender_name=r["sender_name"], content=r["content"],
+                attachments=json.loads(r["attachments"]) if isinstance(r["attachments"], str) else (r["attachments"] or []),
                 created_at=r["created_at"], edited_at=r["edited_at"],
             )
             for r in reversed(rows)
@@ -641,3 +654,59 @@ async def leave_channel(
         )
 
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# File uploads for channel messages
+# ---------------------------------------------------------------------------
+
+_MAX_CHANNEL_FILE_COUNT = 5
+_MAX_CHANNEL_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
+_ALLOWED_CHANNEL_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".webp", ".gif",
+    ".pdf", ".txt", ".csv", ".doc", ".docx", ".mp4", ".mov", ".mp3",
+}
+
+
+@router.post("/{channel_id}/upload")
+async def upload_channel_files(
+    channel_id: UUID,
+    files: list[UploadFile] = File(...),
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Upload files for a channel message. Returns attachment metadata to include with the message."""
+    if len(files) > _MAX_CHANNEL_FILE_COUNT:
+        raise HTTPException(status_code=400, detail=f"Maximum {_MAX_CHANNEL_FILE_COUNT} files per message")
+
+    async with get_connection() as conn:
+        is_member = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+            channel_id, current_user.id,
+        )
+        if not is_member:
+            raise HTTPException(status_code=403, detail="Not a member of this channel")
+
+    storage = get_storage()
+    attachments = []
+
+    for f in files:
+        file_bytes = await f.read()
+        filename = f.filename or "upload"
+        ct = f.content_type or "application/octet-stream"
+        ext = os.path.splitext(filename)[1].lower()
+        size = len(file_bytes)
+
+        if ext not in _ALLOWED_CHANNEL_EXTENSIONS:
+            raise HTTPException(status_code=400, detail=f"File type not allowed: {filename}")
+        if size > _MAX_CHANNEL_FILE_SIZE:
+            raise HTTPException(status_code=400, detail=f"File too large: {filename}")
+
+        url = await storage.upload_file(file_bytes, filename, prefix=f"channels/{channel_id}", content_type=ct)
+        attachments.append({
+            "url": url,
+            "filename": filename,
+            "content_type": ct,
+            "size": size,
+        })
+
+    return {"attachments": attachments}

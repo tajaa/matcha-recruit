@@ -21,12 +21,20 @@ export interface ChannelMember {
   joined_at: string
 }
 
+export interface ChannelAttachment {
+  url: string
+  filename: string
+  content_type: string
+  size: number
+}
+
 export interface ChannelMessage {
   id: string
   channel_id: string
   sender_id: string
   sender_name: string
   content: string
+  attachments?: ChannelAttachment[]
   created_at: string
   edited_at: string | null
 }
@@ -68,6 +76,21 @@ export const leaveChannel = (id: string) =>
 
 export const updateChannel = (id: string, updates: { name?: string; description?: string }) =>
   api.patch<ChannelSummary>(`/channels/${id}`, updates)
+
+export async function uploadChannelFiles(channelId: string, files: File[]): Promise<ChannelAttachment[]> {
+  const BASE = import.meta.env.VITE_API_URL ?? '/api'
+  const token = localStorage.getItem('matcha_access_token')
+  const form = new FormData()
+  files.forEach((f) => form.append('files', f))
+  const res = await fetch(`${BASE}/channels/${channelId}/upload`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  })
+  if (!res.ok) throw new Error('Upload failed')
+  const data = await res.json()
+  return data.attachments
+}
 
 export const searchInvitableUsers = (q: string, channelId?: string) =>
   api.get<{ id: string; name: string; email: string; role: string; avatar_url: string | null }[]>(
