@@ -717,28 +717,26 @@ def _deterministic_flags_from_patterns(patterns: dict) -> list[dict]:
     return flags
 
 
-async def rebuild_flags_deterministic(company_id: UUID) -> int:
-    """Rebuild mw_risk_flags from current data. No AI — fast deterministic scan.
+import re as _loc_re_mod
+_LOC_PATTERN = _loc_re_mod.compile(r',\s*[A-Z]{2}')
 
-    Call this whenever data changes (incident created, ER case opened, etc.)
-    or when the flags table is empty for a company.
-    """
-    patterns = await _detect_risk_patterns(company_id)
-    raw_flags = _deterministic_flags_from_patterns(patterns)
 
-    import re as _loc_re3
-    _LOC_PAT3 = _loc_re3.compile(r',\s*[A-Z]{2}')
-    dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
-
-    def _classify(name: str) -> str:
-        if name.lower() in ("company-wide", "company wide"):
-            return "Company-wide"
-        if name in dept_names:
-            return "Departments"
+def _classify_location(name: str, dept_names: set[str] | None = None) -> str:
+    """Classify a location_subject into Locations / Departments / Company-wide."""
+    if name.lower() in ("company-wide", "company wide"):
+        return "Company-wide"
+    if dept_names and name in dept_names:
+        return "Departments"
+    if _LOC_PATTERN.search(name):
         return "Locations"
+    return "Locations"
 
+
+async def _write_flags_to_db(
+    company_id: UUID, raw_flags: list[dict], is_ai: bool, dept_names: set[str] | None = None,
+) -> int:
+    """Delete existing flags and write new ones. Returns count written."""
     now = datetime.now(timezone.utc)
-
     async with get_connection() as conn:
         async with conn.transaction():
             await conn.execute("DELETE FROM mw_risk_flags WHERE company_id = $1", company_id)
@@ -759,11 +757,23 @@ async def rebuild_flags_deterministic(company_id: UUID) -> int:
                     f.get("source_type", "pattern"),
                     f.get("source_id"),
                     f.get("link"),
-                    _classify(loc_subj),
-                    False,
+                    _classify_location(loc_subj, dept_names),
+                    is_ai,
                     now,
                 )
     return len(raw_flags)
+
+
+async def rebuild_flags_deterministic(company_id: UUID) -> int:
+    """Rebuild mw_risk_flags from current data. No AI — fast deterministic scan.
+
+    Call this whenever data changes (incident created, ER case opened, etc.)
+    or when the flags table is empty for a company.
+    """
+    patterns = await _detect_risk_patterns(company_id)
+    raw_flags = _deterministic_flags_from_patterns(patterns)
+    dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
+    return await _write_flags_to_db(company_id, raw_flags, is_ai=False, dept_names=dept_names)
 
 
 @router.get("/flags", response_model=DashboardFlagsResponse)
@@ -813,12 +823,10 @@ async def get_dashboard_flags(
 
     # Build heat map from stored flags
     heat_cells: dict[tuple[str, str], dict] = {}
-    import re as _loc_re
-    _LOC_PAT = _loc_re.compile(r',\s*[A-Z]{2}')
     for r in rows:
         loc = r["location_subject"] or "Unknown"
         cat = r["category"] or "Other"
-        grp = r["group_label"] or ("Company-wide" if loc.lower() in ("company-wide", "company wide") else "Departments" if not _LOC_PAT.search(loc) else "Locations")
+        grp = r["group_label"] or _classify_location(loc)
         key = (loc, cat)
         cell = heat_cells.get(key)
         if cell:
@@ -852,55 +860,19 @@ async def analyze_risk_flags(
         return {"analyzed": 0}
 
     patterns = await _detect_risk_patterns(company_id)
+    dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
 
     # Try AI synthesis, fall back to deterministic
     ai_flags = await _analyze_with_ai(patterns)
     if ai_flags is not None:
-        raw_flags = ai_flags
-        is_ai = True
+        count = await _write_flags_to_db(company_id, ai_flags, is_ai=True, dept_names=dept_names)
+        return {"analyzed": count, "is_ai": True}
     else:
-        raw_flags = _deterministic_flags_from_patterns(patterns)
-        is_ai = False
-
-    import re as _loc_re2
-    _LOC_PAT2 = _loc_re2.compile(r',\s*[A-Z]{2}')
-    dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
-
-    def _classify(name: str) -> str:
-        if name.lower() in ("company-wide", "company wide"):
-            return "Company-wide"
-        if name in dept_names:
-            return "Departments"
-        return "Locations"
-
-    now = datetime.now(timezone.utc)
-
-    async with get_connection() as conn:
-        async with conn.transaction():
-            await conn.execute("DELETE FROM mw_risk_flags WHERE company_id = $1", company_id)
-            for i, f in enumerate(raw_flags):
-                loc_subj = f.get("location_subject", "")
-                await conn.execute(
-                    """INSERT INTO mw_risk_flags
-                       (company_id, priority, category, location_subject, description,
-                        recommendation, severity, source_type, source_id, link,
-                        group_label, is_ai_generated, analyzed_at)
-                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
-                    company_id, i + 1,
-                    f.get("category", ""),
-                    loc_subj,
-                    f.get("description", ""),
-                    f.get("recommendation", ""),
-                    f.get("severity", "medium"),
-                    f.get("source_type", "pattern"),
-                    f.get("source_id"),
-                    f.get("link"),
-                    _classify(loc_subj),
-                    is_ai,
-                    now,
-                )
-
-    return {"analyzed": len(raw_flags), "is_ai": is_ai, "analyzed_at": now.isoformat()}
+        count = await _write_flags_to_db(
+            company_id, _deterministic_flags_from_patterns(patterns),
+            is_ai=False, dept_names=dept_names,
+        )
+        return {"analyzed": count, "is_ai": False}
 
 
 def _format_action(action: str, details: dict | None) -> str:
