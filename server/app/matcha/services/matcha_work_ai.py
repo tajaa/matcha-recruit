@@ -768,6 +768,10 @@ class GeminiProvider(MatchaWorkAIProvider):
                 f"- Do NOT change any other slide's title, bullets, or speaker_notes\n"
                 f"- Do NOT include presentation_title, subtitle, theme, or cover_image_url in updates\n"
                 f"- Only include 'slides' in your updates object\n"
+                f"- CRITICAL: The user is requesting a CHANGE to the current slide. You must produce "
+                f"updated content that differs from current_state. If the user asks to add, remove, or "
+                f"modify something, the slide in your response MUST reflect that change. Never return "
+                f"the slide unchanged when the user has requested a modification.\n"
                 f"--- END SLIDE LOCK ---"
             )
 

@@ -862,13 +862,16 @@ def _inject_slide_context(msg_dicts: list[dict], current_state: dict, slide_inde
     speaker_notes = slide.get("speaker_notes", "")
 
     context_lines = [
-        f"[Editing Slide {slide_index + 1}/{total}: \"{title}\"]",
-        "Current content:",
+        f"[EDITING Slide {slide_index + 1}/{total}: \"{title}\"]",
+        "Below is the slide's CURRENT content. The user's request describes changes they want applied to THIS content.",
+        "You MUST modify the slide to reflect their request — do NOT return the current content unchanged.",
         f"- Title: {title}",
         f"- Bullets: {json.dumps(bullets)}",
     ]
     if speaker_notes:
         context_lines.append(f"- Speaker Notes: {speaker_notes}")
+    context_lines.append("")
+    context_lines.append("Apply the following change:")
 
     context_block = "\n".join(context_lines)
 
@@ -878,7 +881,7 @@ def _inject_slide_context(msg_dicts: list[dict], current_state: dict, slide_inde
             original = msg_dicts[i]["content"]
             msg_dicts[i] = {
                 "role": "user",
-                "content": f"{context_block}\n\nUser request: {original}",
+                "content": f"{context_block}\n{original}",
             }
             break
 
@@ -5246,6 +5249,16 @@ async def send_message(
         if gaps:
             msg_metadata["compliance_gaps"] = gaps
 
+    # Annotate reply with change summary for conversation continuity
+    if changed and ai_resp.structured_update and isinstance(ai_resp.structured_update, dict):
+        update_slides = ai_resp.structured_update.get("slides")
+        if update_slides and body.slide_index is not None and 0 <= body.slide_index < len(update_slides):
+            changed_slide = update_slides[body.slide_index]
+            if isinstance(changed_slide, dict):
+                n_bullets = len(changed_slide.get("bullets", []))
+                change_note = f"\n\n[Applied changes to Slide {body.slide_index + 1}: title=\"{changed_slide.get('title', '')}\", {n_bullets} bullets]"
+                assistant_reply_text += change_note
+
     # Save assistant message
     assistant_msg = await doc_svc.add_message(
         thread_id,
@@ -5523,6 +5536,16 @@ async def send_message_stream(
                 gaps = await _detect_compliance_gaps(company_id, msg_metadata)
                 if gaps:
                     msg_metadata["compliance_gaps"] = gaps
+
+            # Annotate reply with change summary for conversation continuity
+            if changed and ai_resp.structured_update and isinstance(ai_resp.structured_update, dict):
+                update_slides = ai_resp.structured_update.get("slides")
+                if update_slides and body.slide_index is not None and 0 <= body.slide_index < len(update_slides):
+                    changed_slide = update_slides[body.slide_index]
+                    if isinstance(changed_slide, dict):
+                        n_bullets = len(changed_slide.get("bullets", []))
+                        change_note = f"\n\n[Applied changes to Slide {body.slide_index + 1}: title=\"{changed_slide.get('title', '')}\", {n_bullets} bullets]"
+                        assistant_reply_text += change_note
 
             # Save assistant message
             assistant_msg = await doc_svc.add_message(
