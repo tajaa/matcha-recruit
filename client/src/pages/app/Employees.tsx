@@ -35,7 +35,7 @@ export default function Employees() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">
             Employees
@@ -44,7 +44,7 @@ export default function Employees() {
             {employees.length} total employee{employees.length !== 1 ? 's' : ''}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 w-full sm:w-auto">
           <Button variant="ghost" onClick={() => setShowUpload(true)}>Upload CSV</Button>
           <Button onClick={() => setShowBatch(true)}>Add Employees</Button>
         </div>
@@ -63,7 +63,7 @@ export default function Employees() {
       />
 
       {/* Filters */}
-      <div className="mt-6 flex items-center gap-3">
+      <div className="mt-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 flex-wrap">
         <Input
           label=""
           placeholder="Search by name or email..."
@@ -80,7 +80,7 @@ export default function Employees() {
             className="w-44"
           />
         )}
-        <div className="flex gap-1 ml-auto">
+        <div className="flex gap-1 w-full sm:w-auto sm:ml-auto overflow-x-auto pb-2 sm:pb-0">
           {(['all', 'active', 'on_leave', 'terminated'] as const).map((s) => (
             <Button
               key={s}
@@ -103,8 +103,8 @@ export default function Employees() {
         ) : employees.length === 0 ? (
           <p className="text-sm text-zinc-500">No employees found.</p>
         ) : (
-          <div className="overflow-hidden rounded-xl border border-zinc-800">
-            <table className="w-full text-sm text-left">
+          <div className="overflow-x-auto rounded-xl border border-zinc-800">
+            <table className="w-full text-sm text-left min-w-[800px]">
               <thead className="bg-zinc-900/50 text-zinc-400">
                 <tr>
                   <th className="px-4 py-3 font-medium">Name</th>

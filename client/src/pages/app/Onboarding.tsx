@@ -109,7 +109,7 @@ export default function Onboarding() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">
             Onboarding
@@ -125,7 +125,7 @@ export default function Onboarding() {
 
       {/* Analytics funnel */}
       {analytics && (
-        <div className="mt-6 grid gap-3 sm:grid-cols-5">
+        <div className="mt-6 grid gap-3 sm:grid-cols-1 md:grid-cols-3 lg:grid-cols-5">
           {Object.entries(analytics.funnel).map(([key, val]) => (
             <div key={key} className="border border-zinc-800 rounded-lg px-3 py-3 text-center">
               <p className="text-xl font-semibold text-zinc-100">{val}</p>
@@ -177,7 +177,7 @@ export default function Onboarding() {
       {/* Create form */}
       {showForm && (
         <div className="mt-5 border border-zinc-800 rounded-lg p-4">
-          <form onSubmit={handleCreate} className="grid gap-3 sm:grid-cols-2">
+          <form onSubmit={handleCreate} className="grid gap-3 grid-cols-1 sm:grid-cols-2">
             <Input
               id="title"
               label="Task title"

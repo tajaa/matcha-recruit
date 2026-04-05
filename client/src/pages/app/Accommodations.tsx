@@ -121,7 +121,7 @@ export default function Accommodations() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">
             ADA Accommodations
@@ -167,8 +167,8 @@ export default function Accommodations() {
           </Button>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-xl border border-zinc-800">
-          <table className="w-full text-sm text-left">
+        <div className="overflow-x-auto rounded-xl border border-zinc-800">
+          <table className="w-full text-sm text-left min-w-[800px]">
             <thead className="bg-zinc-900/50 text-zinc-400">
               <tr>
                 <th className="px-4 py-3 font-medium">Case</th>
