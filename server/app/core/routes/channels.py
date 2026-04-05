@@ -568,6 +568,24 @@ async def add_members(
                 channel_id, uid,
             )
 
+        # Notify added members
+        channel_name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", channel_id)
+        for uid in body.user_ids:
+            if uid == current_user.id:
+                continue
+            try:
+                from ...matcha.services import notification_service as notif_svc
+                await notif_svc.create_notification(
+                    user_id=uid,
+                    company_id=company_id,
+                    type="channel_added",
+                    title=f"Added to #{channel_name or 'channel'}",
+                    body=f"You've been added to the channel #{channel_name}",
+                    link=f"/work/channels/{channel_id}",
+                )
+            except Exception:
+                pass
+
     return {"ok": True}
 
 

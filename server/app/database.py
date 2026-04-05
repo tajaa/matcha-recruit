@@ -5218,4 +5218,24 @@ async def init_db():
             ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'::jsonb
         """)
 
+        # Matcha Work notifications
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_notifications (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                body TEXT,
+                link TEXT,
+                metadata JSONB DEFAULT '{}'::jsonb,
+                is_read BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mw_notifications_user
+            ON mw_notifications(user_id, is_read, created_at DESC)
+        """)
+
         print("[DB] Tables initialized")

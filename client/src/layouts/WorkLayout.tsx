@@ -2,6 +2,7 @@ import { Link, Outlet } from 'react-router-dom'
 import { ArrowLeft, Zap } from 'lucide-react'
 import { usePresenceHeartbeat } from '../hooks/usePresenceHeartbeat'
 import { OnlineUsersPanel } from '../components/work/OnlineUsersPanel'
+import NotificationBell from '../components/work/NotificationBell'
 import WorkSidebar from '../components/work/WorkSidebar'
 import { useEffect, useState } from 'react'
 import { useMe } from '../hooks/useMe'
@@ -113,6 +114,7 @@ export default function WorkLayout() {
 
         <div className="ml-auto flex items-center gap-4">
           <TokenIndicator />
+          <NotificationBell />
           <OnlineUsersPanel />
         </div>
       </header>

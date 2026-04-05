@@ -3460,6 +3460,22 @@ async def invite_to_project(
         except Exception as exc:
             logger.warning("Failed to send project invite email: %s", exc)
 
+    # Create MW notification for the invitee
+    try:
+        from ..services import notification_service as notif_svc
+        company_id = await get_client_company_id(current_user)
+        await notif_svc.create_notification(
+            user_id=invitee_id,
+            company_id=company_id,
+            type="project_invite",
+            title=f"Project invite from {inviter_name}",
+            body=f"You've been invited to join \"{project_title}\"",
+            link=f"/work",
+            metadata={"project_id": str(project_id), "invited_by": str(current_user.id)},
+        )
+    except Exception as e:
+        logger.warning("Failed to create invite notification: %s", e)
+
     return {"invited": True, "email": email}
 
 

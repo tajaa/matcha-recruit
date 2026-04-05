@@ -17,6 +17,7 @@ from .brokers import router as brokers_router
 from .provisioning import router as provisioning_router
 from .matcha_work import router as matcha_work_router, public_router as matcha_work_public_router, presence_router as matcha_work_presence_router
 from .billing import router as matcha_work_billing_router, admin_router as matcha_work_billing_admin_router
+from .notifications import router as mw_notifications_router
 from .risk_assessment import router as risk_assessment_router
 from .pre_termination import router as pre_termination_router
 from .inbound_email import router as anonymous_report_router
@@ -87,6 +88,11 @@ matcha_router.include_router(
     matcha_work_billing_admin_router,
     prefix="/matcha-work/billing",
     tags=["matcha-work-billing-admin"],
+)
+matcha_router.include_router(
+    mw_notifications_router,
+    prefix="/matcha-work",
+    tags=["matcha-work-notifications"],
 )
 matcha_router.include_router(
     risk_assessment_router,
