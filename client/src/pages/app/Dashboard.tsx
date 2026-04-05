@@ -128,7 +128,7 @@ export default function Dashboard() {
       )}
 
       {/* Header */}
-      <div className="flex items-center justify-between mb-8">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold text-zinc-100">
@@ -222,24 +222,26 @@ export default function Dashboard() {
 
       {/* Quick setup nudge */}
       {hasZeroEmployees && hasZeroPolicies && (
-        <div className="mb-8 rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-5 flex items-center gap-4">
+        <div className="mb-8 rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-5 flex flex-col sm:flex-row sm:items-center gap-4">
           <div className="flex-1">
             <p className="text-sm font-medium text-zinc-200">Quick Setup</p>
             <p className="text-xs text-zinc-500 mt-0.5">
               Import employees and create your first policy to unlock the full dashboard.
             </p>
           </div>
-          <Button size="sm" variant="secondary" onClick={() => navigate('/app/employees')}>
-            Import Employees
-          </Button>
-          <Button size="sm" onClick={() => navigate('/app/handbooks')}>
-            Create Policy
-          </Button>
+          <div className="flex flex-wrap gap-2 sm:gap-4">
+            <Button size="sm" variant="secondary" onClick={() => navigate('/app/employees')}>
+              Import Employees
+            </Button>
+            <Button size="sm" onClick={() => navigate('/app/handbooks')}>
+              Create Policy
+            </Button>
+          </div>
         </div>
       )}
 
       {/* Tab buttons */}
-      <div className="flex gap-1 mb-8 border-b border-zinc-800/60 pb-px">
+      <div className="flex gap-1 mb-8 border-b border-zinc-800/60 pb-px overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {(['overview', 'flags', 'operations'] as const).map((t) => (
           <button
             key={t}

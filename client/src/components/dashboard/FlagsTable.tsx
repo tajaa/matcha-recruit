@@ -89,8 +89,8 @@ export function FlagsTable({ flags, totalFlags, criticalCount, analyzedAt, onRef
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-3 mb-4">
-        <div className="flex-1">
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+        <div className="flex-1 w-full">
           <h2 className="text-sm font-semibold text-zinc-100 uppercase tracking-wider">
             System Flags & Recommendations
           </h2>
@@ -110,31 +110,33 @@ export function FlagsTable({ flags, totalFlags, criticalCount, analyzedAt, onRef
             )}
           </div>
         </div>
-        <div className="relative">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search Flags..."
-            className="pl-8 pr-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500 w-48"
-          />
+        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+          <div className="relative w-full sm:w-auto">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search Flags..."
+              className="pl-8 pr-3 py-1.5 rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500 w-full sm:w-48"
+            />
+          </div>
+          <select
+            value={priorityFilter}
+            onChange={(e) => setPriorityFilter(e.target.value)}
+            className="rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-300 px-3 py-1.5 outline-none focus:border-zinc-500 w-full sm:w-auto"
+          >
+            <option value="all">Priority: All</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+          </select>
         </div>
-        <select
-          value={priorityFilter}
-          onChange={(e) => setPriorityFilter(e.target.value)}
-          className="rounded-lg border border-zinc-700 bg-zinc-900 text-xs text-zinc-300 px-3 py-1.5 outline-none focus:border-zinc-500"
-        >
-          <option value="all">Priority: All</option>
-          <option value="critical">Critical</option>
-          <option value="high">High</option>
-          <option value="medium">Medium</option>
-          <option value="low">Low</option>
-        </select>
       </div>
 
       {/* Table */}
-      <div className="rounded-xl border border-zinc-800 overflow-hidden">
-        <table className="w-full text-xs">
+      <div className="rounded-xl border border-zinc-800 overflow-x-auto">
+        <table className="w-full text-xs min-w-[800px]">
           <thead>
             <tr className="bg-zinc-900/80 border-b border-zinc-800">
               <th
