@@ -717,14 +717,72 @@ def _deterministic_flags_from_patterns(patterns: dict) -> list[dict]:
     return flags
 
 
+async def rebuild_flags_deterministic(company_id: UUID) -> int:
+    """Rebuild mw_risk_flags from current data. No AI — fast deterministic scan.
+
+    Call this whenever data changes (incident created, ER case opened, etc.)
+    or when the flags table is empty for a company.
+    """
+    patterns = await _detect_risk_patterns(company_id)
+    raw_flags = _deterministic_flags_from_patterns(patterns)
+
+    import re as _loc_re3
+    _LOC_PAT3 = _loc_re3.compile(r',\s*[A-Z]{2}')
+    dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
+
+    def _classify(name: str) -> str:
+        if name.lower() in ("company-wide", "company wide"):
+            return "Company-wide"
+        if name in dept_names:
+            return "Departments"
+        return "Locations"
+
+    now = datetime.now(timezone.utc)
+
+    async with get_connection() as conn:
+        async with conn.transaction():
+            await conn.execute("DELETE FROM mw_risk_flags WHERE company_id = $1", company_id)
+            for i, f in enumerate(raw_flags):
+                loc_subj = f.get("location_subject", "")
+                await conn.execute(
+                    """INSERT INTO mw_risk_flags
+                       (company_id, priority, category, location_subject, description,
+                        recommendation, severity, source_type, source_id, link,
+                        group_label, is_ai_generated, analyzed_at)
+                       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)""",
+                    company_id, i + 1,
+                    f.get("category", ""),
+                    loc_subj,
+                    f.get("description", ""),
+                    f.get("recommendation", ""),
+                    f.get("severity", "medium"),
+                    f.get("source_type", "pattern"),
+                    f.get("source_id"),
+                    f.get("link"),
+                    _classify(loc_subj),
+                    False,
+                    now,
+                )
+    return len(raw_flags)
+
+
 @router.get("/flags", response_model=DashboardFlagsResponse)
 async def get_dashboard_flags(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Read pre-computed risk flags from the database. Instant — no AI calls."""
+    """Read pre-computed risk flags from the database. Auto-populates if empty."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return DashboardFlagsResponse(total_flags=0, critical_count=0, flags=[])
+
+    async with get_connection() as conn:
+        count = await conn.fetchval(
+            "SELECT COUNT(*) FROM mw_risk_flags WHERE company_id = $1", company_id
+        )
+
+    # Auto-populate on first visit (no AI, just deterministic scan)
+    if count == 0:
+        await rebuild_flags_deterministic(company_id)
 
     async with get_connection() as conn:
         rows = await conn.fetch(
@@ -788,7 +846,7 @@ async def get_dashboard_flags(
 async def analyze_risk_flags(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Run risk analysis (patterns + optional AI) and store results in mw_risk_flags."""
+    """Re-analyze with AI: detect patterns, call Gemini for better recommendations, store results."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return {"analyzed": 0}
@@ -804,7 +862,6 @@ async def analyze_risk_flags(
         raw_flags = _deterministic_flags_from_patterns(patterns)
         is_ai = False
 
-    # Classify locations for heat map grouping
     import re as _loc_re2
     _LOC_PAT2 = _loc_re2.compile(r',\s*[A-Z]{2}')
     dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
@@ -820,9 +877,7 @@ async def analyze_risk_flags(
 
     async with get_connection() as conn:
         async with conn.transaction():
-            # Clear old flags for this company
             await conn.execute("DELETE FROM mw_risk_flags WHERE company_id = $1", company_id)
-
             for i, f in enumerate(raw_flags):
                 loc_subj = f.get("location_subject", "")
                 await conn.execute(
