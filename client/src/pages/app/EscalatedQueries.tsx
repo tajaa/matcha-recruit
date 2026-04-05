@@ -127,7 +127,7 @@ export default function EscalatedQueries() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div className="flex items-center gap-3">
           <MessageSquareWarning className="h-5 w-5 text-amber-500" />
           <h1 className="text-lg font-semibold text-zinc-100">Escalated Queries</h1>
@@ -138,7 +138,7 @@ export default function EscalatedQueries() {
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 border-b border-zinc-800/60 pb-px">
+      <div className="flex gap-1 border-b border-zinc-800/60 pb-px overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -318,7 +318,7 @@ export default function EscalatedQueries() {
                           rows={3}
                         />
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 w-full sm:w-auto">
                         <Button
                           size="sm"
                           onClick={handleResolve}

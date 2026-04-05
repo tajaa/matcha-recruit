@@ -216,7 +216,7 @@ export default function Handbooks() {
           <button type="button" onClick={() => setError(null)} className="text-red-500 hover:text-red-300 text-xs">Dismiss</button>
         </div>
       )}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Handbooks</h1>
           <p className="mt-1 text-sm text-zinc-500">Create, manage, and distribute employee handbooks.</p>
@@ -225,7 +225,7 @@ export default function Handbooks() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 mt-4 border-b border-zinc-800">
+      <div className="flex gap-1 mt-4 border-b border-zinc-800 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {(['all', 'active', 'draft', 'archived'] as Tab[]).map((t) => {
           const count = t === 'all' ? items.length : items.filter((h) => h.status === t).length
           return (

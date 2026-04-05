@@ -306,7 +306,7 @@ export default function CompanySettings() {
       <p className="text-sm text-zinc-500 mb-5">Manage your company profile and locations.</p>
 
       {/* Tabs */}
-      <div className="flex gap-1 mb-5">
+      <div className="flex gap-1 mb-5 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {(['profile', 'locations'] as const).map((t) => (
           <Button key={t} variant={tab === t ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t)}>
             {t === 'profile' ? 'Profile' : `Locations${locations.length > 0 ? ` (${locations.length})` : ''}`}
@@ -316,7 +316,7 @@ export default function CompanySettings() {
 
       {/* Profile Tab */}
       {tab === 'profile' && (
-        <div className="grid grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="col-span-2 space-y-5">
             <Card>
               <h3 className="text-sm font-medium text-zinc-300 mb-4">Company Information</h3>
@@ -408,7 +408,7 @@ export default function CompanySettings() {
 
       {/* Locations Tab */}
       {tab === 'locations' && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="col-span-1">
             <ComplianceLocationList
               locations={locations}
@@ -463,7 +463,7 @@ export default function CompanySettings() {
 
                 <Card>
                   <h3 className="text-sm font-medium text-zinc-300 mb-3">Location Details</h3>
-                  <dl className="grid grid-cols-2 gap-3 text-sm">
+                  <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                     <div>
                       <dt className="text-zinc-500 text-xs">City</dt>
                       <dd className="text-zinc-200">{selectedLoc?.city}</dd>

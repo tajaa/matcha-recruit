@@ -51,7 +51,7 @@ export default function ERCopilot() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">
             ER Copilot
@@ -94,7 +94,7 @@ export default function ERCopilot() {
       </Modal>
 
       {/* Filters */}
-      <div className="mt-6 flex items-center gap-3">
+      <div className="mt-6 flex flex-col sm:flex-row items-start sm:items-center gap-3 sm:gap-4 flex-wrap">
         <Input
           label=""
           placeholder="Search cases..."
@@ -102,7 +102,7 @@ export default function ERCopilot() {
           onChange={(e) => setSearch(e.target.value)}
           className="max-w-xs"
         />
-        <div className="flex gap-1 ml-auto">
+        <div className="flex gap-1 w-full sm:w-auto sm:ml-auto overflow-x-auto pb-2 sm:pb-0">
           {(['all', 'open', 'in_review', 'closed'] as const).map((s) => (
             <Button
               key={s}

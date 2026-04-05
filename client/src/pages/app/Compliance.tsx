@@ -121,7 +121,7 @@ export default function Compliance() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Compliance</h1>
           <p className="mt-1 text-sm text-zinc-500">Jurisdictional requirements, alerts, and location management.</p>
@@ -153,7 +153,7 @@ export default function Compliance() {
 
       {/* Location-contextual tabs */}
       {tab !== 'overview' && (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {/* Left: location list */}
           <div className="col-span-1">
             <ComplianceLocationList

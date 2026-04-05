@@ -74,7 +74,7 @@ export default function IRList() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">
             Incident Reporting
@@ -109,7 +109,7 @@ export default function IRList() {
         <div className="space-y-5">
           {/* Summary stats */}
           {summary && (
-            <div className="grid gap-3 grid-cols-4">
+            <div className="grid gap-3 grid-cols-1 md:grid-cols-2 lg:grid-cols-4">
               {([
                 ['Total', summary.total],
                 ['Open', summary.open],
@@ -158,7 +158,7 @@ export default function IRList() {
                 onChange={(e) => setTypeFilter(e.target.value as TypeFilter)}
               />
             </div>
-            <div className="flex gap-1 ml-auto">
+            <div className="flex gap-1 w-full sm:w-auto sm:ml-auto overflow-x-auto pb-2 sm:pb-0">
               {(['all', 'low', 'medium', 'high', 'critical'] as const).map((s) => (
                 <Button key={s} variant={severityFilter === s ? 'primary' : 'ghost'} size="sm" onClick={() => setSeverityFilter(s)}>
                   {s.charAt(0).toUpperCase() + s.slice(1)}
@@ -173,8 +173,8 @@ export default function IRList() {
           ) : filtered.length === 0 ? (
             <p className="text-sm text-zinc-500">No incidents found.</p>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-zinc-800">
-              <table className="w-full text-sm text-left">
+            <div className="overflow-x-auto rounded-xl border border-zinc-800">
+              <table className="w-full text-sm text-left min-w-[800px]">
                 <thead className="bg-zinc-900/50 text-zinc-400">
                   <tr>
                     <th className="px-4 py-3 font-medium">Incident #</th>

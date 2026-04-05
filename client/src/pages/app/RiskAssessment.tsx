@@ -51,7 +51,7 @@ export default function RiskAssessment() {
   if (noSnapshot) {
     return (
       <div>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
           <div>
             <h1 className="text-2xl font-semibold text-zinc-100">Risk Assessment</h1>
             <p className="mt-1 text-sm text-zinc-500">Holistic workforce risk scoring across compliance, incidents, ER cases, and more.</p>
@@ -167,7 +167,7 @@ export default function RiskAssessment() {
           {/* Score Bands Legend */}
           <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6">
             <div className="text-[10px] text-zinc-500 uppercase tracking-widest font-bold mb-4">Score Bands</div>
-            <div className="grid grid-cols-4 gap-px bg-white/10 rounded-lg overflow-hidden">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-white/10 rounded-lg overflow-hidden">
               {(['low', 'moderate', 'high', 'critical'] as Band[]).map(band => (
                 <div key={band} className="bg-zinc-800 px-4 py-3">
                   <div className={`text-[10px] font-bold uppercase tracking-widest ${BAND_COLOR[band].text}`}>{BAND_LABEL[band]}</div>

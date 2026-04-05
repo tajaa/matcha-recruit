@@ -228,12 +228,12 @@ export default function Policies() {
         </div>
       )}
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sm:gap-0">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-100">Policies</h1>
           <p className="mt-1 text-sm text-zinc-500">Upload, manage, and distribute company policies.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 w-full sm:w-auto">
           <Button size="sm" variant="secondary" onClick={() => { resetForm(); setShowCreate(true) }}>
             <Plus className="h-3.5 w-3.5" /> Create Policy
           </Button>
@@ -419,7 +419,7 @@ export default function Policies() {
             />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-[11px] text-zinc-500 uppercase tracking-wide block mb-1">Category</label>
               <select
@@ -446,7 +446,7 @@ export default function Policies() {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-[11px] text-zinc-500 uppercase tracking-wide block mb-1">Effective Date</label>
               <input
