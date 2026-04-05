@@ -174,6 +174,26 @@ export interface ComplianceDashboard {
   coming_up: ComplianceDashboardItem[]
 }
 
+// ── Dashboard Flags (from /dashboard/flags) ──
+
+export interface DashboardFlag {
+  priority: number
+  category: string
+  location_subject: string
+  description: string
+  recommendation: string
+  severity: string
+  source_type: string
+  source_id: string | null
+  link: string | null
+}
+
+export interface DashboardFlagsResponse {
+  total_flags: number
+  critical_count: number
+  flags: DashboardFlag[]
+}
+
 // ── /auth/me Response ──
 
 export interface MeUser {

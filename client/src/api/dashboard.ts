@@ -5,6 +5,7 @@ import type {
   UpcomingResponse,
   EscalatedQueryListResponse,
   EscalatedQueryDetail,
+  DashboardFlagsResponse,
 } from '../types/dashboard'
 
 export function fetchDashboardStats() {
@@ -41,4 +42,8 @@ export function dismissEscalatedQuery(id: string, reason?: string) {
 
 export function updateEscalatedQueryStatus(id: string, status: 'in_review') {
   return api.put(`/dashboard/escalated-queries/${id}/status`, { status })
+}
+
+export function fetchDashboardFlags() {
+  return api.get<DashboardFlagsResponse>('/dashboard/flags')
 }

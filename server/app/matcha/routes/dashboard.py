@@ -357,6 +357,194 @@ async def get_dashboard_stats(
     return result
 
 
+# ---------------------------------------------------------------------------
+# Flags & Actions — unified risk table
+# ---------------------------------------------------------------------------
+
+
+class DashboardFlag(BaseModel):
+    priority: int
+    category: str
+    location_subject: str
+    description: str
+    recommendation: str
+    severity: str  # critical, high, medium, low
+    source_type: str  # compliance, incident, er_case, stale_policy, wage, credential
+    source_id: Optional[str] = None
+    link: Optional[str] = None
+
+
+class DashboardFlagsResponse(BaseModel):
+    total_flags: int
+    critical_count: int
+    flags: list[DashboardFlag]
+
+
+_SEVERITY_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "warning": 1, "info": 3}
+
+
+@router.get("/flags", response_model=DashboardFlagsResponse)
+async def get_dashboard_flags(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Return a prioritized list of risk flags aggregated from all data sources."""
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return DashboardFlagsResponse(total_flags=0, critical_count=0, flags=[])
+
+    flags: list[dict] = []
+
+    async with get_connection() as conn:
+        # 1. Compliance alerts
+        try:
+            alert_rows = await conn.fetch(
+                """SELECT ca.id, ca.severity, ca.title, ca.description,
+                          bl.city, bl.state
+                   FROM compliance_alerts ca
+                   LEFT JOIN business_locations bl ON ca.location_id = bl.id
+                   WHERE ca.company_id = $1 AND ca.status != 'dismissed'
+                     AND COALESCE(ca.confidence_score, 1.0) >= 0.6
+                   ORDER BY CASE ca.severity WHEN 'critical' THEN 0 WHEN 'warning' THEN 1 ELSE 2 END
+                   LIMIT 50""",
+                company_id,
+            )
+            for r in alert_rows:
+                loc = f"{r['city']}, {r['state']}" if r.get("city") else (r.get("state") or "Company-wide")
+                sev = "critical" if r["severity"] == "critical" else "high"
+                flags.append({
+                    "category": "Compliance (HR)",
+                    "location_subject": loc,
+                    "description": r["title"] or r["description"] or "Compliance alert",
+                    "recommendation": "Review and address compliance requirement.",
+                    "severity": sev,
+                    "source_type": "compliance",
+                    "source_id": str(r["id"]),
+                    "link": "/app/compliance",
+                })
+        except Exception:
+            logger.debug("Skipping compliance alerts in flags", exc_info=True)
+
+        # 2. Open incidents
+        try:
+            incident_rows = await conn.fetch(
+                """SELECT id, title, severity, location, incident_number
+                   FROM ir_incidents
+                   WHERE company_id = $1 AND status IN ('reported', 'investigating', 'action_required')
+                   ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END
+                   LIMIT 30""",
+                company_id,
+            )
+            for r in incident_rows:
+                flags.append({
+                    "category": "Safety",
+                    "location_subject": r.get("location") or "Unspecified",
+                    "description": r["title"] or f"Incident {r['incident_number']}",
+                    "recommendation": "Investigate incident, recommend re-training and flag to management.",
+                    "severity": r["severity"] or "medium",
+                    "source_type": "incident",
+                    "source_id": str(r["id"]),
+                    "link": f"/app/ir/{r['id']}",
+                })
+        except Exception:
+            logger.debug("Skipping incidents in flags", exc_info=True)
+
+        # 3. ER cases
+        try:
+            er_rows = await conn.fetch(
+                """SELECT id, title, case_type, severity, status
+                   FROM er_cases
+                   WHERE company_id = $1 AND status NOT IN ('closed', 'resolved')
+                   ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END
+                   LIMIT 20""",
+                company_id,
+            )
+            for r in er_rows:
+                case_label = (r.get("case_type") or "ER Case").replace("_", " ").title()
+                flags.append({
+                    "category": "HR Policy / Legal",
+                    "location_subject": case_label,
+                    "description": r["title"] or "Open ER case requires attention",
+                    "recommendation": "Investigate and resolve per company policy. Consider creating or updating relevant policy.",
+                    "severity": r.get("severity") or "medium",
+                    "source_type": "er_case",
+                    "source_id": str(r["id"]),
+                    "link": f"/app/er-copilot/{r['id']}",
+                })
+        except Exception:
+            logger.debug("Skipping ER cases in flags", exc_info=True)
+
+        # 4. Stale policies
+        try:
+            stale_rows = await conn.fetch(
+                """SELECT id, title, updated_at
+                   FROM policies
+                   WHERE company_id = $1 AND status = 'active'
+                     AND updated_at < NOW() - INTERVAL '180 days'
+                   ORDER BY updated_at ASC
+                   LIMIT 10""",
+                company_id,
+            )
+            for r in stale_rows:
+                days_old = (date.today() - r["updated_at"].date()).days if r["updated_at"] else 0
+                flags.append({
+                    "category": "HR Policy / Legal",
+                    "location_subject": r["title"] or "Untitled Policy",
+                    "description": f"Policy has not been updated in {days_old} days.",
+                    "recommendation": "Review and update policy to ensure current compliance.",
+                    "severity": "medium",
+                    "source_type": "stale_policy",
+                    "source_id": str(r["id"]),
+                    "link": "/app/handbooks",
+                })
+        except Exception:
+            logger.debug("Skipping stale policies in flags", exc_info=True)
+
+        # 5. Wage violations
+        try:
+            emp_rows = await conn.fetch(
+                """SELECT e.id, CONCAT(e.first_name, ' ', e.last_name) AS name,
+                          e.salary, e.pay_type, bl.city, bl.state
+                   FROM employees e
+                   LEFT JOIN business_locations bl ON e.location_id = bl.id
+                   WHERE e.org_id = $1 AND e.termination_date IS NULL
+                     AND e.pay_type = 'salary' AND e.salary IS NOT NULL AND e.salary > 0
+                   LIMIT 200""",
+                company_id,
+            )
+            # Check for CA exempt salary minimum (~$70,405 for 2025)
+            ca_min_salary = 70_405
+            for emp in emp_rows:
+                if emp.get("state") and emp["state"].upper() in ("CA", "CALIFORNIA"):
+                    if emp["salary"] and float(emp["salary"]) < ca_min_salary:
+                        loc = f"{emp.get('city') or ''}, {emp['state']}".strip(", ")
+                        flags.append({
+                            "category": "Compliance (HR)",
+                            "location_subject": emp["name"] or "Employee",
+                            "description": f"Employee is paid ${emp['salary']:,.0f} salary but CA requires a minimum ${ca_min_salary:,}.",
+                            "recommendation": f"Change to hourly wage or bump their salary to ${ca_min_salary:,}.",
+                            "severity": "critical",
+                            "source_type": "wage",
+                            "source_id": str(emp["id"]),
+                            "link": "/app/employees",
+                        })
+        except Exception:
+            logger.debug("Skipping wage violations in flags", exc_info=True)
+
+    # Sort by severity, then assign priority numbers
+    flags.sort(key=lambda f: _SEVERITY_ORDER.get(f["severity"], 99))
+    critical_count = sum(1 for f in flags if f["severity"] == "critical")
+
+    result_flags = []
+    for i, f in enumerate(flags):
+        result_flags.append(DashboardFlag(priority=i + 1, **f))
+
+    return DashboardFlagsResponse(
+        total_flags=len(result_flags),
+        critical_count=critical_count,
+        flags=result_flags,
+    )
+
+
 def _format_action(action: str, details: dict | None) -> str:
     """Format an audit log action into a human-readable string."""
     labels = {

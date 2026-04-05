@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 
 import { useMe } from '../../hooks/useMe'
-import { fetchDashboardStats, fetchCredentialExpirations, fetchUpcoming } from '../../api/dashboard'
+import { fetchDashboardStats, fetchCredentialExpirations, fetchUpcoming, fetchDashboardFlags } from '../../api/dashboard'
 import { fetchPinnedRequirements, pinRequirement, fetchComplianceDashboard } from '../../api/compliance'
 import { ComplianceWidget } from '../../components/compliance/ComplianceWidget'
 
@@ -22,9 +22,10 @@ import {
   SignatureRing,
   CredentialAlerts,
   UpcomingDeadlines,
+  FlagsTable,
 } from '../../components/dashboard'
 
-import type { DashboardStats, CredentialExpirationsResponse, UpcomingResponse, ComplianceDashboard } from '../../types/dashboard'
+import type { DashboardStats, CredentialExpirationsResponse, UpcomingResponse, ComplianceDashboard, DashboardFlagsResponse } from '../../types/dashboard'
 import type { PinnedRequirement } from '../../types/compliance'
 
 export default function Dashboard() {
@@ -36,10 +37,11 @@ export default function Dashboard() {
   const [upcoming, setUpcoming] = useState<UpcomingResponse | null>(null)
   const [pinned, setPinned] = useState<PinnedRequirement[]>([])
   const [complianceDash, setComplianceDash] = useState<ComplianceDashboard | null>(null)
+  const [flagsData, setFlagsData] = useState<DashboardFlagsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [pinnedLoading, setPinnedLoading] = useState(true)
   const [upcomingLoading, setUpcomingLoading] = useState(true)
-  const [tab, setTab] = useState<'overview' | 'operations'>('overview')
+  const [tab, setTab] = useState<'overview' | 'flags' | 'operations'>('overview')
 
   // Parallel data fetching once /me resolves
   useEffect(() => {
@@ -51,6 +53,12 @@ export default function Dashboard() {
       fetchDashboardStats()
         .then(setStats)
         .catch(() => setStats(null))
+    )
+
+    promises.push(
+      fetchDashboardFlags()
+        .then(setFlagsData)
+        .catch(() => setFlagsData(null))
     )
 
     if (isHealthcare) {
@@ -231,7 +239,7 @@ export default function Dashboard() {
 
       {/* Tab buttons */}
       <div className="flex gap-1 mb-8 border-b border-zinc-800/60 pb-px">
-        {(['overview', 'operations'] as const).map((t) => (
+        {(['overview', 'flags', 'operations'] as const).map((t) => (
           <button
             key={t}
             type="button"
@@ -242,7 +250,12 @@ export default function Dashboard() {
                 : 'text-zinc-500 hover:text-zinc-300'
             }`}
           >
-            {t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === 'flags' ? 'Flags & Actions' : t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === 'flags' && flagsData && flagsData.critical_count > 0 && (
+              <span className="ml-1.5 inline-flex items-center justify-center w-4 h-4 rounded-full bg-red-600 text-[8px] font-bold text-white">
+                {flagsData.critical_count}
+              </span>
+            )}
             {tab === t && (
               <span className="absolute bottom-0 left-2 right-2 h-px bg-zinc-300 rounded-full" />
             )}
@@ -292,6 +305,15 @@ export default function Dashboard() {
             </div>
           )}
         </>
+      )}
+
+      {/* Flags & Actions tab */}
+      {tab === 'flags' && (
+        <FlagsTable
+          flags={flagsData?.flags ?? []}
+          totalFlags={flagsData?.total_flags ?? 0}
+          criticalCount={flagsData?.critical_count ?? 0}
+        />
       )}
 
       {/* Operations tab */}
