@@ -6,12 +6,12 @@ interface Props {
   cells: HeatMapCell[]
 }
 
-const SEV_BG: Record<string, string> = {
-  critical: 'bg-red-900/80 border-red-800/60 text-red-100',
-  high: 'bg-orange-900/60 border-orange-800/40 text-orange-100',
-  medium: 'bg-amber-900/50 border-amber-800/30 text-amber-100',
-  low: 'bg-zinc-800/80 border-zinc-700/40 text-zinc-300',
-  warning: 'bg-orange-900/60 border-orange-800/40 text-orange-100',
+const SEV_BADGE: Record<string, string> = {
+  critical: 'bg-sev-critical-bg border-sev-critical-border text-sev-critical',
+  high: 'bg-sev-high-bg border-sev-high-border text-sev-high',
+  medium: 'bg-sev-medium-bg border-sev-medium-border text-sev-medium',
+  low: 'bg-sev-low-bg border-sev-low-border text-sev-low',
+  warning: 'bg-sev-high-bg border-sev-high-border text-sev-high',
 }
 
 const SEV_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, warning: 1 }
@@ -42,7 +42,6 @@ export function RiskHeatMap({ cells }: Props) {
       byGroup.get(grp)!.push({ location: c.location, cat: c.category, count: c.count, severity: c.worst_severity })
     }
 
-    // Merge cells by location within each group, sort by worst severity then count
     const result: { name: string; items: { location: string; badges: { cat: string; count: number; severity: string }[] }[] }[] = []
     for (const grpName of [...GROUP_ORDER, ...byGroup.keys()]) {
       if (result.some(r => r.name === grpName)) continue
@@ -77,10 +76,10 @@ export function RiskHeatMap({ cells }: Props) {
       <div className="flex items-center gap-4 mb-2.5">
         <h3 className="text-[11px] font-medium text-vsc-text/50 uppercase tracking-wider">Risk Concentration</h3>
         <div className="flex items-center gap-3 text-[9px] text-vsc-text/40">
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-red-700" />Critical</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-orange-700" />High</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-amber-700" />Medium</span>
-          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-zinc-600" />Low</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-sev-critical" />Critical</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-sev-high" />High</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-sev-medium" />Medium</span>
+          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-sm bg-sev-low" />Low</span>
           <span className="text-vsc-border mx-1">|</span>
           <span>CMP = Compliance</span>
           <span>SAF = Safety</span>
@@ -107,7 +106,7 @@ export function RiskHeatMap({ cells }: Props) {
                     {badges.map((b, i) => (
                       <span
                         key={i}
-                        className={`inline-flex items-center gap-0.5 px-1.5 py-px rounded text-[9px] font-bold border ${SEV_BG[b.severity] || SEV_BG.medium}`}
+                        className={`inline-flex items-center gap-0.5 px-1.5 py-px rounded text-[9px] font-bold border ${SEV_BADGE[b.severity] || SEV_BADGE.medium}`}
                         title={`${b.cat}: ${b.count} flag(s) (${b.severity})`}
                       >
                         {b.count}

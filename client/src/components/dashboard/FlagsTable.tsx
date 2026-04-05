@@ -180,30 +180,30 @@ export function FlagsTable({ flags, heatMap, totalFlags, criticalCount, analyzed
                 <tr
                   key={`${flag.source_type}-${flag.source_id}-${idx}`}
                   onClick={() => flag.link && navigate(flag.link)}
-                  className={`border-b border-zinc-800/50 transition-colors ${
+                  className={`border-b border-vsc-border/50 transition-colors ${
                     flag.link ? 'cursor-pointer' : ''
                   } ${
                     isCriticalRow
-                      ? 'bg-gradient-to-r from-red-950/80 via-red-950/40 to-transparent hover:from-red-900/70'
-                      : 'hover:bg-zinc-800/30'
+                      ? 'bg-gradient-to-r from-sev-row-from via-sev-row-via to-sev-row-to hover:brightness-125'
+                      : 'hover:bg-vsc-panel/50'
                   }`}
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-[11px] font-bold ${
                         isCriticalRow
-                          ? 'bg-red-700 text-white'
+                          ? 'bg-sev-critical-border text-white'
                           : flag.severity === 'high'
-                            ? 'bg-orange-800/60 text-orange-200'
-                            : 'bg-zinc-800 text-zinc-400'
+                            ? 'bg-sev-high-bg text-sev-high'
+                            : 'bg-sev-low-bg text-sev-low'
                       }`}>
                         {flag.priority}
                       </span>
-                      {isCriticalRow && <AlertTriangle size={12} className="text-red-500" />}
+                      {isCriticalRow && <AlertTriangle size={12} className="text-sev-critical" />}
                     </div>
                   </td>
                   <td className="px-4 py-3">
-                    <span className={`font-medium ${isCriticalRow ? 'text-red-300' : 'text-vsc-accent/75'}`}>
+                    <span className={`font-medium ${isCriticalRow ? 'text-sev-critical' : 'text-vsc-accent/75'}`}>
                       {flag.category}
                     </span>
                   </td>

@@ -4,6 +4,31 @@
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --default-font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
   --default-font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+
+  --color-vsc-bg: #1e1e1e;
+  --color-vsc-panel: #252526;
+  --color-vsc-border: #333333;
+  --color-vsc-text: #d4d4d4;
+  --color-vsc-accent: #ce9178;
+  --color-vsc-keyword: #d7ba7d;
+  --color-vsc-blue: #569cd6;
+
+  /* Severity scale — warm orange/amber, no reds */
+  --color-sev-critical: #ce9178;
+  --color-sev-critical-bg: #3d2a1a;
+  --color-sev-critical-border: #5c3d20;
+  --color-sev-high: #d7ba7d;
+  --color-sev-high-bg: #332815;
+  --color-sev-high-border: #4a3a1d;
+  --color-sev-medium: #9a8a70;
+  --color-sev-medium-bg: #2a2520;
+  --color-sev-medium-border: #3d352a;
+  --color-sev-low: #6a737d;
+  --color-sev-low-bg: #252526;
+  --color-sev-low-border: #333333;
+  --color-sev-row-from: #3d2a1a;
+  --color-sev-row-via: #2e2015;
+  --color-sev-row-to: transparent;
 }
 
 body {
