@@ -308,11 +308,46 @@ def _build_company_context(profile: dict) -> str:
 
 
 def _clean_json_text(text: str) -> str:
-    """Strip markdown code fences from model output."""
+    """Strip markdown code fences and fix common JSON issues from model output."""
     text = text.strip()
     text = re.sub(r"^```(?:json)?\s*", "", text)
     text = re.sub(r"\s*```$", "", text)
-    return text.strip()
+    text = text.strip()
+
+    # Fix raw newlines inside JSON string values.
+    # Gemini sometimes wraps long strings across lines, producing bare newlines
+    # inside JSON strings which json.loads() rejects.
+    # Strategy: replace newlines that occur inside quoted strings with \\n.
+    try:
+        json.loads(text)
+        return text  # Already valid
+    except json.JSONDecodeError:
+        pass
+
+    # Escape unescaped newlines within string values
+    fixed = []
+    in_string = False
+    escape_next = False
+    for ch in text:
+        if escape_next:
+            fixed.append(ch)
+            escape_next = False
+            continue
+        if ch == '\\':
+            fixed.append(ch)
+            escape_next = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            fixed.append(ch)
+            continue
+        if in_string and ch == '\n':
+            fixed.append('\\n')
+            continue
+        if in_string and ch == '\r':
+            continue
+        fixed.append(ch)
+    return ''.join(fixed)
 
 
 def _infer_skill_from_state(current_state: dict) -> str:
