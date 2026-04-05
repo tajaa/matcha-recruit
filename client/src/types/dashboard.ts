@@ -193,6 +193,7 @@ export interface HeatMapCell {
   category: string
   count: number
   worst_severity: string
+  group: string // Locations, Departments, Company-wide
 }
 
 export interface DashboardFlagsResponse {

@@ -1,11 +1,10 @@
 import { useMemo } from 'react'
+import { MapPin, Building2, Globe } from 'lucide-react'
 import type { HeatMapCell } from '../../types/dashboard'
 
 interface Props {
   cells: HeatMapCell[]
 }
-
-const SEV_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, warning: 1 }
 
 const CELL_STYLES: Record<string, string> = {
   critical: 'bg-red-600/40 text-red-300 border-red-700/40',
@@ -16,36 +15,63 @@ const CELL_STYLES: Record<string, string> = {
   empty: 'bg-zinc-900/50 text-zinc-700 border-zinc-800/30',
 }
 
-export function RiskHeatMap({ cells }: Props) {
-  const { locations, categories, grid } = useMemo(() => {
-    if (cells.length === 0) return { locations: [], categories: [], grid: new Map<string, HeatMapCell>() }
+const GROUP_ORDER = ['Locations', 'Departments', 'Company-wide']
+const GROUP_ICONS: Record<string, typeof MapPin> = {
+  Locations: MapPin,
+  Departments: Building2,
+  'Company-wide': Globe,
+}
 
-    const locCounts = new Map<string, number>()
+export function RiskHeatMap({ cells }: Props) {
+  const { groups, categories, grid } = useMemo(() => {
+    if (cells.length === 0) return { groups: [], categories: [], grid: new Map<string, HeatMapCell>() }
+
     const catSet = new Set<string>()
     const gridMap = new Map<string, HeatMapCell>()
+    const groupLocs = new Map<string, Map<string, number>>() // group -> (location -> total count)
 
     for (const c of cells) {
-      locCounts.set(c.location, (locCounts.get(c.location) || 0) + c.count)
+      const grp = c.group || 'Locations'
       catSet.add(c.category)
       gridMap.set(`${c.location}||${c.category}`, c)
+
+      if (!groupLocs.has(grp)) groupLocs.set(grp, new Map())
+      const locMap = groupLocs.get(grp)!
+      locMap.set(c.location, (locMap.get(c.location) || 0) + c.count)
     }
 
-    // Sort locations by total count descending
-    const locArr = [...locCounts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .map(([loc]) => loc)
-
-    // Stable category order
+    // Sort categories in stable order
     const catOrder = ['Compliance', 'Safety', 'HR Policy / Legal', 'Workforce Risk']
     const catArr = catOrder.filter(c => catSet.has(c))
     for (const c of catSet) {
       if (!catArr.includes(c)) catArr.push(c)
     }
 
-    return { locations: locArr, categories: catArr, grid: gridMap }
+    // Build ordered groups with sorted locations
+    const orderedGroups: { name: string; locations: string[] }[] = []
+    for (const grpName of GROUP_ORDER) {
+      const locMap = groupLocs.get(grpName)
+      if (!locMap || locMap.size === 0) continue
+      const sortedLocs = [...locMap.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([loc]) => loc)
+        .slice(0, 6)
+      orderedGroups.push({ name: grpName, locations: sortedLocs })
+    }
+    // Any groups not in GROUP_ORDER
+    for (const [grpName, locMap] of groupLocs) {
+      if (GROUP_ORDER.includes(grpName)) continue
+      const sortedLocs = [...locMap.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([loc]) => loc)
+        .slice(0, 6)
+      orderedGroups.push({ name: grpName, locations: sortedLocs })
+    }
+
+    return { groups: orderedGroups, categories: catArr, grid: gridMap }
   }, [cells])
 
-  if (locations.length === 0 || categories.length === 0) return null
+  if (groups.length === 0 || categories.length === 0) return null
 
   return (
     <div className="mb-6">
@@ -54,7 +80,7 @@ export function RiskHeatMap({ cells }: Props) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-zinc-800/50">
-              <th className="text-left px-3 py-2 text-zinc-500 font-medium w-40" />
+              <th className="text-left px-3 py-2 text-zinc-500 font-medium w-44" />
               {categories.map((cat) => (
                 <th key={cat} className="text-center px-3 py-2 text-zinc-500 font-medium whitespace-nowrap">
                   {cat}
@@ -63,33 +89,48 @@ export function RiskHeatMap({ cells }: Props) {
             </tr>
           </thead>
           <tbody>
-            {locations.slice(0, 8).map((loc) => (
-              <tr key={loc} className="border-b border-zinc-800/30">
-                <td className="px-3 py-2 text-zinc-300 font-medium truncate max-w-[160px]" title={loc}>
-                  {loc}
-                </td>
-                {categories.map((cat) => {
-                  const cell = grid.get(`${loc}||${cat}`)
-                  const style = cell ? CELL_STYLES[cell.worst_severity] || CELL_STYLES.low : CELL_STYLES.empty
-                  return (
-                    <td key={cat} className="px-3 py-2 text-center">
-                      <span
-                        className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border text-[11px] font-semibold ${style}`}
-                        title={cell ? `${cell.count} flag(s), worst: ${cell.worst_severity}` : 'No flags'}
-                      >
-                        {cell ? cell.count : '--'}
+            {groups.map((grp) => {
+              const Icon = GROUP_ICONS[grp.name] || MapPin
+              return (
+                <>{/* Group section */}
+                  <tr key={`hdr-${grp.name}`}>
+                    <td
+                      colSpan={categories.length + 1}
+                      className="px-3 pt-3 pb-1"
+                    >
+                      <span className="flex items-center gap-1.5 text-[10px] font-medium text-zinc-500 uppercase tracking-wider">
+                        <Icon size={10} />
+                        {grp.name}
                       </span>
                     </td>
-                  )
-                })}
-              </tr>
-            ))}
+                  </tr>
+                  {grp.locations.map((loc) => (
+                    <tr key={`${grp.name}-${loc}`} className="border-b border-zinc-800/20">
+                      <td className="px-3 py-2 text-zinc-300 font-medium truncate max-w-[180px] pl-6" title={loc}>
+                        {loc}
+                      </td>
+                      {categories.map((cat) => {
+                        const cell = grid.get(`${loc}||${cat}`)
+                        const style = cell ? CELL_STYLES[cell.worst_severity] || CELL_STYLES.low : CELL_STYLES.empty
+                        return (
+                          <td key={cat} className="px-3 py-1.5 text-center">
+                            <span
+                              className={`inline-flex items-center justify-center w-8 h-8 rounded-lg border text-[11px] font-semibold ${style}`}
+                              title={cell ? `${cell.count} flag(s), worst: ${cell.worst_severity}` : 'No flags'}
+                            >
+                              {cell ? cell.count : '--'}
+                            </span>
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </>
+              )
+            })}
           </tbody>
         </table>
       </div>
-      {locations.length > 8 && (
-        <p className="text-[10px] text-zinc-600 mt-1 px-1">Showing top 8 of {locations.length} locations</p>
-      )}
     </div>
   )
 }

@@ -382,6 +382,7 @@ class HeatMapCell(BaseModel):
     category: str
     count: int
     worst_severity: str
+    group: str = "Locations"  # Locations, Departments, Company-wide
 
 
 class DashboardFlagsResponse(BaseModel):
@@ -771,46 +772,47 @@ async def get_dashboard_flags(
     analyzed_at = datetime.now(timezone.utc)
 
     # Build heat map from raw patterns (real locations, not AI-generated labels)
+    # Each cell is keyed by (location, category) and tagged with a group for display
     heat_cells: dict[tuple[str, str], dict] = {}
 
     for inc in patterns.get("incidents_by_location", []):
         loc = inc.get("location") or "Unknown"
         key = (loc, "Safety")
-        cell = heat_cells.setdefault(key, {"count": 0, "worst": "low"})
+        cell = heat_cells.setdefault(key, {"count": 0, "worst": "low", "group": "Locations"})
         cell["count"] += inc.get("count", 1)
         if _SEVERITY_ORDER.get(inc.get("severity", "medium"), 99) < _SEVERITY_ORDER.get(cell["worst"], 99):
             cell["worst"] = inc["severity"]
 
     for alert in patterns.get("compliance_alerts", []):
         loc = alert.get("location") or "Company-wide"
+        grp = "Company-wide" if loc == "Company-wide" else "Locations"
         key = (loc, "Compliance")
-        cell = heat_cells.setdefault(key, {"count": 0, "worst": "low"})
+        cell = heat_cells.setdefault(key, {"count": 0, "worst": "low", "group": grp})
         cell["count"] += alert.get("count", 1)
         if _SEVERITY_ORDER.get(alert.get("severity", "warning"), 99) < _SEVERITY_ORDER.get(cell["worst"], 99):
             cell["worst"] = alert["severity"]
 
     for er in patterns.get("open_er_cases", []):
-        cat_label = (er.get("category") or "uncategorized").replace("_", " ").title()
         key = ("Company-wide", "HR Policy / Legal")
-        cell = heat_cells.setdefault(key, {"count": 0, "worst": "high"})
+        cell = heat_cells.setdefault(key, {"count": 0, "worst": "high", "group": "Company-wide"})
         cell["count"] += er.get("count", 1)
 
     for wv in patterns.get("wage_violations", []):
         loc = wv.get("location") or "Unknown"
         key = (loc, "Compliance")
-        cell = heat_cells.setdefault(key, {"count": 0, "worst": "low"})
+        cell = heat_cells.setdefault(key, {"count": 0, "worst": "low", "group": "Locations"})
         cell["count"] += 1
         cell["worst"] = "critical"
 
     for dept in patterns.get("departments_with_multiple_incidents", []):
         key = (dept["department"], "Workforce Risk")
-        cell = heat_cells.setdefault(key, {"count": 0, "worst": "medium"})
+        cell = heat_cells.setdefault(key, {"count": 0, "worst": "medium", "group": "Departments"})
         cell["count"] += dept["incident_count"]
         if dept["incident_count"] >= 4:
             cell["worst"] = "high"
 
     heat_map = [
-        HeatMapCell(location=loc, category=cat, count=v["count"], worst_severity=v["worst"])
+        HeatMapCell(location=loc, category=cat, count=v["count"], worst_severity=v["worst"], group=v["group"])
         for (loc, cat), v in heat_cells.items()
     ]
 
