@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home, Pencil } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home, Pencil, LogOut } from 'lucide-react'
 import { listChannels, updateChannel } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
-import { listThreads, listProjects, updateTitle, updateProjectMeta } from '../../api/matchaWork'
+import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew } from '../../api/matchaWork'
 import type { MWThread, MWProject } from '../../types/matcha-work'
 import { getUnreadCount } from '../../api/inbox'
 import { useMe } from '../../hooks/useMe'
@@ -89,9 +89,26 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     setRenaming(null)
   }
 
+  async function handleCreateProject() {
+    try {
+      const project = await createProjectNew('New Project')
+      setProjects((prev) => [project, ...prev])
+      navigate(`/work/projects/${project.id}`)
+    } catch {}
+  }
+
+  function handleLogout() {
+    localStorage.removeItem('matcha_access_token')
+    localStorage.removeItem('matcha_refresh_token')
+    window.location.href = '/login'
+  }
+
   const isActive = (path: string) => location.pathname === path
   const inboxPath = '/work/inbox'
   const totalChannelUnread = channels.reduce((sum, ch) => sum + ch.unread_count, 0)
+  const userName = me?.profile?.name || me?.user?.email?.split('@')[0] || 'User'
+  const userEmail = me?.user?.email || ''
+  const userAvatar = me?.user?.avatar_url
 
   // ─── Collapsed: icon rail ───
   if (!open) {
@@ -281,7 +298,15 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
             >
               Projects
-              <ChevronDown size={12} className={`transition-transform ${projectsOpen ? '' : '-rotate-90'}`} />
+              <div className="flex items-center gap-1">
+                <span
+                  onClick={(e) => { e.stopPropagation(); handleCreateProject() }}
+                  className="hover:text-emerald-400 cursor-pointer"
+                >
+                  <Plus size={12} />
+                </span>
+                <ChevronDown size={12} className={`transition-transform ${projectsOpen ? '' : '-rotate-90'}`} />
+              </div>
             </button>
             {projectsOpen && (
               <div className="space-y-0.5 mt-0.5">
@@ -373,8 +398,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           </div>
         </nav>
 
-        {/* Inbox footer */}
-        <div className="px-2 py-2 border-t border-zinc-800/30">
+        {/* Footer: Inbox + User profile + Logout */}
+        <div className="px-2 py-2 border-t border-zinc-800/30 space-y-1">
           <button
             onClick={() => navigate(inboxPath)}
             className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 transition-colors"
@@ -387,6 +412,28 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               </span>
             )}
           </button>
+
+          {/* User profile */}
+          <div className="flex items-center gap-2 px-2.5 py-2 mt-1">
+            {userAvatar ? (
+              <img src={userAvatar} alt={userName} className="w-7 h-7 rounded-full object-cover shrink-0" />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center text-[11px] font-medium text-zinc-400 shrink-0">
+                {userName.charAt(0).toUpperCase()}
+              </div>
+            )}
+            <div className="flex-1 min-w-0">
+              <p className="text-[12px] text-zinc-300 truncate">{userName}</p>
+              <p className="text-[10px] text-zinc-600 truncate">{userEmail}</p>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="shrink-0 p-1 rounded text-zinc-600 hover:text-red-400 hover:bg-zinc-800/50 transition-colors"
+              title="Log out"
+            >
+              <LogOut size={13} />
+            </button>
+          </div>
         </div>
       </aside>
 
