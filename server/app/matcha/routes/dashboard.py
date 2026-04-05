@@ -398,7 +398,7 @@ async def get_dashboard_flags(
         # 1. Compliance alerts
         try:
             alert_rows = await conn.fetch(
-                """SELECT ca.id, ca.severity, ca.title, ca.description,
+                """SELECT ca.id, ca.severity, ca.title, ca.message,
                           bl.city, bl.state
                    FROM compliance_alerts ca
                    LEFT JOIN business_locations bl ON ca.location_id = bl.id
@@ -414,7 +414,7 @@ async def get_dashboard_flags(
                 flags.append({
                     "category": "Compliance (HR)",
                     "location_subject": loc,
-                    "description": r["title"] or r["description"] or "Compliance alert",
+                    "description": r["title"] or r.get("message") or "Compliance alert",
                     "recommendation": "Review and address compliance requirement.",
                     "severity": sev,
                     "source_type": "compliance",
@@ -451,21 +451,20 @@ async def get_dashboard_flags(
         # 3. ER cases
         try:
             er_rows = await conn.fetch(
-                """SELECT id, title, case_type, severity, status
+                """SELECT id, title, case_number, status
                    FROM er_cases
                    WHERE company_id = $1 AND status NOT IN ('closed', 'resolved')
-                   ORDER BY CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END
+                   ORDER BY created_at DESC
                    LIMIT 20""",
                 company_id,
             )
             for r in er_rows:
-                case_label = (r.get("case_type") or "ER Case").replace("_", " ").title()
                 flags.append({
                     "category": "HR Policy / Legal",
-                    "location_subject": case_label,
+                    "location_subject": r.get("case_number") or "ER Case",
                     "description": r["title"] or "Open ER case requires attention",
                     "recommendation": "Investigate and resolve per company policy. Consider creating or updating relevant policy.",
-                    "severity": r.get("severity") or "medium",
+                    "severity": "high",
                     "source_type": "er_case",
                     "source_id": str(r["id"]),
                     "link": f"/app/er-copilot/{r['id']}",
@@ -515,12 +514,13 @@ async def get_dashboard_flags(
             ca_min_salary = 70_405
             for emp in emp_rows:
                 if emp.get("state") and emp["state"].upper() in ("CA", "CALIFORNIA"):
-                    if emp["salary"] and float(emp["salary"]) < ca_min_salary:
+                    salary_val = float(emp["salary"]) if emp["salary"] else 0
+                    if salary_val > 0 and salary_val < ca_min_salary:
                         loc = f"{emp.get('city') or ''}, {emp['state']}".strip(", ")
                         flags.append({
                             "category": "Compliance (HR)",
                             "location_subject": emp["name"] or "Employee",
-                            "description": f"Employee is paid ${emp['salary']:,.0f} salary but CA requires a minimum ${ca_min_salary:,}.",
+                            "description": f"Employee is paid ${salary_val:,.0f} salary but CA requires a minimum ${ca_min_salary:,}.",
                             "recommendation": f"Change to hourly wage or bump their salary to ${ca_min_salary:,}.",
                             "severity": "critical",
                             "source_type": "wage",
