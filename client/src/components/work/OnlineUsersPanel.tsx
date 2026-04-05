@@ -28,7 +28,7 @@ export function OnlineUsersPanel() {
   const count = users.length
 
   return (
-    <>
+    <div className="relative">
       {/* Inline trigger */}
       <button
         onClick={() => setOpen(!open)}
@@ -123,6 +123,6 @@ export function OnlineUsersPanel() {
           </div>
         </div>
       )}
-    </>
+    </div>
   )
 }

@@ -66,6 +66,9 @@ export const addChannelMembers = (id: string, userIds: string[]) =>
 export const leaveChannel = (id: string) =>
   api.post(`/channels/${id}/leave`)
 
+export const updateChannel = (id: string, updates: { name?: string; description?: string }) =>
+  api.patch<ChannelSummary>(`/channels/${id}`, updates)
+
 export const searchInvitableUsers = (q: string, channelId?: string) =>
   api.get<{ id: string; name: string; email: string; role: string; avatar_url: string | null }[]>(
     `/channels/invitable-users?q=${encodeURIComponent(q)}${channelId ? `&channel_id=${channelId}` : ''}`

@@ -558,6 +558,76 @@ async def add_members(
     return {"ok": True}
 
 
+class UpdateChannelRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+
+
+@router.patch("/{channel_id}", response_model=ChannelSummary)
+async def update_channel(
+    channel_id: UUID,
+    body: UpdateChannelRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Rename or update a channel. Only the creator or admin can update."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT created_by, company_id FROM channels WHERE id = $1", channel_id
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Channel not found")
+
+        is_admin = current_user.role == "admin"
+        is_creator = str(row["created_by"]) == str(current_user.id)
+        if not is_admin and not is_creator:
+            raise HTTPException(status_code=403, detail="Only the channel creator or admin can update this channel")
+
+        sets = []
+        params: list = []
+        idx = 1
+
+        if body.name is not None:
+            name = body.name.strip()
+            if not name:
+                raise HTTPException(status_code=400, detail="Channel name cannot be empty")
+            slug = _slugify(name)
+            sets.append(f"name = ${idx}")
+            params.append(name)
+            idx += 1
+            sets.append(f"slug = ${idx}")
+            params.append(slug)
+            idx += 1
+
+        if body.description is not None:
+            sets.append(f"description = ${idx}")
+            params.append(body.description.strip() or None)
+            idx += 1
+
+        if not sets:
+            raise HTTPException(status_code=400, detail="No updates provided")
+
+        params.append(channel_id)
+        await conn.execute(
+            f"UPDATE channels SET {', '.join(sets)} WHERE id = ${idx}",
+            *params,
+        )
+
+        # Return updated channel summary
+        ch = await conn.fetchrow(
+            """
+            SELECT c.id, c.name, c.slug, c.description,
+                   (SELECT COUNT(*) FROM channel_members WHERE channel_id = c.id) AS member_count,
+                   0 AS unread_count,
+                   NULL::timestamptz AS last_message_at,
+                   NULL AS last_message_preview,
+                   TRUE AS is_member
+            FROM channels c WHERE c.id = $1
+            """,
+            channel_id,
+        )
+        return dict(ch)
+
+
 @router.post("/{channel_id}/leave", status_code=status.HTTP_200_OK)
 async def leave_channel(
     channel_id: UUID,

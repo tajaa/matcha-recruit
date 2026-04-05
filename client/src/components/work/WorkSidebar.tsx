@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home } from 'lucide-react'
-import { listChannels } from '../../api/channels'
+import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home, Pencil, Check, X } from 'lucide-react'
+import { listChannels, updateChannel } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
-import { listThreads, listProjects } from '../../api/matchaWork'
+import { listThreads, listProjects, updateTitle, updateProjectMeta } from '../../api/matchaWork'
 import type { MWThread, MWProject } from '../../types/matcha-work'
 import { getUnreadCount } from '../../api/inbox'
 import { useMe } from '../../hooks/useMe'
@@ -13,6 +13,8 @@ interface Props {
   open: boolean
   onToggle: () => void
 }
+
+type RenameTarget = { type: 'channel' | 'project' | 'thread'; id: string; name: string } | null
 
 export default function WorkSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
@@ -29,6 +31,11 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [channelsOpen, setChannelsOpen] = useState(true)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [threadsOpen, setThreadsOpen] = useState(false)
+
+  // Inline rename state
+  const [renaming, setRenaming] = useState<RenameTarget>(null)
+  const [renameDraft, setRenameDraft] = useState('')
+  const renameRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     listChannels().then(setChannels).catch(() => {})
@@ -50,6 +57,37 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     }, 60_000)
     return () => clearInterval(id)
   }, [])
+
+  // Focus rename input when it appears
+  useEffect(() => {
+    if (renaming) renameRef.current?.focus()
+  }, [renaming])
+
+  function startRename(type: RenameTarget['type'], id: string, name: string) {
+    setRenaming({ type: type!, id, name })
+    setRenameDraft(name)
+  }
+
+  async function submitRename() {
+    if (!renaming || !renameDraft.trim() || renameDraft.trim() === renaming.name) {
+      setRenaming(null)
+      return
+    }
+    const newName = renameDraft.trim()
+    try {
+      if (renaming.type === 'channel') {
+        await updateChannel(renaming.id, { name: newName })
+        setChannels((prev) => prev.map((ch) => ch.id === renaming.id ? { ...ch, name: newName, slug: newName.toLowerCase().replace(/[^a-z0-9]+/g, '-') } : ch))
+      } else if (renaming.type === 'project') {
+        await updateProjectMeta(renaming.id, { title: newName })
+        setProjects((prev) => prev.map((p) => p.id === renaming.id ? { ...p, title: newName } : p))
+      } else if (renaming.type === 'thread') {
+        await updateTitle(renaming.id, newName)
+        setThreads((prev) => prev.map((t) => t.id === renaming.id ? { ...t, title: newName } : t))
+      }
+    } catch {}
+    setRenaming(null)
+  }
 
   const isActive = (path: string) => location.pathname === path
   const inboxPath = '/work/inbox'
@@ -123,6 +161,25 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     )
   }
 
+  // ─── Inline rename input ───
+  function renderRenameInput() {
+    return (
+      <div className="flex items-center gap-1 px-1 flex-1 min-w-0">
+        <input
+          ref={renameRef}
+          value={renameDraft}
+          onChange={(e) => setRenameDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submitRename()
+            if (e.key === 'Escape') setRenaming(null)
+          }}
+          onBlur={submitRename}
+          className="flex-1 min-w-0 rounded border border-zinc-600 bg-zinc-800 px-1.5 py-0.5 text-[13px] text-zinc-100 outline-none focus:border-emerald-600"
+        />
+      </div>
+    )
+  }
+
   // ─── Expanded sidebar ───
   return (
     <>
@@ -178,23 +235,40 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                   <p className="px-2.5 py-1 text-[11px] text-zinc-600">No channels</p>
                 )}
                 {channels.map((ch) => (
-                  <button
+                  <div
                     key={ch.id}
-                    onClick={() => navigate(`/work/channels/${ch.id}`)}
-                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
                       isActive(`/work/channels/${ch.id}`)
                         ? 'bg-zinc-800/60 text-white font-medium'
                         : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                     }`}
                   >
                     <Hash size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
-                    <span className="truncate">{ch.name}</span>
-                    {ch.unread_count > 0 && (
+                    {renaming?.type === 'channel' && renaming.id === ch.id ? (
+                      renderRenameInput()
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => navigate(`/work/channels/${ch.id}`)}
+                          className="flex-1 min-w-0 text-left truncate"
+                        >
+                          {ch.name}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startRename('channel', ch.id, ch.name) }}
+                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                          title="Rename"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      </>
+                    )}
+                    {ch.unread_count > 0 && !renaming && (
                       <span className="ml-auto w-4 h-4 rounded-full bg-emerald-600 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
                         {ch.unread_count > 9 ? '9+' : ch.unread_count}
                       </span>
                     )}
-                  </button>
+                  </div>
                 ))}
               </div>
             )}
@@ -215,18 +289,35 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                   <p className="px-2.5 py-1 text-[11px] text-zinc-600">No projects</p>
                 )}
                 {projects.slice(0, 10).map((p) => (
-                  <button
+                  <div
                     key={p.id}
-                    onClick={() => navigate(`/work/projects/${p.id}`)}
-                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
                       isActive(`/work/projects/${p.id}`)
                         ? 'bg-zinc-800/60 text-white font-medium'
                         : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                     }`}
                   >
                     <FolderOpen size={14} className="text-[#ce9178] shrink-0" strokeWidth={1.6} />
-                    <span className="truncate">{p.title}</span>
-                  </button>
+                    {renaming?.type === 'project' && renaming.id === p.id ? (
+                      renderRenameInput()
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => navigate(`/work/projects/${p.id}`)}
+                          className="flex-1 min-w-0 text-left truncate"
+                        >
+                          {p.title}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startRename('project', p.id, p.title) }}
+                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                          title="Rename"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -247,18 +338,35 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                   <p className="px-2.5 py-1 text-[11px] text-zinc-600">No threads</p>
                 )}
                 {threads.slice(0, 10).map((t) => (
-                  <button
+                  <div
                     key={t.id}
-                    onClick={() => navigate(`/work/${t.id}`)}
-                    className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
                       isActive(`/work/${t.id}`)
                         ? 'bg-zinc-800/60 text-white font-medium'
                         : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                     }`}
                   >
                     <MessageSquare size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
-                    <span className="truncate">{t.title}</span>
-                  </button>
+                    {renaming?.type === 'thread' && renaming.id === t.id ? (
+                      renderRenameInput()
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => navigate(`/work/${t.id}`)}
+                          className="flex-1 min-w-0 text-left truncate"
+                        >
+                          {t.title}
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); startRename('thread', t.id, t.title) }}
+                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                          title="Rename"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -275,7 +383,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             Inbox
             {inboxUnread > 0 && (
               <span className="ml-auto w-4 h-4 rounded-full bg-blue-500 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
-                {inboxUnread > 9 ? '9+' : inboxUnread}
+                {inboxUnread > 9 ? '!' : inboxUnread}
               </span>
             )}
           </button>
