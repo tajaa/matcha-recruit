@@ -45,7 +45,7 @@ export function RiskHeatMap({ cells }: Props) {
     return { locations: locArr, categories: catArr, grid: gridMap }
   }, [cells])
 
-  if (locations.length < 2 || categories.length === 0) return null
+  if (locations.length === 0 || categories.length === 0) return null
 
   return (
     <div className="mb-6">

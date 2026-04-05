@@ -428,17 +428,19 @@ async def _detect_risk_patterns(company_id: UUID) -> dict:
         # 1. Incidents by location (last 90 days)
         try:
             loc_rows = await conn.fetch(
-                """SELECT location, location_id, severity, COUNT(*) AS cnt
-                   FROM ir_incidents
-                   WHERE company_id = $1 AND occurred_at > NOW() - INTERVAL '90 days'
-                   GROUP BY location, location_id, severity
+                """SELECT COALESCE(bl.name, CONCAT(bl.city, ', ', bl.state), i.location, 'Unspecified') AS loc_name,
+                          i.severity, COUNT(*) AS cnt
+                   FROM ir_incidents i
+                   LEFT JOIN business_locations bl ON bl.id = i.location_id
+                   WHERE i.company_id = $1 AND i.occurred_at > NOW() - INTERVAL '90 days'
+                   GROUP BY loc_name, i.severity
                    ORDER BY cnt DESC
                    LIMIT 20""",
                 company_id,
             )
             if loc_rows:
                 patterns["incidents_by_location"] = [
-                    {"location": r["location"] or "Unspecified", "severity": r["severity"], "count": r["cnt"]}
+                    {"location": r["loc_name"] or "Unspecified", "severity": r["severity"], "count": r["cnt"]}
                     for r in loc_rows
                 ]
         except Exception:
