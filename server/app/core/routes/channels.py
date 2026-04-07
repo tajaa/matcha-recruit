@@ -614,6 +614,7 @@ async def add_members(
 class UpdateChannelRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
+    visibility: Optional[str] = None
 
 
 @router.patch("/{channel_id}", response_model=ChannelSummary)
@@ -622,18 +623,25 @@ async def update_channel(
     body: UpdateChannelRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Rename or update a channel. Only the creator or admin can update."""
+    """Update a channel. Owner/moderator can change name/description. Only owner can change visibility."""
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT created_by, company_id FROM channels WHERE id = $1", channel_id
+            "SELECT company_id FROM channels WHERE id = $1", channel_id
         )
         if not row:
             raise HTTPException(status_code=404, detail="Channel not found")
 
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
         is_admin = current_user.role == "admin"
-        is_creator = str(row["created_by"]) == str(current_user.id)
-        if not is_admin and not is_creator:
-            raise HTTPException(status_code=403, detail="Only the channel creator or admin can update this channel")
+        if not is_admin and my_role not in ("owner", "moderator"):
+            raise HTTPException(status_code=403, detail="Only channel owners and moderators can update this channel")
+
+        # Only owner can change visibility
+        if body.visibility is not None and my_role != "owner" and not is_admin:
+            raise HTTPException(status_code=403, detail="Only the channel owner can change visibility")
 
         sets = []
         params: list = []
@@ -654,6 +662,13 @@ async def update_channel(
         if body.description is not None:
             sets.append(f"description = ${idx}")
             params.append(body.description.strip() or None)
+            idx += 1
+
+        if body.visibility is not None:
+            if body.visibility not in ("public", "private", "invite_only"):
+                raise HTTPException(status_code=400, detail="Visibility must be public, private, or invite_only")
+            sets.append(f"visibility = ${idx}")
+            params.append(body.visibility)
             idx += 1
 
         if not sets:
@@ -726,6 +741,8 @@ async def set_member_role(
     """Change a member's channel role. Only the owner can promote/demote."""
     if body.role not in ("moderator", "member"):
         raise HTTPException(status_code=400, detail="Role must be 'moderator' or 'member'")
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot change your own role")
 
     async with get_connection() as conn:
         my_role = await conn.fetchval(
