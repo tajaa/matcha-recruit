@@ -1,12 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, ChevronUp, ChevronDown, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react'
-import type { DashboardFlag, HeatMapCell } from '../../types/dashboard'
+import type { DashboardFlag, HeatMapCell, BusinessLocation } from '../../types/dashboard'
 import { RiskHeatMap } from './RiskHeatMap'
+import { LocationMap } from './LocationMap'
 
 interface Props {
   flags: DashboardFlag[]
   heatMap: HeatMapCell[]
+  locations: BusinessLocation[]
   totalFlags: number
   criticalCount: number
   analyzedAt: string | null
@@ -25,7 +27,7 @@ function timeAgo(iso: string): string {
   return `${hrs}h ago`
 }
 
-export function FlagsTable({ flags, heatMap, totalFlags: _totalFlags, criticalCount: _criticalCount, analyzedAt, onRefresh, refreshing }: Props) {
+export function FlagsTable({ flags, heatMap, locations, totalFlags: _totalFlags, criticalCount: _criticalCount, analyzedAt, onRefresh, refreshing }: Props) {
   const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<string>('all')
@@ -74,6 +76,9 @@ export function FlagsTable({ flags, heatMap, totalFlags: _totalFlags, criticalCo
 
   return (
     <div>
+      {/* Location map */}
+      <LocationMap locations={locations} heatMap={heatMap} />
+
       {/* Heat map */}
       <RiskHeatMap cells={heatMap} />
 

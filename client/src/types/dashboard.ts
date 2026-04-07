@@ -196,11 +196,18 @@ export interface HeatMapCell {
   group: string // Locations, Departments, Company-wide
 }
 
+export interface BusinessLocation {
+  name: string
+  city: string
+  state: string
+}
+
 export interface DashboardFlagsResponse {
   total_flags: number
   critical_count: number
   flags: DashboardFlag[]
   heat_map: HeatMapCell[]
+  locations: BusinessLocation[]
   analyzed_at: string | null
 }
 

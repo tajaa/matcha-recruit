@@ -102,6 +102,7 @@ export default function Dashboard() {
       <FlagsTable
         flags={flagsData?.flags ?? []}
         heatMap={flagsData?.heat_map ?? []}
+        locations={flagsData?.locations ?? []}
         totalFlags={flagsData?.total_flags ?? 0}
         criticalCount={flagsData?.critical_count ?? 0}
         analyzedAt={flagsData?.analyzed_at ?? null}

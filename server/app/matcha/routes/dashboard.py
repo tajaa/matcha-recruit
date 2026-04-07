@@ -385,11 +385,18 @@ class HeatMapCell(BaseModel):
     group: str = "Locations"  # Locations, Departments, Company-wide
 
 
+class BusinessLocationSummary(BaseModel):
+    name: str
+    city: str
+    state: str
+
+
 class DashboardFlagsResponse(BaseModel):
     total_flags: int
     critical_count: int
     flags: list[DashboardFlag]
     heat_map: list[HeatMapCell] = []
+    locations: list[BusinessLocationSummary] = []
     analyzed_at: Optional[datetime] = None
 
 
@@ -805,6 +812,16 @@ async def get_dashboard_flags(
         )
         analyzed_at_val = rows[0]["analyzed_at"] if rows else None
 
+        loc_rows = await conn.fetch(
+            """SELECT COALESCE(name, CONCAT(city, ', ', state)) AS display_name,
+                      COALESCE(city, '') AS city,
+                      COALESCE(state, '') AS state
+               FROM business_locations
+               WHERE company_id = $1 AND is_active = true
+               ORDER BY state, city""",
+            company_id,
+        )
+
     flags = [
         DashboardFlag(
             priority=r["priority"],
@@ -841,11 +858,17 @@ async def get_dashboard_flags(
         for (loc, cat), v in heat_cells.items()
     ]
 
+    all_locations = [
+        BusinessLocationSummary(name=r["display_name"], city=r["city"], state=r["state"])
+        for r in loc_rows
+    ]
+
     return DashboardFlagsResponse(
         total_flags=len(flags),
         critical_count=critical_count,
         flags=flags,
         heat_map=heat_map,
+        locations=all_locations,
         analyzed_at=analyzed_at_val,
     )
 
