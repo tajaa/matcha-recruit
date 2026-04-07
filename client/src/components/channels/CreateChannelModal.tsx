@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Loader2, Hash } from 'lucide-react'
+import { X, Loader2, Hash, Globe, Lock, UserPlus } from 'lucide-react'
 import { createChannel } from '../../api/channels'
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
 export default function CreateChannelModal({ onClose, onCreated }: Props) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [visibility, setVisibility] = useState<'public' | 'invite_only' | 'private'>('public')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
@@ -19,7 +20,7 @@ export default function CreateChannelModal({ onClose, onCreated }: Props) {
     setCreating(true)
     setError('')
     try {
-      const ch = await createChannel(name.trim(), description.trim() || undefined)
+      const ch = await createChannel(name.trim(), description.trim() || undefined, visibility)
       onCreated(ch)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create channel')
@@ -63,6 +64,30 @@ export default function CreateChannelModal({ onClose, onCreated }: Props) {
               rows={2}
               className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-emerald-600 resize-none"
             />
+          </div>
+          <div>
+            <label className="block text-xs text-zinc-400 mb-1.5">Visibility</label>
+            <div className="flex gap-2">
+              {([
+                { value: 'public' as const, icon: Globe, label: 'Public', desc: 'Anyone can join' },
+                { value: 'invite_only' as const, icon: UserPlus, label: 'Invite Only', desc: 'Visible, but must be invited' },
+                { value: 'private' as const, icon: Lock, label: 'Private', desc: 'Hidden from non-members' },
+              ]).map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setVisibility(opt.value)}
+                  className={`flex-1 flex flex-col items-center gap-1 px-2 py-2 rounded-lg border text-[11px] transition-colors ${
+                    visibility === opt.value
+                      ? 'border-emerald-600 bg-emerald-600/10 text-emerald-400'
+                      : 'border-zinc-700 bg-zinc-800 text-zinc-400 hover:border-zinc-600'
+                  }`}
+                >
+                  <opt.icon size={14} />
+                  <span className="font-medium">{opt.label}</span>
+                </button>
+              ))}
+            </div>
           </div>
           {error && <p className="text-red-400 text-xs">{error}</p>}
           <button

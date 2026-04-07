@@ -32,7 +32,8 @@ class ChannelMember(BaseModel):
     user_id: UUID
     name: str
     email: str
-    role: str
+    role: str  # user's global role
+    channel_role: str = "member"  # owner, moderator, member
     avatar_url: Optional[str] = None
     joined_at: datetime
 
@@ -60,6 +61,7 @@ class ChannelSummary(BaseModel):
     name: str
     slug: str
     description: Optional[str] = None
+    visibility: str = "public"
     member_count: int = 0
     unread_count: int = 0
     last_message_at: Optional[datetime] = None
@@ -72,11 +74,13 @@ class ChannelDetail(BaseModel):
     name: str
     slug: str
     description: Optional[str] = None
+    visibility: str = "public"
     is_archived: bool = False
     created_by: UUID
     created_at: datetime
     member_count: int = 0
     is_member: bool = False
+    my_role: Optional[str] = None  # current user's channel_role
     members: list[ChannelMember] = []
     messages: list[ChannelMessage] = []
 
@@ -84,6 +88,7 @@ class ChannelDetail(BaseModel):
 class CreateChannelRequest(BaseModel):
     name: str
     description: Optional[str] = None
+    visibility: str = "public"
 
 
 # ---------------------------------------------------------------------------
@@ -117,6 +122,7 @@ async def list_channels(
         rows = await conn.fetch(
             f"""
             SELECT ch.id, ch.name, ch.slug, ch.description,
+                   COALESCE(ch.visibility, 'public') AS visibility,
                    (SELECT COUNT(*) FROM channel_members WHERE channel_id = ch.id) AS member_count,
                    CASE WHEN cm.user_id IS NOT NULL THEN
                        (SELECT COUNT(*) FROM channel_messages msg
@@ -133,6 +139,7 @@ async def list_channels(
             FROM channels ch
             LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
             WHERE ch.company_id = $2 AND ch.is_archived = false
+              AND (COALESCE(ch.visibility, 'public') != 'private' OR cm.user_id IS NOT NULL)
             ORDER BY last_message_at DESC NULLS LAST, ch.created_at DESC
             """,
             current_user.id,
@@ -145,6 +152,7 @@ async def list_channels(
                 name=r["name"],
                 slug=r["slug"],
                 description=r["description"],
+                visibility=r["visibility"],
                 member_count=r["member_count"],
                 unread_count=r["unread_count"],
                 last_message_at=r["last_message_at"],
@@ -182,18 +190,20 @@ async def create_channel(
             suffix += 1
             slug = f"{base_slug}-{suffix}"
 
+        visibility = body.visibility if body.visibility in ("public", "private", "invite_only") else "public"
+
         row = await conn.fetchrow(
             """
-            INSERT INTO channels (company_id, name, slug, description, created_by)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING id, name, slug, description, is_archived, created_by, created_at
+            INSERT INTO channels (company_id, name, slug, description, created_by, visibility)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, name, slug, description, is_archived, created_by, created_at, visibility
             """,
-            company_id, name, slug, body.description, current_user.id,
+            company_id, name, slug, body.description, current_user.id, visibility,
         )
 
-        # Auto-join creator
+        # Auto-join creator as owner
         await conn.execute(
-            "INSERT INTO channel_members (channel_id, user_id) VALUES ($1, $2)",
+            "INSERT INTO channel_members (channel_id, user_id, role) VALUES ($1, $2, 'owner')",
             row["id"], current_user.id,
         )
 
@@ -202,11 +212,13 @@ async def create_channel(
             name=row["name"],
             slug=row["slug"],
             description=row["description"],
+            visibility=row["visibility"] or "public",
             is_archived=row["is_archived"],
             created_by=row["created_by"],
             created_at=row["created_at"],
             member_count=1,
             is_member=True,
+            my_role="owner",
             members=[],
             messages=[],
         )
@@ -332,22 +344,24 @@ async def get_channel(
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, name, slug, description, is_archived, created_by, created_at FROM channels WHERE id = $1 AND company_id = $2",
+            "SELECT id, name, slug, description, is_archived, created_by, created_at, COALESCE(visibility, 'public') AS visibility FROM channels WHERE id = $1 AND company_id = $2",
             channel_id, company_id,
         )
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found")
 
-        # Check membership
-        is_member = await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+        # Check membership + get role
+        my_membership = await conn.fetchrow(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
         )
+        is_member = my_membership is not None
+        my_role = my_membership["role"] if my_membership else None
 
         # Members
         members = await conn.fetch(
             f"""
-            SELECT cm.user_id, cm.joined_at, u.email, u.role, u.avatar_url,
+            SELECT cm.user_id, cm.joined_at, cm.role AS channel_role, u.email, u.role, u.avatar_url,
                    {_USER_NAME_EXPR} AS name
             FROM channel_members cm
             JOIN users u ON u.id = cm.user_id
@@ -389,15 +403,18 @@ async def get_channel(
             name=ch["name"],
             slug=ch["slug"],
             description=ch["description"],
+            visibility=ch["visibility"],
             is_archived=ch["is_archived"],
             created_by=ch["created_by"],
             created_at=ch["created_at"],
             member_count=len(members),
             is_member=is_member,
+            my_role=my_role,
             members=[
                 ChannelMember(
                     user_id=m["user_id"], name=m["name"], email=m["email"],
-                    role=m["role"], avatar_url=m["avatar_url"], joined_at=m["joined_at"],
+                    role=m["role"], channel_role=m["channel_role"] or "member",
+                    avatar_url=m["avatar_url"], joined_at=m["joined_at"],
                 )
                 for m in members
             ],
@@ -495,17 +512,20 @@ async def join_channel(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        ch = await conn.fetchval(
-            "SELECT id FROM channels WHERE id = $1 AND company_id = $2 AND is_archived = false",
+        ch = await conn.fetchrow(
+            "SELECT id, COALESCE(visibility, 'public') AS visibility FROM channels WHERE id = $1 AND company_id = $2 AND is_archived = false",
             channel_id, company_id,
         )
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found")
 
+        if ch["visibility"] in ("private", "invite_only"):
+            raise HTTPException(status_code=403, detail="This channel requires an invitation to join")
+
         await conn.execute(
             """
-            INSERT INTO channel_members (channel_id, user_id)
-            VALUES ($1, $2)
+            INSERT INTO channel_members (channel_id, user_id, role)
+            VALUES ($1, $2, 'member')
             ON CONFLICT (channel_id, user_id) DO NOTHING
             """,
             channel_id, current_user.id,
@@ -524,23 +544,25 @@ async def add_members(
     body: AddMembersRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Add members to a channel. Any current member can invite others from the same company."""
+    """Add members to a channel. Only owner, moderator, or platform admin can invite."""
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        # Verify channel exists + requester is a member
-        is_member = await conn.fetchval(
+        # Verify channel exists + requester has permission
+        member_row = await conn.fetchrow(
             """
-            SELECT EXISTS(
-                SELECT 1 FROM channels ch
-                JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $2
-                WHERE ch.id = $1 AND ch.company_id = $3
-            )
+            SELECT cm.role FROM channels ch
+            JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $2
+            WHERE ch.id = $1 AND ch.company_id = $3
             """,
             channel_id, current_user.id, company_id,
         )
-        if not is_member:
+        if not member_row and current_user.role != "admin":
             raise HTTPException(status_code=404, detail="Channel not found or not a member")
+
+        my_role = member_row["role"] if member_row else None
+        if current_user.role != "admin" and my_role not in ("owner", "moderator"):
+            raise HTTPException(status_code=403, detail="Only channel owners and moderators can add members")
 
         # Verify all user_ids belong to the same company
         for uid in body.user_ids:
@@ -561,8 +583,8 @@ async def add_members(
 
             await conn.execute(
                 """
-                INSERT INTO channel_members (channel_id, user_id)
-                VALUES ($1, $2)
+                INSERT INTO channel_members (channel_id, user_id, role)
+                VALUES ($1, $2, 'member')
                 ON CONFLICT (channel_id, user_id) DO NOTHING
                 """,
                 channel_id, uid,
@@ -664,11 +686,160 @@ async def leave_channel(
     channel_id: UUID,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Leave a channel."""
+    """Leave a channel. Owners must transfer ownership first."""
     async with get_connection() as conn:
+        member = await conn.fetchrow(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if member and member["role"] == "owner":
+            raise HTTPException(status_code=400, detail="Channel owners must transfer ownership before leaving")
+
         await conn.execute(
             "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
+        )
+
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Member management (kick, role change, ownership transfer)
+# ---------------------------------------------------------------------------
+
+
+class SetRoleRequest(BaseModel):
+    role: str  # "moderator" or "member"
+
+
+class TransferOwnershipRequest(BaseModel):
+    user_id: UUID
+
+
+@router.patch("/{channel_id}/members/{user_id}")
+async def set_member_role(
+    channel_id: UUID,
+    user_id: UUID,
+    body: SetRoleRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Change a member's channel role. Only the owner can promote/demote."""
+    if body.role not in ("moderator", "member"):
+        raise HTTPException(status_code=400, detail="Role must be 'moderator' or 'member'")
+
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role != "owner" and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the channel owner can change roles")
+
+        target = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, user_id,
+        )
+        if not target:
+            raise HTTPException(status_code=404, detail="User is not a member of this channel")
+        if target == "owner":
+            raise HTTPException(status_code=400, detail="Cannot change the owner's role. Use transfer-ownership instead.")
+
+        await conn.execute(
+            "UPDATE channel_members SET role = $3 WHERE channel_id = $1 AND user_id = $2",
+            channel_id, user_id, body.role,
+        )
+
+    return {"ok": True, "role": body.role}
+
+
+@router.delete("/{channel_id}/members/{user_id}")
+async def kick_member(
+    channel_id: UUID,
+    user_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Remove a member from a channel. Owner can kick anyone, moderator can kick members."""
+    if user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot kick yourself. Use /leave instead.")
+
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role not in ("owner", "moderator") and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only owners and moderators can remove members")
+
+        target_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, user_id,
+        )
+        if not target_role:
+            raise HTTPException(status_code=404, detail="User is not a member")
+        if target_role == "owner":
+            raise HTTPException(status_code=403, detail="Cannot kick the channel owner")
+        if target_role == "moderator" and my_role != "owner" and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the owner can remove moderators")
+
+        await conn.execute(
+            "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, user_id,
+        )
+
+        # Send notification
+        try:
+            company_id = await _get_company_id(current_user)
+            channel_name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", channel_id)
+            from ...matcha.services import notification_service as notif_svc
+            await notif_svc.create_notification(
+                user_id=user_id,
+                company_id=company_id,
+                type="channel_removed",
+                title=f"Removed from #{channel_name}",
+                body=f"You were removed from the channel #{channel_name}",
+                link="/work",
+            )
+        except Exception:
+            pass
+
+    return {"ok": True}
+
+
+@router.post("/{channel_id}/transfer-ownership")
+async def transfer_ownership(
+    channel_id: UUID,
+    body: TransferOwnershipRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Transfer channel ownership to another member."""
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role != "owner" and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the current owner can transfer ownership")
+
+        target = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, body.user_id,
+        )
+        if not target:
+            raise HTTPException(status_code=404, detail="Target user is not a member of this channel")
+
+        # Transfer: old owner → moderator, new owner → owner
+        await conn.execute(
+            "UPDATE channel_members SET role = 'moderator' WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        await conn.execute(
+            "UPDATE channel_members SET role = 'owner' WHERE channel_id = $1 AND user_id = $2",
+            channel_id, body.user_id,
+        )
+        # Update channels.created_by for consistency
+        await conn.execute(
+            "UPDATE channels SET created_by = $2 WHERE id = $1",
+            channel_id, body.user_id,
         )
 
     return {"ok": True}

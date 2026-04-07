@@ -5174,6 +5174,7 @@ async def init_db():
                 description TEXT,
                 created_by UUID NOT NULL REFERENCES users(id),
                 is_archived BOOLEAN DEFAULT false,
+                visibility VARCHAR(20) DEFAULT 'public',
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 updated_at TIMESTAMPTZ DEFAULT NOW(),
                 UNIQUE(company_id, slug)
@@ -5188,6 +5189,7 @@ async def init_db():
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                 channel_id UUID NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
                 user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                role VARCHAR(20) DEFAULT 'member',
                 joined_at TIMESTAMPTZ DEFAULT NOW(),
                 last_read_at TIMESTAMPTZ,
                 is_muted BOOLEAN DEFAULT false,
@@ -5216,6 +5218,15 @@ async def init_db():
         # Add attachments column if missing (for existing tables)
         await conn.execute("""
             ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'::jsonb
+        """)
+        # Channel permissions columns (for existing tables)
+        await conn.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'public'")
+        await conn.execute("ALTER TABLE channel_members ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'member'")
+        # Backfill: set channel creators as owners
+        await conn.execute("""
+            UPDATE channel_members cm SET role = 'owner'
+            FROM channels ch
+            WHERE cm.channel_id = ch.id AND cm.user_id = ch.created_by AND cm.role = 'member'
         """)
 
         # Risk flags (pre-computed by background analysis)

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon } from 'lucide-react'
-import { getChannel, joinChannel, leaveChannel, uploadChannelFiles } from '../../api/channels'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, MoreVertical } from 'lucide-react'
+import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
@@ -381,17 +381,54 @@ export default function ChannelView() {
 
         {/* Members sidebar */}
         {showMembers && (
-          <div className="w-56 border-l border-zinc-800 overflow-y-auto px-3 py-3 hidden sm:block">
+          <div className="w-64 border-l border-zinc-800 overflow-y-auto px-3 py-3 hidden sm:block">
             <h3 className="text-xs font-medium text-zinc-500 uppercase mb-2">
               Members ({channel?.member_count ?? 0})
             </h3>
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {channel?.members.map((m: ChannelMember) => {
                 const isOnline = onlineUsers.some((u) => u.id === m.user_id)
+                const canManage = channel.my_role === 'owner' || (channel.my_role === 'moderator' && m.channel_role === 'member')
+                const isMe = m.user_id === userId
                 return (
-                  <div key={m.user_id} className="flex items-center gap-2 py-1">
+                  <div key={m.user_id} className="group flex items-center gap-2 py-1.5 px-1 rounded hover:bg-zinc-800/30">
                     <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
-                    <span className="text-sm text-zinc-300 truncate">{m.name}</span>
+                    <span className="text-sm text-zinc-300 truncate flex-1">{m.name}</span>
+                    {m.channel_role === 'owner' && (
+                      <Crown size={12} className="text-amber-500 shrink-0" title="Owner" />
+                    )}
+                    {m.channel_role === 'moderator' && (
+                      <Shield size={12} className="text-blue-400 shrink-0" title="Moderator" />
+                    )}
+                    {!isMe && canManage && (
+                      <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0">
+                        {channel.my_role === 'owner' && m.channel_role !== 'owner' && (
+                          <button
+                            onClick={async () => {
+                              const newRole = m.channel_role === 'moderator' ? 'member' : 'moderator'
+                              await setMemberRole(channel.id, m.user_id, newRole)
+                              const data = await getChannel(channel.id)
+                              setChannel(data)
+                            }}
+                            className="p-0.5 text-zinc-500 hover:text-blue-400"
+                            title={m.channel_role === 'moderator' ? 'Remove moderator' : 'Make moderator'}
+                          >
+                            <Shield size={11} />
+                          </button>
+                        )}
+                        <button
+                          onClick={async () => {
+                            await kickMember(channel.id, m.user_id)
+                            const data = await getChannel(channel.id)
+                            setChannel(data)
+                          }}
+                          className="p-0.5 text-zinc-500 hover:text-red-400"
+                          title="Remove from channel"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )
               })}

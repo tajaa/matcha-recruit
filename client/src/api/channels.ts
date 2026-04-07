@@ -5,6 +5,7 @@ export interface ChannelSummary {
   name: string
   slug: string
   description: string | null
+  visibility: string
   member_count: number
   unread_count: number
   last_message_at: string | null
@@ -17,6 +18,7 @@ export interface ChannelMember {
   name: string
   email: string
   role: string
+  channel_role: string // owner, moderator, member
   avatar_url: string | null
   joined_at: string
 }
@@ -44,11 +46,13 @@ export interface ChannelDetail {
   name: string
   slug: string
   description: string | null
+  visibility: string
   is_archived: boolean
   created_by: string
   created_at: string
   member_count: number
   is_member: boolean
+  my_role: string | null // owner, moderator, member
   members: ChannelMember[]
   messages: ChannelMessage[]
 }
@@ -56,8 +60,8 @@ export interface ChannelDetail {
 export const listChannels = () =>
   api.get<ChannelSummary[]>('/channels')
 
-export const createChannel = (name: string, description?: string) =>
-  api.post<ChannelDetail>('/channels', { name, description })
+export const createChannel = (name: string, description?: string, visibility: string = 'public') =>
+  api.post<ChannelDetail>('/channels', { name, description, visibility })
 
 export const getChannel = (id: string) =>
   api.get<ChannelDetail>(`/channels/${id}`)
@@ -91,6 +95,15 @@ export async function uploadChannelFiles(channelId: string, files: File[]): Prom
   const data = await res.json()
   return data.attachments
 }
+
+export const kickMember = (channelId: string, userId: string) =>
+  api.delete(`/channels/${channelId}/members/${userId}`)
+
+export const setMemberRole = (channelId: string, userId: string, role: 'moderator' | 'member') =>
+  api.patch(`/channels/${channelId}/members/${userId}`, { role })
+
+export const transferOwnership = (channelId: string, userId: string) =>
+  api.post(`/channels/${channelId}/transfer-ownership`, { user_id: userId })
 
 export const searchInvitableUsers = (q: string, channelId?: string) =>
   api.get<{ id: string; name: string; email: string; role: string; avatar_url: string | null }[]>(
