@@ -39,11 +39,11 @@ class RegulationDef:
 
 
 # ---------------------------------------------------------------------------
-# CATEGORIES  (63 entries)
+# CATEGORIES  (79 entries)
 # ---------------------------------------------------------------------------
 
 CATEGORIES: List[ComplianceCategoryDef] = [
-    # ── Labor (12) ─────────────────────────────────────────────────────────
+    # ── Labor (28) ─────────────────────────────────────────────────────────
     ComplianceCategoryDef(
         key="minimum_wage", label="Minimum Wage", short_label="Min Wage",
         group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
@@ -90,6 +90,70 @@ CATEGORIES: List[ComplianceCategoryDef] = [
     ),
     ComplianceCategoryDef(
         key="anti_discrimination", label="Anti-Discrimination", short_label="Anti-Discrim",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="employee_classification", label="Employee Classification", short_label="Classification",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="i9_everify", label="I-9 & E-Verify", short_label="I-9/E-Verify",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="warn_act", label="WARN Act (Plant Closing & Layoffs)", short_label="WARN Act",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="cobra", label="COBRA & Health Coverage Continuation", short_label="COBRA",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="eeo_reporting", label="EEO Reporting & Affirmative Action", short_label="EEO/AA",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="pay_transparency", label="Pay Transparency & Equity", short_label="Pay Transparency",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="background_checks", label="Background Checks & Ban the Box", short_label="Background Checks",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="drug_testing", label="Drug & Alcohol Testing", short_label="Drug Testing",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="non_compete", label="Non-Compete & Restrictive Covenants", short_label="Non-Compete",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="whistleblower", label="Whistleblower Protections", short_label="Whistleblower",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="userra", label="USERRA (Military Reemployment)", short_label="USERRA",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="garnishment", label="Wage Garnishment & Attachment", short_label="Garnishment",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="erisa_benefits", label="ERISA & Benefits Compliance", short_label="ERISA",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="pregnancy_accommodation", label="Pregnancy & Lactation Accommodation", short_label="Pregnancy Accom",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="equal_pay", label="Equal Pay Act & Pay Equity", short_label="Equal Pay",
+        group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
+    ),
+    ComplianceCategoryDef(
+        key="nlra_organizing", label="NLRA & Union Organizing Rights", short_label="NLRA/Union",
         group="labor", industry_tag="", research_mode="default_sweep", docx_section=None,
     ),
 
