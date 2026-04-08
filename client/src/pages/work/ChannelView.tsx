@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, MoreVertical } from 'lucide-react'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield } from 'lucide-react'
 import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
@@ -395,10 +395,10 @@ export default function ChannelView() {
                     <span className={`w-2 h-2 rounded-full shrink-0 ${isOnline ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
                     <span className="text-sm text-zinc-300 truncate flex-1">{m.name}</span>
                     {m.channel_role === 'owner' && (
-                      <Crown size={12} className="text-amber-500 shrink-0" title="Owner" />
+                      <Crown size={12} className="text-amber-500 shrink-0" aria-label="Owner" />
                     )}
                     {m.channel_role === 'moderator' && (
-                      <Shield size={12} className="text-blue-400 shrink-0" title="Moderator" />
+                      <Shield size={12} className="text-blue-400 shrink-0" aria-label="Moderator" />
                     )}
                     {!isMe && canManage && (
                       <div className="opacity-0 group-hover:opacity-100 flex items-center gap-0.5 shrink-0">
