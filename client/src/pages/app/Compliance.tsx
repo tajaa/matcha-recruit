@@ -61,6 +61,10 @@ export default function Compliance() {
     const paramTab = searchParams.get('tab') as Tab | null
     if (paramLocationId && data.locations.find((l) => l.id === paramLocationId)) {
       setSelectedId(paramLocationId)
+      // Auto-switch to a location-contextual tab so the detail panel is visible
+      if (!paramTab) {
+        setTab('requirements')
+      }
     }
     if (paramTab && TABS.some((t) => t.value === paramTab)) {
       setTab(paramTab)

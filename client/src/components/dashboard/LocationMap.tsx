@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ComposableMap, Geographies, Geography, Marker } from 'react-simple-maps'
 import type { BusinessLocation, HeatMapCell } from '../../types/dashboard'
 
@@ -176,7 +177,23 @@ function shortLabel(name: string): string {
   return city.toUpperCase()
 }
 
+/* SVG grid pattern rendered inline as a <defs> element */
+function GridPattern() {
+  return (
+    <defs>
+      <pattern id="hud-grid" width="40" height="40" patternUnits="userSpaceOnUse">
+        <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#a1a1aa" strokeWidth="0.25" opacity="0.12" />
+      </pattern>
+      <pattern id="hud-grid-lg" width="200" height="200" patternUnits="userSpaceOnUse">
+        <rect width="200" height="200" fill="url(#hud-grid)" />
+        <path d="M 200 0 L 0 0 0 200" fill="none" stroke="#a1a1aa" strokeWidth="0.5" opacity="0.08" />
+      </pattern>
+    </defs>
+  )
+}
+
 export function LocationMap({ locations, heatMap }: Props) {
+  const navigate = useNavigate()
   const [tooltip, setTooltip] = useState<{ name: string; tier: Tier } | null>(null)
 
   const { severityMap, globalFloor } = useMemo(() => {
@@ -205,7 +222,7 @@ export function LocationMap({ locations, heatMap }: Props) {
 
   const dots = useMemo(() => {
     const tierOrder: Record<Tier, number> = { critical: 0, high: 1, medium: 2, clear: 3 }
-    const seen = new Map<string, { name: string; coords: [number, number]; tier: Tier; index: number }>()
+    const seen = new Map<string, { id: string; name: string; coords: [number, number]; tier: Tier; index: number }>()
     locations.forEach((loc, i) => {
       const city = loc.city || parseLocationName(loc.name).city
       const state = loc.state || parseLocationName(loc.name).state
@@ -216,7 +233,7 @@ export function LocationMap({ locations, heatMap }: Props) {
       const tier = tierOrder[specific] <= tierOrder[globalFloor] ? specific : globalFloor
       const existing = seen.get(key)
       if (!existing || tierOrder[tier] < tierOrder[existing.tier]) {
-        seen.set(key, { name: loc.name, coords, tier, index: i })
+        seen.set(key, { id: loc.id, name: loc.name, coords, tier, index: i })
       }
     })
     return [...seen.entries()].map(([, v], i) => ({ ...v, index: i }))
@@ -226,17 +243,23 @@ export function LocationMap({ locations, heatMap }: Props) {
 
   return (
     <div className="mb-5">
+      {/* Header row */}
       <div className="flex items-center gap-4 mb-2.5">
-        <h3 className="text-[11px] font-medium text-vsc-text/50 uppercase tracking-wider">Location Coverage</h3>
-        <div className="flex items-center gap-3 text-[9px] text-vsc-text/40">
+        <h3
+          className="text-[11px] font-medium uppercase tracking-wider"
+          style={{ color: '#a1a1aa', opacity: 0.7, fontFamily: '"Space Mono", "SF Mono", monospace', letterSpacing: '0.2em' }}
+        >
+          Location Coverage
+        </h3>
+        <div className="flex items-center gap-3 text-[9px]" style={{ color: '#a1a1aa', opacity: 0.5, fontFamily: '"Space Mono", monospace' }}>
           <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full" style={{ background: TIER_COLOR.critical }} />Critical/High
+            <span className="w-2 h-2 rounded-full" style={{ background: TIER_COLOR.critical, boxShadow: `0 0 6px ${TIER_COLOR.critical}` }} />CRITICAL
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full" style={{ background: TIER_COLOR.medium }} />Medium
+            <span className="w-2 h-2 rounded-full" style={{ background: TIER_COLOR.medium, boxShadow: `0 0 6px ${TIER_COLOR.medium}` }} />MEDIUM
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full" style={{ background: TIER_COLOR.clear }} />All Clear
+            <span className="w-2 h-2 rounded-full" style={{ background: TIER_COLOR.clear, boxShadow: `0 0 6px ${TIER_COLOR.clear}` }} />CLEAR
           </span>
         </div>
       </div>
@@ -244,8 +267,59 @@ export function LocationMap({ locations, heatMap }: Props) {
       {/* Map container */}
       <div
         className="relative rounded-xl overflow-hidden select-none"
-        style={{ background: '#0a0a0a' }}
+        style={{ background: '#000000' }}
       >
+        {/* Vignette overlay */}
+        <div
+          className="absolute inset-0 pointer-events-none z-10"
+          style={{
+            background: 'radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.7) 100%)',
+          }}
+        />
+
+        {/* Scan-line overlay */}
+        <div
+          className="absolute inset-0 pointer-events-none z-10"
+          style={{
+            backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(255,255,255,0.008) 2px, rgba(255,255,255,0.008) 4px)',
+            backgroundSize: '100% 4px',
+          }}
+        />
+
+        {/* Corner brackets — HUD frame */}
+        <div className="absolute top-2 left-2 w-4 h-4 border-t border-l z-20" style={{ borderColor: 'rgba(161,161,170,0.3)' }} />
+        <div className="absolute top-2 right-2 w-4 h-4 border-t border-r z-20" style={{ borderColor: 'rgba(161,161,170,0.3)' }} />
+        <div className="absolute bottom-2 left-2 w-4 h-4 border-b border-l z-20" style={{ borderColor: 'rgba(161,161,170,0.3)' }} />
+        <div className="absolute bottom-2 right-2 w-4 h-4 border-b border-r z-20" style={{ borderColor: 'rgba(161,161,170,0.3)' }} />
+
+        {/* Coordinate readout — top-right */}
+        <div
+          className="absolute top-3 right-8 z-20 pointer-events-none"
+          style={{
+            fontFamily: '"Space Mono", monospace',
+            fontSize: '8px',
+            color: '#a1a1aa',
+            opacity: 0.3,
+            letterSpacing: '0.15em',
+          }}
+        >
+          CONUS // ALBERS-USA
+        </div>
+
+        {/* Node count — bottom-left */}
+        <div
+          className="absolute bottom-3 left-8 z-20 pointer-events-none"
+          style={{
+            fontFamily: '"Space Mono", monospace',
+            fontSize: '8px',
+            color: '#a1a1aa',
+            opacity: 0.3,
+            letterSpacing: '0.15em',
+          }}
+        >
+          NODES: {dots.length}
+        </div>
+
         <ComposableMap
           projection="geoAlbersUsa"
           projectionConfig={{ scale: 600 }}
@@ -253,19 +327,24 @@ export function LocationMap({ locations, heatMap }: Props) {
           height={350}
           style={{ width: '100%', height: 'auto' }}
         >
-          {/* State boundaries — wireframe style */}
+          {/* Grid background */}
+          <GridPattern />
+          <rect x="0" y="0" width="800" height="350" fill="url(#hud-grid-lg)" />
+
+          {/* State boundaries — wireframe mesh style matching globe */}
           <Geographies geography={GEO_URL}>
             {({ geographies }) =>
               geographies.map((geo) => (
                 <Geography
                   key={geo.rpiProperties?.name || geo.id}
                   geography={geo}
-                  fill="rgba(255,255,255,0.015)"
+                  fill="rgba(161,161,170,0.02)"
                   stroke="#a1a1aa"
-                  strokeWidth={0.3}
+                  strokeWidth={0.35}
+                  strokeOpacity={0.35}
                   style={{
                     default: { outline: 'none' },
-                    hover: { outline: 'none', fill: 'rgba(255,255,255,0.04)' },
+                    hover: { outline: 'none', fill: 'rgba(161,161,170,0.06)', stroke: '#a1a1aa', strokeWidth: 0.5, strokeOpacity: 0.5 },
                     pressed: { outline: 'none' },
                   }}
                 />
@@ -283,43 +362,77 @@ export function LocationMap({ locations, heatMap }: Props) {
                 coordinates={dot.coords}
                 onMouseEnter={() => setTooltip({ name: dot.name, tier: dot.tier })}
                 onMouseLeave={() => setTooltip(null)}
+                onClick={() => navigate(`/app/compliance?location_id=${dot.id}`)}
+                style={{ cursor: 'pointer' }}
               >
-                {/* Pulse halo */}
-                <circle r={12} fill={color} opacity={0.15}>
+                {/* Outer pulse halo */}
+                <circle r={12} fill={color} opacity={0.1}>
                   <animate
                     attributeName="r"
-                    from="6"
-                    to="18"
-                    dur="2.6s"
-                    begin={`${(dot.index % 7) * 0.38}s`}
+                    from="5"
+                    to="20"
+                    dur="3s"
+                    begin={`${(dot.index % 7) * 0.42}s`}
                     repeatCount="indefinite"
                   />
                   <animate
                     attributeName="opacity"
-                    from="0.4"
+                    from="0.35"
                     to="0"
-                    dur="2.6s"
-                    begin={`${(dot.index % 7) * 0.38}s`}
+                    dur="3s"
+                    begin={`${(dot.index % 7) * 0.42}s`}
                     repeatCount="indefinite"
                   />
                 </circle>
+
+                {/* Secondary pulse — staggered for depth */}
+                <circle r={8} fill="none" stroke={color} strokeWidth={0.4} opacity={0.1}>
+                  <animate
+                    attributeName="r"
+                    from="4"
+                    to="14"
+                    dur="3s"
+                    begin={`${(dot.index % 7) * 0.42 + 1.5}s`}
+                    repeatCount="indefinite"
+                  />
+                  <animate
+                    attributeName="opacity"
+                    from="0.3"
+                    to="0"
+                    dur="3s"
+                    begin={`${(dot.index % 7) * 0.42 + 1.5}s`}
+                    repeatCount="indefinite"
+                  />
+                </circle>
+
                 {/* Outer ring */}
-                <circle r={6} fill="none" stroke={color} strokeWidth={0.5} opacity={0.4} />
-                {/* Inner dot */}
-                <circle r={3} fill={color} style={{ filter: `drop-shadow(0 0 4px ${color})` }} />
-                {/* Connection line */}
-                <line x1={0} y1={-4} x2={0} y2={-16} stroke={color} strokeWidth={0.5} opacity={0.4} />
+                <circle r={6} fill="none" stroke={color} strokeWidth={0.5} opacity={0.35} />
+
+                {/* Inner dot — glowing core */}
+                <circle
+                  r={2.5}
+                  fill={color}
+                  style={{ filter: `drop-shadow(0 0 6px ${color}) drop-shadow(0 0 2px ${color})` }}
+                />
+
+                {/* Connection line upward */}
+                <line x1={0} y1={-4} x2={0} y2={-18} stroke={color} strokeWidth={0.4} opacity={0.35} />
+
+                {/* Small tick at top of connection line */}
+                <line x1={-2} y1={-18} x2={2} y2={-18} stroke={color} strokeWidth={0.3} opacity={0.25} />
+
                 {/* City label */}
                 <text
-                  y={-20}
+                  y={-22}
                   textAnchor="middle"
                   style={{
                     fontFamily: '"Space Mono", "SF Mono", monospace',
-                    fontSize: '7px',
+                    fontSize: '6.5px',
                     fontWeight: 400,
                     fill: '#ffffff',
-                    opacity: 0.7,
-                    letterSpacing: '0.18em',
+                    opacity: 0.75,
+                    letterSpacing: '0.22em',
+                    filter: 'drop-shadow(0 0 3px rgba(255,255,255,0.25))',
                   }}
                 >
                   {label}
@@ -332,16 +445,22 @@ export function LocationMap({ locations, heatMap }: Props) {
         {/* Tooltip overlay */}
         {tooltip && (
           <div
-            className="fixed z-50 pointer-events-none rounded border border-zinc-700/60 bg-zinc-900/95 px-2.5 py-1.5 text-[10px] text-white whitespace-nowrap font-mono backdrop-blur-sm"
+            className="fixed z-50 pointer-events-none rounded px-3 py-1.5 whitespace-nowrap backdrop-blur-sm"
             style={{
               left: 'var(--mouse-x, 50%)',
               top: 'var(--mouse-y, 50%)',
               transform: 'translate(-50%, -140%)',
+              background: 'rgba(0,0,0,0.9)',
+              border: '1px solid rgba(161,161,170,0.25)',
+              fontFamily: '"Space Mono", monospace',
+              fontSize: '10px',
+              color: '#ffffff',
+              letterSpacing: '0.1em',
             }}
           >
-            {tooltip.name}
+            {tooltip.name.toUpperCase()}
             {tooltip.tier !== 'clear' && (
-              <span className="ml-1.5 uppercase tracking-wider text-[9px]" style={{ color: dotColor(tooltip.tier) }}>
+              <span className="ml-2 uppercase tracking-wider text-[9px]" style={{ color: dotColor(tooltip.tier) }}>
                 [{tooltip.tier}]
               </span>
             )}

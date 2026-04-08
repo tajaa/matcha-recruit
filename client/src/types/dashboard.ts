@@ -197,6 +197,7 @@ export interface HeatMapCell {
 }
 
 export interface BusinessLocation {
+  id: string
   name: string
   city: string
   state: string

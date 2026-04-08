@@ -41,3 +41,10 @@ body {
   70%  { transform: scale(2.8); opacity: 0; }
   100% { transform: scale(2.8); opacity: 0; }
 }
+
+@keyframes map-scan {
+  0%   { left: -2%; opacity: 0; }
+  3%   { opacity: 1; }
+  97%  { opacity: 1; }
+  100% { left: 102%; opacity: 0; }
+}

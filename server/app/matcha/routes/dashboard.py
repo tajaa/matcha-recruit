@@ -386,6 +386,7 @@ class HeatMapCell(BaseModel):
 
 
 class BusinessLocationSummary(BaseModel):
+    id: str
     name: str
     city: str
     state: str
@@ -813,7 +814,8 @@ async def get_dashboard_flags(
         analyzed_at_val = rows[0]["analyzed_at"] if rows else None
 
         loc_rows = await conn.fetch(
-            """SELECT COALESCE(name, CONCAT(city, ', ', state)) AS display_name,
+            """SELECT id::text,
+                      COALESCE(name, CONCAT(city, ', ', state)) AS display_name,
                       COALESCE(city, '') AS city,
                       COALESCE(state, '') AS state
                FROM business_locations
@@ -859,7 +861,7 @@ async def get_dashboard_flags(
     ]
 
     all_locations = [
-        BusinessLocationSummary(name=r["display_name"], city=r["city"], state=r["state"])
+        BusinessLocationSummary(id=r["id"], name=r["display_name"], city=r["city"], state=r["state"])
         for r in loc_rows
     ]
 
