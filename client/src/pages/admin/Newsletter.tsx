@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { Loader2, Plus, Send, Trash2, FileText, Search } from 'lucide-react'
+import { useEffect, useState, useRef } from 'react'
+import { Loader2, Plus, Send, Trash2, FileText, Search, Image as ImageIcon, Paperclip } from 'lucide-react'
 import { api } from '../../api/client'
+import SectionEditor from '../../components/matcha-work/SectionEditor'
 
 type Subscriber = {
   id: string; email: string; name: string | null; source: string
@@ -237,8 +238,31 @@ export default function NewsletterAdmin() {
             <input value={composeSubject} onChange={(e) => setComposeSubject(e.target.value)} placeholder="Email subject..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
           </div>
           <div>
-            <label className="block text-xs text-zinc-400 mb-1">Content (HTML)</label>
-            <textarea value={composeHtml} onChange={(e) => setComposeHtml(e.target.value)} rows={15} placeholder="<h2>Hello!</h2><p>Your weekly HR update...</p>" className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500 resize-y font-mono" />
+            <label className="block text-xs text-zinc-400 mb-1">Content</label>
+            <div className="rounded-lg border border-zinc-700 overflow-hidden" style={{ background: '#1e1e1e' }}>
+              <SectionEditor
+                content={composeHtml}
+                onUpdate={(html) => setComposeHtml(html)}
+                onImageUpload={async (file) => {
+                  const BASE = import.meta.env.VITE_API_URL ?? '/api'
+                  const token = localStorage.getItem('matcha_access_token')
+                  const form = new FormData()
+                  form.append('file', file)
+                  try {
+                    const res = await fetch(`${BASE}/admin/newsletter/media/upload`, {
+                      method: 'POST',
+                      headers: token ? { Authorization: `Bearer ${token}` } : {},
+                      body: form,
+                    })
+                    if (!res.ok) return null
+                    const data = await res.json()
+                    return data.url
+                  } catch {
+                    return null
+                  }
+                }}
+              />
+            </div>
           </div>
           <div className="flex gap-2">
             {!editingId ? (

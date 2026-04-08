@@ -4,7 +4,9 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import os
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, EmailStr
 
 from ..dependencies import get_current_user, require_admin
@@ -198,6 +200,33 @@ async def send_newsletter(
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+_ALLOWED_MEDIA_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".mp4", ".mov", ".pdf"}
+_MAX_MEDIA_SIZE = 10 * 1024 * 1024  # 10 MB
+
+
+@admin_router.post("/media/upload")
+async def upload_newsletter_media(
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Upload an image/video/file for use in newsletter content. Returns the CDN URL."""
+    from ..services.storage import get_storage
+
+    file_bytes = await file.read()
+    filename = file.filename or "upload"
+    ct = file.content_type or "application/octet-stream"
+    ext = os.path.splitext(filename)[1].lower()
+
+    if ext not in _ALLOWED_MEDIA_EXT:
+        raise HTTPException(status_code=400, detail=f"File type not allowed: {ext}")
+    if len(file_bytes) > _MAX_MEDIA_SIZE:
+        raise HTTPException(status_code=400, detail="File too large (max 10MB)")
+
+    storage = get_storage()
+    url = await storage.upload_file(file_bytes, filename, prefix="newsletter", content_type=ct)
+    return {"url": url, "filename": filename, "content_type": ct, "size": len(file_bytes)}
 
 
 @admin_router.delete("/newsletters/{newsletter_id}")
