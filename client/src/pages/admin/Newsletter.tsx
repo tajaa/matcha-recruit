@@ -228,7 +228,7 @@ export default function NewsletterAdmin() {
 
       {/* Compose tab */}
       {tab === 'compose' && (
-        <div className="space-y-4 max-w-2xl">
+        <div className="space-y-4 max-w-5xl">
           <div>
             <label className="block text-xs text-zinc-400 mb-1">Title</label>
             <input value={composeTitle} onChange={(e) => setComposeTitle(e.target.value)} placeholder="Newsletter title..." className="w-full px-3 py-2 rounded-lg border border-zinc-700 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-500" />
