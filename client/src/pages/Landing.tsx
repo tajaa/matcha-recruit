@@ -6,7 +6,8 @@ import { AsciiHalftone } from '../components/AsciiHalftone'
 import { GlitchText } from '../components/GlitchText'
 import { PricingContactModal } from '../components/PricingContactModal'
 import { JurisdictionCascade } from '../components/landing/JurisdictionCascade'
-import { SignalMonitor } from '../components/landing/SignalMonitor'
+import { SignalMonitor as _SignalMonitor } from '../components/landing/SignalMonitor'
+import { MatchaWorkMockup } from '../components/landing/MatchaWorkMockup'
 import { MonteCarloDistribution } from '../components/landing/MonteCarloDistribution'
 import { TimelineConstructor } from '../components/landing/TimelineConstructor'
 import { PatternGrid } from '../components/landing/PatternGrid'
@@ -26,13 +27,14 @@ const SECTIONS = [
     desc: 'Agentic jurisdiction research across federal, state, and local levels. Chain-of-reasoning compliance querying walks through regulatory logic step by step — citing sources, applying preemption rules, and surfacing gaps before returning a final answer.',
     graphic: JurisdictionCascade,
   },
-  {
-    category: 'COMPLIANCE & LEGAL',
-    accent: '#f59e0b',
-    title: 'Legislative Tracker',
-    desc: 'Continuous monitoring of regulatory changes with pattern detection for coordinated legislative activity across jurisdictions. Real-time signal processing flags relevant changes before they become compliance gaps.',
-    graphic: SignalMonitor,
-  },
+  // Legislative Tracker — muted for now
+  // {
+  //   category: 'COMPLIANCE & LEGAL',
+  //   accent: '#f59e0b',
+  //   title: 'Legislative Tracker',
+  //   desc: 'Continuous monitoring of regulatory changes with pattern detection for coordinated legislative activity across jurisdictions. Real-time signal processing flags relevant changes before they become compliance gaps.',
+  //   graphic: _SignalMonitor,
+  // },
   {
     category: 'COMPLIANCE & LEGAL',
     accent: '#10b981',
@@ -61,6 +63,13 @@ const SECTIONS = [
     desc: '9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before any separation decision. Generates a narrative memo suitable for counsel review.',
     graphic: RadarChart,
   },
+  {
+    category: 'COLLABORATION',
+    accent: '#10b981',
+    title: 'Matcha Work',
+    desc: 'Internal collaboration hub with real-time channels, direct messaging, and team workspaces. Threaded conversations keep context organized across departments — HR, legal, compliance, and operations all in one secure platform.',
+    graphic: MatchaWorkMockup,
+  },
 ]
 
 
@@ -69,16 +78,16 @@ export default function Landing() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
 
   return (
-    <div className="relative bg-zinc-900 text-zinc-100 overflow-x-hidden">
+    <div className="relative bg-zinc-900 text-zinc-100 overflow-x-hidden snap-y snap-proximity h-screen overflow-y-auto">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <div className="relative z-10">
         {/* Nav */}
         <LandingNav onPricingClick={() => setIsPricingOpen(true)} />
 
         {/* Hero */}
-        <div className="relative pt-16">
+        <div className="relative pt-16 snap-start min-h-screen">
           <AsciiHalftone />
-        <section className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-[80vh] sm:min-h-[90vh] flex items-center py-12 sm:py-0">
+        <section className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-screen flex items-center py-12 sm:py-0">
           {/* System tag */}
           <div className="absolute top-8 left-8 text-[11px] text-zinc-600 border border-zinc-700/40 px-3 py-1.5 rounded-sm">
             SYSTEM CORE // OFFLINE MODE
@@ -162,11 +171,11 @@ export default function Landing() {
 
         {/* ── Feature Sections ─────────────────────────────────── */}
         {SECTIONS.map((section, idx) => (
-          <FeatureSectionItem key={section.title} section={section} idx={idx} />
+          <FeatureSectionItem key={section.title} section={section} idx={idx} isLast={idx === SECTIONS.length - 1} />
         ))}
 
         {/* Footer */}
-        <footer className="border-t border-zinc-700/50 py-6 px-8">
+        <footer className="border-t border-zinc-700/50 py-6 px-8 snap-start">
           <div className="flex items-center justify-between max-w-7xl mx-auto">
             <p className="text-[10px] text-zinc-600 uppercase">
               &copy; {new Date().getFullYear()} Matcha Systems Inc.

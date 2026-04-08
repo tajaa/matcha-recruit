@@ -1,6 +1,15 @@
 export const SCAN_LINE_BG = 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(161,161,170,0.03) 2px, rgba(161,161,170,0.03) 4px)'
 export const DOT_GRID_BG = 'radial-gradient(circle, rgba(161,161,170,0.4) 1px, transparent 1px)'
 
+// Static wireframe mesh — mimics the AsciiHalftone hero texture as pure CSS
+export const WIRE_MESH_BG = [
+  'linear-gradient(rgba(161,161,170,0.06) 1px, transparent 1px)',
+  'linear-gradient(90deg, rgba(161,161,170,0.06) 1px, transparent 1px)',
+  'linear-gradient(45deg, rgba(161,161,170,0.03) 1px, transparent 1px)',
+  'linear-gradient(-45deg, rgba(161,161,170,0.03) 1px, transparent 1px)',
+].join(', ')
+export const WIRE_MESH_SIZE = '20px 20px, 20px 20px, 28px 28px, 28px 28px'
+
 export const _wave = (freq: number, amp: number, phase: number) =>
   Array.from({ length: 80 }, (_, i) => {
     const x = (i / 79) * 100

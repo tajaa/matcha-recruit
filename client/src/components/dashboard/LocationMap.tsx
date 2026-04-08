@@ -363,7 +363,7 @@ export function LocationMap({ locations, heatMap }: Props) {
                 onMouseEnter={() => setTooltip({ name: dot.name, tier: dot.tier })}
                 onMouseLeave={() => setTooltip(null)}
                 onClick={() => navigate(`/app/compliance?location_id=${dot.id}`)}
-                style={{ cursor: 'pointer' }}
+                style={{ default: { cursor: 'pointer' }, hover: { cursor: 'pointer' }, pressed: { cursor: 'pointer' } }}
               >
                 {/* Outer pulse halo */}
                 <circle r={12} fill={color} opacity={0.1}>
