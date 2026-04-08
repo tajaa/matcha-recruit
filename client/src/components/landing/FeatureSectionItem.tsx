@@ -67,6 +67,7 @@ export function FeatureSectionItem({ section, idx, isLast }: { section: Section,
 
           <motion.p
             className="text-base text-zinc-400 leading-relaxed max-w-md"
+            style={{ fontFamily: "'Inter', sans-serif" }}
             initial={false}
             animate={isInView ? { opacity: 1, y: 0 } : { opacity: 0, y: 12 }}
             transition={{ ...SPRING, delay: 0.18 }}

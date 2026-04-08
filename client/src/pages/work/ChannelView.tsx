@@ -180,20 +180,25 @@ export default function ChannelView() {
     )
   }
 
-  // Not a member — show join prompt
+  // Not a member — show join prompt or invite-only message
   if (!isMember && !error) {
+    const isPublic = !channel?.visibility || channel.visibility === 'public'
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
         <Hash size={48} className="text-zinc-600" />
-        <p className="text-zinc-400 text-sm">You're not a member of this channel</p>
-        <button
-          onClick={handleJoin}
-          disabled={joining}
-          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
-        >
-          {joining ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
-          Join Channel
-        </button>
+        <p className="text-zinc-400 text-sm">
+          {isPublic ? "You're not a member of this channel" : "This channel requires an invitation to join"}
+        </p>
+        {isPublic && (
+          <button
+            onClick={handleJoin}
+            disabled={joining}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+          >
+            {joining ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+            Join Channel
+          </button>
+        )}
         <button onClick={() => navigate('/work')} className="text-zinc-500 text-xs hover:text-zinc-300">
           Back to Matcha Work
         </button>
@@ -233,13 +238,15 @@ export default function ChannelView() {
               {onlineUsers.length} online
             </span>
           )}
-          <button
-            onClick={() => setShowAddMembers(true)}
-            className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-emerald-400"
-            title="Add members"
-          >
-            <UserPlus size={16} />
-          </button>
+          {channel?.my_role && ['owner', 'moderator'].includes(channel.my_role) && (
+            <button
+              onClick={() => setShowAddMembers(true)}
+              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-emerald-400"
+              title="Add members"
+            >
+              <UserPlus size={16} />
+            </button>
+          )}
           <button
             onClick={() => setShowMembers(!showMembers)}
             className={`p-1.5 rounded hover:bg-zinc-800 ${showMembers ? 'text-emerald-400' : 'text-zinc-500'}`}
@@ -247,13 +254,15 @@ export default function ChannelView() {
           >
             <Users size={16} />
           </button>
-          <button
-            onClick={handleLeave}
-            className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-red-400"
-            title="Leave channel"
-          >
-            <LogOut size={16} />
-          </button>
+          {channel?.my_role !== 'owner' && (
+            <button
+              onClick={handleLeave}
+              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-red-400"
+              title="Leave channel"
+            >
+              <LogOut size={16} />
+            </button>
+          )}
         </div>
       </div>
 

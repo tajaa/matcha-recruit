@@ -14,6 +14,7 @@ import { PatternGrid } from "../components/landing/PatternGrid";
 import { RadarChart } from "../components/landing/RadarChart";
 
 import { FeatureSectionItem } from "../components/landing/FeatureSectionItem";
+import { ComplianceTicker } from "../components/landing/ComplianceTicker";
 
 const ParticleSphere = lazy(() => import("../components/ParticleSphere"));
 
@@ -23,7 +24,7 @@ const SECTIONS = [
     category: "COMPLIANCE & LEGAL",
     accent: "#10b981",
     title: "Compliance Engine",
-    desc: "Agentic jurisdiction research across federal, state, and local levels. Chain-of-reasoning compliance querying walks through regulatory logic step by step — citing sources, applying preemption rules, and surfacing gaps before returning a final answer.",
+    desc: "Agentic jurisdiction research across federal, state, and local regulatory frameworks. The system walks through regulatory logic step by step — citing sources, applying preemption rules, and surfacing gaps before they become audit findings or enforcement actions.",
     graphic: JurisdictionCascade,
   },
   // Legislative Tracker — muted for now
@@ -38,35 +39,35 @@ const SECTIONS = [
     category: "COMPLIANCE & LEGAL",
     accent: "#10b981",
     title: "Risk Assessment",
-    desc: "5-dimension live scoring with Monte Carlo simulation across 10,000 iterations, statistical anomaly detection on time-series metrics, and NAICS-benchmarked peer comparison sourced from BLS, OSHA, EEOC, and QCEW.",
+    desc: "5-dimension live scoring with Monte Carlo simulation across 10,000 iterations. Statistical anomaly detection on time-series metrics with NAICS-benchmarked peer comparison — so you know exactly where you stand relative to your industry before regulators tell you.",
     graphic: MonteCarloDistribution,
   },
   {
     category: "INVESTIGATIONS & RISK",
     accent: "#f59e0b",
     title: "ER Copilot",
-    desc: "Employment relations case management with agentic document analysis. Timeline construction and discrepancy detection. Encrypted PDF report generation with secure shared export links for external counsel.",
+    desc: "Employment relations case management that catches discrepancies human reviewers miss. Automated timeline construction, document analysis, and encrypted PDF reports ready for counsel — turning weeks of investigation prep into hours.",
     graphic: TimelineConstructor,
   },
   {
     category: "INVESTIGATIONS & RISK",
     accent: "#f59e0b",
     title: "Incident Reports",
-    desc: "OSHA 300 and 300A auto-generation, anonymous reporting, and trend analytics with pattern detection across locations. Covers safety, behavioral, and compliance incidents.",
+    desc: "OSHA 300/300A auto-generation, anonymous reporting, and cross-location pattern detection. Surface systemic issues before they become pattern-or-practice investigations — the kind that led to DOJ settlements at companies like National Mentor Holdings.",
     graphic: PatternGrid,
   },
   {
     category: "INVESTIGATIONS & RISK",
     accent: "#f59e0b",
     title: "Pre-Termination Intel",
-    desc: "9-dimension agentic risk assessment scanning legal, compliance, and organizational factors before any separation decision. Generates a narrative memo suitable for counsel review.",
+    desc: "9-dimension risk assessment scanning legal, compliance, and organizational factors before any separation. The system connects protected activity, pending complaints, and regulatory exposure that decision-makers typically can't see — generating a counsel-ready memo before the decision is made, not after the filing.",
     graphic: RadarChart,
   },
   {
     category: "COLLABORATION",
     accent: "#10b981",
     title: "Matcha Work",
-    desc: "Internal collaboration hub with real-time channels, direct messaging, and team workspaces. Threaded conversations keep context organized across departments — HR, legal, compliance, and operations all in one secure platform.",
+    desc: "Secure internal collaboration where HR, legal, compliance, and operations share context in real time. Threaded channels, direct messaging, and document sharing — so the cross-functional decisions that create or prevent liability happen with full visibility, not in disconnected email chains.",
     graphic: MatchaWorkMockup,
   },
 ];
@@ -84,8 +85,11 @@ export default function Landing() {
         {/* Nav */}
         <LandingNav onPricingClick={() => setIsPricingOpen(true)} />
 
+        {/* Compliance Ticker */}
+        <ComplianceTicker />
+
         {/* Hero */}
-        <div className="relative pt-16 md:snap-start min-h-[100svh]">
+        <div className="relative pt-[84px] md:snap-start min-h-[100svh]">
           <AsciiHalftone />
           <section className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-[100svh] flex items-center py-20 sm:py-0">
             {/* System tag */}
@@ -194,40 +198,41 @@ export default function Landing() {
           id="about"
           className="relative min-h-[100svh] md:min-h-screen flex items-center md:snap-start border-t border-zinc-700/40 px-4 sm:px-8 py-20 sm:py-24"
         >
-          <div className="max-w-4xl mx-auto">
-            <p className="text-xs tracking-[0.3em] uppercase text-zinc-500 mb-6">
+          <div className="max-w-4xl mx-auto" style={{ fontFamily: "'Inter', sans-serif" }}>
+            <p className="text-xs font-medium tracking-[0.3em] uppercase text-zinc-500 mb-8">
               At The Core
             </p>
-            <h2 className="text-2xl sm:text-3xl lg:text-5xl font-bold text-zinc-100 leading-tight mb-6 sm:mb-8">
+            <h2 className="text-2xl sm:text-3xl lg:text-5xl font-semibold text-zinc-100 leading-[1.2] mb-8 sm:mb-10">
               Regulated companies don't fail from one bad decision — they
               collapse under{" "}
               <span className="text-amber-500">disconnected gaps</span> that
               compound into unsurvivable events.
             </h2>
-            <p className="text-base sm:text-lg text-zinc-400 leading-relaxed mb-5 sm:mb-6">
-              Compliance data, investigation records, credential tracking, and
-              HR decisions all live in separate systems. The people making
-              termination decisions can't see protected activity. The people
-              tracking credentials can't see compliance implications. Every one
-              of these gaps is a future claim nobody knows exists yet.
-            </p>
-            <p className="text-base sm:text-lg text-zinc-400 leading-relaxed mb-8 sm:mb-10">
-              Matcha closes every one of those gaps. One system where compliance
-              obligations, investigations, credentials, policies, and workforce
-              decisions are connected — so when someone is about to make a
-              decision that creates liability, the system catches it before it
-              becomes a filing.
-            </p>
-            <div className="h-px w-24 bg-gradient-to-r from-amber-500 to-transparent mb-10" />
-            <p className="text-sm text-zinc-500 max-w-2xl leading-relaxed mb-12">
+            <div className="space-y-5 mb-10 sm:mb-12">
+              <p className="text-base sm:text-lg text-zinc-400 leading-relaxed">
+                Compliance data, investigation records, credential tracking, and
+                HR decisions all live in separate systems. The people making
+                termination decisions can't see protected activity. The people
+                tracking credentials can't see compliance implications. Every one
+                of these gaps is a future claim nobody knows exists yet.
+              </p>
+              <p className="text-base sm:text-lg text-zinc-400 leading-relaxed">
+                Matcha closes every one of those gaps. One system where compliance
+                obligations, investigations, credentials, policies, and workforce
+                decisions are connected — so when someone is about to make a
+                decision that creates liability, the system catches it before it
+                becomes a filing.
+              </p>
+            </div>
+            <div className="h-px w-32 bg-gradient-to-r from-amber-500/60 to-transparent mb-10" />
+            <p className="text-sm text-zinc-500 max-w-2xl leading-relaxed mb-12" style={{ fontStyle: 'italic' }}>
               The companies that survive in regulated industries aren't the ones
               with the best lawyers. They're the ones whose systems make
               catastrophic mistakes structurally improbable.
             </p>
             <a
               href="/login"
-              className="inline-block uppercase text-sm tracking-[0.2em] px-10 py-3 border border-zinc-600 hover:border-zinc-400 text-zinc-300 hover:text-zinc-100 transition-colors duration-300 rounded-sm"
-              style={{ fontFamily: '"Space Mono", monospace' }}
+              className="inline-block uppercase text-sm font-medium tracking-[0.15em] px-10 py-3 border border-zinc-600 hover:border-zinc-400 text-zinc-300 hover:text-zinc-100 transition-colors duration-300 rounded-sm"
             >
               Initialize Account
             </a>
