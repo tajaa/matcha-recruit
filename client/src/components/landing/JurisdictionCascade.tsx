@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from 'react'
 import { motion, useInView } from 'framer-motion'
-import { SCAN_LINE_BG } from './shared'
+import { DOT_GRID_BG } from './shared'
 
 /* ── Jurisdiction Cascade (Compliance Engine) ─────────────────── */
 export function JurisdictionCascade() {
@@ -27,7 +27,7 @@ export function JurisdictionCascade() {
   }, [inView, tiers.length])
 
   return (
-    <div ref={ref} className="relative h-72 lg:h-80 overflow-hidden bg-zinc-950 flex flex-col items-center justify-center" style={{ backgroundImage: SCAN_LINE_BG, perspective: '1000px' }}>
+    <div ref={ref} className="relative h-72 lg:h-80 overflow-hidden bg-zinc-950 flex flex-col items-center justify-center" style={{ backgroundImage: DOT_GRID_BG, backgroundSize: '20px 20px', perspective: '1000px' }}>
       
       {/* Core Isometric Container */}
       <motion.div
@@ -39,18 +39,18 @@ export function JurisdictionCascade() {
       >
         
         {/* Background data streams */}
-        <div className="absolute top-0 bottom-0 left-10 w-px bg-emerald-500/30" style={{ transform: 'translateZ(-80px)' }} />
-        <div className="absolute top-0 bottom-0 right-10 w-px bg-emerald-500/30" style={{ transform: 'translateZ(-80px)' }} />
+        <div className="absolute top-0 bottom-0 left-10 w-px bg-zinc-700/30" style={{ transform: 'translateZ(-80px)' }} />
+        <div className="absolute top-0 bottom-0 right-10 w-px bg-zinc-700/30" style={{ transform: 'translateZ(-80px)' }} />
         
         <motion.div 
-          className="absolute left-10 w-px h-20 bg-gradient-to-b from-transparent via-emerald-400 to-transparent" 
-          style={{ transform: 'translateZ(-80px)', filter: 'blur(1px)' }}
+          className="absolute left-10 w-px h-20 bg-gradient-to-b from-transparent via-zinc-500 to-transparent"
+          style={{ transform: 'translateZ(-80px)' }}
           animate={{ top: ['-20%', '120%'] }}
           transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
         />
         <motion.div 
-          className="absolute right-10 w-px h-20 bg-gradient-to-b from-transparent via-emerald-400 to-transparent" 
-          style={{ transform: 'translateZ(-80px)', filter: 'blur(1px)' }}
+          className="absolute right-10 w-px h-20 bg-gradient-to-b from-transparent via-zinc-500 to-transparent"
+          style={{ transform: 'translateZ(-80px)' }}
           animate={{ top: ['-20%', '120%'] }}
           transition={{ duration: 2.5, repeat: Infinity, ease: "linear", delay: 1 }}
         />
@@ -69,18 +69,17 @@ export function JurisdictionCascade() {
           >
             {/* Glass Pane Background */}
             <div 
-              className="absolute inset-0 bg-zinc-900/60 border border-emerald-500/30 rounded-lg scale-105 backdrop-blur-sm" 
-              style={{ 
-                boxShadow: '0 10px 30px -10px rgba(0,0,0,0.8), inset 0 0 20px rgba(16,185,129,0.05)',
+              className="absolute inset-0 bg-zinc-900/60 border border-zinc-700/40 rounded-lg scale-105"
+              style={{
+                boxShadow: '0 10px 30px -10px rgba(0,0,0,0.8)',
                 transform: 'translateZ(-1px)'
               }} 
             />
 
             {/* Scanning Line Effect */}
             {activeItem?.tier === tIdx && (
-              <motion.div 
-                className="absolute inset-x-0 h-[2px] bg-emerald-400/80 z-20"
-                style={{ boxShadow: '0 0 10px #34d399, 0 0 20px #34d399' }}
+              <motion.div
+                className="absolute inset-x-0 h-[2px] bg-zinc-400/60 z-20"
                 initial={{ top: '0%', opacity: 0 }}
                 animate={{ top: '100%', opacity: [0, 1, 1, 0] }}
                 transition={{ duration: 2, ease: "linear" }}
@@ -89,8 +88,8 @@ export function JurisdictionCascade() {
 
             <div className="relative z-10 w-full px-4 py-4 flex flex-col items-center">
               <div className="flex items-center gap-2 mb-3">
-                <div className={`h-1.5 w-1.5 rounded-full ${activeItem?.tier === tIdx ? 'bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]' : 'bg-zinc-600'}`} />
-                <span className="text-[10px] font-[Orbitron] font-bold tracking-widest uppercase text-emerald-500/90 drop-shadow-md">
+                <div className={`h-1.5 w-1.5 rounded-full ${activeItem?.tier === tIdx ? 'bg-amber-500 animate-pulse' : 'bg-zinc-700'}`} />
+                <span className="text-[10px] font-[Orbitron] font-bold tracking-widest uppercase text-zinc-400">
                   {tier.level}
                 </span>
               </div>
@@ -102,20 +101,18 @@ export function JurisdictionCascade() {
                     <motion.div
                       key={item}
                       className={`relative px-2 py-1 text-[9px] font-mono border rounded transition-all duration-300 ${
-                        isActive 
-                          ? 'border-emerald-400 bg-emerald-500/20 text-emerald-100' 
+                        isActive
+                          ? 'border-amber-500/60 bg-amber-500/10 text-zinc-100'
                           : 'border-zinc-700/50 bg-zinc-900/80 text-zinc-500'
                       }`}
                       style={{
                         transform: isActive ? 'translateZ(15px) scale(1.1)' : 'translateZ(0px) scale(1)',
-                        boxShadow: isActive ? '0 5px 15px rgba(52,211,153,0.3), inset 0 0 8px rgba(52,211,153,0.3)' : 'none',
-                        textShadow: isActive ? '0 0 8px rgba(16,185,129,0.8)' : 'none'
                       }}
                     >
                       {item}
                       {isActive && (
                         <motion.div 
-                          className="absolute inset-0 border border-emerald-400 rounded"
+                          className="absolute inset-0 border border-amber-500/50 rounded"
                           initial={{ opacity: 1, scale: 1 }}
                           animate={{ opacity: 0, scale: 1.5 }}
                           transition={{ duration: 1, repeat: Infinity }}
@@ -131,10 +128,10 @@ export function JurisdictionCascade() {
       </motion.div>
 
       {/* Floating Data Nodes (Particles) */}
-      {inView && Array.from({ length: 15 }).map((_, i) => (
+      {inView && Array.from({ length: 8 }).map((_, i) => (
         <motion.div
           key={`particle-${i}`}
-          className="absolute w-1 h-1 bg-emerald-500/40 rounded-full"
+          className="absolute w-1 h-1 bg-zinc-500/30 rounded-full"
           initial={{
             x: Math.random() * 300 - 150,
             y: Math.random() * 300 - 150,
@@ -157,7 +154,7 @@ export function JurisdictionCascade() {
       {/* HUD Overlays */}
       <div className="absolute bottom-4 left-4 flex flex-col gap-1">
         <div className="text-[8px] text-zinc-500 uppercase tracking-widest">Query Layer</div>
-        <div className="text-[10px] text-emerald-400 font-mono flex items-center gap-2">
+        <div className="text-[10px] text-zinc-300 font-mono flex items-center gap-2">
           <span>{activeItem ? `[${tiers[activeItem.tier].level}] SELECT * FROM rules` : 'AWAITING QUERY...'}</span>
           {activeItem && <span className="animate-pulse">▊</span>}
         </div>
@@ -165,10 +162,10 @@ export function JurisdictionCascade() {
 
       <div className="absolute top-4 right-4 flex items-center gap-2">
         <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-500 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
         </span>
-        <span className="text-[8px] text-emerald-500/80 uppercase font-bold tracking-widest drop-shadow-[0_0_5px_rgba(16,185,129,0.8)]">Live Engine</span>
+        <span className="text-[8px] text-zinc-500 uppercase font-bold tracking-widest">Live Engine</span>
       </div>
     </div>
   )
