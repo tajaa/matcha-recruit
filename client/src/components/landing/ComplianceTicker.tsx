@@ -29,7 +29,7 @@ export function ComplianceTicker() {
       <div className="flex items-center">
         {/* Static label */}
         <div
-          className="shrink-0 px-2 sm:px-4 py-1 sm:py-1.5 border-r border-zinc-800/60 text-[8px] sm:text-[10px] font-medium uppercase tracking-[0.15em] text-red-500"
+          className="shrink-0 px-2 sm:px-4 py-1.5 sm:py-2 border-r border-zinc-800/60 text-[10px] sm:text-[12px] font-medium uppercase tracking-[0.15em] text-red-500"
           style={{ fontFamily: "'Space Mono', monospace" }}
         >
           <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mr-1.5 animate-pulse" />
@@ -43,9 +43,9 @@ export function ComplianceTicker() {
             style={{ width: 'max-content' }}
           >
             {ITEMS.map((item, i) => (
-              <span key={i} className="inline-flex items-center gap-1.5 sm:gap-2 py-1 sm:py-1.5">
+              <span key={i} className="inline-flex items-center gap-1.5 sm:gap-2 py-1.5 sm:py-2">
                 <span
-                  className="text-[7px] sm:text-[9px] font-bold uppercase px-1 sm:px-1.5 py-0.5 rounded-sm"
+                  className="text-[9px] sm:text-[11px] font-bold uppercase px-1.5 sm:px-2 py-0.5 rounded-sm"
                   style={{
                     color: item.color,
                     border: `1px solid ${item.color}40`,
@@ -54,7 +54,7 @@ export function ComplianceTicker() {
                 >
                   {item.tag}
                 </span>
-                <span className="text-[11px] sm:text-[13px] text-zinc-500" style={{ fontFamily: "'Inter', sans-serif" }}>
+                <span className="text-[13px] sm:text-[15px] text-zinc-500" style={{ fontFamily: "'Inter', sans-serif" }}>
                   {item.text}
                 </span>
               </span>

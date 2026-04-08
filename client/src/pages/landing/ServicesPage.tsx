@@ -2,140 +2,156 @@ import { useState } from 'react'
 import { motion } from 'framer-motion'
 import { PricingContactModal } from '../../components/PricingContactModal'
 import { DOT_GRID_BG } from '../../components/landing/shared'
+import { AsciiHalftone } from '../../components/AsciiHalftone'
 import LandingNav from './LandingNav'
 
 export default function ServicesPage() {
   const [isPricingOpen, setIsPricingOpen] = useState(false)
 
+  const services = [
+    {
+      title: "HR Consulting",
+      subtitle: "Operations & Strategy",
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+          <circle cx="9" cy="7" r="4" />
+          <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+          <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+        </svg>
+      ),
+      points: [
+        "HR infrastructure build-out for startups through enterprise",
+        "Multi-state employment law — hiring, termination, classification",
+        "Workforce operations — onboarding, credentialing, org design",
+        "Employee relations — investigations and separation risk review",
+        "Advisory sessions — standing access to senior HR guidance"
+      ]
+    },
+    {
+      title: "Compliance Consulting",
+      subtitle: "Regulatory & Audit",
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
+          <path d="m9 12 2 2 4-4" />
+        </svg>
+      ),
+      points: [
+        "Regulatory gap analysis across all operating jurisdictions",
+        "Compliance program design for healthcare and manufacturing",
+        "Audit preparation — CMS, Joint Commission, OSHA, and State boards",
+        "Policy & handbook remediation and gap identification",
+        "Credential & license program setup and audit-ready tracking"
+      ]
+    },
+    {
+      title: "AI / Tech Consulting",
+      subtitle: "Implementation & Strategy",
+      icon: (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
+          <circle cx="12" cy="12" r="4" />
+        </svg>
+      ),
+      points: [
+        "AI integration — LLM orchestration and RAG pipelines",
+        "Autonomous agent development and agentic workflows",
+        "AI strategy & roadmapping — leverage analysis and build vs buy",
+        "Tech stack modernization and infrastructure planning",
+        "Industry-specific AI forecasting and team preparation"
+      ]
+    }
+  ]
+
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 overflow-x-hidden selection:bg-zinc-100 selection:text-zinc-950">
       <LandingNav onPricingClick={() => setIsPricingOpen(true)} />
 
-      <motion.section
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        className="relative pt-32 pb-24 px-4 sm:px-8"
-      >
+      <section className="relative pt-32 pb-24 px-4 sm:px-8">
+        <AsciiHalftone />
         <div
-          className="absolute inset-0 opacity-[0.04]"
+          className="absolute inset-0 opacity-[0.03] pointer-events-none"
           style={{ backgroundImage: DOT_GRID_BG, backgroundSize: '24px 24px' }}
         />
+        
         <div className="relative max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <span className="text-xs tracking-[0.3em] text-zinc-500 uppercase flex items-center justify-center gap-2 mb-4">
-              <span className="h-1.5 w-1.5 rounded-full bg-zinc-500 shadow-[0_0_8px_#71717a]" />
+          {/* System tag */}
+          <div className="text-[10px] font-mono text-zinc-600 border-l border-zinc-800 pl-3 py-1 mb-16 uppercase tracking-widest hidden lg:block">
+            System Core // Service_Registry.v3
+          </div>
+
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 1 }}
+            className="text-center mb-24 relative"
+          >
+            <span className="text-[10px] tracking-[0.4em] text-zinc-500 uppercase mb-6 block">
               Beyond the Platform
             </span>
-            <h1 className="text-4xl sm:text-5xl font-bold uppercase tracking-wide text-zinc-100">
+            <h1 className="font-[Orbitron] text-4xl sm:text-5xl lg:text-6xl font-black uppercase tracking-tight text-zinc-100 mb-8">
               Consulting Services
             </h1>
-            <p className="text-zinc-500 text-sm sm:text-base mt-4 max-w-xl mx-auto leading-relaxed">
-              Hands-on expertise for organizations that need more than software.
-            </p>
-          </div>
+            <div className="max-w-2xl mx-auto space-y-4">
+              <p className="text-zinc-300 text-lg sm:text-xl font-medium tracking-wide leading-relaxed">
+                Regulated companies don't fail from one event. They fail from disconnected gaps.
+              </p>
+              <p className="text-zinc-500 text-sm sm:text-base leading-relaxed max-w-xl mx-auto uppercase tracking-[0.2em] font-light">
+                Identifying and closing systemic risk through hands-on technical and operational expertise.
+              </p>
+            </div>
+          </motion.div>
 
-          <div className="grid md:grid-cols-2 gap-8 max-w-5xl mx-auto">
-            {/* HR Consulting */}
-            <motion.div
-              whileHover={{ y: -4 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="relative group rounded-xl border border-zinc-700/50 p-8 overflow-hidden"
-              style={{ background: 'linear-gradient(135deg, rgba(24,24,27,0.9) 0%, rgba(39,39,42,0.4) 100%)' }}
-            >
-              <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-emerald-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
-                    <circle cx="9" cy="7" r="4" />
-                    <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
-                    <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                  </svg>
+          <div className="grid lg:grid-cols-3 gap-1px bg-zinc-700/30 border border-zinc-800/80 max-w-7xl mx-auto backdrop-blur-sm">
+            {services.map((service, idx) => (
+              <div
+                key={idx}
+                className="group relative p-12 bg-zinc-900/40 flex flex-col h-full transition-all duration-300 hover:bg-zinc-800/30"
+              >
+                <div className="flex items-center justify-between mb-12">
+                  <div className="text-zinc-400 group-hover:text-white transition-colors duration-300 scale-110">
+                    {service.icon}
+                  </div>
+                  <span className="text-[10px] font-mono text-zinc-500 tracking-widest uppercase">
+                    Ref. {idx + 1}
+                  </span>
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-zinc-100 uppercase tracking-wide">HR Consulting</h3>
-                  <span className="text-[10px] text-emerald-500 uppercase tracking-[0.2em]">Operations & Strategy</span>
-                </div>
-              </div>
-              <ul className="space-y-3 text-sm text-zinc-400">
-                <li className="flex items-start gap-2.5">
-                  <span className="w-1 h-1 rounded-full bg-emerald-500 mt-2 shrink-0" />
-                  <span>HR infrastructure setup for startups and scaling companies &mdash; handbooks, policies, compliance foundations</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="w-1 h-1 rounded-full bg-emerald-500 mt-2 shrink-0" />
-                  <span>Multi-state employment law navigation &mdash; hiring, termination, classification, leave management</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="w-1 h-1 rounded-full bg-emerald-500 mt-2 shrink-0" />
-                  <span>Workforce operations &mdash; onboarding, credentialing, performance management, and organizational design</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="w-1 h-1 rounded-full bg-emerald-500 mt-2 shrink-0" />
-                  <span>Compliance audits and gap analysis for regulated industries &mdash; healthcare, biotech, manufacturing, finance</span>
-                </li>
-              </ul>
-              <div className="mt-8">
-                <span
-                  onClick={() => setIsPricingOpen(true)}
-                  className="text-[11px] text-zinc-500 uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300 tracking-widest"
-                >
-                  Get in touch &rarr;
-                </span>
-              </div>
-            </motion.div>
 
-            {/* AI Consulting */}
-            <motion.div
-              whileHover={{ y: -4 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 25 }}
-              className="relative group rounded-xl border border-zinc-700/50 p-8 overflow-hidden"
-              style={{ background: 'linear-gradient(135deg, rgba(24,24,27,0.9) 0%, rgba(39,39,42,0.4) 100%)' }}
-            >
-              <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-amber-500/40 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
-                    <circle cx="12" cy="12" r="4" />
-                  </svg>
+                <div className="mb-10">
+                  <h3 className="text-xl font-bold text-zinc-100 uppercase tracking-[0.1em] mb-2">
+                    {service.title}
+                  </h3>
+                  <span className="text-xs text-zinc-400 uppercase tracking-[0.2em] font-medium border-b border-zinc-700/50 pb-1">
+                    {service.subtitle}
+                  </span>
                 </div>
-                <div>
-                  <h3 className="text-lg font-bold text-zinc-100 uppercase tracking-wide">AI Consulting</h3>
-                  <span className="text-[10px] text-amber-500 uppercase tracking-[0.2em]">Implementation & Strategy</span>
+
+                <ul className="space-y-6 text-base text-zinc-300 flex-grow mb-16">
+                  {service.points.map((point, pIdx) => (
+                    <li key={pIdx} className="flex items-start gap-4">
+                      <span className="w-1.5 h-1.5 rounded-full bg-zinc-600 mt-2 shrink-0 group-hover:bg-zinc-400 transition-colors" />
+                      <span className="leading-relaxed font-light group-hover:text-white transition-colors duration-300">
+                        {point}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="mt-auto">
+                  <span
+                    onClick={() => setIsPricingOpen(true)}
+                    className="inline-flex items-center gap-3 text-xs text-zinc-300 uppercase tracking-[0.3em] cursor-pointer hover:text-white transition-all duration-300 group/link font-bold py-2 border-t border-zinc-800/50 w-full"
+                  >
+                    Initialize Engagement
+                    <span className="transition-transform duration-300 group-hover/link:translate-x-1">&rarr;</span>
+                  </span>
                 </div>
               </div>
-              <ul className="space-y-3 text-sm text-zinc-400">
-                <li className="flex items-start gap-2.5">
-                  <span className="w-1 h-1 rounded-full bg-amber-500 mt-2 shrink-0" />
-                  <span>AI integration into existing tech stacks &mdash; LLM orchestration, RAG pipelines, embedding strategies, tool-use architectures</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="w-1 h-1 rounded-full bg-amber-500 mt-2 shrink-0" />
-                  <span>Autonomous agent development &mdash; multi-step agentic workflows, chain-of-thought reasoning systems, human-in-the-loop design</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="w-1 h-1 rounded-full bg-amber-500 mt-2 shrink-0" />
-                  <span>AI strategy and roadmapping &mdash; where AI creates leverage in your operations vs. where it doesn't, build vs. buy analysis</span>
-                </li>
-                <li className="flex items-start gap-2.5">
-                  <span className="w-1 h-1 rounded-full bg-amber-500 mt-2 shrink-0" />
-                  <span>The future of AI in your industry &mdash; capability forecasting, infrastructure planning, and preparing your team for what's next</span>
-                </li>
-              </ul>
-              <div className="mt-8">
-                <span
-                  onClick={() => setIsPricingOpen(true)}
-                  className="text-[11px] text-zinc-500 uppercase hover:text-amber-400 cursor-pointer transition-colors duration-300 tracking-widest"
-                >
-                  Get in touch &rarr;
-                </span>
-              </div>
-            </motion.div>
+            ))}
           </div>
         </div>
-      </motion.section>
+      </section>
 
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
     </div>
