@@ -18,6 +18,8 @@ import SpecializationResearch from './pages/admin/SpecializationResearch'
 import Brokers from './pages/admin/Brokers'
 import ComplianceManagement from './pages/admin/ComplianceManagement'
 import Individuals from './pages/admin/Individuals'
+import NewsletterAdmin from './pages/admin/Newsletter'
+import Subscribe from './pages/landing/Subscribe'
 import CategoryDetailPage from './pages/admin/CategoryDetailPage'
 import PolicyDetailPage from './pages/admin/PolicyDetailPage'
 import Dashboard from './pages/app/Dashboard'
@@ -64,6 +66,7 @@ export default function App() {
       <Route path="/" element={<Landing />} />
       <Route path="/matcha-work" element={<MatchaWorkPage />} />
       <Route path="/services" element={<ServicesPage />} />
+      <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/register/beta" element={<BetaRegister />} />
@@ -93,6 +96,7 @@ export default function App() {
         <Route path="specialization-research" element={<SpecializationResearch />} />
         <Route path="brokers" element={<Brokers />} />
         <Route path="compliance-mgmt" element={<ComplianceManagement />} />
+        <Route path="newsletter" element={<NewsletterAdmin />} />
       </Route>
       <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
         <Route index element={<BrokerDashboard />} />

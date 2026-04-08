@@ -24,6 +24,7 @@ from .credential_templates import router as credential_templates_router
 from .inbox import router as inbox_router
 from .channels import router as channels_router
 from .channels_ws import router as channels_ws_router
+from .newsletter import public_router as newsletter_public_router, admin_router as newsletter_admin_router
 from ...matcha.dependencies import require_feature
 
 # Create main core router
@@ -57,6 +58,8 @@ core_router.include_router(credential_templates_router, prefix="/credential-temp
                            dependencies=[Depends(require_feature("credential_templates"))])
 core_router.include_router(inbox_router, prefix="/inbox", tags=["inbox"])
 core_router.include_router(channels_router, prefix="/channels", tags=["channels"])
+core_router.include_router(newsletter_public_router, prefix="/newsletter", tags=["newsletter-public"])
+core_router.include_router(newsletter_admin_router, prefix="/admin/newsletter", tags=["newsletter-admin"])
 
 # Export individual routers for backwards compatibility
 __all__ = [
