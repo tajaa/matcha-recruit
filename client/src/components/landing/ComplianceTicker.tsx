@@ -23,29 +23,29 @@ const ITEMS = [...HEADLINES, ...HEADLINES]
 export function ComplianceTicker() {
   return (
     <div
-      className="fixed top-[72px] left-0 right-0 z-40 overflow-hidden border-b border-zinc-800/60"
-      style={{ background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(8px)' }}
+      className="fixed top-0 left-0 right-0 z-50 overflow-hidden border-b border-zinc-800/60"
+      style={{ background: 'rgba(0,0,0,0.90)', backdropFilter: 'blur(8px)' }}
     >
       <div className="flex items-center">
         {/* Static label */}
         <div
-          className="shrink-0 px-4 py-1.5 border-r border-zinc-800/60 text-[10px] font-medium uppercase tracking-[0.15em] text-red-500"
+          className="shrink-0 px-2 sm:px-4 py-1 sm:py-1.5 border-r border-zinc-800/60 text-[8px] sm:text-[10px] font-medium uppercase tracking-[0.15em] text-red-500"
           style={{ fontFamily: "'Space Mono', monospace" }}
         >
-          <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mr-2 animate-pulse" />
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 mr-1.5 animate-pulse" />
           LIVE
         </div>
 
         {/* Scrolling ticker */}
         <div className="overflow-hidden flex-1">
           <div
-            className="flex items-center gap-8 whitespace-nowrap animate-[ticker_90s_linear_infinite]"
+            className="flex items-center gap-6 sm:gap-8 whitespace-nowrap animate-[ticker_90s_linear_infinite]"
             style={{ width: 'max-content' }}
           >
             {ITEMS.map((item, i) => (
-              <span key={i} className="inline-flex items-center gap-2 py-1.5">
+              <span key={i} className="inline-flex items-center gap-1.5 sm:gap-2 py-1 sm:py-1.5">
                 <span
-                  className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-sm"
+                  className="text-[7px] sm:text-[9px] font-bold uppercase px-1 sm:px-1.5 py-0.5 rounded-sm"
                   style={{
                     color: item.color,
                     border: `1px solid ${item.color}40`,
@@ -54,7 +54,7 @@ export function ComplianceTicker() {
                 >
                   {item.tag}
                 </span>
-                <span className="text-[13px] text-zinc-500" style={{ fontFamily: "'Inter', sans-serif" }}>
+                <span className="text-[11px] sm:text-[13px] text-zinc-500" style={{ fontFamily: "'Inter', sans-serif" }}>
                   {item.text}
                 </span>
               </span>

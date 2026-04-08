@@ -14,7 +14,7 @@ export default function LandingNav({ onPricingClick }: Props) {
   const { pathname } = useLocation()
 
   return (
-    <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-center px-6 pt-5">
+    <nav className="fixed top-[24px] sm:top-[28px] left-0 right-0 z-50 flex items-center justify-center px-4 sm:px-6 pt-3 sm:pt-5">
       <div
         className="flex items-center justify-between w-full max-w-6xl px-6 py-3 rounded-full border border-zinc-700/30"
         style={{

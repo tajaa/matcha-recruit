@@ -89,7 +89,7 @@ export default function Landing() {
         <ComplianceTicker />
 
         {/* Hero */}
-        <div className="relative pt-[84px] md:snap-start min-h-[100svh]">
+        <div className="relative pt-[90px] sm:pt-[96px] md:snap-start min-h-[100svh]">
           <AsciiHalftone />
           <section className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-[100svh] flex items-center py-20 sm:py-0">
             {/* System tag */}
