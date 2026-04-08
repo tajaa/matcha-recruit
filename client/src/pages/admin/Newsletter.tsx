@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Plus, Send, Trash2, Users, FileText, Search } from 'lucide-react'
+import { Loader2, Plus, Send, Trash2, FileText, Search } from 'lucide-react'
 import { api } from '../../api/client'
 
 type Subscriber = {
