@@ -74,6 +74,15 @@ async def unsubscribe(token: str = Query(...)):
 # ---------------------------------------------------------------------------
 
 
+@admin_router.post("/subscribers/sync")
+async def sync_platform_users(
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Sync all active platform users into newsletter subscribers."""
+    count = await svc.sync_platform_users()
+    return {"synced": count}
+
+
 @admin_router.get("/subscribers")
 async def list_subscribers(
     status: Optional[str] = None,
@@ -83,7 +92,10 @@ async def list_subscribers(
     offset: int = Query(0, ge=0),
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """List newsletter subscribers with filters."""
+    """List newsletter subscribers with filters. Auto-syncs platform users."""
+    # Auto-sync platform users on each load (idempotent, fast)
+    await svc.sync_platform_users()
+
     rows, total = await svc.get_subscribers(
         status=status, source=source, search=search, limit=limit, offset=offset,
     )

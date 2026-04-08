@@ -151,6 +151,26 @@ async def get_subscriber_stats() -> dict:
     return {"total": total, "active": active, "by_source": by_source}
 
 
+async def sync_platform_users() -> int:
+    """Sync all active platform users into newsletter_subscribers. Idempotent."""
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """INSERT INTO newsletter_subscribers (email, name, source, user_id)
+               SELECT u.email,
+                      COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), u.email),
+                      'platform',
+                      u.id
+               FROM users u
+               LEFT JOIN clients c ON c.user_id = u.id
+               LEFT JOIN employees e ON e.user_id = u.id
+               WHERE u.is_active = true AND u.email IS NOT NULL
+               ON CONFLICT (email) DO NOTHING"""
+        )
+        count = int(result.split()[-1]) if result else 0
+    logger.info("Synced %d platform users to newsletter subscribers", count)
+    return count
+
+
 async def create_newsletter(title: str, subject: str, created_by: UUID) -> dict:
     async with get_connection() as conn:
         row = await conn.fetchrow(
