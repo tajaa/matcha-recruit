@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import hmac
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -65,7 +66,7 @@ async def subscribe(
                            subscribed_at = NOW()
                        WHERE id = $1""",
                     existing["id"], name, source,
-                    __import__("json").dumps(metadata or {}),
+                    json.dumps(metadata or {}),
                 )
             return {"id": str(existing["id"]), "status": "active", "already_subscribed": existing["status"] == "active"}
 
@@ -74,7 +75,7 @@ async def subscribe(
                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
                RETURNING id, status""",
             email, name, source, user_id, company_id,
-            __import__("json").dumps(metadata or {}),
+            json.dumps(metadata or {}),
         )
         return {"id": str(row["id"]), "status": "active", "already_subscribed": False}
 
@@ -251,7 +252,16 @@ async def send_newsletter(newsletter_id: UUID) -> dict:
                 newsletter_id, sub["id"],
             )
 
-    # Send in batches
+    # Launch sending in background so the API response returns immediately
+    asyncio.create_task(_send_emails(newsletter_id, dict(nl), list(subscribers)))
+
+    return {"queued": len(subscribers), "status": "sending"}
+
+
+async def _send_emails(newsletter_id: UUID, nl: dict, subscribers: list[dict]) -> None:
+    """Background task — sends emails in batches and updates send status."""
+    from .email import get_email_service
+
     email_svc = get_email_service()
     settings = get_settings()
     base_url = (settings.app_base_url or "https://hey-matcha.com").rstrip("/")
@@ -260,9 +270,12 @@ async def send_newsletter(newsletter_id: UUID) -> dict:
 
     for i in range(0, len(subscribers), BATCH_SIZE):
         batch = subscribers[i:i + BATCH_SIZE]
+        sent_ids = []
+        failed_ids = []
+
         for sub in batch:
             unsub_token = generate_unsubscribe_token(sub["id"])
-            unsub_url = f"{base_url}/newsletter/unsubscribe?token={unsub_token}"
+            unsub_url = f"{base_url}/api/newsletter/unsubscribe?token={unsub_token}"
 
             html = _render_email(nl, sub, unsub_url)
 
@@ -273,32 +286,43 @@ async def send_newsletter(newsletter_id: UUID) -> dict:
                     subject=nl["subject"],
                     html_content=html,
                 )
-                async with get_connection() as conn:
-                    await conn.execute(
-                        "UPDATE newsletter_sends SET status = 'sent', sent_at = NOW() WHERE newsletter_id = $1 AND subscriber_id = $2",
-                        newsletter_id, sub["id"],
-                    )
+                sent_ids.append(sub["id"])
                 sent_count += 1
             except Exception as e:
                 logger.warning("Failed to send newsletter to %s: %s", sub["email"], e)
-                async with get_connection() as conn:
-                    await conn.execute(
-                        "UPDATE newsletter_sends SET status = 'failed' WHERE newsletter_id = $1 AND subscriber_id = $2",
-                        newsletter_id, sub["id"],
-                    )
+                failed_ids.append(sub["id"])
                 failed_count += 1
+
+        # Batch-update send status
+        try:
+            async with get_connection() as conn:
+                if sent_ids:
+                    await conn.execute(
+                        "UPDATE newsletter_sends SET status = 'sent', sent_at = NOW() WHERE newsletter_id = $1 AND subscriber_id = ANY($2::uuid[])",
+                        newsletter_id, sent_ids,
+                    )
+                if failed_ids:
+                    await conn.execute(
+                        "UPDATE newsletter_sends SET status = 'failed' WHERE newsletter_id = $1 AND subscriber_id = ANY($2::uuid[])",
+                        newsletter_id, failed_ids,
+                    )
+        except Exception as e:
+            logger.error("Failed to update send status: %s", e)
 
         if i + BATCH_SIZE < len(subscribers):
             await asyncio.sleep(BATCH_DELAY)
 
-    # Mark as sent
-    async with get_connection() as conn:
-        await conn.execute(
-            "UPDATE newsletters SET status = 'sent', sent_at = NOW() WHERE id = $1",
-            newsletter_id,
-        )
+    # Mark newsletter as sent
+    try:
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE newsletters SET status = 'sent', sent_at = NOW() WHERE id = $1",
+                newsletter_id,
+            )
+    except Exception as e:
+        logger.error("Failed to mark newsletter as sent: %s", e)
 
-    return {"sent": sent_count, "failed": failed_count, "total": len(subscribers)}
+    logger.info("Newsletter %s: sent=%d failed=%d total=%d", newsletter_id, sent_count, failed_count, len(subscribers))
 
 
 def _render_email(newsletter: dict, subscriber: dict, unsubscribe_url: str) -> str:

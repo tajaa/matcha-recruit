@@ -53,11 +53,20 @@ async def subscribe(body: SubscribeRequest):
 
 @public_router.get("/unsubscribe")
 async def unsubscribe(token: str = Query(...)):
-    """One-click unsubscribe via signed token."""
+    """One-click unsubscribe via signed token. Returns HTML page."""
+    from fastapi.responses import HTMLResponse
     success = await svc.unsubscribe(token)
     if not success:
-        raise HTTPException(status_code=400, detail="Invalid or expired unsubscribe link")
-    return {"ok": True, "message": "You have been unsubscribed."}
+        return HTMLResponse(
+            '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">'
+            '<div style="text-align:center"><h2>Invalid link</h2><p>This unsubscribe link is invalid or expired.</p></div></body></html>',
+            status_code=400,
+        )
+    return HTMLResponse(
+        '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">'
+        '<div style="text-align:center"><h2 style="color:#ce9178;">Unsubscribed</h2><p>You have been unsubscribed from Matcha newsletters.</p>'
+        '<p style="color:#6a737d;font-size:13px;margin-top:16px;">You can close this tab.</p></div></body></html>'
+    )
 
 
 # ---------------------------------------------------------------------------
