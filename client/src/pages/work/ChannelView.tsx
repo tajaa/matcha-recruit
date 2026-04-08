@@ -414,10 +414,12 @@ export default function ChannelView() {
                         {channel.my_role === 'owner' && m.channel_role !== 'owner' && (
                           <button
                             onClick={async () => {
-                              const newRole = m.channel_role === 'moderator' ? 'member' : 'moderator'
-                              await setMemberRole(channel.id, m.user_id, newRole)
-                              const data = await getChannel(channel.id)
-                              setChannel(data)
+                              try {
+                                const newRole = m.channel_role === 'moderator' ? 'member' : 'moderator'
+                                await setMemberRole(channel.id, m.user_id, newRole)
+                                const data = await getChannel(channel.id)
+                                setChannel(data)
+                              } catch {}
                             }}
                             className="p-0.5 text-zinc-500 hover:text-blue-400"
                             title={m.channel_role === 'moderator' ? 'Remove moderator' : 'Make moderator'}
@@ -427,9 +429,11 @@ export default function ChannelView() {
                         )}
                         <button
                           onClick={async () => {
-                            await kickMember(channel.id, m.user_id)
-                            const data = await getChannel(channel.id)
-                            setChannel(data)
+                            try {
+                              await kickMember(channel.id, m.user_id)
+                              const data = await getChannel(channel.id)
+                              setChannel(data)
+                            } catch {}
                           }}
                           className="p-0.5 text-zinc-500 hover:text-red-400"
                           title="Remove from channel"
