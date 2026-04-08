@@ -51,6 +51,12 @@ export default function LandingNav({ onPricingClick }: Props) {
               {link.label}
             </Link>
           ))}
+          <a
+            href="#about"
+            className="hidden sm:inline text-[11px] text-zinc-400 uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300"
+          >
+            About
+          </a>
           <span
             onClick={onPricingClick}
             className="hidden sm:inline text-[11px] text-zinc-400 uppercase hover:text-emerald-400 cursor-pointer transition-colors duration-300"

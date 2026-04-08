@@ -25,7 +25,7 @@ export function FeatureSectionItem({ section, idx, isLast }: { section: Section,
     <section
       ref={containerRef}
       id={idx === 0 ? 'features' : undefined}
-      className="relative border-t border-zinc-700/40 min-h-screen flex items-center py-16 sm:py-24 px-4 sm:px-8 overflow-hidden group snap-start"
+      className="relative border-t border-zinc-700/40 min-h-0 md:min-h-screen flex items-center py-16 sm:py-24 px-4 sm:px-8 overflow-hidden group md:snap-start"
     >
       <div
         className="absolute inset-0 opacity-[0.04] pointer-events-none"
@@ -39,8 +39,8 @@ export function FeatureSectionItem({ section, idx, isLast }: { section: Section,
           style={{ willChange: 'transform, opacity' }}
           initial={false}
           animate={isInView
-            ? { opacity: 1, x: 0 }
-            : { opacity: 0, x: reversed ? 40 : -40 }
+            ? { opacity: 1, y: 0 }
+            : { opacity: 0, y: 24 }
           }
           transition={SPRING}
         >
@@ -86,11 +86,11 @@ export function FeatureSectionItem({ section, idx, isLast }: { section: Section,
         {/* Graphic */}
         <motion.div
           className={reversed ? 'lg:order-1' : ''}
-          style={{ willChange: 'transform, opacity', perspective: 800 }}
+          style={{ willChange: 'transform, opacity' }}
           initial={false}
           animate={isInView
-            ? { opacity: 1, x: 0, scale: 1, rotateY: 0, rotateX: 0 }
-            : { opacity: 0, x: reversed ? -60 : 60, scale: 0.88, rotateY: reversed ? 8 : -8, rotateX: 4 }
+            ? { opacity: 1, y: 0, scale: 1 }
+            : { opacity: 0, y: 30, scale: 0.95 }
           }
           transition={{ ...SPRING, delay: 0.08 }}
         >
@@ -104,7 +104,7 @@ export function FeatureSectionItem({ section, idx, isLast }: { section: Section,
       </div>
 
       {/* Scroll indicator or CTA */}
-      <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
+      <div className="hidden md:block absolute bottom-6 left-1/2 -translate-x-1/2 z-20">
         {isLast ? (
           <motion.a
             href="/login"
