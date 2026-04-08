@@ -243,12 +243,14 @@ export function LocationMap({ locations, heatMap }: Props) {
 
       {/* Map container */}
       <div
-        className="relative w-full rounded-xl overflow-hidden select-none"
+        className="relative rounded-xl overflow-hidden select-none"
         style={{ background: '#0a0a0a' }}
       >
         <ComposableMap
           projection="geoAlbersUsa"
-          projectionConfig={{ scale: 1000 }}
+          projectionConfig={{ scale: 600 }}
+          width={800}
+          height={350}
           style={{ width: '100%', height: 'auto' }}
         >
           {/* State boundaries — wireframe style */}
