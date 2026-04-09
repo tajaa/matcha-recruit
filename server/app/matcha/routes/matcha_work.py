@@ -6552,8 +6552,8 @@ async def start_tutor_voice_session(
     if language not in ("en", "es"):
         raise HTTPException(status_code=400, detail="Language must be 'en' or 'es'")
     duration_minutes = body.get("duration_minutes", 5)
-    if duration_minutes not in (2, 5, 8):
-        raise HTTPException(status_code=400, detail="Duration must be 2, 5, or 8 minutes")
+    if duration_minutes not in (0.33, 2, 5, 8):
+        raise HTTPException(status_code=400, detail="Duration must be 0.33 (20s test), 2, 5, or 8 minutes")
 
     company_id = await get_client_company_id(current_user)
 
@@ -6596,7 +6596,7 @@ async def start_tutor_voice_session(
             json.dumps(current_state), thread_id,
         )
 
-    duration_seconds = duration_minutes * 60
+    duration_seconds = int(duration_minutes * 60)
     return {
         "interview_id": str(interview_id),
         "websocket_url": f"/api/ws/interview/{interview_id}",
@@ -6610,7 +6610,10 @@ async def get_tutor_voice_status(
     thread_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Poll language tutor session status and analysis results."""
+    """Poll language tutor session status and analysis results.
+
+    Runs analysis inline (no Celery) on first poll after session ends.
+    """
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
@@ -6640,14 +6643,44 @@ async def get_tutor_voice_status(
         if not interview:
             raise HTTPException(status_code=404, detail="Interview record not found")
 
+        tutor_analysis = interview["tutor_analysis"]
+        interview_status = interview["status"]
+
+        # Run analysis inline if session ended but analysis hasn't run yet
+        if interview_status in ("analyzing", "completed") and not tutor_analysis and interview["transcript"]:
+            try:
+                from ..services.conversation_analyzer import ConversationAnalyzer
+                settings = get_settings()
+                analyzer = ConversationAnalyzer(
+                    api_key=settings.gemini_api_key,
+                    vertex_project=settings.vertex_project if settings.use_vertex else None,
+                    vertex_location=settings.vertex_location,
+                    model=settings.analysis_model,
+                )
+                language = tutor_state.get("language", "en")
+                tutor_analysis = await analyzer.analyze_tutor_language(
+                    transcript=interview["transcript"],
+                    language=language,
+                )
+                # Save analysis and mark completed
+                await conn.execute(
+                    "UPDATE interviews SET tutor_analysis = $1, status = 'completed' WHERE id = $2",
+                    json.dumps(tutor_analysis), UUID(interview_id),
+                )
+                interview_status = "completed"
+            except Exception as e:
+                logger.error("Inline tutor analysis failed: %s", e)
+                # Return current status, client will retry
+                return {"status": interview_status, "tutor_analysis": None}
+
         result = {
-            "status": interview["status"],
-            "tutor_analysis": interview["tutor_analysis"],
+            "status": interview_status,
+            "tutor_analysis": tutor_analysis if isinstance(tutor_analysis, dict) else (json.loads(tutor_analysis) if tutor_analysis else None),
         }
 
         # When analysis is complete, save summary as assistant message (idempotent)
-        if interview["status"] == "completed" and interview["tutor_analysis"] and not tutor_state.get("message_saved"):
-            analysis = interview["tutor_analysis"] if isinstance(interview["tutor_analysis"], dict) else json.loads(interview["tutor_analysis"])
+        if interview_status == "completed" and tutor_analysis and not tutor_state.get("message_saved"):
+            analysis = tutor_analysis if isinstance(tutor_analysis, dict) else json.loads(tutor_analysis)
             proficiency = analysis.get("overall_proficiency", {})
             level = proficiency.get("level", "N/A")
             level_desc = proficiency.get("level_description", "")
@@ -6658,8 +6691,8 @@ async def get_tutor_voice_status(
             areas = proficiency.get("areas_to_improve", [])
             if areas:
                 summary_text += "**Areas to Improve:** " + ", ".join(areas) + "\n\n"
-            grammar = analysis.get("grammar", {})
-            errors = grammar.get("common_errors", [])
+            grammar_data = analysis.get("grammar", {})
+            errors = grammar_data.get("common_errors", [])
             if errors:
                 summary_text += "**Grammar Notes:**\n"
                 for err in errors[:5]:

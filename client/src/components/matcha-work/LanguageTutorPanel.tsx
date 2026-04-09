@@ -18,6 +18,7 @@ interface Transcript {
 }
 
 const DURATIONS = [
+  { value: 0.33, label: '20s test' },
   { value: 2, label: '2 min' },
   { value: 5, label: '5 min' },
   { value: 8, label: '8 min' },
