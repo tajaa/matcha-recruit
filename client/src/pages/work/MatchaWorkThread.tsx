@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip, Bot, FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethoscope, MapPin, Sun, Moon, Paperclip, Bot, FileText, Users, Presentation, Package, ClipboardList, Scale, BookOpen, FileCheck, MessageSquare, Briefcase, Languages } from 'lucide-react'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
@@ -13,6 +13,7 @@ import ResumeBatchPanel from '../../components/matcha-work/ResumeBatchPanel'
 import InventoryPanel from '../../components/matcha-work/InventoryPanel'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import AgentPanel from '../../components/matcha-work/AgentPanel'
+import LanguageTutorPanel from '../../components/matcha-work/LanguageTutorPanel'
 import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/constants'
 
 const RESUME_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt']
@@ -32,6 +33,7 @@ const HR_SKILLS = [
   { id: 'policy', icon: Scale, label: 'Policy', desc: 'Draft compliance policies', prompt: 'Draft a policy for ', requiresCompany: true },
   { id: 'onboarding', icon: Users, label: 'Onboarding', desc: 'Create employee records', prompt: 'Onboard a new employee', requiresCompany: true },
   { id: 'review', icon: Briefcase, label: 'Review', desc: 'Run performance reviews', prompt: 'Create a performance review for ', requiresCompany: true },
+  { id: 'language_tutor', icon: Languages, label: 'Language Tutor', desc: 'Practice English or Spanish', prompt: '', requiresCompany: false },
 ] as const
 
 const PERSONAL_SKILLS = [
@@ -40,6 +42,7 @@ const PERSONAL_SKILLS = [
   { id: 'presentation', icon: Presentation, label: 'Presentation', desc: 'Generate slide decks', prompt: 'Create a presentation about ', requiresCompany: false },
   { id: 'resume_batch', icon: ClipboardList, label: 'Resume Batch', desc: 'Analyze candidate resumes', prompt: '', requiresCompany: false, dropHint: 'Drop resumes to start' },
   { id: 'inventory', icon: Package, label: 'Inventory', desc: 'Process invoices & track stock', prompt: '', requiresCompany: false, dropHint: 'Drop invoices to start' },
+  { id: 'language_tutor', icon: Languages, label: 'Language Tutor', desc: 'Practice English or Spanish', prompt: '', requiresCompany: false },
 ] as const
 
 const TASK_LABELS: Record<string, string> = {
@@ -54,6 +57,7 @@ const TASK_LABELS: Record<string, string> = {
   resume_batch: 'Resume Batch',
   inventory: 'Inventory',
   project: 'Project',
+  language_tutor: 'Language Tutor',
 }
 
 export default function MatchaWorkThread() {
@@ -71,6 +75,9 @@ export default function MatchaWorkThread() {
 
   // Agent mode (local toggle, no backend persistence)
   const [agentMode, setAgentMode] = useState(false)
+
+  // Language tutor panel (shown before thread gets task_type)
+  const [showTutorSetup, setShowTutorSetup] = useState(false)
 
   // Mobile panel toggle
   const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat')
@@ -383,7 +390,9 @@ export default function MatchaWorkThread() {
   const showInventoryPanel = isInventory && thread?.current_state
   const isProject = thread?.task_type === 'project'
   const showProjectPanel = isProject && thread?.current_state
-  const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || agentMode)
+  const isLanguageTutor = thread?.task_type === 'language_tutor'
+  const showLanguageTutorPanel = isLanguageTutor || showTutorSetup
+  const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || showLanguageTutorPanel || agentMode)
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
   const inputDisabled = streaming || isFinalized || isArchived
@@ -663,6 +672,10 @@ export default function MatchaWorkThread() {
                     <button
                       key={skill.id}
                       onClick={() => {
+                        if (skill.id === 'language_tutor') {
+                          setShowTutorSetup(true)
+                          return
+                        }
                         if (skill.prompt) {
                           setInput(skill.prompt)
                           textareaRef.current?.focus()
@@ -842,11 +855,23 @@ export default function MatchaWorkThread() {
           />
         )}
 
-        {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && (
+        {showLanguageTutorPanel && (
+          <LanguageTutorPanel
+            threadId={threadId!}
+            lightMode={lightMode}
+            currentState={thread?.current_state ?? null}
+            onStateUpdate={() => {
+              // Re-fetch thread to pick up updated current_state + task_type
+              if (threadId) getThread(threadId).then(t => { setThread(t); setMessages(t.messages ?? []) }).catch(() => {})
+            }}
+          />
+        )}
+
+        {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !showLanguageTutorPanel && (
           <AgentPanel />
         )}
 
-        {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !agentMode && (
+        {pdfUrl && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !showLanguageTutorPanel && !agentMode && (
           <div className={`${mobileView === 'panel' ? 'block w-full' : 'hidden md:block'} flex-1 bg-zinc-900`}>
             <iframe
               src={pdfUrl}

@@ -370,6 +370,8 @@ def _infer_skill_from_state(current_state: dict) -> str:
     """Infer the active skill from current_state contents."""
     if not current_state:
         return "chat"
+    if "language_tutor" in current_state:
+        return "language_tutor"
     if any(k in current_state for k in ("candidate_name", "position_title", "salary", "salary_range_min")):
         return "offer_letter"
     if any(k in current_state for k in ("overall_rating", "review_title", "review_request_statuses", "review_expected_responses")):

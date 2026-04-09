@@ -10,6 +10,7 @@ export type MWTaskType =
   | 'resume_batch'
   | 'inventory'
   | 'project'
+  | 'language_tutor'
 
 export interface ResumeCandidate {
   id: string

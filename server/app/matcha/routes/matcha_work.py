@@ -6534,3 +6534,137 @@ async def undismiss_auto_task(
             current_user.id, cat, sid,
         )
     return {"status": "restored"}
+
+
+# ── Language Tutor Voice Sessions ──────────────────────────────────────────
+
+
+@router.post("/threads/{thread_id}/tutor/start")
+async def start_tutor_voice_session(
+    thread_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Start a Gemini Live language tutor voice session linked to a matcha-work thread."""
+    from ...core.services.auth import create_interview_ws_token
+
+    language = body.get("language", "en")
+    if language not in ("en", "es"):
+        raise HTTPException(status_code=400, detail="Language must be 'en' or 'es'")
+    duration_minutes = body.get("duration_minutes", 5)
+    if duration_minutes not in (2, 5, 8):
+        raise HTTPException(status_code=400, detail="Duration must be 2, 5, or 8 minutes")
+
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Verify thread exists and belongs to user
+        thread = await conn.fetchrow(
+            "SELECT id, current_state FROM mw_threads WHERE id = $1 AND company_id IS NOT DISTINCT FROM $2",
+            thread_id, company_id,
+        )
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        # Create interview record (same as POST /tutor/sessions with mode=language_test)
+        row = await conn.fetchrow(
+            """
+            INSERT INTO interviews (company_id, interviewer_name, interviewer_role, interview_type, status)
+            VALUES (NULL, $1, $2, 'tutor_language', 'pending')
+            RETURNING id
+            """,
+            current_user.email,
+            language,
+        )
+        interview_id = row["id"]
+
+        # Store interview_id in thread current_state
+        current_state = dict(thread["current_state"]) if thread["current_state"] else {}
+        current_state["language_tutor"] = {
+            "interview_id": str(interview_id),
+            "language": language,
+            "status": "active",
+        }
+        await conn.execute(
+            "UPDATE mw_threads SET current_state = $1, updated_at = NOW() WHERE id = $2",
+            json.dumps(current_state), thread_id,
+        )
+
+    duration_seconds = duration_minutes * 60
+    return {
+        "interview_id": str(interview_id),
+        "websocket_url": f"/api/ws/interview/{interview_id}",
+        "ws_auth_token": create_interview_ws_token(interview_id),
+        "max_session_duration_seconds": duration_seconds,
+    }
+
+
+@router.get("/threads/{thread_id}/tutor/status")
+async def get_tutor_voice_status(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Poll language tutor session status and analysis results."""
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        thread = await conn.fetchrow(
+            "SELECT id, current_state FROM mw_threads WHERE id = $1 AND company_id IS NOT DISTINCT FROM $2",
+            thread_id, company_id,
+        )
+        if not thread:
+            raise HTTPException(status_code=404, detail="Thread not found")
+
+        current_state = thread["current_state"] or {}
+        tutor_state = current_state.get("language_tutor")
+        if not tutor_state or not tutor_state.get("interview_id"):
+            raise HTTPException(status_code=404, detail="No tutor session found for this thread")
+
+        interview_id = tutor_state["interview_id"]
+        interview = await conn.fetchrow(
+            "SELECT status, tutor_analysis, transcript FROM interviews WHERE id = $1",
+            UUID(interview_id),
+        )
+        if not interview:
+            raise HTTPException(status_code=404, detail="Interview record not found")
+
+        result = {
+            "status": interview["status"],
+            "tutor_analysis": interview["tutor_analysis"],
+        }
+
+        # When analysis is complete, save summary as assistant message (idempotent)
+        if interview["status"] == "completed" and interview["tutor_analysis"] and not tutor_state.get("message_saved"):
+            analysis = interview["tutor_analysis"] if isinstance(interview["tutor_analysis"], dict) else json.loads(interview["tutor_analysis"])
+            proficiency = analysis.get("overall_proficiency", {})
+            level = proficiency.get("level", "N/A")
+            level_desc = proficiency.get("level_description", "")
+            summary_text = f"**Language Practice Complete** — CEFR Level: **{level}** ({level_desc})\n\n"
+            strengths = proficiency.get("strengths", [])
+            if strengths:
+                summary_text += "**Strengths:** " + ", ".join(strengths) + "\n\n"
+            areas = proficiency.get("areas_to_improve", [])
+            if areas:
+                summary_text += "**Areas to Improve:** " + ", ".join(areas) + "\n\n"
+            grammar = analysis.get("grammar", {})
+            errors = grammar.get("common_errors", [])
+            if errors:
+                summary_text += "**Grammar Notes:**\n"
+                for err in errors[:5]:
+                    if isinstance(err, dict):
+                        summary_text += f"- {err.get('error', '')}: {err.get('correction', '')}\n"
+                    else:
+                        summary_text += f"- {err}\n"
+
+            await doc_svc.add_message(thread_id, "assistant", summary_text.strip())
+
+            # Mark message as saved so we don't duplicate
+            current_state_updated = dict(current_state)
+            current_state_updated["language_tutor"]["message_saved"] = True
+            current_state_updated["language_tutor"]["status"] = "completed"
+            await conn.execute(
+                "UPDATE mw_threads SET current_state = $1, updated_at = NOW() WHERE id = $2",
+                json.dumps(current_state_updated), thread_id,
+            )
+
+        return result
