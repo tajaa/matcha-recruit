@@ -207,6 +207,8 @@ export function useVoiceSession(options: UseVoiceSessionOptions | null) {
   }, [updateStatus, playPcmChunk, flushPlayback, cleanup])
 
   const stop = useCallback(() => {
+    // Flush any remaining audio in the worklet buffer before stopping
+    workletNodeRef.current?.port.postMessage('flush')
     const ws = wsRef.current
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'command', command: 'stop_session' }))

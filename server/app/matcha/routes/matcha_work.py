@@ -6646,8 +6646,16 @@ async def get_tutor_voice_status(
         tutor_analysis = interview["tutor_analysis"]
         interview_status = interview["status"]
 
-        # Run analysis inline if session ended but analysis hasn't run yet
+        # Run analysis inline if session ended but analysis hasn't run yet.
+        # Atomically claim the analysis slot to prevent duplicate runs from concurrent polls.
         if interview_status in ("analyzing", "completed") and not tutor_analysis and interview["transcript"]:
+            claimed = await conn.fetchval(
+                "UPDATE interviews SET status = 'analyzing_inline' WHERE id = $1 AND status IN ('analyzing', 'completed') AND tutor_analysis IS NULL RETURNING id",
+                UUID(interview_id),
+            )
+            if not claimed:
+                # Another request is already running analysis
+                return {"status": "analyzing", "tutor_analysis": None}
             try:
                 from ..services.conversation_analyzer import ConversationAnalyzer
                 settings = get_settings()
@@ -6670,8 +6678,12 @@ async def get_tutor_voice_status(
                 interview_status = "completed"
             except Exception as e:
                 logger.error("Inline tutor analysis failed: %s", e)
-                # Return current status, client will retry
-                return {"status": interview_status, "tutor_analysis": None}
+                # Reset status so next poll can retry
+                await conn.execute(
+                    "UPDATE interviews SET status = 'analyzing' WHERE id = $1",
+                    UUID(interview_id),
+                )
+                return {"status": "analyzing", "tutor_analysis": None}
 
         result = {
             "status": interview_status,

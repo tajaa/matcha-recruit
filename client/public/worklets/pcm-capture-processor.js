@@ -1,6 +1,8 @@
 /**
  * AudioWorklet processor that captures mic audio, resamples to 16 kHz mono,
  * buffers to ~4096-byte chunks, and converts Float32 -> Int16 PCM for Gemini Live API.
+ *
+ * Sends a message { type: 'flush' } from the main thread to flush remaining buffer.
  */
 class PCMCaptureProcessor extends AudioWorkletProcessor {
   constructor() {
@@ -8,6 +10,15 @@ class PCMCaptureProcessor extends AudioWorkletProcessor {
     this._targetRate = 16000
     this._buffer = new Int16Array(2048) // 4096 bytes (matches iOS chunk size)
     this._bufferOffset = 0
+
+    this.port.onmessage = (e) => {
+      if (e.data === 'flush' && this._bufferOffset > 0) {
+        const chunk = this._buffer.slice(0, this._bufferOffset)
+        this.port.postMessage(chunk.buffer, [chunk.buffer])
+        this._buffer = new Int16Array(2048)
+        this._bufferOffset = 0
+      }
+    }
   }
 
   process(inputs) {
