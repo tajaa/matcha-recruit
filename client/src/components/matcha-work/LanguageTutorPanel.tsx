@@ -73,30 +73,50 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [transcripts])
 
+  // Fire error check for a completed user utterance
+  const fireCheck = useCallback((idx: number, utterance: string) => {
+    const key = `${idx}:${utterance}`
+    if (checkedRef.current.has(key)) return
+    checkedRef.current.add(key)
+    checkUtterance(threadId, utterance, language).then(res => {
+      if (res.errors.length > 0) {
+        setInlineErrors(m => new Map(m).set(idx, res.errors))
+      }
+    }).catch(() => {})
+  }, [threadId, language])
+
   const handleTranscript = useCallback((role: 'user' | 'assistant', text: string) => {
     if (!text.trim()) return
     setTranscripts(prev => {
-      const last = prev[prev.length - 1]
-      // When assistant starts speaking, the previous user utterance is complete — check it
-      if (role === 'assistant' && last?.role === 'user') {
-        const idx = prev.length - 1
-        const utterance = last.text
-        if (!checkedRef.current.has(utterance)) {
-          checkedRef.current.add(utterance)
-          checkUtterance(threadId, utterance, language).then(res => {
-            if (res.errors.length > 0) {
-              setInlineErrors(m => new Map(m).set(idx, res.errors))
-            }
-          }).catch(() => {})
-        }
-      }
       // Merge consecutive same-role entries
-      if (last && last.role === role) {
-        return [...prev.slice(0, -1), { role, text: last.text + ' ' + text }]
+      if (prev.length > 0 && prev[prev.length - 1].role === role) {
+        return [...prev.slice(0, -1), { role, text: prev[prev.length - 1].text + ' ' + text }]
       }
       return [...prev, { role, text }]
     })
-  }, [threadId, language])
+  }, [])
+
+  // Check user utterances when assistant starts speaking (meaning user just finished)
+  useEffect(() => {
+    if (transcripts.length < 2) return
+    const last = transcripts[transcripts.length - 1]
+    const prev = transcripts[transcripts.length - 2]
+    if (last.role === 'assistant' && prev.role === 'user') {
+      fireCheck(transcripts.length - 2, prev.text)
+    }
+  }, [transcripts, fireCheck])
+
+  // Also check final user utterance when session ends
+  const prevPhaseRef = useRef(phase)
+  useEffect(() => {
+    if (prevPhaseRef.current === 'active' && phase === 'analyzing' && transcripts.length > 0) {
+      const last = transcripts[transcripts.length - 1]
+      if (last.role === 'user') {
+        fireCheck(transcripts.length - 1, last.text)
+      }
+    }
+    prevPhaseRef.current = phase
+  }, [phase, transcripts, fireCheck])
 
   const handleSessionEnded = useCallback(() => {
     if (pollRef.current) return // already polling, don't double-fire
