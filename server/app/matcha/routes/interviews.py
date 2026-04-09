@@ -1191,7 +1191,7 @@ async def interview_websocket(
             api_key=settings.gemini_api_key,
             vertex_project=settings.vertex_project,
             vertex_location=settings.vertex_location,
-            use_alpha_api=True,
+            use_alpha_api=False,
         )
 
         # Connect with appropriate interview prompt + new Live API features

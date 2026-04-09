@@ -6579,7 +6579,13 @@ async def start_tutor_voice_session(
         interview_id = row["id"]
 
         # Store interview_id in thread current_state
-        current_state = dict(thread["current_state"]) if thread["current_state"] else {}
+        raw_state = thread["current_state"]
+        if isinstance(raw_state, str):
+            current_state = json.loads(raw_state) if raw_state else {}
+        elif isinstance(raw_state, dict):
+            current_state = dict(raw_state)
+        else:
+            current_state = {}
         current_state["language_tutor"] = {
             "interview_id": str(interview_id),
             "language": language,
@@ -6615,7 +6621,13 @@ async def get_tutor_voice_status(
         if not thread:
             raise HTTPException(status_code=404, detail="Thread not found")
 
-        current_state = thread["current_state"] or {}
+        raw_state = thread["current_state"]
+        if isinstance(raw_state, str):
+            current_state = json.loads(raw_state) if raw_state else {}
+        elif isinstance(raw_state, dict):
+            current_state = dict(raw_state)
+        else:
+            current_state = {}
         tutor_state = current_state.get("language_tutor")
         if not tutor_state or not tutor_state.get("interview_id"):
             raise HTTPException(status_code=404, detail="No tutor session found for this thread")
