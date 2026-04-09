@@ -84,6 +84,7 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
   }, [])
 
   const handleSessionEnded = useCallback(() => {
+    if (pollRef.current) return // already polling, don't double-fire
     setPhase('analyzing')
     // Start polling for analysis
     pollRef.current = setInterval(async () => {
@@ -294,7 +295,7 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
             {voice.isMicActive ? <Mic size={20} /> : <MicOff size={20} />}
           </button>
           <button
-            onClick={voice.stop}
+            onClick={() => { voice.stop(); handleSessionEnded() }}
             style={{
               width: 48, height: 48, borderRadius: '50%', border: 'none', cursor: 'pointer',
               background: '#ef4444', color: '#fff',
