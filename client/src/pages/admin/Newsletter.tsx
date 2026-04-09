@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef } from 'react'
-import { Loader2, Plus, Send, Trash2, FileText, Search, Image as ImageIcon, Paperclip } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Loader2, Plus, Send, Trash2, FileText, Search } from 'lucide-react'
 import { api } from '../../api/client'
 import SectionEditor from '../../components/matcha-work/SectionEditor'
 

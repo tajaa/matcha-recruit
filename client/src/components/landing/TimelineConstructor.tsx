@@ -40,14 +40,16 @@ export function TimelineConstructor() {
       setCurrentStep(0)
       return
     }
+    // Start immediately at step 1, cycle through 4 steps + brief pause at end
+    setCurrentStep(1)
     const interval = setInterval(() => {
-      setCurrentStep(s => (s + 1) % 6)
-    }, 3000)
+      setCurrentStep(s => s >= 4 ? 1 : s + 1)
+    }, 2000)
     return () => clearInterval(interval)
   }, [inView])
 
   return (
-    <div ref={ref} className="relative h-80 lg:h-96 overflow-hidden bg-zinc-950 flex flex-col items-center justify-center p-6" style={{ backgroundImage: SCAN_LINE_BG }}>
+    <div ref={ref} className="relative h-[400px] lg:h-[460px] overflow-hidden bg-zinc-950 flex flex-col items-center justify-center p-6" style={{ backgroundImage: SCAN_LINE_BG }}>
       
       {/* Background Grid */}
       <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-amber-900/10 via-zinc-950 to-zinc-950 pointer-events-none" />

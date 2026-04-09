@@ -59,7 +59,7 @@ export function RadarChart() {
   const activeLabel = activeDim !== null ? RADAR_DIMS[activeDim] : null
 
   return (
-    <div ref={ref} className="relative h-80 lg:h-96 flex items-center justify-center overflow-hidden bg-zinc-950 p-4"
+    <div ref={ref} className="relative h-[400px] lg:h-[460px] flex items-center justify-center overflow-hidden bg-zinc-950 p-4"
       style={{ backgroundImage: SCAN_LINE_BG }}
     >
       {/* 3D Container for Radar */}

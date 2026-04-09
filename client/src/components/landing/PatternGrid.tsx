@@ -42,7 +42,7 @@ export function PatternGrid() {
   }, [inView])
 
   return (
-    <div ref={ref} className="relative h-80 lg:h-96 overflow-hidden bg-zinc-950 flex flex-col items-center justify-center p-4"
+    <div ref={ref} className="relative h-[400px] lg:h-[460px] overflow-hidden bg-zinc-950 flex flex-col items-center justify-center p-4"
       style={{ backgroundImage: SCAN_LINE_BG, perspective: '1200px' }}
     >
       {/* 3D Isometric Container */}
