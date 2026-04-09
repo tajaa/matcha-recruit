@@ -1185,13 +1185,12 @@ async def interview_websocket(
 
     try:
         # Create Gemini session (use alpha API for affective dialog + proactive audio)
+        # Use Google AI API (not Vertex) for live sessions — 3.1 models
+        # only available on Google AI, and 2.5 is being discontinued on Vertex.
         gemini_session = GeminiLiveSession(
             model=settings.live_model,
             voice=settings.voice,
             api_key=settings.gemini_api_key,
-            vertex_project=settings.vertex_project,
-            vertex_location=settings.vertex_location,
-            use_alpha_api=False,
         )
 
         # Connect with appropriate interview prompt + new Live API features
@@ -1209,8 +1208,8 @@ async def interview_websocket(
             interviewee_role_for_prompt=interviewee_role_for_prompt,
             # Investigation interviews: don't let user interrupt the investigator
             no_interruption=(interview_type == "investigation"),
-            enable_affective_dialog=True,
-            enable_proactive_audio=True,
+            enable_affective_dialog=False,
+            enable_proactive_audio=False,
         )
 
         await send_message(MessageType.STATUS, "Session started")

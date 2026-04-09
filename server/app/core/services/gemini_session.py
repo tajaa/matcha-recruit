@@ -602,52 +602,16 @@ class GeminiLiveSession:
 
         self._interview_type = interview_type
 
-        # Build realtime input config (VAD tuning + interruption control)
-        activity_handling = (
-            types.ActivityHandling.NO_INTERRUPTION
-            if no_interruption
-            else types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS
-        )
-        realtime_input_config = types.RealtimeInputConfig(
-            activity_handling=activity_handling,
-            automatic_activity_detection=types.AutomaticActivityDetection(
-                # LOW end-of-speech sensitivity = waits longer before cutting off
-                # (reduces premature cutoffs when user pauses mid-thought)
-                end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                silence_duration_ms=500,
-            ),
-        )
-
-        config_kwargs = dict(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=self.voice
-                    )
-                )
-            ),
-            system_instruction=types.Content(
-                parts=[types.Part(text=system_prompt)]
-            ),
-            input_audio_transcription=types.AudioTranscriptionConfig(),
-            output_audio_transcription=types.AudioTranscriptionConfig(),
-            realtime_input_config=realtime_input_config,
-            # Sliding window compression prevents long sessions from hitting token limits
-            context_window_compression=types.ContextWindowCompressionConfig(
-                sliding_window=types.SlidingWindow(),
-            ),
-        )
-
-        # Alpha API features (require use_alpha_api=True on client)
-        if enable_affective_dialog:
-            config_kwargs["enable_affective_dialog"] = True
-        if enable_proactive_audio:
-            config_kwargs["proactivity"] = types.ProactivityConfig(
-                proactive_audio=True
-            )
-
-        config = types.LiveConnectConfig(**config_kwargs)
+        # Dict-style config for 3.1 compatibility
+        config = {
+            "response_modalities": ["AUDIO"],
+            "speech_config": {
+                "voice_config": {"prebuilt_voice_config": {"voice_name": self.voice}}
+            },
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "input_audio_transcription": {},
+            "output_audio_transcription": {},
+        }
 
         print(f"[Gemini] Connecting for interview with {company_name}")
 
@@ -673,27 +637,15 @@ class GeminiLiveSession:
         self._output_transcript_buffer = ""
         self.session_transcript = []
 
-        config = types.LiveConnectConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=self.voice)
-                )
-            ),
-            system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
-            input_audio_transcription=types.AudioTranscriptionConfig(),
-            output_audio_transcription=types.AudioTranscriptionConfig(),
-            realtime_input_config=types.RealtimeInputConfig(
-                activity_handling=types.ActivityHandling.START_OF_ACTIVITY_INTERRUPTS,
-                automatic_activity_detection=types.AutomaticActivityDetection(
-                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                    silence_duration_ms=500,
-                ),
-            ),
-            context_window_compression=types.ContextWindowCompressionConfig(
-                sliding_window=types.SlidingWindow(),
-            ),
-        )
+        config = {
+            "response_modalities": ["AUDIO"],
+            "speech_config": {
+                "voice_config": {"prebuilt_voice_config": {"voice_name": self.voice}}
+            },
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "input_audio_transcription": {},
+            "output_audio_transcription": {},
+        }
 
         print("[Gemini] Connecting for phone call")
         self._session_context = self.client.aio.live.connect(model=self.model, config=config)
@@ -803,13 +755,7 @@ class GeminiLiveSession:
         """Send a text message to trigger model response."""
         if self.session and not self._closed:
             try:
-                await self.session.send_client_content(
-                    turns=types.Content(
-                        role="user",
-                        parts=[types.Part(text=text)]
-                    ),
-                    turn_complete=True,
-                )
+                await self.session.send_realtime_input(text=text)
             except Exception as e:
                 print(f"[Gemini] Failed to send text: {e}")
 

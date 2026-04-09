@@ -68,8 +68,6 @@ async def twilio_media_stream(websocket: WebSocket, call_id: str):
         model=settings.live_model,
         voice=settings.voice,
         api_key=settings.gemini_api_key,
-        vertex_project=settings.vertex_project,
-        vertex_location=settings.vertex_location,
     )
 
     try:
