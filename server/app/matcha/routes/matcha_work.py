@@ -6727,3 +6727,75 @@ async def get_tutor_voice_status(
             )
 
         return result
+
+
+# ── Real-time utterance error checking ─────────────────────────────────
+
+
+UTTERANCE_CHECK_PROMPT_EN = """You are a language tutor analyzing a student's English utterance for errors.
+
+Utterance: "{utterance}"
+
+Return a JSON array of errors found. Each error object has:
+- "error": the incorrect word/phrase exactly as spoken
+- "correction": the correct form
+- "type": one of "grammar", "vocabulary", "pronunciation"
+- "brief": a 5-word max explanation
+
+If no errors, return an empty array [].
+Only flag clear mistakes, not stylistic preferences. Be concise.
+Return ONLY valid JSON, no markdown."""
+
+UTTERANCE_CHECK_PROMPT_ES = """Eres un tutor de idiomas analizando una frase en español de un estudiante.
+
+Frase: "{utterance}"
+
+Devuelve un array JSON de errores encontrados. Cada objeto tiene:
+- "error": la palabra/frase incorrecta exactamente como fue dicha
+- "correction": la forma correcta
+- "type": uno de "grammar", "vocabulary", "pronunciation"
+- "brief": explicación de máximo 5 palabras
+
+Si no hay errores, devuelve un array vacío [].
+Solo marca errores claros, no preferencias de estilo. Sé conciso.
+Devuelve SOLO JSON válido, sin markdown."""
+
+
+@router.post("/threads/{thread_id}/tutor/check")
+async def check_tutor_utterance(
+    thread_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Real-time error check on a single user utterance during a voice session."""
+    utterance = (body.get("utterance") or "").strip()
+    language = body.get("language", "en")
+
+    if not utterance or len(utterance) < 3:
+        return {"errors": []}
+
+    settings = get_settings()
+    try:
+        from google import genai
+        if settings.use_vertex:
+            client = genai.Client(
+                vertexai=True,
+                project=settings.vertex_project,
+                location=settings.vertex_location,
+            )
+        else:
+            client = genai.Client(api_key=settings.gemini_api_key)
+
+        prompt = (UTTERANCE_CHECK_PROMPT_ES if language == "es" else UTTERANCE_CHECK_PROMPT_EN).format(utterance=utterance)
+        response = await client.aio.models.generate_content(model="gemini-2.5-flash", contents=prompt)
+        text = response.text.strip()
+        if text.startswith("```"):
+            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+        errors = json.loads(text)
+        return {"errors": errors if isinstance(errors, list) else []}
+    except Exception as e:
+        logger.warning("Utterance check failed: %s", e)
+        return {"errors": []}

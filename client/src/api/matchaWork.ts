@@ -1017,3 +1017,17 @@ export function startTutorSession(threadId: string, language: 'en' | 'es', durat
 export function getTutorStatus(threadId: string) {
   return api.get<TutorStatusResponse>(`/matcha-work/threads/${threadId}/tutor/status`)
 }
+
+export interface UtteranceError {
+  error: string
+  correction: string
+  type: 'grammar' | 'vocabulary' | 'pronunciation'
+  brief: string
+}
+
+export function checkUtterance(threadId: string, utterance: string, language: 'en' | 'es') {
+  return api.post<{ errors: UtteranceError[] }>(`/matcha-work/threads/${threadId}/tutor/check`, {
+    utterance,
+    language,
+  })
+}

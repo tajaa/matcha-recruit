@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Mic, MicOff, Square, Play, Loader2, Globe, ChevronDown, ChevronUp, RotateCcw } from 'lucide-react'
 import { useVoiceSession } from '../../hooks/useVoiceSession'
-import { startTutorSession, getTutorStatus, type TutorStartResponse, type TutorAnalysis } from '../../api/matchaWork'
+import { startTutorSession, getTutorStatus, checkUtterance, type TutorStartResponse, type TutorAnalysis, type UtteranceError } from '../../api/matchaWork'
 
 interface LanguageTutorPanelProps {
   threadId: string
@@ -57,8 +57,10 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
   const [error, setError] = useState('')
   const [starting, setStarting] = useState(false)
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set(['proficiency', 'grammar']))
+  const [inlineErrors, setInlineErrors] = useState<Map<number, UtteranceError[]>>(new Map())
   const transcriptEndRef = useRef<HTMLDivElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const checkedRef = useRef<Set<string>>(new Set()) // track which utterances we've checked
 
   const bg = lightMode ? '#ffffff' : '#1e1e1e'
   const fg = lightMode ? '#111827' : '#e5e7eb'
@@ -74,14 +76,27 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
   const handleTranscript = useCallback((role: 'user' | 'assistant', text: string) => {
     if (!text.trim()) return
     setTranscripts(prev => {
-      // Merge consecutive same-role entries
       const last = prev[prev.length - 1]
+      // When assistant starts speaking, the previous user utterance is complete — check it
+      if (role === 'assistant' && last?.role === 'user') {
+        const idx = prev.length - 1
+        const utterance = last.text
+        if (!checkedRef.current.has(utterance)) {
+          checkedRef.current.add(utterance)
+          checkUtterance(threadId, utterance, language).then(res => {
+            if (res.errors.length > 0) {
+              setInlineErrors(m => new Map(m).set(idx, res.errors))
+            }
+          }).catch(() => {})
+        }
+      }
+      // Merge consecutive same-role entries
       if (last && last.role === role) {
         return [...prev.slice(0, -1), { role, text: last.text + ' ' + text }]
       }
       return [...prev, { role, text }]
     })
-  }, [])
+  }, [threadId, language])
 
   const handleSessionEnded = useCallback(() => {
     if (pollRef.current) return // already polling, don't double-fire
@@ -161,6 +176,8 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
     setSessionInfo(null)
     setAnalysis(null)
     setTranscripts([])
+    setInlineErrors(new Map())
+    checkedRef.current.clear()
     setError('')
   }
 
@@ -266,18 +283,33 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
               {voice.status === 'connecting' ? 'Connecting to tutor...' : 'Listening... Start speaking!'}
             </div>
           )}
-          {transcripts.map((t, i) => (
-            <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: t.role === 'user' ? 'flex-end' : 'flex-start' }}>
-              <span style={{ fontSize: 10, color: muted, marginBottom: 2 }}>{t.role === 'user' ? 'You' : 'Tutor'}</span>
-              <div style={{
-                padding: '8px 12px', borderRadius: 12, maxWidth: '85%', fontSize: 14, lineHeight: 1.5,
-                background: t.role === 'user' ? '#3b82f6' : cardBg,
-                color: t.role === 'user' ? '#fff' : fg,
-              }}>
-                {t.text}
+          {transcripts.map((t, i) => {
+            const errors = inlineErrors.get(i)
+            return (
+              <div key={i} style={{ display: 'flex', flexDirection: 'column', alignItems: t.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                <span style={{ fontSize: 10, color: muted, marginBottom: 2 }}>{t.role === 'user' ? 'You' : 'Tutor'}</span>
+                <div style={{
+                  padding: '8px 12px', borderRadius: 12, maxWidth: '85%', fontSize: 14, lineHeight: 1.5,
+                  background: t.role === 'user' ? '#3b82f6' : cardBg,
+                  color: t.role === 'user' ? '#fff' : fg,
+                }}>
+                  {t.text}
+                </div>
+                {errors && errors.length > 0 && (
+                  <div style={{ maxWidth: '85%', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                    {errors.map((e, j) => (
+                      <div key={j} style={{ fontSize: 11, display: 'flex', alignItems: 'baseline', gap: 4, flexWrap: 'wrap' }}>
+                        <span style={{ color: '#ef4444', textDecoration: 'line-through' }}>{e.error}</span>
+                        <span style={{ color: muted }}>→</span>
+                        <span style={{ color: '#22c55e' }}>{e.correction}</span>
+                        <span style={{ color: muted, fontSize: 10 }}>({e.brief})</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            )
+          })}
           <div ref={transcriptEndRef} />
         </div>
 
