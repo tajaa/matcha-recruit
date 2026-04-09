@@ -134,7 +134,7 @@ export function MonteCarloDistribution() {
         transition={{ delay: 1.5, duration: 1 }}
       >
         <div className="absolute right-4 -top-4 flex items-center gap-2">
-          <span className="text-[9px] text-red-400 uppercase font-bold tracking-widest drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]">
+          <span className="text-[11px] text-red-400 uppercase font-bold tracking-widest drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]">
             Critical Threshold
           </span>
           <span className="relative flex h-1.5 w-1.5">
@@ -146,15 +146,15 @@ export function MonteCarloDistribution() {
 
       {/* HUD Overlays */}
       <div className="absolute top-4 left-4 flex flex-col gap-1 z-30">
-        <div className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold">Monte Carlo Engine</div>
-        <div className="text-[10px] text-emerald-400 font-mono">
+        <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Monte Carlo Engine</div>
+        <div className="text-xs text-emerald-400 font-mono">
           ITERATIONS: {iterations.toLocaleString().padStart(6, '0')} / 10,000
         </div>
         {progress === 1 && (
           <motion.div 
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
-            className="text-[9px] text-emerald-500 mt-1 uppercase tracking-widest"
+            className="text-[11px] text-emerald-500 mt-1 uppercase tracking-widest"
           >
             [ Simulation Complete ]
           </motion.div>
@@ -162,21 +162,21 @@ export function MonteCarloDistribution() {
       </div>
 
       <div className="absolute bottom-4 left-4 flex flex-col gap-1.5 z-30 bg-zinc-950/80 p-2 rounded backdrop-blur-md border border-zinc-800/50">
-        <div className="flex items-center gap-2 text-[9px] font-mono">
+        <div className="flex items-center gap-2 text-[11px] font-mono">
           <span className="w-1.5 h-1.5 bg-emerald-500 border border-emerald-400 shadow-[0_0_5px_rgba(16,185,129,0.5)]" />
           <span className="text-zinc-400 w-6">P50:</span> <span className="text-zinc-200">$142,000</span>
         </div>
-        <div className="flex items-center gap-2 text-[9px] font-mono">
+        <div className="flex items-center gap-2 text-[11px] font-mono">
           <span className="w-1.5 h-1.5 bg-amber-500 border border-amber-400 shadow-[0_0_5px_rgba(245,158,11,0.5)]" />
           <span className="text-zinc-400 w-6">P90:</span> <span className="text-zinc-200">$890,000</span>
         </div>
-        <div className="flex items-center gap-2 text-[9px] font-mono">
+        <div className="flex items-center gap-2 text-[11px] font-mono">
           <span className="w-1.5 h-1.5 bg-red-500 border border-red-400 shadow-[0_0_5px_rgba(239,68,68,0.5)]" />
           <span className="text-zinc-400 w-6">P99:</span> <span className="text-zinc-200">$2.4M</span>
         </div>
       </div>
       
-      <div className="absolute bottom-2 right-4 text-[8px] text-zinc-600 font-mono">
+      <div className="absolute bottom-2 right-4 text-xs text-zinc-600 font-mono">
         ANNUAL LOSS EXPOSURE →
       </div>
     </div>

@@ -233,7 +233,7 @@ export function RadarChart() {
             exit={{ opacity: 0, x: 10 }}
             transition={{ duration: 0.3 }}
           >
-            <div className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold mb-1">
+            <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold mb-1">
               Dimension Scan
             </div>
             <div className={`text-[12px] font-[Orbitron] font-bold uppercase tracking-widest ${activeValue > 0.7 ? 'text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)]' : 'text-amber-500 drop-shadow-[0_0_5px_rgba(245,158,11,0.8)]'}`}>
@@ -248,12 +248,12 @@ export function RadarChart() {
                   transition={{ duration: 0.5, ease: "easeOut" }}
                 />
               </div>
-              <div className={`text-[10px] font-mono font-bold ${activeValue > 0.7 ? 'text-red-400' : 'text-amber-400'}`}>
+              <div className={`text-xs font-mono font-bold ${activeValue > 0.7 ? 'text-red-400' : 'text-amber-400'}`}>
                 {(activeValue * 100).toFixed(1)}%
               </div>
             </div>
             {activeValue > 0.7 && (
-              <div className="mt-2 text-[8px] text-red-300 font-mono bg-red-500/10 px-1.5 py-0.5 border border-red-500/30 rounded">
+              <div className="mt-2 text-xs text-red-300 font-mono bg-red-500/10 px-1.5 py-0.5 border border-red-500/30 rounded">
                 ! HIGH EXPOSURE DETECTED
               </div>
             )}
@@ -263,8 +263,8 @@ export function RadarChart() {
 
       {/* Persistent UI Overlays */}
       <div className="absolute top-4 left-4 flex flex-col gap-1 z-30">
-        <div className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold">Pre-Termination Intel</div>
-        <div className="text-[10px] text-amber-500 font-mono flex items-center gap-2">
+        <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Pre-Termination Intel</div>
+        <div className="text-xs text-amber-500 font-mono flex items-center gap-2">
           <span>{activeDim !== null ? 'ANALYZING RISK VECTOR...' : 'INITIALIZING SENSORS...'}</span>
           <span className="animate-pulse">▊</span>
         </div>
@@ -290,8 +290,8 @@ export function RadarChart() {
           <div className="text-[14px] font-[Orbitron] font-bold text-zinc-100">72</div>
         </div>
         <div className="flex flex-col">
-          <div className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold">Total Score</div>
-          <div className="text-[10px] font-[Orbitron] font-bold tracking-widest text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)] mt-0.5">
+          <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Total Score</div>
+          <div className="text-xs font-[Orbitron] font-bold tracking-widest text-red-500 drop-shadow-[0_0_5px_rgba(239,68,68,0.8)] mt-0.5">
             HIGH RISK
           </div>
         </div>
@@ -302,7 +302,7 @@ export function RadarChart() {
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 bg-amber-400" />
           <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
         </span>
-        <span className="text-[8px] uppercase font-bold tracking-widest text-amber-500 drop-shadow-[0_0_5px_rgba(245,158,11,0.8)]">
+        <span className="text-xs uppercase font-bold tracking-widest text-amber-500 drop-shadow-[0_0_5px_rgba(245,158,11,0.8)]">
           Target Locked
         </span>
       </div>

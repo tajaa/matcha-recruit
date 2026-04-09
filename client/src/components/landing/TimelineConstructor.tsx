@@ -80,8 +80,8 @@ export function TimelineConstructor() {
                 animate={isActive ? { y: 0, opacity: 1 } : { y: 20, opacity: 0 }}
                 transition={{ duration: 0.5, delay: 0.2 }}
               >
-                <div className="text-[7px] text-zinc-500 uppercase tracking-widest mb-1.5 text-center">Source</div>
-                <div className={`text-[8px] sm:text-[9px] font-mono text-center break-words ${isAlert ? 'text-amber-400' : 'text-zinc-300'}`}>
+                <div className="text-[11px] text-zinc-500 uppercase tracking-widest mb-1.5 text-center">Source</div>
+                <div className={`text-xs sm:text-[11px] font-mono text-center break-words ${isAlert ? 'text-amber-400' : 'text-zinc-300'}`}>
                   {step.doc}
                 </div>
               </motion.div>
@@ -134,10 +134,10 @@ export function TimelineConstructor() {
                 animate={isActive ? { y: 0, opacity: 1 } : { y: -10, opacity: 0 }}
                 transition={{ duration: 0.5, delay: 0.4 }}
               >
-                <div className={`text-[8px] sm:text-[9px] font-[Orbitron] font-bold tracking-widest uppercase mb-1.5 ${isAlert ? 'text-amber-400' : 'text-zinc-200'}`}>
+                <div className={`text-xs sm:text-[11px] font-[Orbitron] font-bold tracking-widest uppercase mb-1.5 ${isAlert ? 'text-amber-400' : 'text-zinc-200'}`}>
                   {step.title}
                 </div>
-                <div className="text-[8px] text-zinc-500 leading-tight">
+                <div className="text-xs text-zinc-500 leading-tight">
                   {step.desc}
                 </div>
               </motion.div>
@@ -157,11 +157,11 @@ export function TimelineConstructor() {
             exit={{ opacity: 0, y: 10, scale: 0.95 }}
             transition={{ duration: 0.4, type: 'spring' }}
           >
-            <div className="text-[9px] text-amber-400 uppercase tracking-widest mb-2.5 flex items-center gap-2 font-bold">
+            <div className="text-[11px] text-amber-400 uppercase tracking-widest mb-2.5 flex items-center gap-2 font-bold">
               <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse shadow-[0_0_8px_#f59e0b]" />
               Agent Alert: Temporal Anomaly
             </div>
-            <div className="text-[10px] font-mono text-amber-100/90 leading-relaxed bg-black/40 p-2.5 rounded border border-amber-500/20">
+            <div className="text-xs font-mono text-amber-100/90 leading-relaxed bg-black/40 p-2.5 rounded border border-amber-500/20">
               <span className="text-amber-500 font-bold">Witness A:</span> "Incident occurred at 4:15 PM."<br/>
               <span className="text-amber-500 font-bold">Badge Log:</span> Subject exited building at 3:42 PM.<br/>
               <motion.div 
@@ -179,8 +179,8 @@ export function TimelineConstructor() {
 
       {/* HUD */}
       <div className="absolute top-4 left-4 flex flex-col gap-1 z-30">
-        <div className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold">ER Copilot Engine</div>
-        <div className="text-[10px] text-amber-500 font-mono flex items-center gap-2">
+        <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold">ER Copilot Engine</div>
+        <div className="text-xs text-amber-500 font-mono flex items-center gap-2">
           <span>STATUS: {currentStep === 0 ? 'AWAITING DOCS' : currentStep >= 4 ? 'MEMO READY' : 'ANALYZING...'}</span>
           {currentStep > 0 && currentStep < 4 && <span className="animate-pulse">▊</span>}
         </div>
@@ -191,7 +191,7 @@ export function TimelineConstructor() {
           <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${currentStep === 3 ? 'bg-amber-400' : 'bg-zinc-500'}`} />
           <span className={`relative inline-flex rounded-full h-2 w-2 ${currentStep === 3 ? 'bg-amber-500' : 'bg-zinc-600'}`} />
         </span>
-        <span className="text-[8px] uppercase font-bold tracking-widest text-zinc-500">
+        <span className="text-xs uppercase font-bold tracking-widest text-zinc-500">
           Auto-Investigator
         </span>
       </div>

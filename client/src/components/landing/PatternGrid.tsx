@@ -204,10 +204,10 @@ export function PatternGrid() {
               <circle cx="50" cy="50" r="25" fill="none" stroke="currentColor" strokeWidth="2" strokeDasharray="4 4" className="animate-[spin_4s_linear_infinite]" />
               <circle cx="50" cy="50" r="4" fill="currentColor" className="animate-pulse" />
             </svg>
-            <div className="text-[10px] text-red-400 font-[Orbitron] font-bold tracking-widest uppercase bg-zinc-950/80 px-2 py-1 border border-red-500/30 rounded backdrop-blur-sm">
+            <div className="text-xs text-red-400 font-[Orbitron] font-bold tracking-widest uppercase bg-zinc-950/80 px-2 py-1 border border-red-500/30 rounded backdrop-blur-sm">
               Cluster Lock
             </div>
-            <div className="text-[8px] font-mono text-red-300/80 mt-1 text-right">
+            <div className="text-xs font-mono text-red-300/80 mt-1 text-right">
               LAT: 34.05 // LNG: -118.24<br/>
               SEVERITY: CRITICAL
             </div>
@@ -217,29 +217,29 @@ export function PatternGrid() {
 
       {/* HUD Overlays */}
       <div className="absolute top-4 left-4 flex flex-col gap-1 z-30">
-        <div className="text-[8px] text-zinc-500 uppercase tracking-widest font-bold">Pattern Detection Grid</div>
-        <div className="text-[10px] text-amber-500 font-mono flex items-center gap-2">
+        <div className="text-xs text-zinc-500 uppercase tracking-widest font-bold">Pattern Detection Grid</div>
+        <div className="text-xs text-amber-500 font-mono flex items-center gap-2">
           <span>{scanLine >= 0 && scanLine < cols ? `SCANNING SECTOR ${scanLine.toString().padStart(2, '0')}...` : 'RECALIBRATING...'}</span>
           {scanLine >= 0 && scanLine < cols && <span className="animate-pulse">▊</span>}
         </div>
       </div>
       
       <div className="absolute bottom-4 left-4 z-30 bg-zinc-950/80 p-2.5 rounded backdrop-blur-md border border-zinc-800/50 shadow-[0_5px_15px_rgba(0,0,0,0.5)]">
-        <div className="text-[8px] text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Anomaly Stats</div>
+        <div className="text-xs text-zinc-500 uppercase tracking-widest mb-1.5 font-bold">Anomaly Stats</div>
         <div className="flex items-center gap-4">
           <div>
             <div className="text-[14px] font-[Orbitron] font-bold text-amber-500">{incidentSet.size}</div>
-            <div className="text-[7px] text-zinc-400 uppercase">Incidents</div>
+            <div className="text-[9px] text-zinc-400 uppercase">Incidents</div>
           </div>
           <div className="w-px h-6 bg-zinc-800" />
           <div>
             <div className="text-[14px] font-[Orbitron] font-bold text-red-500">1</div>
-            <div className="text-[7px] text-zinc-400 uppercase">Cluster</div>
+            <div className="text-[9px] text-zinc-400 uppercase">Cluster</div>
           </div>
           <div className="w-px h-6 bg-zinc-800" />
           <div>
-            <div className="text-[10px] font-mono font-bold text-emerald-400 mt-1">98.4%</div>
-            <div className="text-[7px] text-zinc-400 uppercase mt-0.5">Confidence</div>
+            <div className="text-xs font-mono font-bold text-emerald-400 mt-1">98.4%</div>
+            <div className="text-[9px] text-zinc-400 uppercase mt-0.5">Confidence</div>
           </div>
         </div>
       </div>
