@@ -6659,11 +6659,13 @@ async def get_tutor_voice_status(
             try:
                 from ..services.conversation_analyzer import ConversationAnalyzer
                 settings = get_settings()
+                # Use gemini-2.5-flash for Vertex (gemini-3-flash-preview not accessible on all projects)
+                analysis_model = "gemini-2.5-flash" if settings.use_vertex else settings.analysis_model
                 analyzer = ConversationAnalyzer(
                     api_key=settings.gemini_api_key,
                     vertex_project=settings.vertex_project if settings.use_vertex else None,
                     vertex_location=settings.vertex_location,
-                    model=settings.analysis_model,
+                    model=analysis_model,
                 )
                 language = tutor_state.get("language", "en")
                 tutor_analysis = await analyzer.analyze_tutor_language(
