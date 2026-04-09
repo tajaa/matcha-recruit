@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home, Pencil, LogOut, FileText, Presentation, Users, X } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X } from 'lucide-react'
 import { listChannels, updateChannel } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew } from '../../api/matchaWork'
@@ -139,6 +139,14 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         </button>
 
         <button
+          onClick={() => navigate('/work/email')}
+          className={`p-2 rounded-lg transition-colors ${isActive('/work/email') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          title="Email"
+        >
+          <MailOpen size={16} />
+        </button>
+
+        <button
           onClick={() => { onToggle(); setChannelsOpen(true) }}
           className={`relative p-2 rounded-lg transition-colors ${location.pathname.includes('/channels/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
           title="Channels"
@@ -232,6 +240,19 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           >
             <Home size={14} strokeWidth={1.6} />
             Home
+          </button>
+
+          {/* Email */}
+          <button
+            onClick={() => navigate('/work/email')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+              location.pathname === '/work/email'
+                ? 'bg-zinc-800/60 text-white font-medium'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+            }`}
+          >
+            <MailOpen size={14} strokeWidth={1.6} />
+            Email
           </button>
 
           {/* Channels */}
