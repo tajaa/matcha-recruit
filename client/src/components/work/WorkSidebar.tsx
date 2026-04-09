@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home, Pencil, LogOut } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, Home, Pencil, LogOut, FileText, Presentation, Users, X } from 'lucide-react'
 import { listChannels, updateChannel } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew } from '../../api/matchaWork'
@@ -27,6 +27,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [threads, setThreads] = useState<MWThread[]>([])
   const [inboxUnread, setInboxUnread] = useState(0)
   const [showCreateChannel, setShowCreateChannel] = useState(false)
+  const [showProjectTypePicker, setShowProjectTypePicker] = useState(false)
 
   const [channelsOpen, setChannelsOpen] = useState(true)
   const [projectsOpen, setProjectsOpen] = useState(true)
@@ -89,9 +90,15 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     setRenaming(null)
   }
 
-  async function handleCreateProject() {
+  async function handleCreateProject(type: 'general' | 'presentation' | 'recruiting' = 'general') {
+    setShowProjectTypePicker(false)
+    const titles: Record<string, string> = {
+      general: 'New Project',
+      presentation: 'New Presentation',
+      recruiting: 'New Job Posting',
+    }
     try {
-      const project = await createProjectNew('New Project')
+      const project = await createProjectNew(titles[type], type)
       setProjects((prev) => [project, ...prev])
       navigate(`/work/projects/${project.id}`)
     } catch {}
@@ -300,7 +307,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               Projects
               <div className="flex items-center gap-1">
                 <span
-                  onClick={(e) => { e.stopPropagation(); handleCreateProject() }}
+                  onClick={(e) => { e.stopPropagation(); setShowProjectTypePicker(true) }}
                   className="hover:text-emerald-400 cursor-pointer"
                 >
                   <Plus size={12} />
@@ -446,6 +453,39 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             navigate(`/work/channels/${ch.id}`)
           }}
         />
+      )}
+
+      {showProjectTypePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setShowProjectTypePicker(false)}>
+          <div className="bg-zinc-900 border border-zinc-700 rounded-xl p-6 w-full max-w-sm mx-4" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-white font-semibold">New Project</h2>
+              <button onClick={() => setShowProjectTypePicker(false)} className="text-zinc-500 hover:text-white">
+                <X size={16} />
+              </button>
+            </div>
+            <p className="text-zinc-400 text-sm mb-4">What kind of project?</p>
+            <div className="space-y-2">
+              {([
+                { type: 'general' as const, icon: FileText, label: 'Research / Report', desc: 'Build documents and plans from chat' },
+                { type: 'presentation' as const, icon: Presentation, label: 'Presentation', desc: 'Create slide decks and pitch materials' },
+                { type: 'recruiting' as const, icon: Users, label: 'Job Posting', desc: 'Recruiting pipeline with resumes and interviews' },
+              ]).map((opt) => (
+                <button
+                  key={opt.type}
+                  onClick={() => handleCreateProject(opt.type)}
+                  className="w-full flex items-center gap-3 p-3 rounded-lg border border-zinc-700 hover:border-emerald-600 hover:bg-zinc-800/50 transition-colors text-left"
+                >
+                  <opt.icon size={20} className="text-emerald-500 shrink-0" />
+                  <div>
+                    <p className="text-sm font-medium text-white">{opt.label}</p>
+                    <p className="text-xs text-zinc-400">{opt.desc}</p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
     </>
   )
