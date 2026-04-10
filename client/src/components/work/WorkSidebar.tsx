@@ -289,6 +289,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                     }`}
                   >
                     <Hash size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
+                    {ch.is_paid && (
+                      <span className="text-[9px] font-bold text-emerald-500 shrink-0">$</span>
+                    )}
                     {renaming?.type === 'channel' && renaming.id === ch.id ? (
                       renderRenameInput()
                     ) : (

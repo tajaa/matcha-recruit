@@ -82,7 +82,15 @@ async def lifespan(app: FastAPI):
     await init_redis_cache(settings.redis_url)
     print("[Matcha] Redis cache initialized")
 
+    # Start channel inactivity checker (runs every 12h)
+    from .core.services.inactivity_worker import start_inactivity_scheduler
+    inactivity_task = await start_inactivity_scheduler()
+
     yield
+
+    # Cancel background tasks
+    if inactivity_task:
+        inactivity_task.cancel()
 
     # Cleanup
     await close_redis_cache()

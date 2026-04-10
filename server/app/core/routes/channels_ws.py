@@ -237,10 +237,10 @@ async def channel_websocket(
                         await websocket.send_json({"type": "error", "message": "Invalid channel ID"})
                         continue
                     async with get_connection() as conn:
-                        # Verify membership + company access
+                        # Verify membership + company access (exclude removed-for-inactivity members)
                         if user.role == "admin":
                             ok = await conn.fetchval(
-                                "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+                                "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2 AND removed_for_inactivity IS NOT TRUE)",
                                 ch_uuid, user.id,
                             )
                         else:
@@ -250,6 +250,7 @@ async def channel_websocket(
                                     SELECT 1 FROM channel_members cm
                                     JOIN channels ch ON ch.id = cm.channel_id
                                     WHERE cm.channel_id = $1 AND cm.user_id = $2 AND ch.company_id = $3
+                                      AND cm.removed_for_inactivity IS NOT TRUE
                                 )
                                 """,
                                 ch_uuid, user.id, user.company_id,
@@ -288,9 +289,9 @@ async def channel_websocket(
                     import json as _json
                     attachments_json = _json.dumps(attachments) if attachments else "[]"
                     async with get_connection() as conn:
-                        # Verify membership
+                        # Verify membership (exclude removed members)
                         is_member = await conn.fetchval(
-                            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+                            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2 AND removed_for_inactivity IS NOT TRUE)",
                             ch_uuid, user.id,
                         )
                         if is_member:
@@ -302,10 +303,14 @@ async def channel_websocket(
                                 """,
                                 ch_uuid, user.id, content or "", attachments_json,
                             )
-                            # Update channel activity timestamp
+                            # Update channel + member activity timestamps
                             await conn.execute(
                                 "UPDATE channels SET updated_at = NOW() WHERE id = $1",
                                 ch_uuid,
+                            )
+                            await conn.execute(
+                                "UPDATE channel_members SET last_contributed_at = NOW() WHERE channel_id = $1 AND user_id = $2",
+                                ch_uuid, user.id,
                             )
 
                             broadcast_attachments = _json.loads(row["attachments"]) if row["attachments"] else []

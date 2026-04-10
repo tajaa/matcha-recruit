@@ -201,3 +201,53 @@ Periodic task (runs daily):
 1. Email notifications for warnings and removals
 2. Creator revenue dashboard
 3. Member-facing subscription management (cancel, view history)
+
+---
+
+## Known Issues & Open Questions
+
+### Critical — Must Resolve Before Implementation
+
+1. **No Stripe Connect for creator payouts** — Current Stripe integration (`stripe_service.py`) is company-scoped. Payments would go to *our* Stripe account, not the channel creator. Need Stripe Connect (Standard or Express) so creators receive funds. This changes checkout flow, webhook handling, and requires creator onboarding (connect their Stripe account).
+
+2. **`last_contributed_at` not tracked anywhere today** — WebSocket handler (`channels_ws.py`) only updates `channels.updated_at`, not per-member activity. File upload endpoint (`channels.py:877-918`) also doesn't track activity. Both need hooks added. Writing to DB on every message is expensive at scale — consider Redis-based activity tracking flushed to DB by the Celery worker.
+
+3. **New members have NULL `last_contributed_at`** — Inactivity worker would flag them immediately on join. Need to initialize `last_contributed_at = joined_at` when a member joins, or have the worker skip members with NULL.
+
+4. **No failed payment handling** — `subscription_status: 'past_due'` is in the schema but no logic exists for what happens. Does the member lose access? Get a grace period? The inactivity worker only handles inactivity, not payment failures. Need a separate payment failure flow.
+
+5. **Free → paid conversion undefined** — What happens to existing free members when a channel converts to paid? Options: grandfather them, give them a grace period to subscribe, or kick everyone. Plan must specify.
+
+6. **Removal + continued access is contradictory** — "Removed members keep access until billing period ends" means they're not actually removed yet. Need two distinct states: `subscription_canceled` (still has access through `paid_through`) and `removed` (actually loses access). The single `removed_for_inactivity` boolean doesn't capture this.
+
+### Design Issues
+
+7. **Cooldown is punitive for paying users** — A user who paid $50/month, got removed for inactivity on day 3, loses $50 AND can't rejoin for a week. Consider: prorated refunds for remaining period, or cooldown only after repeated removals.
+
+8. **No price validation** — Stripe has minimum charge amounts (~$0.50 USD). Need min/max price enforcement. Also no currency validation beyond the default.
+
+9. **Creator can subscribe to own channel** — No guard against this. Should owners be auto-members without a subscription?
+
+10. **Channel deletion doesn't cancel subscriptions** — If a channel is deleted/archived, all active Stripe subscriptions must be canceled. Not mentioned in the plan.
+
+11. **Webhook routing** — Plan says `POST /channels/stripe-webhook` but existing webhook is at `POST /webhooks/stripe` (global, shared). Should extend existing webhook with metadata routing, not create a second endpoint.
+
+### Codebase Gaps the Plan Must Address
+
+12. **`CreateChannelRequest` model** (`channels.py:88-92`) only has `name, description, visibility` — needs `paid_config` added.
+
+13. **`join_channel()` endpoint** (`channels.py:506-534`) has no payment or cooldown validation — needs guards for paid channels.
+
+14. **Notification types** — `notification_service.py` doesn't have `channel_inactivity_warning` or `channel_removed_for_inactivity`. Must be added.
+
+15. **Celery task registration** — New inactivity task must be added to `celery_app.py` include list and follow existing task patterns in `workers/tasks/`.
+
+16. **Daily worker timing** — If threshold is 7 days and warning is 3 days, a once-daily worker could give less than 3 full days of warning. Consider running twice daily or using precise timestamps.
+
+### Existing Infrastructure to Reuse
+
+- **Stripe SDK**: `stripe_service.py` — `create_checkout_session()`, `create_subscription_checkout_session()`
+- **Webhook handler**: `stripe_webhook.py` — extend with channel payment event types
+- **Celery**: Fully configured with Redis broker, 18+ existing tasks
+- **Notifications**: `notification_service.py` — `create_notification()` with email support
+- **Channel roles**: `channel_members.role` already has `owner/moderator/member`

@@ -11,6 +11,7 @@ export interface ChannelSummary {
   last_message_at: string | null
   last_message_preview: string | null
   is_member: boolean
+  is_paid?: boolean
 }
 
 export interface ChannelMember {
@@ -47,6 +48,9 @@ export interface ChannelDetail {
   slug: string
   description: string | null
   visibility: string
+  is_paid: boolean
+  price_cents: number | null
+  currency: string
   is_archived: boolean
   created_by: string
   created_at: string
@@ -60,8 +64,48 @@ export interface ChannelDetail {
 export const listChannels = () =>
   api.get<ChannelSummary[]>('/channels')
 
-export const createChannel = (name: string, description?: string, visibility: string = 'public') =>
-  api.post<ChannelDetail>('/channels', { name, description, visibility })
+export interface PaidChannelConfig {
+  price_cents: number
+  currency?: string
+  inactivity_threshold_days?: number | null
+  inactivity_warning_days?: number
+}
+
+export interface ChannelPaymentInfo {
+  is_paid: boolean
+  price_cents?: number
+  currency?: string
+  inactivity_threshold_days?: number | null
+  inactivity_warning_days?: number
+  is_subscribed?: boolean
+  subscription_status?: string | null
+  paid_through?: string | null
+  can_rejoin?: boolean
+  cooldown_until?: string | null
+  days_until_removal?: number | null
+}
+
+export interface MemberActivity {
+  user_id: string
+  name: string
+  email: string
+  role: string
+  last_contributed_at: string | null
+  subscription_status: string | null
+  days_until_removal: number | null
+  activity_status: string // 'active' | 'at_risk' | 'warned' | 'expired' | 'exempt'
+}
+
+export interface ChannelRevenue {
+  subscriber_count: number
+  mrr_cents: number
+  total_revenue_cents: number
+  currency: string
+  recent_events: { event_type: string; amount_cents: number; created_at: string; user_id: string }[]
+}
+
+export const createChannel = (name: string, description?: string, visibility: string = 'public', paidConfig?: PaidChannelConfig) =>
+  api.post<ChannelDetail>('/channels', { name, description, visibility, paid_config: paidConfig })
 
 export const getChannel = (id: string) =>
   api.get<ChannelDetail>(`/channels/${id}`)
@@ -109,3 +153,21 @@ export const searchInvitableUsers = (q: string, channelId?: string) =>
   api.get<{ id: string; name: string; email: string; role: string; avatar_url: string | null }[]>(
     `/channels/invitable-users?q=${encodeURIComponent(q)}${channelId ? `&channel_id=${channelId}` : ''}`
   )
+
+export const getChannelPaymentInfo = (id: string) =>
+  api.get<ChannelPaymentInfo>(`/channels/${id}/payment-info`)
+
+export const createChannelCheckout = (id: string) =>
+  api.post<{ checkout_url: string }>(`/channels/${id}/checkout`)
+
+export const cancelChannelSubscription = (id: string) =>
+  api.post<{ ok: boolean; paid_through: string }>(`/channels/${id}/cancel-subscription`)
+
+export const updatePaidSettings = (id: string, settings: { inactivity_threshold_days?: number; inactivity_warning_days?: number }) =>
+  api.patch(`/channels/${id}/paid-settings`, settings)
+
+export const getMemberActivity = (id: string) =>
+  api.get<MemberActivity[]>(`/channels/${id}/member-activity`)
+
+export const getChannelRevenue = (id: string) =>
+  api.get<ChannelRevenue>(`/channels/${id}/revenue`)

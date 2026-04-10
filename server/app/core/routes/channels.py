@@ -62,6 +62,7 @@ class ChannelSummary(BaseModel):
     slug: str
     description: Optional[str] = None
     visibility: str = "public"
+    is_paid: bool = False
     member_count: int = 0
     unread_count: int = 0
     last_message_at: Optional[datetime] = None
@@ -75,6 +76,9 @@ class ChannelDetail(BaseModel):
     slug: str
     description: Optional[str] = None
     visibility: str = "public"
+    is_paid: bool = False
+    price_cents: Optional[int] = None
+    currency: str = "usd"
     is_archived: bool = False
     created_by: UUID
     created_at: datetime
@@ -85,10 +89,18 @@ class ChannelDetail(BaseModel):
     messages: list[ChannelMessage] = []
 
 
+class PaidChannelConfig(BaseModel):
+    price_cents: int
+    currency: str = "usd"
+    inactivity_threshold_days: Optional[int] = None  # 7, 14, 21, 30
+    inactivity_warning_days: int = 3
+
+
 class CreateChannelRequest(BaseModel):
     name: str
     description: Optional[str] = None
     visibility: str = "public"
+    paid_config: Optional[PaidChannelConfig] = None
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +135,7 @@ async def list_channels(
             f"""
             SELECT ch.id, ch.name, ch.slug, ch.description,
                    COALESCE(ch.visibility, 'public') AS visibility,
+                   COALESCE(ch.is_paid, false) AS is_paid,
                    (SELECT COUNT(*) FROM channel_members WHERE channel_id = ch.id) AS member_count,
                    CASE WHEN cm.user_id IS NOT NULL THEN
                        (SELECT COUNT(*) FROM channel_messages msg
@@ -153,6 +166,7 @@ async def list_channels(
                 slug=r["slug"],
                 description=r["description"],
                 visibility=r["visibility"],
+                is_paid=r["is_paid"],
                 member_count=r["member_count"],
                 unread_count=r["unread_count"],
                 last_message_at=r["last_message_at"],
@@ -192,18 +206,66 @@ async def create_channel(
 
         visibility = body.visibility if body.visibility in ("public", "private", "invite_only") else "public"
 
+        # Handle paid channel setup
+        is_paid = False
+        price_cents = None
+        currency = "usd"
+        inactivity_threshold_days = None
+        inactivity_warning_days = 3
+        stripe_product_id = None
+        stripe_price_id = None
+
+        if body.paid_config:
+            from ..services.channel_payment_service import (
+                create_stripe_product_and_price,
+                MIN_PRICE_CENTS,
+                MAX_PRICE_CENTS,
+                ChannelPaymentError,
+            )
+            pc = body.paid_config
+            if pc.price_cents < MIN_PRICE_CENTS or pc.price_cents > MAX_PRICE_CENTS:
+                raise HTTPException(status_code=400, detail=f"Price must be between ${MIN_PRICE_CENTS/100:.2f} and ${MAX_PRICE_CENTS/100:.2f}")
+            if pc.inactivity_threshold_days and pc.inactivity_threshold_days not in (7, 14, 21, 30):
+                raise HTTPException(status_code=400, detail="Inactivity threshold must be 7, 14, 21, or 30 days")
+
+            is_paid = True
+            price_cents = pc.price_cents
+            currency = pc.currency
+            inactivity_threshold_days = pc.inactivity_threshold_days
+            inactivity_warning_days = pc.inactivity_warning_days
+
+        # Insert channel first, then create Stripe product with real ID
         row = await conn.fetchrow(
             """
-            INSERT INTO channels (company_id, name, slug, description, created_by, visibility)
-            VALUES ($1, $2, $3, $4, $5, $6)
+            INSERT INTO channels (company_id, name, slug, description, created_by, visibility,
+                is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING id, name, slug, description, is_archived, created_by, created_at, visibility
             """,
             company_id, name, slug, body.description, current_user.id, visibility,
+            is_paid, price_cents, currency, inactivity_threshold_days, inactivity_warning_days,
         )
 
-        # Auto-join creator as owner
+        if is_paid:
+            try:
+                stripe_product_id, stripe_price_id = await create_stripe_product_and_price(
+                    channel_id=row["id"],
+                    channel_name=name,
+                    price_cents=price_cents,
+                    currency=currency,
+                )
+                await conn.execute(
+                    "UPDATE channels SET stripe_product_id = $2, stripe_price_id = $3 WHERE id = $1",
+                    row["id"], stripe_product_id, stripe_price_id,
+                )
+            except ChannelPaymentError as e:
+                # Rollback: delete the channel we just created
+                await conn.execute("DELETE FROM channels WHERE id = $1", row["id"])
+                raise HTTPException(status_code=400, detail=str(e))
+
+        # Auto-join creator as owner (no subscription needed)
         await conn.execute(
-            "INSERT INTO channel_members (channel_id, user_id, role) VALUES ($1, $2, 'owner')",
+            "INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at) VALUES ($1, $2, 'owner', NOW())",
             row["id"], current_user.id,
         )
 
@@ -213,6 +275,9 @@ async def create_channel(
             slug=row["slug"],
             description=row["description"],
             visibility=row["visibility"] or "public",
+            is_paid=is_paid,
+            price_cents=price_cents,
+            currency=currency,
             is_archived=row["is_archived"],
             created_by=row["created_by"],
             created_at=row["created_at"],
@@ -344,7 +409,7 @@ async def get_channel(
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, name, slug, description, is_archived, created_by, created_at, COALESCE(visibility, 'public') AS visibility FROM channels WHERE id = $1 AND company_id = $2",
+            "SELECT id, name, slug, description, is_archived, created_by, created_at, COALESCE(visibility, 'public') AS visibility, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency FROM channels WHERE id = $1 AND company_id = $2",
             channel_id, company_id,
         )
         if not ch:
@@ -404,6 +469,9 @@ async def get_channel(
             slug=ch["slug"],
             description=ch["description"],
             visibility=ch["visibility"],
+            is_paid=ch["is_paid"],
+            price_cents=ch["price_cents"],
+            currency=ch["currency"],
             is_archived=ch["is_archived"],
             created_by=ch["created_by"],
             created_at=ch["created_at"],
@@ -513,7 +581,7 @@ async def join_channel(
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, COALESCE(visibility, 'public') AS visibility FROM channels WHERE id = $1 AND company_id = $2 AND is_archived = false",
+            "SELECT id, COALESCE(visibility, 'public') AS visibility, is_paid FROM channels WHERE id = $1 AND company_id = $2 AND is_archived = false",
             channel_id, company_id,
         )
         if not ch:
@@ -522,11 +590,35 @@ async def join_channel(
         if ch["visibility"] in ("private", "invite_only"):
             raise HTTPException(status_code=403, detail="This channel requires an invitation to join")
 
+        # Paid channels require checkout flow, not direct join
+        if ch["is_paid"]:
+            raise HTTPException(
+                status_code=400,
+                detail="This is a paid channel. Use the checkout endpoint to subscribe and join.",
+            )
+
+        # Check cooldown for previously removed members
+        existing = await conn.fetchrow(
+            "SELECT removal_cooldown_until FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if existing and existing["removal_cooldown_until"]:
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            if existing["removal_cooldown_until"] > now:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"You cannot rejoin until {existing['removal_cooldown_until'].strftime('%b %d, %Y')}",
+                )
+
         await conn.execute(
             """
-            INSERT INTO channel_members (channel_id, user_id, role)
-            VALUES ($1, $2, 'member')
-            ON CONFLICT (channel_id, user_id) DO NOTHING
+            INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+            VALUES ($1, $2, 'member', NOW())
+            ON CONFLICT (channel_id, user_id) DO UPDATE SET
+                removed_for_inactivity = false,
+                removal_cooldown_until = NULL,
+                last_contributed_at = NOW()
             """,
             channel_id, current_user.id,
         )
@@ -704,11 +796,19 @@ async def leave_channel(
     """Leave a channel. Owners must transfer ownership first."""
     async with get_connection() as conn:
         member = await conn.fetchrow(
-            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            "SELECT role, stripe_subscription_id FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
         )
         if member and member["role"] == "owner":
             raise HTTPException(status_code=400, detail="Channel owners must transfer ownership before leaving")
+
+        # Cancel Stripe subscription if active
+        if member and member["stripe_subscription_id"]:
+            try:
+                from ..services.channel_payment_service import cancel_subscription
+                await cancel_subscription(member["stripe_subscription_id"])
+            except Exception:
+                pass  # Still allow leaving even if Stripe call fails
 
         await conn.execute(
             "DELETE FROM channel_members WHERE channel_id = $1 AND user_id = $2",
@@ -891,6 +991,11 @@ async def upload_channel_files(
         )
         if not is_member:
             raise HTTPException(status_code=403, detail="Not a member of this channel")
+        # Track file upload as contribution activity
+        await conn.execute(
+            "UPDATE channel_members SET last_contributed_at = NOW() WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
 
     storage = get_storage()
     attachments = []
@@ -916,3 +1021,232 @@ async def upload_channel_files(
         })
 
     return {"attachments": attachments}
+
+
+# ---------------------------------------------------------------------------
+# Paid channel endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{channel_id}/payment-info")
+async def get_channel_payment_info(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get payment info for a channel from the current user's perspective."""
+    from ..services.channel_payment_service import get_payment_info
+    return await get_payment_info(channel_id, current_user.id)
+
+
+@router.post("/{channel_id}/checkout")
+async def create_channel_checkout(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Create a Stripe checkout session for subscribing to a paid channel."""
+    company_id = await _get_company_id(current_user)
+
+    async with get_connection() as conn:
+        ch = await conn.fetchrow(
+            "SELECT id, name, is_paid, stripe_price_id, created_by FROM channels WHERE id = $1 AND company_id = $2",
+            channel_id, company_id,
+        )
+        if not ch:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if not ch["is_paid"]:
+            raise HTTPException(status_code=400, detail="This channel is free to join")
+        if not ch["stripe_price_id"]:
+            raise HTTPException(status_code=500, detail="Channel payment not configured")
+
+        # Block owner from subscribing to own channel
+        if ch["created_by"] == current_user.id:
+            raise HTTPException(status_code=400, detail="Channel owners cannot subscribe to their own channel")
+
+        # Check cooldown
+        from ..services.channel_payment_service import check_rejoin_eligibility
+        eligibility = await check_rejoin_eligibility(channel_id, current_user.id)
+        if not eligibility["can_rejoin"]:
+            raise HTTPException(
+                status_code=403,
+                detail=f"You cannot rejoin until {eligibility['cooldown_until']}",
+            )
+
+        # Check if already subscribed
+        existing_sub = await conn.fetchval(
+            "SELECT subscription_status FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if existing_sub == "active":
+            raise HTTPException(status_code=400, detail="You already have an active subscription")
+
+    from ..services.channel_payment_service import create_checkout_session, ChannelPaymentError
+    try:
+        url = await create_checkout_session(
+            channel_id=channel_id,
+            channel_name=ch["name"],
+            stripe_price_id=ch["stripe_price_id"],
+            user_id=current_user.id,
+        )
+    except ChannelPaymentError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"checkout_url": url}
+
+
+@router.post("/{channel_id}/cancel-subscription")
+async def cancel_channel_subscription(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Cancel the current user's subscription to a paid channel."""
+    async with get_connection() as conn:
+        member = await conn.fetchrow(
+            "SELECT stripe_subscription_id, subscription_status FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if not member or not member["stripe_subscription_id"]:
+            raise HTTPException(status_code=400, detail="No active subscription found")
+        if member["subscription_status"] != "active":
+            raise HTTPException(status_code=400, detail="Subscription is not active")
+
+    from ..services.channel_payment_service import cancel_subscription, ChannelPaymentError
+    try:
+        paid_through = await cancel_subscription(member["stripe_subscription_id"])
+    except ChannelPaymentError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE channel_members SET subscription_status = 'canceling', paid_through = $3 WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id, paid_through,
+        )
+
+    return {"ok": True, "paid_through": paid_through.isoformat()}
+
+
+class UpdatePaidSettingsRequest(BaseModel):
+    inactivity_threshold_days: Optional[int] = None
+    inactivity_warning_days: Optional[int] = None
+
+
+@router.patch("/{channel_id}/paid-settings")
+async def update_paid_settings(
+    channel_id: UUID,
+    body: UpdatePaidSettingsRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Update inactivity settings for a paid channel. Owner only."""
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role != "owner" and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the channel owner can update paid settings")
+
+        sets = []
+        params: list = []
+        idx = 1
+
+        if body.inactivity_threshold_days is not None:
+            if body.inactivity_threshold_days not in (0, 7, 14, 21, 30):
+                raise HTTPException(status_code=400, detail="Threshold must be 0 (disabled), 7, 14, 21, or 30")
+            val = body.inactivity_threshold_days if body.inactivity_threshold_days > 0 else None
+            sets.append(f"inactivity_threshold_days = ${idx}")
+            params.append(val)
+            idx += 1
+
+        if body.inactivity_warning_days is not None:
+            if body.inactivity_warning_days not in (1, 2, 3, 5, 7):
+                raise HTTPException(status_code=400, detail="Warning period must be 1, 2, 3, 5, or 7 days")
+            sets.append(f"inactivity_warning_days = ${idx}")
+            params.append(body.inactivity_warning_days)
+            idx += 1
+
+        if not sets:
+            raise HTTPException(status_code=400, detail="No updates provided")
+
+        params.append(channel_id)
+        await conn.execute(
+            f"UPDATE channels SET {', '.join(sets)} WHERE id = ${idx}",
+            *params,
+        )
+
+    return {"ok": True}
+
+
+@router.get("/{channel_id}/member-activity")
+async def get_member_activity(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get member activity data for a paid channel. Owner/moderator only."""
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role not in ("owner", "moderator") and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only owners and moderators can view member activity")
+
+    from ..services.channel_payment_service import get_member_activity as _get_activity
+    return await _get_activity(channel_id)
+
+
+@router.get("/{channel_id}/revenue")
+async def get_channel_revenue(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get revenue summary for a paid channel. Owner only."""
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role != "owner" and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the channel owner can view revenue")
+
+        ch = await conn.fetchrow(
+            "SELECT price_cents, currency FROM channels WHERE id = $1",
+            channel_id,
+        )
+
+        subscriber_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM channel_members WHERE channel_id = $1 AND subscription_status = 'active'",
+            channel_id,
+        )
+
+        total_revenue = await conn.fetchval(
+            "SELECT COALESCE(SUM(amount_cents), 0) FROM channel_payment_events WHERE channel_id = $1 AND event_type = 'payment_success'",
+            channel_id,
+        )
+
+        recent_events = await conn.fetch(
+            """
+            SELECT event_type, amount_cents, created_at, user_id
+            FROM channel_payment_events
+            WHERE channel_id = $1
+            ORDER BY created_at DESC
+            LIMIT 20
+            """,
+            channel_id,
+        )
+
+    mrr = (ch["price_cents"] or 0) * subscriber_count
+
+    return {
+        "subscriber_count": subscriber_count,
+        "mrr_cents": mrr,
+        "total_revenue_cents": total_revenue,
+        "currency": ch["currency"],
+        "recent_events": [
+            {
+                "event_type": e["event_type"],
+                "amount_cents": e["amount_cents"],
+                "created_at": e["created_at"].isoformat(),
+                "user_id": str(e["user_id"]),
+            }
+            for e in recent_events
+        ],
+    }

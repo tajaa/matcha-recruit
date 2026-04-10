@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { X, Loader2, Hash, Globe, Lock, UserPlus } from 'lucide-react'
+import { X, Loader2, Hash, Globe, Lock, UserPlus, DollarSign } from 'lucide-react'
 import { createChannel } from '../../api/channels'
+import type { PaidChannelConfig } from '../../api/channels'
 
 interface Props {
   onClose: () => void
@@ -11,16 +12,29 @@ export default function CreateChannelModal({ onClose, onCreated }: Props) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [visibility, setVisibility] = useState<'public' | 'invite_only' | 'private'>('public')
+  const [isPaid, setIsPaid] = useState(false)
+  const [priceDollars, setPriceDollars] = useState('')
+  const [inactivityDays, setInactivityDays] = useState<number>(14)
+  const [warningDays, setWarningDays] = useState<number>(3)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
+    if (isPaid && (!priceDollars || parseFloat(priceDollars) < 0.5)) {
+      setError('Minimum price is $0.50')
+      return
+    }
     setCreating(true)
     setError('')
     try {
-      const ch = await createChannel(name.trim(), description.trim() || undefined, visibility)
+      const paidConfig: PaidChannelConfig | undefined = isPaid ? {
+        price_cents: Math.round(parseFloat(priceDollars) * 100),
+        inactivity_threshold_days: inactivityDays,
+        inactivity_warning_days: warningDays,
+      } : undefined
+      const ch = await createChannel(name.trim(), description.trim() || undefined, visibility, paidConfig)
       onCreated(ch)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create channel')
@@ -88,6 +102,69 @@ export default function CreateChannelModal({ onClose, onCreated }: Props) {
                 </button>
               ))}
             </div>
+          </div>
+          <div>
+            <label
+              className="flex items-center gap-2 cursor-pointer select-none"
+              onClick={() => setIsPaid(!isPaid)}
+            >
+              <div className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                isPaid ? 'bg-emerald-600 border-emerald-600' : 'border-zinc-600 bg-zinc-800'
+              }`}>
+                {isPaid && <span className="text-white text-[10px] font-bold">✓</span>}
+              </div>
+              <DollarSign size={14} className={isPaid ? 'text-emerald-400' : 'text-zinc-500'} />
+              <span className="text-xs text-zinc-300">Make this a paid channel</span>
+            </label>
+            {isPaid && (
+              <div className="mt-2.5 space-y-2.5 pl-6">
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Monthly price</label>
+                  <div className="flex items-center gap-1">
+                    <span className="text-zinc-400 text-sm">$</span>
+                    <input
+                      type="number"
+                      min="0.50"
+                      step="0.50"
+                      value={priceDollars}
+                      onChange={(e) => setPriceDollars(e.target.value)}
+                      placeholder="9.99"
+                      className="w-28 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm placeholder:text-zinc-500 focus:outline-none focus:border-emerald-600"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Inactivity threshold</label>
+                  <select
+                    value={inactivityDays}
+                    onChange={(e) => setInactivityDays(Number(e.target.value))}
+                    className="w-full px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-600"
+                  >
+                    <option value={7}>7 days</option>
+                    <option value={14}>14 days</option>
+                    <option value={21}>21 days</option>
+                    <option value={30}>30 days</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Warning period</label>
+                  <select
+                    value={warningDays}
+                    onChange={(e) => setWarningDays(Number(e.target.value))}
+                    className="w-full px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-white text-sm focus:outline-none focus:border-emerald-600"
+                  >
+                    <option value={1}>1 day</option>
+                    <option value={2}>2 days</option>
+                    <option value={3}>3 days</option>
+                    <option value={5}>5 days</option>
+                    <option value={7}>7 days</option>
+                  </select>
+                </div>
+                <p className="text-zinc-500 text-[11px] leading-relaxed">
+                  Members who don't contribute for {inactivityDays} days will be auto-removed. They can rejoin 1 week after their billing period ends.
+                </p>
+              </div>
+            )}
           </div>
           {error && <p className="text-red-400 text-xs">{error}</p>}
           <button

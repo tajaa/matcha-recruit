@@ -21,6 +21,9 @@ TYPES = {
     "channel_message": "Channel Message",
     "inbox_message": "New Message",
     "mention": "Mentioned",
+    "channel_inactivity_warning": "Inactivity Warning",
+    "channel_removed_for_inactivity": "Removed for Inactivity",
+    "channel_payment_failed": "Payment Failed",
 }
 
 

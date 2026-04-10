@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield } from 'lucide-react'
-import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole } from '../../api/channels'
-import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment } from '../../api/channels'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings } from 'lucide-react'
+import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout } from '../../api/channels'
+import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
 import AddMembersModal from '../../components/channels/AddMembersModal'
+import PaidChannelGate from '../../components/channels/PaidChannelGate'
+import InactivityWarningBanner from '../../components/channels/InactivityWarningBanner'
+import ChannelSettingsPanel from '../../components/channels/ChannelSettingsPanel'
 
 export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -26,6 +29,10 @@ export default function ChannelView() {
   const [showAddMembers, setShowAddMembers] = useState(false)
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
+  const [paymentInfo, setPaymentInfo] = useState<ChannelPaymentInfo | null>(null)
+  const [checkingOut, setCheckingOut] = useState(false)
+  const [warningDismissed, setWarningDismissed] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -54,6 +61,12 @@ export default function ChannelView() {
       })
       .finally(() => setLoading(false))
   }, [channelId, scrollToBottom])
+
+  // Load payment info
+  useEffect(() => {
+    if (!channelId) return
+    getChannelPaymentInfo(channelId).then(setPaymentInfo).catch(() => {})
+  }, [channelId])
 
   // WebSocket connection
   useEffect(() => {
@@ -164,10 +177,26 @@ export default function ChannelView() {
     }
   }
 
+  async function handleCheckout() {
+    if (!channelId) return
+    setCheckingOut(true)
+    try {
+      const { checkout_url } = await createChannelCheckout(channelId)
+      window.location.href = checkout_url
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Checkout failed')
+      setCheckingOut(false)
+    }
+  }
+
   async function handleLeave() {
     if (!channelId) return
-    await leaveChannel(channelId)
-    navigate('/work')
+    try {
+      await leaveChannel(channelId)
+      navigate('/work')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to leave channel')
+    }
   }
 
   const typingText = Array.from(typingUsers.values()).join(', ')
@@ -182,6 +211,25 @@ export default function ChannelView() {
 
   // Not a member — show join prompt or invite-only message
   if (!isMember && !error) {
+    // Paid channel — show payment gate
+    if (paymentInfo?.is_paid) {
+      return (
+        <div className="flex items-center justify-center h-full">
+          <PaidChannelGate
+            channelName={channel?.name ?? 'Channel'}
+            priceCents={paymentInfo.price_cents ?? 0}
+            currency={paymentInfo.currency ?? 'usd'}
+            inactivityDays={paymentInfo.inactivity_threshold_days ?? null}
+            cooldownUntil={paymentInfo.cooldown_until ?? null}
+            canRejoin={paymentInfo.can_rejoin ?? true}
+            onCheckout={handleCheckout}
+            checkingOut={checkingOut}
+            onBack={() => navigate('/work')}
+          />
+        </div>
+      )
+    }
+    // Free channel — existing join prompt
     const isPublic = !channel?.visibility || channel.visibility === 'public'
     return (
       <div className="flex flex-col items-center justify-center h-full gap-4">
@@ -226,7 +274,12 @@ export default function ChannelView() {
         </button>
         <Hash size={18} className="text-emerald-500 shrink-0" />
         <div className="flex-1 min-w-0">
-          <h2 className="text-white font-semibold truncate">{channel?.name}</h2>
+          <h2 className="text-white font-semibold truncate flex items-center gap-1.5">
+            {channel?.name}
+            {paymentInfo?.is_paid && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-600/20 text-emerald-400">$</span>
+            )}
+          </h2>
           {channel?.description && (
             <p className="text-xs text-zinc-500 truncate">{channel.description}</p>
           )}
@@ -247,6 +300,15 @@ export default function ChannelView() {
               <UserPlus size={16} />
             </button>
           )}
+          {channel?.my_role === 'owner' && paymentInfo?.is_paid && (
+            <button
+              onClick={() => setShowSettings(!showSettings)}
+              className={`p-1.5 rounded hover:bg-zinc-800 ${showSettings ? 'text-emerald-400' : 'text-zinc-500'}`}
+              title="Channel settings"
+            >
+              <Settings size={16} />
+            </button>
+          )}
           <button
             onClick={() => setShowMembers(!showMembers)}
             className={`p-1.5 rounded hover:bg-zinc-800 ${showMembers ? 'text-emerald-400' : 'text-zinc-500'}`}
@@ -265,6 +327,13 @@ export default function ChannelView() {
           )}
         </div>
       </div>
+
+      {paymentInfo?.days_until_removal != null && paymentInfo.days_until_removal <= (paymentInfo.inactivity_warning_days ?? 3) && !warningDismissed && (
+        <InactivityWarningBanner
+          daysUntilRemoval={Math.ceil(paymentInfo.days_until_removal)}
+          onDismiss={() => setWarningDismissed(true)}
+        />
+      )}
 
       <div className="flex flex-1 min-h-0">
         {/* Messages */}
@@ -449,6 +518,15 @@ export default function ChannelView() {
           </div>
         )}
       </div>
+
+      {showSettings && channel && (
+        <ChannelSettingsPanel
+          channelId={channel.id}
+          channelName={channel.name}
+          isPaid={paymentInfo?.is_paid ?? false}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
 
       {showAddMembers && channel && (
         <AddMembersModal
