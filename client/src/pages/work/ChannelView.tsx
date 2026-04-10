@@ -335,6 +335,22 @@ export default function ChannelView() {
         />
       )}
 
+      {isMember && paymentInfo?.is_paid && (
+        <div className="flex items-center gap-4 px-4 py-1.5 border-b border-zinc-800/50 bg-zinc-900/50 text-xs text-zinc-500">
+          <span className="text-emerald-400 font-medium">${((paymentInfo.price_cents ?? 0) / 100).toFixed(2)}/mo</span>
+          <span>{channel?.member_count ?? 0} members</span>
+          {onlineUsers.length > 0 && <span>{onlineUsers.length} online</span>}
+          {paymentInfo.subscription_status === 'active' && (
+            <button
+              onClick={() => {/* TODO: show subscription management */}}
+              className="ml-auto text-zinc-600 hover:text-zinc-400"
+            >
+              Manage subscription
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-1 min-h-0">
         {/* Messages */}
         <div className="flex-1 flex flex-col min-w-0">

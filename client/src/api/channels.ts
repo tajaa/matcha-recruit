@@ -12,6 +12,8 @@ export interface ChannelSummary {
   last_message_preview: string | null
   is_member: boolean
   is_paid?: boolean
+  price_cents?: number | null
+  currency?: string
 }
 
 export interface ChannelMember {

@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X, Compass } from 'lucide-react'
 import { listChannels, updateChannel } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew } from '../../api/matchaWork'
@@ -263,6 +263,13 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             >
               Channels
               <div className="flex items-center gap-1">
+                <span
+                  onClick={(e) => { e.stopPropagation(); navigate('/work/channels') }}
+                  className="hover:text-emerald-400 cursor-pointer"
+                  title="Browse channels"
+                >
+                  <Compass size={12} />
+                </span>
                 {canCreateChannel && (
                   <span
                     onClick={(e) => { e.stopPropagation(); setShowCreateChannel(true) }}
@@ -300,7 +307,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                           onClick={() => navigate(`/work/channels/${ch.id}`)}
                           className="flex-1 min-w-0 text-left truncate"
                         >
-                          {ch.name}
+                          <span className={ch.unread_count > 0 ? 'font-semibold text-white' : ''}>{ch.name}</span>
                         </button>
                         <button
                           onClick={(e) => { e.stopPropagation(); startRename('channel', ch.id, ch.name) }}
@@ -315,6 +322,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                       <span className="ml-auto w-4 h-4 rounded-full bg-emerald-600 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
                         {ch.unread_count > 9 ? '9+' : ch.unread_count}
                       </span>
+                    )}
+                    {ch.last_message_preview && !renaming && (
+                      <p className="text-[11px] text-zinc-600 truncate pl-6 -mt-0.5">{ch.last_message_preview}</p>
                     )}
                   </div>
                 ))}

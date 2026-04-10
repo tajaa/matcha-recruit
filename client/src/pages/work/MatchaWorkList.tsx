@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Pin, Archive, Loader2, FileText, Presentation, Users, X } from 'lucide-react'
+import { Plus, Pin, Archive, Loader2, FileText, Presentation, Users, X, Hash, Compass } from 'lucide-react'
 import type { MWThread } from '../../types/matcha-work'
+import { listChannels } from '../../api/channels'
+import type { ChannelSummary } from '../../api/channels'
 import { listThreads, createThread, pinThread, archiveThread, createProjectNew, fetchTaskBoard, createTask, updateTask, deleteTask, dismissAutoTask } from '../../api/matchaWork'
 import type { TaskBoardResponse } from '../../api/matchaWork'
 import TaskBoard from '../../components/work/TaskBoard'
@@ -24,6 +26,7 @@ export default function MatchaWorkList() {
   const navigate = useNavigate()
   useMe() // auth guard
   const [threads, setThreads] = useState<MWThread[]>([])
+  const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [taskBoard, setTaskBoard] = useState<TaskBoardResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [creating, setCreating] = useState(false)
@@ -51,6 +54,10 @@ export default function MatchaWorkList() {
   }
 
   useEffect(() => { load() }, [tab])
+
+  useEffect(() => {
+    listChannels().then(setChannels).catch(() => {})
+  }, [])
 
   const filtered = tab === 'pinned' ? threads.filter((t) => t.is_pinned) : threads
 
@@ -113,16 +120,65 @@ export default function MatchaWorkList() {
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold text-white">Matcha Work</h1>
         {tab !== 'tasks' && (
-          <button
-            onClick={handleCreate}
-            disabled={creating}
-            className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
-          >
-            {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
-            New Thread
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCreate}
+              disabled={creating}
+              className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+            >
+              {creating ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
+              New Thread
+            </button>
+            <button
+              onClick={() => setShowTypePicker(true)}
+              disabled={creating}
+              className="flex items-center gap-2 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-white text-sm font-medium rounded-lg border border-zinc-700 transition-colors disabled:opacity-50"
+            >
+              <Plus size={16} />
+              New Project
+            </button>
+          </div>
         )}
       </div>
+
+      {/* Your Channels */}
+      {channels.length > 0 && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-medium text-zinc-400 uppercase tracking-wider">Your Channels</h2>
+            <button onClick={() => navigate('/work/channels')} className="text-xs text-zinc-500 hover:text-emerald-400 flex items-center gap-1">
+              <Compass size={12} />
+              Browse All
+            </button>
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            {channels.filter(ch => ch.is_member).slice(0, 8).map((ch) => (
+              <button
+                key={ch.id}
+                onClick={() => navigate(`/work/channels/${ch.id}`)}
+                className="flex-shrink-0 w-48 bg-zinc-900 border border-zinc-800 rounded-lg p-3 hover:border-zinc-700 transition-colors text-left"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <Hash size={14} className="text-emerald-500 shrink-0" />
+                  <span className="text-sm font-medium text-white truncate">{ch.name}</span>
+                  {ch.is_paid && <span className="text-[9px] font-bold text-emerald-400">$</span>}
+                </div>
+                <div className="flex items-center gap-3 text-xs text-zinc-500">
+                  <span>{ch.member_count} members</span>
+                  {ch.unread_count > 0 && (
+                    <span className="px-1.5 py-0.5 rounded-full bg-emerald-600 text-[10px] font-bold text-white">
+                      {ch.unread_count > 9 ? '9+' : ch.unread_count}
+                    </span>
+                  )}
+                </div>
+                {ch.last_message_preview && (
+                  <p className="text-xs text-zinc-600 truncate mt-1">{ch.last_message_preview}</p>
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Tabs */}
       <div className="flex gap-1 mb-6 border-b border-zinc-800 overflow-x-auto whitespace-nowrap [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
