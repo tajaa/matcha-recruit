@@ -71,6 +71,30 @@ async def unsubscribe(token: str = Query(...)):
     )
 
 
+@public_router.get("/view/{newsletter_id}")
+async def view_newsletter(newsletter_id: UUID):
+    """Public 'View in browser' endpoint for sent newsletters."""
+    from fastapi.responses import HTMLResponse
+    from ...database import get_connection
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT title, subject, content_html, sent_at FROM newsletters WHERE id = $1 AND status = 'sent'",
+            newsletter_id,
+        )
+    if not row or not row["content_html"]:
+        return HTMLResponse(
+            '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">'
+            '<div style="text-align:center"><h2>Newsletter not found</h2><p>This newsletter doesn\'t exist or hasn\'t been published yet.</p></div></body></html>',
+            status_code=404,
+        )
+    title = row["title"] or row["subject"] or "Newsletter"
+    return HTMLResponse(
+        f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'<title>{title} — Matcha</title></head><body>{row["content_html"]}</body></html>'
+    )
+
+
 # ---------------------------------------------------------------------------
 # Admin endpoints
 # ---------------------------------------------------------------------------
