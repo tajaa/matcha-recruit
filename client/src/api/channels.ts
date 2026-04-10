@@ -173,3 +173,30 @@ export const getMemberActivity = (id: string) =>
 
 export const getChannelRevenue = (id: string) =>
   api.get<ChannelRevenue>(`/channels/${id}/revenue`)
+
+export interface ChannelInvite {
+  id: string
+  code: string
+  url: string
+  max_uses: number | null
+  use_count: number
+  expires_at: string | null
+  note: string | null
+  is_active: boolean
+  created_at: string
+}
+
+export const createChannelInvite = (channelId: string, options?: {
+  max_uses?: number | null
+  expires_in_hours?: number | null
+  note?: string | null
+}) => api.post<ChannelInvite>(`/channels/${channelId}/invites`, options ?? {})
+
+export const listChannelInvites = (channelId: string) =>
+  api.get<ChannelInvite[]>(`/channels/${channelId}/invites`)
+
+export const revokeChannelInvite = (channelId: string, inviteId: string) =>
+  api.delete(`/channels/${channelId}/invites/${inviteId}`)
+
+export const joinByInvite = (code: string) =>
+  api.post<{ ok?: boolean; requires_payment?: boolean; channel_id?: string; checkout_url?: string }>(`/channels/join-by-invite/${code}`)

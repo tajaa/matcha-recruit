@@ -61,6 +61,7 @@ import ProjectView from './pages/work/ProjectView'
 import ChannelView from './pages/work/ChannelView'
 import WorkEmail from './pages/work/WorkEmail'
 import ChannelBrowse from './pages/work/ChannelBrowse'
+import ChannelJoinByInvite from './pages/work/ChannelJoinByInvite'
 
 export default function App() {
   return (
@@ -80,6 +81,7 @@ export default function App() {
         <Route path="inbox" element={<Inbox />} />
         <Route path="email" element={<WorkEmail />} />
         <Route path="channels" element={<ChannelBrowse />} />
+        <Route path="channels/join/:code" element={<ChannelJoinByInvite />} />
         <Route path="channels/:channelId" element={<ChannelView />} />
         <Route path=":threadId" element={<MatchaWorkThread />} />
         <Route path="projects/:projectId" element={<ProjectView />} />

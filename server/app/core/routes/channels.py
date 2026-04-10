@@ -4,7 +4,8 @@ import json
 import os
 import re
 import logging
-from datetime import datetime
+import secrets
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -101,6 +102,24 @@ class CreateChannelRequest(BaseModel):
     description: Optional[str] = None
     visibility: str = "public"
     paid_config: Optional[PaidChannelConfig] = None
+
+
+class CreateInviteRequest(BaseModel):
+    max_uses: Optional[int] = None
+    expires_in_hours: Optional[int] = None
+    note: Optional[str] = None
+
+
+class ChannelInvite(BaseModel):
+    id: UUID
+    code: str
+    url: str
+    max_uses: Optional[int] = None
+    use_count: int = 0
+    expires_at: Optional[datetime] = None
+    note: Optional[str] = None
+    is_active: bool = True
+    created_at: datetime
 
 
 # ---------------------------------------------------------------------------
@@ -1250,3 +1269,217 @@ async def get_channel_revenue(
             for e in recent_events
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Channel invite links
+# ---------------------------------------------------------------------------
+
+def _invite_to_dict(row, base_url: str) -> dict:
+    return ChannelInvite(
+        id=row["id"],
+        code=row["code"],
+        url=f"{base_url}/work/channels/join/{row['code']}",
+        max_uses=row["max_uses"],
+        use_count=row["use_count"],
+        expires_at=row["expires_at"],
+        note=row["note"],
+        is_active=row["is_active"],
+        created_at=row["created_at"],
+    ).model_dump(mode="json")
+
+
+@router.post("/{channel_id}/invites", status_code=status.HTTP_201_CREATED)
+async def create_invite(
+    channel_id: UUID,
+    body: CreateInviteRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Create an invite link for a channel. Owner/moderator only."""
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role not in ("owner", "moderator") and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only owners and moderators can create invite links")
+
+        code = secrets.token_urlsafe(6)
+        expires_at = None
+        if body.expires_in_hours:
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=body.expires_in_hours)
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO channel_invites (channel_id, code, created_by, max_uses, expires_at, note)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, channel_id, code, max_uses, use_count, expires_at, note, is_active, created_at
+            """,
+            channel_id, code, current_user.id, body.max_uses, expires_at, body.note,
+        )
+
+    from ...config import get_settings
+    settings = get_settings()
+    return _invite_to_dict(row, settings.app_base_url)
+
+
+@router.get("/{channel_id}/invites", response_model=list[ChannelInvite])
+async def list_invites(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """List active invite links for a channel. Owner/moderator only."""
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role not in ("owner", "moderator") and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only owners and moderators can view invite links")
+
+        rows = await conn.fetch(
+            """
+            SELECT id, channel_id, code, max_uses, use_count, expires_at, note, is_active, created_at
+            FROM channel_invites
+            WHERE channel_id = $1 AND is_active = true
+            ORDER BY created_at DESC
+            """,
+            channel_id,
+        )
+
+    from ...config import get_settings
+    settings = get_settings()
+    return [_invite_to_dict(r, settings.app_base_url) for r in rows]
+
+
+@router.delete("/{channel_id}/invites/{invite_id}", status_code=status.HTTP_200_OK)
+async def revoke_invite(
+    channel_id: UUID,
+    invite_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Revoke an invite link. Owner/moderator only."""
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role not in ("owner", "moderator") and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only owners and moderators can revoke invite links")
+
+        result = await conn.execute(
+            "UPDATE channel_invites SET is_active = false WHERE id = $1 AND channel_id = $2",
+            invite_id, channel_id,
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status_code=404, detail="Invite not found")
+
+    return {"ok": True}
+
+
+@router.post("/join-by-invite/{code}")
+async def join_by_invite(
+    code: str,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Join a channel via an invite link. Works for invite_only and paid channels."""
+    company_id = await _get_company_id(current_user)
+
+    async with get_connection() as conn:
+        # Look up the invite
+        invite = await conn.fetchrow(
+            """
+            SELECT ci.id, ci.channel_id, ci.max_uses, ci.use_count, ci.expires_at, ci.is_active
+            FROM channel_invites ci
+            WHERE ci.code = $1
+            """,
+            code,
+        )
+        if not invite:
+            raise HTTPException(status_code=404, detail="Invalid invite link")
+
+        if not invite["is_active"]:
+            raise HTTPException(status_code=410, detail="This invite link has been revoked")
+
+        if invite["expires_at"] and invite["expires_at"] < datetime.now(timezone.utc):
+            raise HTTPException(status_code=410, detail="This invite link has expired")
+
+        if invite["max_uses"] is not None and invite["use_count"] >= invite["max_uses"]:
+            raise HTTPException(status_code=410, detail="This invite link has reached its maximum uses")
+
+        channel_id = invite["channel_id"]
+
+        # Verify the channel belongs to the user's company
+        ch = await conn.fetchrow(
+            "SELECT id, is_paid, stripe_price_id, name, created_by FROM channels WHERE id = $1 AND company_id = $2 AND is_archived = false",
+            channel_id, company_id,
+        )
+        if not ch:
+            raise HTTPException(status_code=404, detail="Channel not found in your company")
+
+        # Check cooldown for previously removed members
+        existing = await conn.fetchrow(
+            "SELECT removal_cooldown_until, subscription_status FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if existing and existing["removal_cooldown_until"]:
+            now = datetime.now(timezone.utc)
+            if existing["removal_cooldown_until"] > now:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"You cannot rejoin until {existing['removal_cooldown_until'].strftime('%b %d, %Y')}",
+                )
+
+        # Check if already an active member
+        if existing and not (existing.get("subscription_status") in (None, "canceled", "past_due")):
+            # For paid channels, check subscription status
+            pass
+
+        # Paid channel → redirect to checkout
+        if ch["is_paid"]:
+            if ch["created_by"] == current_user.id:
+                raise HTTPException(status_code=400, detail="Channel owners cannot subscribe to their own channel")
+
+            if existing and existing.get("subscription_status") == "active":
+                raise HTTPException(status_code=400, detail="You already have an active subscription")
+
+            from ..services.channel_payment_service import create_checkout_session, ChannelPaymentError
+            try:
+                url = await create_checkout_session(
+                    channel_id=channel_id,
+                    channel_name=ch["name"],
+                    stripe_price_id=ch["stripe_price_id"],
+                    user_id=current_user.id,
+                )
+            except ChannelPaymentError as e:
+                raise HTTPException(status_code=500, detail=str(e))
+
+            # Increment use_count on invite (will be fully "used" when payment completes,
+            # but we count the attempt)
+            await conn.execute(
+                "UPDATE channel_invites SET use_count = use_count + 1 WHERE id = $1",
+                invite["id"],
+            )
+
+            return {"requires_payment": True, "channel_id": str(channel_id), "checkout_url": url}
+
+        # Free channel → join directly
+        await conn.execute(
+            """
+            INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+            VALUES ($1, $2, 'member', NOW())
+            ON CONFLICT (channel_id, user_id) DO UPDATE SET
+                removed_for_inactivity = false,
+                removal_cooldown_until = NULL,
+                last_contributed_at = NOW()
+            """,
+            channel_id, current_user.id,
+        )
+
+        # Increment use_count
+        await conn.execute(
+            "UPDATE channel_invites SET use_count = use_count + 1 WHERE id = $1",
+            invite["id"],
+        )
+
+    return {"ok": True, "channel_id": str(channel_id)}

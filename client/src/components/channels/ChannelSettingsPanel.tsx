@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { X, Hash } from 'lucide-react'
+import InviteManager from './InviteManager'
 import {
   updatePaidSettings,
   getMemberActivity,
@@ -194,6 +195,11 @@ export default function ChannelSettingsPanel({
           )}
         </div>
       )}
+
+      {/* Invite Links — always shown for owners */}
+      <div className="p-4 border-t border-zinc-800">
+        <InviteManager channelId={channelId} channelName={channelName} />
+      </div>
     </div>
   )
 }
