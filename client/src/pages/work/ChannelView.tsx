@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart } from 'lucide-react'
-import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout } from '../../api/channels'
+import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
