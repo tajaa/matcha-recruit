@@ -289,11 +289,12 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                 {channels.map((ch) => (
                   <div
                     key={ch.id}
-                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors cursor-pointer ${
                       isActive(`/work/channels/${ch.id}`)
                         ? 'bg-zinc-800/60 text-white font-medium'
                         : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
                     }`}
+                    onClick={() => navigate(`/work/channels/${ch.id}`)}
                   >
                     <Hash size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
                     {ch.is_paid && (
@@ -303,12 +304,9 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                       renderRenameInput()
                     ) : (
                       <>
-                        <button
-                          onClick={() => navigate(`/work/channels/${ch.id}`)}
-                          className="flex-1 min-w-0 text-left truncate"
-                        >
-                          <span className={ch.unread_count > 0 ? 'font-semibold text-white' : ''}>{ch.name}</span>
-                        </button>
+                        <span className={`flex-1 min-w-0 truncate ${ch.unread_count > 0 ? 'font-semibold text-white' : ''}`}>
+                          {ch.name}
+                        </span>
                         <button
                           onClick={(e) => { e.stopPropagation(); startRename('channel', ch.id, ch.name) }}
                           className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
@@ -322,9 +320,6 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                       <span className="ml-auto w-4 h-4 rounded-full bg-emerald-600 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
                         {ch.unread_count > 9 ? '9+' : ch.unread_count}
                       </span>
-                    )}
-                    {ch.last_message_preview && !renaming && (
-                      <p className="text-[11px] text-zinc-600 truncate pl-6 -mt-0.5">{ch.last_message_preview}</p>
                     )}
                   </div>
                 ))}
