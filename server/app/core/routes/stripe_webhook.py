@@ -72,11 +72,13 @@ async def stripe_webhook(request: Request):
                     import stripe as _stripe
                     _stripe.api_key = StripeService().settings.stripe_secret_key
                     sub = await asyncio.to_thread(_stripe.Subscription.retrieve, stripe_sub_id)
+                    invite_code = meta.get("invite_code")
                     await handle_subscription_activated(
                         channel_id=UUID(channel_id_str),
                         user_id=UUID(user_id_str),
                         stripe_subscription_id=stripe_sub_id,
                         current_period_end=sub.current_period_end,
+                        invite_code=invite_code,
                     )
                     logger.info("Channel subscription activated: %s for user %s", stripe_sub_id, user_id_str)
                 except Exception as exc:

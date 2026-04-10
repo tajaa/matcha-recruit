@@ -27,6 +27,7 @@ export default function InviteManager({ channelId }: Props) {
   const [showForm, setShowForm] = useState(false)
   const [creating, setCreating] = useState(false)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [error, setError] = useState('')
   const [maxUses, setMaxUses] = useState<number | null>(null)
   const [expiresHours, setExpiresHours] = useState<number | null>(null)
   const [note, setNote] = useState('')
@@ -34,12 +35,13 @@ export default function InviteManager({ channelId }: Props) {
   useEffect(() => {
     listChannelInvites(channelId)
       .then(setInvites)
-      .catch(() => {})
+      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load invites'))
       .finally(() => setLoading(false))
   }, [channelId])
 
   const handleCreate = async () => {
     setCreating(true)
+    setError('')
     try {
       const invite = await createChannelInvite(channelId, {
         max_uses: maxUses,
@@ -51,19 +53,20 @@ export default function InviteManager({ channelId }: Props) {
       setMaxUses(null)
       setExpiresHours(null)
       setNote('')
-    } catch {
-      // ignore
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create invite')
     } finally {
       setCreating(false)
     }
   }
 
   const handleRevoke = async (inviteId: string) => {
+    setError('')
     try {
       await revokeChannelInvite(channelId, inviteId)
       setInvites((prev) => prev.filter((i) => i.id !== inviteId))
-    } catch {
-      // ignore
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to revoke invite')
     }
   }
 
@@ -102,6 +105,10 @@ export default function InviteManager({ channelId }: Props) {
           </button>
         )}
       </div>
+
+      {error && (
+        <p className="text-xs text-red-400 bg-red-900/20 rounded px-2 py-1">{error}</p>
+      )}
 
       {showForm && (
         <div className="space-y-2 rounded-lg bg-zinc-800/50 p-3 border border-zinc-700">

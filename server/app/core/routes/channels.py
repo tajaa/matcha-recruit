@@ -109,6 +109,18 @@ class CreateInviteRequest(BaseModel):
     expires_in_hours: Optional[int] = None
     note: Optional[str] = None
 
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate_fields
+
+    def model_post_init(self, __context) -> None:
+        if self.max_uses is not None and self.max_uses <= 0:
+            raise ValueError("max_uses must be positive")
+        if self.expires_in_hours is not None and self.expires_in_hours <= 0:
+            raise ValueError("expires_in_hours must be positive")
+        if self.note and len(self.note) > 200:
+            raise ValueError("note must be 200 characters or less")
+
 
 class ChannelInvite(BaseModel):
     id: UUID
@@ -1296,7 +1308,17 @@ async def create_invite(
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Create an invite link for a channel. Owner/moderator only."""
+    company_id = await _get_company_id(current_user)
+
     async with get_connection() as conn:
+        # Verify channel belongs to user's company
+        ch_exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channels WHERE id = $1 AND company_id = $2)",
+            channel_id, company_id,
+        )
+        if not ch_exists:
+            raise HTTPException(status_code=404, detail="Channel not found")
+
         my_role = await conn.fetchval(
             "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
@@ -1304,19 +1326,28 @@ async def create_invite(
         if my_role not in ("owner", "moderator") and current_user.role != "admin":
             raise HTTPException(status_code=403, detail="Only owners and moderators can create invite links")
 
-        code = secrets.token_urlsafe(6)
         expires_at = None
         if body.expires_in_hours:
             expires_at = datetime.now(timezone.utc) + timedelta(hours=body.expires_in_hours)
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO channel_invites (channel_id, code, created_by, max_uses, expires_at, note)
-            VALUES ($1, $2, $3, $4, $5, $6)
-            RETURNING id, channel_id, code, max_uses, use_count, expires_at, note, is_active, created_at
-            """,
-            channel_id, code, current_user.id, body.max_uses, expires_at, body.note,
-        )
+        # Generate code with collision retry
+        row = None
+        for _ in range(3):
+            code = secrets.token_urlsafe(12)
+            try:
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO channel_invites (channel_id, code, created_by, max_uses, expires_at, note)
+                    VALUES ($1, $2, $3, $4, $5, $6)
+                    RETURNING id, channel_id, code, max_uses, use_count, expires_at, note, is_active, created_at
+                    """,
+                    channel_id, code, current_user.id, body.max_uses, expires_at, body.note,
+                )
+                break
+            except Exception:
+                continue
+        if not row:
+            raise HTTPException(status_code=500, detail="Failed to generate unique invite code")
 
     from ...config import get_settings
     settings = get_settings()
@@ -1386,30 +1417,24 @@ async def join_by_invite(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        # Look up the invite
+        # Look up invite (basic existence check, no use_count validation yet)
         invite = await conn.fetchrow(
             """
-            SELECT ci.id, ci.channel_id, ci.max_uses, ci.use_count, ci.expires_at, ci.is_active
-            FROM channel_invites ci
-            WHERE ci.code = $1
+            SELECT ci.id, ci.channel_id, ci.is_active, ci.expires_at
+            FROM channel_invites ci WHERE ci.code = $1
             """,
             code,
         )
         if not invite:
             raise HTTPException(status_code=404, detail="Invalid invite link")
-
         if not invite["is_active"]:
             raise HTTPException(status_code=410, detail="This invite link has been revoked")
-
         if invite["expires_at"] and invite["expires_at"] < datetime.now(timezone.utc):
             raise HTTPException(status_code=410, detail="This invite link has expired")
 
-        if invite["max_uses"] is not None and invite["use_count"] >= invite["max_uses"]:
-            raise HTTPException(status_code=410, detail="This invite link has reached its maximum uses")
-
         channel_id = invite["channel_id"]
 
-        # Verify the channel belongs to the user's company
+        # Verify channel belongs to user's company
         ch = await conn.fetchrow(
             "SELECT id, is_paid, stripe_price_id, name, created_by FROM channels WHERE id = $1 AND company_id = $2 AND is_archived = false",
             channel_id, company_id,
@@ -1417,11 +1442,16 @@ async def join_by_invite(
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found in your company")
 
-        # Check cooldown for previously removed members
+        # Check if already an active member — don't consume an invite use
         existing = await conn.fetchrow(
-            "SELECT removal_cooldown_until, subscription_status FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            "SELECT removal_cooldown_until, subscription_status, removed_for_inactivity FROM channel_members WHERE channel_id = $1 AND user_id = $2",
             channel_id, current_user.id,
         )
+        if existing and not existing["removed_for_inactivity"] and existing.get("subscription_status") in ("active", None):
+            # Already a member, just redirect
+            return {"ok": True, "channel_id": str(channel_id)}
+
+        # Check cooldown
         if existing and existing["removal_cooldown_until"]:
             now = datetime.now(timezone.utc)
             if existing["removal_cooldown_until"] > now:
@@ -1430,16 +1460,10 @@ async def join_by_invite(
                     detail=f"You cannot rejoin until {existing['removal_cooldown_until'].strftime('%b %d, %Y')}",
                 )
 
-        # Check if already an active member
-        if existing and not (existing.get("subscription_status") in (None, "canceled", "past_due")):
-            # For paid channels, check subscription status
-            pass
-
-        # Paid channel → redirect to checkout
+        # Paid channel → redirect to checkout (DON'T consume invite use yet)
         if ch["is_paid"]:
             if ch["created_by"] == current_user.id:
                 raise HTTPException(status_code=400, detail="Channel owners cannot subscribe to their own channel")
-
             if existing and existing.get("subscription_status") == "active":
                 raise HTTPException(status_code=400, detail="You already have an active subscription")
 
@@ -1450,20 +1474,28 @@ async def join_by_invite(
                     channel_name=ch["name"],
                     stripe_price_id=ch["stripe_price_id"],
                     user_id=current_user.id,
+                    invite_code=code,  # Pass invite code for deferred use_count increment
                 )
             except ChannelPaymentError as e:
                 raise HTTPException(status_code=500, detail=str(e))
 
-            # Increment use_count on invite (will be fully "used" when payment completes,
-            # but we count the attempt)
-            await conn.execute(
-                "UPDATE channel_invites SET use_count = use_count + 1 WHERE id = $1",
-                invite["id"],
-            )
-
             return {"requires_payment": True, "channel_id": str(channel_id), "checkout_url": url}
 
-        # Free channel → join directly
+        # Free channel → atomic use_count increment (race-safe)
+        claimed = await conn.fetchrow(
+            """
+            UPDATE channel_invites SET use_count = use_count + 1
+            WHERE code = $1 AND is_active = true
+              AND (expires_at IS NULL OR expires_at > NOW())
+              AND (max_uses IS NULL OR use_count < max_uses)
+            RETURNING id
+            """,
+            code,
+        )
+        if not claimed:
+            raise HTTPException(status_code=410, detail="This invite link has expired or reached its maximum uses")
+
+        # Join the channel
         await conn.execute(
             """
             INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
@@ -1474,12 +1506,6 @@ async def join_by_invite(
                 last_contributed_at = NOW()
             """,
             channel_id, current_user.id,
-        )
-
-        # Increment use_count
-        await conn.execute(
-            "UPDATE channel_invites SET use_count = use_count + 1 WHERE id = $1",
-            invite["id"],
         )
 
     return {"ok": True, "channel_id": str(channel_id)}

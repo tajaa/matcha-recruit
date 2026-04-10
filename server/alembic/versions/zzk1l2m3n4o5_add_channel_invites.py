@@ -33,10 +33,7 @@ def upgrade() -> None:
         ON channel_invites (channel_id, is_active)
     """)
 
-    op.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_channel_invites_code
-        ON channel_invites (code)
-    """)
+    # code column already has UNIQUE constraint which creates an implicit index
 
 
 def downgrade() -> None:

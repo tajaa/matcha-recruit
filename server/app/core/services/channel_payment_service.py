@@ -73,6 +73,7 @@ async def create_checkout_session(
     user_id: UUID,
     success_url: Optional[str] = None,
     cancel_url: Optional[str] = None,
+    invite_code: Optional[str] = None,
 ) -> str:
     """Create a Stripe checkout session for subscribing to a paid channel. Returns checkout URL."""
     _ensure_stripe()
@@ -86,6 +87,8 @@ async def create_checkout_session(
         "user_id": str(user_id),
         "type": "channel_subscription",
     }
+    if invite_code:
+        metadata["invite_code"] = invite_code
 
     def _create():
         session = stripe.checkout.Session.create(
@@ -168,6 +171,7 @@ async def handle_subscription_activated(
     user_id: UUID,
     stripe_subscription_id: str,
     current_period_end: int,
+    invite_code: Optional[str] = None,
 ) -> None:
     """Called when a channel subscription checkout completes successfully."""
     paid_through = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
@@ -222,6 +226,17 @@ async def handle_subscription_activated(
             channel_id, user_id,
             __import__("json").dumps({"stripe_subscription_id": stripe_subscription_id}),
         )
+
+        # Increment invite use_count if this was an invite-based join (deferred from checkout)
+        if invite_code:
+            await conn.execute(
+                """
+                UPDATE channel_invites SET use_count = use_count + 1
+                WHERE code = $1 AND is_active = true
+                  AND (max_uses IS NULL OR use_count < max_uses)
+                """,
+                invite_code,
+            )
 
 
 async def handle_subscription_renewed(
