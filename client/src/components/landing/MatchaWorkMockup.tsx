@@ -1,142 +1,218 @@
 import { useRef, useState, useEffect } from 'react'
-import { motion, useInView } from 'framer-motion'
+import { motion, useInView, AnimatePresence } from 'framer-motion'
+
+const CANDIDATES = [
+  { name: 'Maya Chen', role: 'Sr. Engineer @ Stripe', score: 94, skills: ['React', 'Go', 'K8s'], loc: 'SF', status: 'completed', interviewScore: 92 },
+  { name: 'James Park', role: 'Staff Eng @ Airbnb', score: 91, skills: ['Python', 'AWS', 'ML'], loc: 'SF', status: 'completed', interviewScore: 87 },
+  { name: 'Priya Sharma', role: 'SDE III @ Amazon', score: 88, skills: ['Java', 'Distributed', 'React'], loc: 'Seattle', status: 'sent', interviewScore: null },
+  { name: 'Alex Rivera', role: 'Engineer @ Notion', score: 85, skills: ['TypeScript', 'Postgres'], loc: 'Remote', status: 'pending', interviewScore: null },
+]
+
+const fade = { initial: { opacity: 0, y: 8 }, animate: { opacity: 1, y: 0 }, exit: { opacity: 0, y: -4 } }
 
 export function MatchaWorkMockup() {
   const ref = useRef<HTMLDivElement>(null)
-  const inView = useInView(ref, { margin: '-80px' })
-  const [typingStep, setTypingStep] = useState(0)
+  const inView = useInView(ref, { margin: '-60px' })
+  const [step, setStep] = useState(0)
 
   useEffect(() => {
-    if (!inView) {
-      setTypingStep(0)
-      return
-    }
-    const t1 = setTimeout(() => setTypingStep(1), 800)
-    const t2 = setTimeout(() => setTypingStep(2), 2000)
-    const t3 = setTimeout(() => setTypingStep(3), 4000)
-    return () => {
-      clearTimeout(t1)
-      clearTimeout(t2)
-      clearTimeout(t3)
-    }
+    if (!inView) { setStep(0); return }
+    const timers = [
+      setTimeout(() => setStep(1), 600),
+      setTimeout(() => setStep(2), 1800),
+      setTimeout(() => setStep(3), 3200),
+      setTimeout(() => setStep(4), 4800),
+    ]
+    return () => timers.forEach(clearTimeout)
   }, [inView])
 
   return (
-    <div ref={ref} className="relative w-full max-w-4xl mx-auto rounded-xl overflow-hidden border border-zinc-700/50 bg-zinc-950 shadow-2xl flex flex-col md:flex-row h-[400px] font-sans">
-      
+    <div ref={ref} className="relative w-full max-w-4xl mx-auto rounded-xl overflow-hidden border border-zinc-700/50 bg-zinc-950 shadow-2xl flex flex-col md:flex-row h-[420px] font-sans">
+
       {/* Sidebar */}
-      <div className="hidden md:flex flex-col w-64 border-r border-zinc-800/50 bg-zinc-900/40 p-4">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-2">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
-            <span className="text-[11px] font-bold tracking-widest text-zinc-200 uppercase">Matcha Work</span>
+      <div className="hidden md:flex flex-col w-56 border-r border-zinc-800/50 bg-zinc-900/40 p-4">
+        <div className="flex items-center gap-2 mb-6">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+          <span className="text-[11px] font-bold tracking-widest text-zinc-200 uppercase">Matcha Work</span>
+        </div>
+
+        <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Projects</div>
+        <div className="flex flex-col gap-1">
+          <div className="px-3 py-2 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center gap-2">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" y1="8" x2="19" y2="14"/><line x1="22" y1="11" x2="16" y2="11"/></svg>
+            Sr. Engineer — SF
           </div>
-          <div className="w-5 h-5 rounded flex items-center justify-center border border-zinc-700/50 text-zinc-400">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"/></svg>
+          <div className="px-3 py-2 rounded-md text-xs text-zinc-500 flex items-center gap-2">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            Q3 Handbook
+          </div>
+          <div className="px-3 py-2 rounded-md text-xs text-zinc-500 flex items-center gap-2">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            CA Compliance
           </div>
         </div>
-        
-        <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mb-3">Recent Threads</div>
-        <div className="flex flex-col gap-1.5">
-          <div className="px-3 py-2 rounded-md bg-zinc-800/60 text-xs text-zinc-200 border border-zinc-700/50 shadow-sm flex items-center gap-2">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-            Offer Letter: SWE
-          </div>
-          <div className="px-3 py-2 rounded-md text-xs text-zinc-400 hover:bg-zinc-800/30 transition-colors flex items-center gap-2">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-            Overtime Compliance CA
-          </div>
-          <div className="px-3 py-2 rounded-md text-xs text-zinc-400 hover:bg-zinc-800/30 transition-colors flex items-center gap-2">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
-            Handbook Update Q3
+
+        <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest mt-5 mb-2">Threads</div>
+        <div className="flex flex-col gap-1">
+          <div className="px-3 py-2 rounded-md text-xs text-zinc-500 flex items-center gap-2">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            Overtime policy
           </div>
         </div>
       </div>
-      
-      {/* Main Chat Area */}
-      <div className="flex-1 flex flex-col bg-zinc-950/80 relative">
+
+      {/* Main panel */}
+      <div className="flex-1 flex flex-col bg-zinc-950/80">
         {/* Header */}
-        <div className="h-14 border-b border-zinc-800/50 flex items-center px-6 justify-between bg-zinc-900/20">
-          <div className="flex items-center gap-3">
-            <div className="text-sm font-semibold text-zinc-200">Offer Letter: SWE</div>
-            <span className="px-1.5 py-0.5 rounded-full bg-zinc-800 text-[9px] text-zinc-400 border border-zinc-700">Project</span>
+        <div className="h-12 border-b border-zinc-800/50 flex items-center px-5 justify-between bg-zinc-900/20">
+          <div className="flex items-center gap-2.5">
+            <span className="text-sm font-semibold text-zinc-200">Sr. Engineer — SF</span>
+            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-[9px] text-emerald-400 border border-emerald-500/25 font-medium">Recruiting</span>
           </div>
-          {/* Removed Model Selector for Beta */}
+          <div className="flex items-center gap-1.5">
+            {['Posting', 'Candidates', 'Interviews', 'Shortlist'].map((t, i) => (
+              <span key={t} className={`px-2 py-0.5 rounded text-[9px] font-medium transition-colors ${
+                (step <= 1 && i === 0) || (step === 2 && i === 1) || (step === 3 && i === 2) || (step >= 4 && i === 3)
+                  ? 'bg-zinc-800 text-zinc-200 border border-zinc-600'
+                  : 'text-zinc-600'
+              }`}>{t}</span>
+            ))}
+          </div>
         </div>
 
-        {/* Chat Messages */}
-        <div className="flex-1 p-6 overflow-y-auto flex flex-col gap-6">
-          
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={typingStep >= 1 ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
-            className="flex justify-end"
-          >
-            <div className="bg-emerald-600/10 border border-emerald-500/20 text-zinc-200 text-sm px-4 py-3 rounded-2xl rounded-tr-sm max-w-[80%] shadow-sm">
-              Draft an offer letter for a Senior Software Engineer candidate in San Francisco, CA. Base salary $185,000, 4-year vesting schedule for equity.
-            </div>
-          </motion.div>
+        {/* Content */}
+        <div className="flex-1 p-5 overflow-hidden">
+          <AnimatePresence mode="wait">
 
-          <motion.div 
-            initial={{ opacity: 0, y: 10 }}
-            animate={typingStep >= 2 ? { opacity: 1, y: 0 } : { opacity: 0, y: 10 }}
-            className="flex justify-start gap-3"
-          >
-            <div className="w-6 h-6 rounded bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0 mt-1">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" strokeWidth="2"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>
-            </div>
-            
-            <div className="bg-zinc-800/40 border border-zinc-700/50 text-zinc-300 text-sm px-5 py-4 rounded-2xl rounded-tl-sm max-w-[85%] leading-relaxed shadow-sm w-full">
-              {typingStep === 2 && (
-                <div className="flex items-center gap-2 text-zinc-400 font-mono text-xs">
-                  <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" /> Generating document...
-                </div>
-              )}
-              {typingStep >= 3 && (
-                <div className="space-y-3 w-full">
-                  <p>Here is the draft offer letter. It includes standard California at-will employment language and the requested equity vesting schedule.</p>
-                  
-                  <div className="mt-3 p-4 bg-zinc-900/80 rounded-lg border border-zinc-700/80 shadow-inner flex flex-col gap-3 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-2 opacity-20">
-                       <svg width="60" height="60" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                    </div>
-                    <div className="flex items-center gap-2 text-zinc-300 font-bold border-b border-zinc-700/50 pb-2 z-10">
-                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-emerald-400"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                       SWE_Offer_Letter_Draft.pdf
-                    </div>
-                    <div className="space-y-2 text-xs font-mono text-zinc-400 z-10">
-                       <div className="h-2 bg-zinc-700/50 rounded w-3/4"></div>
-                       <div className="h-2 bg-zinc-700/50 rounded w-1/2"></div>
-                       <div className="h-2 bg-zinc-700/50 rounded w-full"></div>
-                       <div className="h-2 bg-zinc-700/50 rounded w-5/6"></div>
-                    </div>
-                    <div className="flex gap-2 mt-2 z-10">
-                       <button className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded hover:bg-emerald-500/30 transition-colors uppercase tracking-wider font-bold">
-                         Preview
-                       </button>
-                       <button className="text-[10px] bg-zinc-800 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded hover:bg-zinc-700 transition-colors uppercase tracking-wider font-bold">
-                         Edit
-                       </button>
-                    </div>
+            {/* Step 1: Job Posting */}
+            {step >= 1 && step < 2 && (
+              <motion.div key="posting" {...fade} className="space-y-3">
+                <div className="p-4 rounded-lg border border-zinc-700/50 bg-zinc-900/50">
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-bold text-zinc-100">Senior Software Engineer</h3>
+                    <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-[9px] text-emerald-400 border border-emerald-500/25">Finalized</span>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-[11px]">
+                    <div><span className="text-zinc-500">Location</span><div className="text-zinc-300 mt-0.5">San Francisco, CA</div></div>
+                    <div><span className="text-zinc-500">Salary</span><div className="text-zinc-300 mt-0.5">$185k — $220k</div></div>
+                    <div><span className="text-zinc-500">Equity</span><div className="text-zinc-300 mt-0.5">0.05% — 0.12%</div></div>
+                  </div>
+                  <div className="flex gap-1.5 mt-3">
+                    {['React', 'Go', 'Kubernetes', 'PostgreSQL'].map(s => (
+                      <span key={s} className="px-2 py-0.5 rounded bg-zinc-800 text-[9px] text-zinc-400 border border-zinc-700/50">{s}</span>
+                    ))}
                   </div>
                 </div>
-              )}
-            </div>
-          </motion.div>
-        </div>
+                <div className="text-[10px] text-zinc-600 flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                  AI analyzed role requirements — ready for candidates
+                </div>
+              </motion.div>
+            )}
 
-        {/* Input Area */}
-        <div className="p-5 border-t border-zinc-800/50 bg-zinc-900/30">
-          <div className="flex items-center gap-3 bg-zinc-950 border border-zinc-700/50 hover:border-zinc-600 transition-colors rounded-xl px-4 py-3 shadow-inner">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-zinc-500"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
-            <div className="flex-1 text-sm text-zinc-500">Message Matcha...</div>
-            <div className="w-8 h-8 rounded-lg bg-emerald-500 flex items-center justify-center shadow-[0_0_10px_rgba(16,185,129,0.3)]">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="22" y1="2" x2="11" y2="13"></line>
-                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-              </svg>
-            </div>
-          </div>
+            {/* Step 2: Candidates */}
+            {step >= 2 && step < 3 && (
+              <motion.div key="candidates" {...fade} className="space-y-2">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">4 candidates ranked by AI match</span>
+                  <span className="text-[9px] text-emerald-500">Drop resumes to add more</span>
+                </div>
+                {CANDIDATES.map((c, i) => (
+                  <motion.div
+                    key={c.name}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: i * 0.15 }}
+                    className="flex items-center gap-3 p-2.5 rounded-lg border border-zinc-800/60 bg-zinc-900/30 hover:border-zinc-700 transition-colors"
+                  >
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${
+                      c.score >= 90 ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30' : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                    }`}>{c.score}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium text-zinc-200 truncate">{c.name}</div>
+                      <div className="text-[10px] text-zinc-500 truncate">{c.role}</div>
+                    </div>
+                    <div className="hidden sm:flex gap-1">
+                      {c.skills.slice(0, 2).map(s => (
+                        <span key={s} className="px-1.5 py-0.5 rounded bg-zinc-800/80 text-[8px] text-zinc-500">{s}</span>
+                      ))}
+                    </div>
+                    <span className="text-[9px] text-zinc-600 shrink-0">{c.loc}</span>
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
+
+            {/* Step 3: Interviews */}
+            {step >= 3 && step < 4 && (
+              <motion.div key="interviews" {...fade} className="space-y-2">
+                <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">Voice interviews via Gemini</span>
+                {CANDIDATES.map((c, i) => (
+                  <motion.div
+                    key={c.name}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: i * 0.1 }}
+                    className="flex items-center justify-between p-2.5 rounded-lg border border-zinc-800/60 bg-zinc-900/30"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-7 h-7 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400">{c.name.split(' ').map(n => n[0]).join('')}</div>
+                      <div>
+                        <div className="text-xs text-zinc-200">{c.name}</div>
+                        <div className="text-[10px] text-zinc-500">{c.role}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {c.interviewScore && (
+                        <span className="text-[10px] font-mono text-emerald-400">{c.interviewScore}/100</span>
+                      )}
+                      <span className={`px-2 py-0.5 rounded text-[9px] font-medium ${
+                        c.status === 'completed' ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/25'
+                        : c.status === 'sent' ? 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
+                        : 'bg-zinc-800 text-zinc-500 border border-zinc-700'
+                      }`}>{c.status === 'completed' ? 'Scored' : c.status === 'sent' ? 'In Progress' : 'Pending'}</span>
+                    </div>
+                  </motion.div>
+                ))}
+              </motion.div>
+            )}
+
+            {/* Step 4: Shortlist */}
+            {step >= 4 && (
+              <motion.div key="shortlist" {...fade} className="space-y-3">
+                <span className="text-[10px] text-zinc-500 font-medium uppercase tracking-wider">AI shortlist recommendation</span>
+                <div className="p-4 rounded-lg border border-emerald-500/30 bg-emerald-500/5">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-10 h-10 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-sm font-bold text-emerald-400">94</div>
+                    <div>
+                      <div className="text-sm font-semibold text-zinc-100">Maya Chen</div>
+                      <div className="text-[11px] text-zinc-400">Sr. Engineer @ Stripe</div>
+                    </div>
+                    <span className="ml-auto px-2.5 py-1 rounded bg-emerald-500/20 text-[10px] text-emerald-300 border border-emerald-500/30 font-medium">Top Pick</span>
+                  </div>
+                  <div className="text-[11px] text-zinc-400 leading-relaxed">
+                    Interview score 92/100 — strong systems design, React expertise matches stack. 6 years experience with distributed systems at scale.
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded font-bold uppercase tracking-wider">
+                      Generate Offer
+                    </button>
+                    <button className="text-[10px] bg-zinc-800 text-zinc-300 border border-zinc-700 px-3 py-1.5 rounded font-bold uppercase tracking-wider">
+                      View Full Profile
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg border border-zinc-800/60 bg-zinc-900/30">
+                  <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400">91</div>
+                  <div>
+                    <div className="text-xs text-zinc-300">James Park</div>
+                    <div className="text-[10px] text-zinc-500">Staff Eng @ Airbnb — Interview: 87/100</div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+          </AnimatePresence>
         </div>
       </div>
     </div>

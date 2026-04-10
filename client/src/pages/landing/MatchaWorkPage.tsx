@@ -39,7 +39,7 @@ export default function MatchaWorkPage() {
               </span>
             </div>
             <p className="text-zinc-500 text-sm sm:text-base mt-4 max-w-lg mx-auto leading-relaxed">
-              A standalone companion tool to the core Matcha platform. An experimental multi-threaded document workspace for compliance research, ER case analysis, and regulatory reasoning chains.
+              AI-powered recruiting pipeline, voice interviews, and document workspace. Post roles, upload resumes, let AI rank candidates and conduct interviews — all in one workspace.
             </p>
           </div>
 
@@ -66,9 +66,9 @@ export default function MatchaWorkPage() {
           {/* Feature highlights */}
           <div className="grid sm:grid-cols-3 gap-6 mt-20 max-w-4xl mx-auto">
             {[
-              { title: 'Research Tasks', desc: 'Define a prompt, paste URLs — AI browses sites and extracts structured data automatically.' },
-              { title: 'Document Workspace', desc: 'Multi-threaded projects with sections, diagrams, exports to PDF/DOCX/Markdown.' },
-              { title: 'AI-Powered Analysis', desc: 'Compliance research, regulatory reasoning chains, and ER case analysis with Gemini.' },
+              { title: 'AI Recruiting Pipeline', desc: 'Post roles, upload resumes, AI ranks candidates by match score. Full pipeline from posting to offer letter.' },
+              { title: 'Voice Interviews', desc: 'Gemini-powered voice interviews with real-time transcription, error analysis, and CEFR-level scoring.' },
+              { title: 'Document Workspace', desc: 'Multi-threaded projects with compliance research, regulatory reasoning chains, and PDF/DOCX export.' },
             ].map(f => (
               <div key={f.title} className="rounded-xl border border-zinc-700/50 p-6" style={{ background: 'rgba(24,24,27,0.6)' }}>
                 <h3 className="text-sm font-bold text-zinc-100 uppercase tracking-wide mb-2">{f.title}</h3>
