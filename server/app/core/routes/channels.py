@@ -208,6 +208,89 @@ async def list_channels(
         ]
 
 
+# ---------------------------------------------------------------------------
+# Member billing / subscription management
+# ---------------------------------------------------------------------------
+
+
+@router.get("/billing")
+async def get_my_channel_billing(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get all paid channel subscriptions for the current user."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT cm.channel_id, cm.subscription_status, cm.paid_through,
+                   cm.last_contributed_at, cm.removed_for_inactivity,
+                   cm.removal_cooldown_until,
+                   ch.name AS channel_name, ch.price_cents, ch.currency,
+                   ch.inactivity_threshold_days
+            FROM channel_members cm
+            JOIN channels ch ON ch.id = cm.channel_id
+            WHERE cm.user_id = $1 AND ch.is_paid = true
+            ORDER BY cm.joined_at DESC
+            """,
+            current_user.id,
+        )
+
+    from datetime import timedelta, timezone as tz
+    now = datetime.now(tz.utc)
+    result = []
+    for r in rows:
+        days_until_removal = None
+        if r["inactivity_threshold_days"] and r["last_contributed_at"]:
+            deadline = r["last_contributed_at"] + timedelta(days=r["inactivity_threshold_days"])
+            remaining = (deadline - now).total_seconds() / 86400
+            if remaining > 0:
+                days_until_removal = round(remaining, 1)
+
+        result.append({
+            "channel_id": str(r["channel_id"]),
+            "channel_name": r["channel_name"],
+            "price_cents": r["price_cents"],
+            "currency": r["currency"],
+            "subscription_status": r["subscription_status"],
+            "paid_through": r["paid_through"].isoformat() if r["paid_through"] else None,
+            "days_until_removal": days_until_removal,
+            "removed_for_inactivity": r["removed_for_inactivity"],
+            "cooldown_until": r["removal_cooldown_until"].isoformat() if r["removal_cooldown_until"] else None,
+        })
+
+    return result
+
+
+@router.get("/billing/history")
+async def get_my_payment_history(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Get payment event history for the current user."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT cpe.event_type, cpe.amount_cents, cpe.created_at,
+                   cpe.channel_id, ch.name AS channel_name
+            FROM channel_payment_events cpe
+            JOIN channels ch ON ch.id = cpe.channel_id
+            WHERE cpe.user_id = $1
+            ORDER BY cpe.created_at DESC
+            LIMIT 50
+            """,
+            current_user.id,
+        )
+
+    return [
+        {
+            "event_type": r["event_type"],
+            "amount_cents": r["amount_cents"],
+            "created_at": r["created_at"].isoformat(),
+            "channel_id": str(r["channel_id"]),
+            "channel_name": r["channel_name"],
+        }
+        for r in rows
+    ]
+
+
 @router.post("", response_model=ChannelDetail, status_code=status.HTTP_201_CREATED)
 async def create_channel(
     body: CreateChannelRequest,

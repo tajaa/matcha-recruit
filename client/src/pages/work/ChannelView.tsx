@@ -342,7 +342,7 @@ export default function ChannelView() {
           {onlineUsers.length > 0 && <span>{onlineUsers.length} online</span>}
           {paymentInfo.subscription_status === 'active' && (
             <button
-              onClick={() => {/* TODO: show subscription management */}}
+              onClick={() => navigate('/work/billing')}
               className="ml-auto text-zinc-600 hover:text-zinc-400"
             >
               Manage subscription

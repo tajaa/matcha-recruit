@@ -200,3 +200,29 @@ export const revokeChannelInvite = (channelId: string, inviteId: string) =>
 
 export const joinByInvite = (code: string) =>
   api.post<{ ok?: boolean; requires_payment?: boolean; channel_id?: string; checkout_url?: string }>(`/channels/join-by-invite/${code}`)
+
+export interface ChannelSubscription {
+  channel_id: string
+  channel_name: string
+  price_cents: number
+  currency: string
+  subscription_status: string | null
+  paid_through: string | null
+  days_until_removal: number | null
+  removed_for_inactivity: boolean
+  cooldown_until: string | null
+}
+
+export interface PaymentEvent {
+  event_type: string
+  amount_cents: number
+  created_at: string
+  channel_id: string
+  channel_name: string
+}
+
+export const getMyChannelBilling = () =>
+  api.get<ChannelSubscription[]>('/channels/billing')
+
+export const getMyPaymentHistory = () =>
+  api.get<PaymentEvent[]>('/channels/billing/history')
