@@ -31,7 +31,6 @@ export default function ChannelView() {
   const [pendingFiles, setPendingFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [paymentInfo, setPaymentInfo] = useState<ChannelPaymentInfo | null>(null)
-  const [checkingOut, setCheckingOut] = useState(false)
   const [warningDismissed, setWarningDismissed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showTip, setShowTip] = useState(false)
@@ -176,18 +175,6 @@ export default function ChannelView() {
       setError(err instanceof Error ? err.message : 'Failed to join')
     } finally {
       setJoining(false)
-    }
-  }
-
-  async function handleCheckout() {
-    if (!channelId) return
-    setCheckingOut(true)
-    try {
-      const { checkout_url } = await createChannelCheckout(channelId)
-      window.location.href = checkout_url
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Checkout failed')
-      setCheckingOut(false)
     }
   }
 
