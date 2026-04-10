@@ -6,9 +6,10 @@ import type { PaidChannelConfig } from '../../api/channels'
 interface Props {
   onClose: () => void
   onCreated: (channel: { id: string; name: string; slug: string }) => void
+  canCreatePaid?: boolean
 }
 
-export default function CreateChannelModal({ onClose, onCreated }: Props) {
+export default function CreateChannelModal({ onClose, onCreated, canCreatePaid = false }: Props) {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [visibility, setVisibility] = useState<'public' | 'invite_only' | 'private'>('public')
@@ -103,7 +104,7 @@ export default function CreateChannelModal({ onClose, onCreated }: Props) {
               ))}
             </div>
           </div>
-          <div>
+          {canCreatePaid && <div>
             <label
               className="flex items-center gap-2 cursor-pointer select-none"
               onClick={() => setIsPaid(!isPaid)}
@@ -165,7 +166,7 @@ export default function CreateChannelModal({ onClose, onCreated }: Props) {
                 </p>
               </div>
             )}
-          </div>
+          </div>}
           {error && <p className="text-red-400 text-xs">{error}</p>}
           <button
             type="submit"

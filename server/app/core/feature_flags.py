@@ -12,6 +12,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "separation_agreements": False,
     "credential_templates": False,
     "hris_import": False,
+    "paid_channel_creator": False,
 }
 
 

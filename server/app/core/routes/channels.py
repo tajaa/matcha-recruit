@@ -297,6 +297,20 @@ async def create_channel(
     if not name or len(name) > 100:
         raise HTTPException(status_code=400, detail="Channel name must be 1-100 characters")
 
+    # Paid channel creation requires the paid_channel_creator feature flag
+    if body.paid_config and current_user.role != "admin":
+        async with get_connection() as conn:
+            features = await conn.fetchval(
+                "SELECT enabled_features FROM companies WHERE id = $1", company_id
+            )
+        from ..feature_flags import merge_company_features
+        merged = merge_company_features(features)
+        if not merged.get("paid_channel_creator"):
+            raise HTTPException(
+                status_code=403,
+                detail="Your account is not approved to create paid channels. Contact support to get verified.",
+            )
+
     slug = _slugify(name)
 
     async with get_connection() as conn:
