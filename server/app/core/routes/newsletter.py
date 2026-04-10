@@ -82,16 +82,37 @@ async def view_newsletter(newsletter_id: UUID):
             "SELECT title, subject, content_html, sent_at FROM newsletters WHERE id = $1 AND status = 'sent'",
             newsletter_id,
         )
+    CDN = "https://cdn.jsdelivr.net/npm/@tailwindcss/cdn@4"
     if not row or not row["content_html"]:
         return HTMLResponse(
-            '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">'
-            '<div style="text-align:center"><h2>Newsletter not found</h2><p>This newsletter doesn\'t exist or hasn\'t been published yet.</p></div></body></html>',
+            f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
+            f'<script src="{CDN}"></script>'
+            f'<title>Not Found — Matcha</title></head>'
+            f'<body class="bg-zinc-950 text-zinc-300 font-sans min-h-screen flex items-center justify-center">'
+            f'<div class="text-center px-6"><h2 class="text-2xl font-semibold text-zinc-100 mb-2">Newsletter not found</h2>'
+            f'<p class="text-zinc-500">This newsletter doesn\'t exist or hasn\'t been published yet.</p></div></body></html>',
             status_code=404,
         )
     title = row["title"] or row["subject"] or "Newsletter"
+    sent_at = row["sent_at"].strftime("%B %d, %Y") if row.get("sent_at") else ""
     return HTMLResponse(
         f'<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">'
-        f'<title>{title} — Matcha</title></head><body>{row["content_html"]}</body></html>'
+        f'<script src="{CDN}"></script>'
+        f'<title>{title} — Matcha</title></head>'
+        f'<body class="bg-zinc-950 text-zinc-200 font-sans min-h-screen">'
+        f'<header class="border-b border-zinc-800">'
+        f'<div class="max-w-2xl mx-auto px-6 py-4 flex items-center justify-between">'
+        f'<span class="text-sm font-semibold tracking-wide text-emerald-500">matcha</span>'
+        f'<span class="text-xs text-zinc-600">{sent_at}</span></div></header>'
+        f'<main class="max-w-2xl mx-auto px-6 py-10">'
+        f'<h1 class="text-3xl font-bold text-zinc-100 mb-8">{title}</h1>'
+        f'<article class="prose prose-invert prose-zinc prose-sm max-w-none '
+        f'prose-headings:text-zinc-100 prose-a:text-emerald-400 prose-strong:text-zinc-100 '
+        f'prose-img:rounded-lg prose-img:border prose-img:border-zinc-800">'
+        f'{row["content_html"]}</article></main>'
+        f'<footer class="border-t border-zinc-800 mt-16">'
+        f'<div class="max-w-2xl mx-auto px-6 py-6 text-center text-xs text-zinc-600">'
+        f'Sent with Matcha</div></footer></body></html>'
     )
 
 
