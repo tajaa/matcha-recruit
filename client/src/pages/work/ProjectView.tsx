@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, ChevronRight, FileText, Users, Video, Star, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil, Menu } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil, Menu } from 'lucide-react'
 import { listConversations, getConversation, sendMessage as sendInboxMessage, getUnreadCount } from '../../api/inbox'
 import type { ConversationSummary, Conversation } from '../../api/inbox'
 import { ConversationList } from '../../components/inbox/ConversationList'
@@ -13,6 +13,7 @@ import type { UsageSummary } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
 import RecruitingPipeline from '../../components/matcha-work/RecruitingPipeline'
+import RecruitingWizard from '../../components/matcha-work/RecruitingWizard'
 import CollaboratorPanel from '../../components/matcha-work/CollaboratorPanel'
 import { MODEL_OPTIONS, formatTokens } from '../../components/matcha-work/constants'
 
@@ -99,7 +100,6 @@ export default function ProjectView() {
 
   // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
-  const [wizardStep, setWizardStep] = useState(0)
   const [isDragOver, setIsDragOver] = useState(false)
   const [showCollaborators, setShowCollaborators] = useState(false)
 
@@ -323,110 +323,9 @@ export default function ProjectView() {
 
   const chats = project.chats || []
 
-  const WIZARD_STEPS = [
-    {
-      icon: FileText,
-      title: 'Draft your job posting',
-      desc: 'Use the chat to describe the role. The AI will help you write a job description, requirements, and compensation details.',
-    },
-    {
-      icon: Users,
-      title: 'Upload candidate resumes',
-      desc: 'Drag and drop resume files (PDF, DOCX, TXT) into the chat. The AI extracts key candidate info automatically and adds them to your pipeline.',
-    },
-    {
-      icon: Star,
-      title: 'Review and shortlist',
-      desc: 'Browse candidates in the right panel. Star your top picks to build a shortlist. Search and sort by experience, skills, or location.',
-    },
-    {
-      icon: Video,
-      title: 'Send to AI interview',
-      desc: 'Select candidates and send them a Gemini Live voice interview. They get an email link — no account needed. Results sync back with scores and summaries.',
-    },
-  ]
-
   function dismissWizard() {
     setShowWizard(false)
     if (projectId) localStorage.setItem(`wizard-dismissed-${projectId}`, '1')
-  }
-
-  if (showWizard) {
-    const step = WIZARD_STEPS[wizardStep]
-    const StepIcon = step.icon
-    const isLast = wizardStep === WIZARD_STEPS.length - 1
-
-    return (
-      <div className="flex items-center justify-center h-[calc(100vh-49px)]" style={{ background: '#1e1e1e' }}>
-        <div className="w-full max-w-md mx-4 rounded-xl border p-6" style={{ background: '#252526', borderColor: '#333' }}>
-          {/* Progress dots */}
-          <div className="flex items-center justify-center gap-2 mb-6">
-            {WIZARD_STEPS.map((_, i) => (
-              <div
-                key={i}
-                className="rounded-full transition-colors"
-                style={{
-                  width: i === wizardStep ? 24 : 8,
-                  height: 8,
-                  background: i === wizardStep ? '#ce9178' : i < wizardStep ? '#22c55e' : '#444',
-                  borderRadius: 4,
-                }}
-              />
-            ))}
-          </div>
-
-          {/* Icon */}
-          <div className="flex justify-center mb-4">
-            <div className="p-3 rounded-full" style={{ background: '#ce9178' + '20' }}>
-              <StepIcon size={28} style={{ color: '#ce9178' }} />
-            </div>
-          </div>
-
-          {/* Content */}
-          <h2 className="text-center text-lg font-semibold mb-2" style={{ color: '#e8e8e8' }}>
-            {step.title}
-          </h2>
-          <p className="text-center text-sm leading-relaxed mb-6" style={{ color: '#9ca3af' }}>
-            {step.desc}
-          </p>
-
-          {/* Step indicator */}
-          <p className="text-center text-[10px] mb-4" style={{ color: '#6a737d' }}>
-            Step {wizardStep + 1} of {WIZARD_STEPS.length}
-          </p>
-
-          {/* Buttons */}
-          <div className="flex items-center justify-between">
-            <button
-              onClick={dismissWizard}
-              className="text-xs transition-colors"
-              style={{ color: '#6a737d' }}
-            >
-              Skip
-            </button>
-            <div className="flex gap-2">
-              {wizardStep > 0 && (
-                <button
-                  onClick={() => setWizardStep(wizardStep - 1)}
-                  className="px-4 py-2 text-xs font-medium rounded-lg transition-colors"
-                  style={{ color: '#d4d4d4', background: '#333' }}
-                >
-                  Back
-                </button>
-              )}
-              <button
-                onClick={() => isLast ? dismissWizard() : setWizardStep(wizardStep + 1)}
-                className="px-4 py-2 text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
-                style={{ background: '#22c55e', color: '#fff' }}
-              >
-                {isLast ? 'Get Started' : 'Next'}
-                {!isLast && <ChevronRight size={12} />}
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    )
   }
 
   const SidebarContent = (
@@ -673,9 +572,9 @@ export default function ProjectView() {
               </div>
             ) : null}
 
-            {project.project_type === 'recruiting' && (
+            {project.project_type === 'recruiting' && messages.length === 0 && (
               <button
-                onClick={() => { setWizardStep(0); setShowWizard(true) }}
+                onClick={() => setShowWizard(true)}
                 title="How it works"
                 className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
               >
@@ -712,7 +611,17 @@ export default function ProjectView() {
               </p>
             </div>
           )}
-          {messages.length === 0 && (
+          {messages.length === 0 && showWizard && project?.project_type === 'recruiting' ? (
+            <div className="flex items-center justify-center h-full">
+              <RecruitingWizard
+                onDismiss={dismissWizard}
+                onStartHiring={() => {
+                  dismissWizard()
+                  setTimeout(() => textareaRef.current?.focus(), 50)
+                }}
+              />
+            </div>
+          ) : messages.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm" style={{ color: '#6a737d' }}>
               {project?.project_type === 'recruiting'
                 ? (isPostingFinalized
@@ -720,7 +629,7 @@ export default function ProjectView() {
                     : 'Describe the role you\'re hiring for, then click "Add to Project" to build the posting.')
                 : 'Start chatting \u2014 use "Add to Project" to build your document.'}
             </div>
-          )}
+          ) : null}
           {messages.map((m) => (
             <MessageBubble
               key={m.id}
