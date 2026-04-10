@@ -47,7 +47,7 @@ export default function MatchaWorkPage() {
             whileHover={{ scale: 1.02 }}
             transition={{ type: "spring", stiffness: 400, damping: 25 }}
             style={{ boxShadow: "0 20px 40px -10px rgba(16, 185, 129, 0.15)" }}
-            className="rounded-lg overflow-hidden max-w-2xl mx-auto border border-emerald-500/20"
+            className="rounded-lg overflow-hidden max-w-5xl mx-auto border border-emerald-500/20"
           >
             <MatchaWorkMockup />
           </motion.div>

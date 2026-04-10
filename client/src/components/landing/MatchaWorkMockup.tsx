@@ -27,7 +27,7 @@ export function MatchaWorkMockup() {
   }, [inView])
 
   return (
-    <div ref={ref} className="relative w-full max-w-4xl mx-auto rounded-xl overflow-hidden border border-zinc-700/50 bg-zinc-950 shadow-2xl flex flex-col md:flex-row h-[420px] font-sans">
+    <div ref={ref} className="relative w-full max-w-5xl mx-auto rounded-xl overflow-hidden border border-zinc-700/50 bg-zinc-950 shadow-2xl flex flex-col md:flex-row h-[520px] font-sans">
 
       {/* Sidebar */}
       <div className="hidden md:flex flex-col w-56 border-r border-zinc-800/50 bg-zinc-900/40 p-4">
