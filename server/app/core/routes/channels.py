@@ -109,10 +109,6 @@ class CreateInviteRequest(BaseModel):
     expires_in_hours: Optional[int] = None
     note: Optional[str] = None
 
-    @classmethod
-    def __get_validators__(cls):
-        yield cls.validate_fields
-
     def model_post_init(self, __context) -> None:
         if self.max_uses is not None and self.max_uses <= 0:
             raise ValueError("max_uses must be positive")
@@ -234,8 +230,7 @@ async def get_my_channel_billing(
             current_user.id,
         )
 
-    from datetime import timedelta, timezone as tz
-    now = datetime.now(tz.utc)
+    now = datetime.now(timezone.utc)
     result = []
     for r in rows:
         days_until_removal = None
@@ -1427,8 +1422,10 @@ async def create_invite(
                     channel_id, code, current_user.id, body.max_uses, expires_at, body.note,
                 )
                 break
-            except Exception:
-                continue
+            except Exception as e:
+                if "unique" in str(e).lower() or "duplicate" in str(e).lower():
+                    continue
+                raise
         if not row:
             raise HTTPException(status_code=500, detail="Failed to generate unique invite code")
 
