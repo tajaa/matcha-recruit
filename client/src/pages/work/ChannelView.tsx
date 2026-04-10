@@ -6,7 +6,7 @@ import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, C
 import { ChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
 import AddMembersModal from '../../components/channels/AddMembersModal'
-import PaidChannelGate from '../../components/channels/PaidChannelGate'
+import PaidChannelJoinWizard from '../../components/channels/PaidChannelJoinWizard'
 import InactivityWarningBanner from '../../components/channels/InactivityWarningBanner'
 import ChannelSettingsPanel from '../../components/channels/ChannelSettingsPanel'
 import TipModal from '../../components/channels/TipModal'
@@ -216,19 +216,19 @@ export default function ChannelView() {
     // Paid channel — show payment gate
     if (paymentInfo?.is_paid) {
       return (
-        <div className="flex items-center justify-center h-full">
-          <PaidChannelGate
-            channelName={channel?.name ?? 'Channel'}
-            priceCents={paymentInfo.price_cents ?? 0}
-            currency={paymentInfo.currency ?? 'usd'}
-            inactivityDays={paymentInfo.inactivity_threshold_days ?? null}
-            cooldownUntil={paymentInfo.cooldown_until ?? null}
-            canRejoin={paymentInfo.can_rejoin ?? true}
-            onCheckout={handleCheckout}
-            checkingOut={checkingOut}
-            onBack={() => navigate('/work')}
-          />
-        </div>
+        <PaidChannelJoinWizard
+          channelName={channel?.name ?? 'Channel'}
+          channelDescription={channel?.description ?? null}
+          memberCount={channel?.member_count ?? 0}
+          priceCents={paymentInfo.price_cents ?? 0}
+          currency={paymentInfo.currency ?? 'usd'}
+          inactivityDays={paymentInfo.inactivity_threshold_days ?? null}
+          cooldownUntil={paymentInfo.cooldown_until ?? null}
+          canRejoin={paymentInfo.can_rejoin ?? true}
+          onJoin={handleJoin}
+          joining={joining}
+          onBack={() => navigate('/work')}
+        />
       )
     }
     // Free channel — existing join prompt
