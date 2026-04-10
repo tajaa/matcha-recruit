@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings } from 'lucide-react'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart } from 'lucide-react'
 import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
@@ -9,6 +9,7 @@ import AddMembersModal from '../../components/channels/AddMembersModal'
 import PaidChannelGate from '../../components/channels/PaidChannelGate'
 import InactivityWarningBanner from '../../components/channels/InactivityWarningBanner'
 import ChannelSettingsPanel from '../../components/channels/ChannelSettingsPanel'
+import TipModal from '../../components/channels/TipModal'
 
 export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -33,6 +34,7 @@ export default function ChannelView() {
   const [checkingOut, setCheckingOut] = useState(false)
   const [warningDismissed, setWarningDismissed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showTip, setShowTip] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -316,6 +318,15 @@ export default function ChannelView() {
           >
             <Users size={16} />
           </button>
+          {channel?.my_role !== 'owner' && isMember && (
+            <button
+              onClick={() => setShowTip(true)}
+              className="p-1.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-pink-400"
+              title="Send a tip"
+            >
+              <Heart size={16} />
+            </button>
+          )}
           {channel?.my_role !== 'owner' && (
             <button
               onClick={handleLeave}
@@ -541,6 +552,14 @@ export default function ChannelView() {
           channelName={channel.name}
           isPaid={paymentInfo?.is_paid ?? false}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showTip && channel && (
+        <TipModal
+          channelId={channel.id}
+          channelName={channel.name}
+          onClose={() => setShowTip(false)}
         />
       )}
 

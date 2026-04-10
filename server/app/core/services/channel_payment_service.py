@@ -138,6 +138,55 @@ async def cancel_subscription_immediately(stripe_subscription_id: str) -> None:
         logger.error("Failed to cancel subscription %s: %s", stripe_subscription_id, exc)
 
 
+async def create_tip_checkout(
+    channel_id: UUID,
+    channel_name: str,
+    sender_id: UUID,
+    creator_id: UUID,
+    amount_cents: int,
+    message: Optional[str] = None,
+) -> str:
+    """Create a one-time Stripe checkout for a tip. Returns checkout URL."""
+    _ensure_stripe()
+    settings = get_settings()
+
+    metadata = {
+        "type": "channel_tip",
+        "channel_id": str(channel_id),
+        "sender_id": str(sender_id),
+        "creator_id": str(creator_id),
+        "amount_cents": str(amount_cents),
+    }
+    if message:
+        metadata["message"] = message[:200]
+
+    def _create():
+        session = stripe.checkout.Session.create(
+            mode="payment",
+            success_url=f"{settings.app_base_url}/work/channels/{channel_id}?tipped=1",
+            cancel_url=f"{settings.app_base_url}/work/channels/{channel_id}",
+            payment_method_types=["card"],
+            metadata=metadata,
+            line_items=[{
+                "price_data": {
+                    "currency": "usd",
+                    "unit_amount": amount_cents,
+                    "product_data": {
+                        "name": f"Tip for #{channel_name}",
+                        "description": message[:100] if message else "Thank you tip",
+                    },
+                },
+                "quantity": 1,
+            }],
+        )
+        return session.url
+
+    try:
+        return await asyncio.to_thread(_create)
+    except Exception as exc:
+        raise ChannelPaymentError(f"Failed to create tip checkout: {exc}") from exc
+
+
 async def check_rejoin_eligibility(channel_id: UUID, user_id: UUID) -> dict:
     """Check if a user can rejoin a paid channel. Returns eligibility info."""
     async with get_connection() as conn:

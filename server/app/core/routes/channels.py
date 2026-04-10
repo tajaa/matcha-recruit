@@ -1603,3 +1603,60 @@ async def join_by_invite(
         )
 
     return {"ok": True, "channel_id": str(channel_id)}
+
+
+# ---------------------------------------------------------------------------
+# Tipping
+# ---------------------------------------------------------------------------
+
+class SendTipRequest(BaseModel):
+    amount_cents: int  # minimum 100 ($1.00), maximum 50000 ($500.00)
+    message: Optional[str] = None  # optional thank-you message, max 200 chars
+
+
+@router.post("/{channel_id}/tip")
+async def send_tip(
+    channel_id: UUID,
+    body: SendTipRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Create a Stripe checkout session to tip the channel creator."""
+    if body.amount_cents < 100 or body.amount_cents > 50000:
+        raise HTTPException(status_code=400, detail="Tip must be between $1.00 and $500.00")
+    if body.message and len(body.message) > 200:
+        raise HTTPException(status_code=400, detail="Message must be 200 characters or fewer")
+
+    async with get_connection() as conn:
+        # Verify membership
+        is_member = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+            channel_id, current_user.id,
+        )
+        if not is_member:
+            raise HTTPException(status_code=403, detail="You must be a member of this channel")
+
+        # Get channel info
+        ch = await conn.fetchrow(
+            "SELECT name, created_by FROM channels WHERE id = $1", channel_id
+        )
+        if not ch:
+            raise HTTPException(status_code=404, detail="Channel not found")
+
+        creator_id = ch["created_by"]
+        if creator_id == current_user.id:
+            raise HTTPException(status_code=400, detail="You cannot tip yourself")
+
+    from ..services.channel_payment_service import create_tip_checkout, ChannelPaymentError
+    try:
+        url = await create_tip_checkout(
+            channel_id=channel_id,
+            channel_name=ch["name"],
+            sender_id=current_user.id,
+            creator_id=creator_id,
+            amount_cents=body.amount_cents,
+            message=body.message,
+        )
+    except ChannelPaymentError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return {"checkout_url": url}

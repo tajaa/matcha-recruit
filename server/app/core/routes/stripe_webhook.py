@@ -44,7 +44,55 @@ async def stripe_webhook(request: Request):
         session_mode = str(event_object.get("mode") or "payment")
         stripe_session_id = str(event_object.get("id") or "")
 
-        if session_mode == "payment":
+        if session_mode == "payment" and meta.get("type") == "channel_tip":
+            try:
+                channel_id = UUID(meta.get("channel_id", ""))
+                sender_id = UUID(meta.get("sender_id", ""))
+                creator_id = UUID(meta.get("creator_id", ""))
+                amount = int(meta.get("amount_cents", "0"))
+                tip_message = meta.get("message", "")
+
+                from ...database import get_connection as _gc
+                async with _gc() as conn:
+                    # Log the tip event
+                    await conn.execute(
+                        """
+                        INSERT INTO channel_payment_events (channel_id, user_id, event_type, amount_cents, metadata)
+                        VALUES ($1, $2, 'tip_received', $3, $4::jsonb)
+                        """,
+                        channel_id, creator_id, amount,
+                        __import__("json").dumps({"sender_id": str(sender_id), "message": tip_message}),
+                    )
+                    # Also log for sender
+                    await conn.execute(
+                        """
+                        INSERT INTO channel_payment_events (channel_id, user_id, event_type, amount_cents, metadata)
+                        VALUES ($1, $2, 'tip_sent', $3, $4::jsonb)
+                        """,
+                        channel_id, sender_id, amount,
+                        __import__("json").dumps({"creator_id": str(creator_id), "message": tip_message}),
+                    )
+                    # Notify creator
+                    company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
+                    channel_name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", channel_id)
+                    sender_name = await conn.fetchval(
+                        "SELECT COALESCE(c.name, u.email) FROM users u LEFT JOIN clients c ON c.user_id = u.id WHERE u.id = $1",
+                        sender_id,
+                    )
+                    from ...matcha.services import notification_service as notif_svc
+                    await notif_svc.create_notification(
+                        user_id=creator_id,
+                        company_id=company_id,
+                        type="channel_tip_received",
+                        title=f"${amount/100:.2f} tip in #{channel_name}",
+                        body=f"{sender_name} sent you a tip" + (f": \"{tip_message}\"" if tip_message else ""),
+                        link=f"/work/channels/{channel_id}",
+                    )
+                logger.info("Channel tip processed: %s -> %s, $%.2f", sender_id, creator_id, amount/100)
+            except Exception as exc:
+                logger.error("Failed to process channel tip: %s", exc)
+
+        elif session_mode == "payment":
             if not stripe_session_id:
                 return {"received": True}
             fulfillment = await billing_service.fulfill_checkout_session(stripe_session_id)

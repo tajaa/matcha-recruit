@@ -198,6 +198,12 @@ export const listChannelInvites = (channelId: string) =>
 export const revokeChannelInvite = (channelId: string, inviteId: string) =>
   api.delete(`/channels/${channelId}/invites/${inviteId}`)
 
+export const sendChannelTip = (channelId: string, amountCents: number, message?: string) =>
+  api.post<{ checkout_url: string }>(`/channels/${channelId}/tip`, {
+    amount_cents: amountCents,
+    message: message || null,
+  })
+
 export const joinByInvite = (code: string) =>
   api.post<{ ok?: boolean; requires_payment?: boolean; channel_id?: string; checkout_url?: string }>(`/channels/join-by-invite/${code}`)
 
