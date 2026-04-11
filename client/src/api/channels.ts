@@ -174,6 +174,50 @@ export const getMemberActivity = (id: string) =>
 export const getChannelRevenue = (id: string) =>
   api.get<ChannelRevenue>(`/channels/${id}/revenue`)
 
+export interface ChannelAnalytics {
+  subscribers: {
+    total: number
+    active: number
+    past_due: number
+    canceled: number
+  }
+  revenue: {
+    mrr_cents: number
+    total_subscription_cents: number
+    total_tips_cents: number
+    total_cents: number
+  }
+  activity: {
+    messages_today: number
+    messages_this_week: number
+    messages_this_month: number
+    most_active_members: {
+      user_id: string
+      name: string
+      message_count: number
+      last_active: string
+    }[]
+  }
+  engagement: {
+    avg_messages_per_day: number
+    members_at_risk: number
+    recent_removals: number
+  }
+  tips: {
+    total_cents: number
+    tip_count: number
+    recent: {
+      sender_name: string
+      amount_cents: number
+      message: string
+      created_at: string
+    }[]
+  }
+}
+
+export const getChannelAnalytics = (id: string) =>
+  api.get<ChannelAnalytics>(`/channels/${id}/analytics`)
+
 export interface ChannelInvite {
   id: string
   code: string

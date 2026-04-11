@@ -1638,6 +1638,208 @@ async def get_channel_revenue(
     }
 
 
+@router.get("/{channel_id}/analytics")
+async def get_channel_analytics(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Comprehensive analytics dashboard for paid channel owners."""
+    async with get_connection() as conn:
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role != "owner" and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the channel owner can view analytics")
+
+        ch = await conn.fetchrow(
+            "SELECT price_cents, currency, inactivity_threshold_days FROM channels WHERE id = $1",
+            channel_id,
+        )
+        if not ch:
+            raise HTTPException(status_code=404, detail="Channel not found")
+
+        # ── Subscribers ──
+        sub_counts = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) AS total,
+                COUNT(*) FILTER (WHERE subscription_status = 'active') AS active,
+                COUNT(*) FILTER (WHERE subscription_status = 'past_due') AS past_due,
+                COUNT(*) FILTER (WHERE subscription_status = 'canceled' OR removed_for_inactivity = true) AS canceled
+            FROM channel_members
+            WHERE channel_id = $1
+            """,
+            channel_id,
+        )
+
+        # ── Revenue ──
+        revenue_row = await conn.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(amount_cents) FILTER (WHERE event_type = 'payment_success'), 0) AS total_subscription_cents,
+                COALESCE(SUM(amount_cents) FILTER (WHERE event_type = 'tip_received'), 0) AS total_tips_cents
+            FROM channel_payment_events
+            WHERE channel_id = $1
+            """,
+            channel_id,
+        )
+        active_subs = sub_counts["active"]
+        mrr_cents = (ch["price_cents"] or 0) * active_subs
+        total_sub = revenue_row["total_subscription_cents"]
+        total_tips = revenue_row["total_tips_cents"]
+
+        # ── Activity (messages) ──
+        now = datetime.now(timezone.utc)
+        activity_row = await conn.fetchrow(
+            """
+            SELECT
+                COUNT(*) FILTER (WHERE created_at >= $2) AS messages_today,
+                COUNT(*) FILTER (WHERE created_at >= $3) AS messages_this_week,
+                COUNT(*) FILTER (WHERE created_at >= $4) AS messages_this_month
+            FROM channel_messages
+            WHERE channel_id = $1
+            """,
+            channel_id,
+            now - timedelta(days=1),
+            now - timedelta(weeks=1),
+            now - timedelta(days=30),
+        )
+
+        # Top 5 most active members (last 30 days)
+        most_active_rows = await conn.fetch(
+            f"""
+            SELECT m.sender_id AS user_id,
+                   {_USER_NAME_EXPR} AS name,
+                   COUNT(*) AS message_count,
+                   MAX(m.created_at) AS last_active
+            FROM channel_messages m
+            JOIN users u ON u.id = m.sender_id
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE m.channel_id = $1 AND m.created_at >= $2
+            GROUP BY m.sender_id, c.name, e.first_name, e.last_name, a.name, u.email
+            ORDER BY message_count DESC
+            LIMIT 5
+            """,
+            channel_id, now - timedelta(days=30),
+        )
+
+        # ── Engagement ──
+        avg_row = await conn.fetchval(
+            """
+            SELECT COUNT(*)::float / GREATEST(1, 30)
+            FROM channel_messages
+            WHERE channel_id = $1 AND created_at >= $2
+            """,
+            channel_id, now - timedelta(days=30),
+        )
+
+        threshold_days = ch["inactivity_threshold_days"]
+        members_at_risk = 0
+        if threshold_days:
+            # Members whose last activity is past 50% of the threshold
+            risk_cutoff = now - timedelta(days=threshold_days * 0.5)
+            members_at_risk = await conn.fetchval(
+                """
+                SELECT COUNT(*)
+                FROM channel_members
+                WHERE channel_id = $1
+                  AND subscription_status = 'active'
+                  AND removed_for_inactivity = false
+                  AND last_contributed_at IS NOT NULL
+                  AND last_contributed_at < $2
+                """,
+                channel_id, risk_cutoff,
+            )
+
+        recent_removals = await conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM channel_members
+            WHERE channel_id = $1
+              AND removed_for_inactivity = true
+              AND inactivity_warned_at >= $2
+            """,
+            channel_id, now - timedelta(days=30),
+        )
+
+        # ── Tips ──
+        tips_row = await conn.fetchrow(
+            """
+            SELECT COALESCE(SUM(amount_cents), 0) AS total_cents, COUNT(*) AS tip_count
+            FROM channel_payment_events
+            WHERE channel_id = $1 AND event_type = 'tip_received'
+            """,
+            channel_id,
+        )
+
+        recent_tips = await conn.fetch(
+            f"""
+            SELECT pe.amount_cents, pe.created_at,
+                   pe.metadata->>'message' AS message,
+                   {_USER_NAME_EXPR} AS sender_name
+            FROM channel_payment_events pe
+            JOIN users u ON u.id = (pe.metadata->>'sender_id')::uuid
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE pe.channel_id = $1 AND pe.event_type = 'tip_received'
+            ORDER BY pe.created_at DESC
+            LIMIT 5
+            """,
+            channel_id,
+        )
+
+    return {
+        "subscribers": {
+            "total": sub_counts["total"],
+            "active": sub_counts["active"],
+            "past_due": sub_counts["past_due"],
+            "canceled": sub_counts["canceled"],
+        },
+        "revenue": {
+            "mrr_cents": mrr_cents,
+            "total_subscription_cents": total_sub,
+            "total_tips_cents": total_tips,
+            "total_cents": total_sub + total_tips,
+        },
+        "activity": {
+            "messages_today": activity_row["messages_today"],
+            "messages_this_week": activity_row["messages_this_week"],
+            "messages_this_month": activity_row["messages_this_month"],
+            "most_active_members": [
+                {
+                    "user_id": str(r["user_id"]),
+                    "name": r["name"],
+                    "message_count": r["message_count"],
+                    "last_active": r["last_active"].isoformat(),
+                }
+                for r in most_active_rows
+            ],
+        },
+        "engagement": {
+            "avg_messages_per_day": round(avg_row or 0, 1),
+            "members_at_risk": members_at_risk,
+            "recent_removals": recent_removals or 0,
+        },
+        "tips": {
+            "total_cents": tips_row["total_cents"],
+            "tip_count": tips_row["tip_count"],
+            "recent": [
+                {
+                    "sender_name": r["sender_name"],
+                    "amount_cents": r["amount_cents"],
+                    "message": r["message"] or "",
+                    "created_at": r["created_at"].isoformat(),
+                }
+                for r in recent_tips
+            ],
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Channel invite links
 # ---------------------------------------------------------------------------

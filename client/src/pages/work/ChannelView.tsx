@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone } from 'lucide-react'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2 } from 'lucide-react'
 import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
@@ -9,6 +9,7 @@ import AddMembersModal from '../../components/channels/AddMembersModal'
 import PaidChannelJoinWizard from '../../components/channels/PaidChannelJoinWizard'
 import InactivityWarningBanner from '../../components/channels/InactivityWarningBanner'
 import ChannelSettingsPanel from '../../components/channels/ChannelSettingsPanel'
+import ChannelAnalytics from '../../components/channels/ChannelAnalytics'
 import TipModal from '../../components/channels/TipModal'
 import VoiceCallBar from '../../components/channels/VoiceCallBar'
 import { useVoiceCall } from '../../hooks/useVoiceCall'
@@ -35,6 +36,7 @@ export default function ChannelView() {
   const [paymentInfo, setPaymentInfo] = useState<ChannelPaymentInfo | null>(null)
   const [warningDismissed, setWarningDismissed] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  const [showAnalytics, setShowAnalytics] = useState(false)
   const [showTip, setShowTip] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
@@ -306,7 +308,16 @@ export default function ChannelView() {
           )}
           {channel?.my_role === 'owner' && paymentInfo?.is_paid && (
             <button
-              onClick={() => setShowSettings(!showSettings)}
+              onClick={() => { setShowAnalytics(!showAnalytics); setShowSettings(false) }}
+              className={`p-1.5 rounded hover:bg-zinc-800 ${showAnalytics ? 'text-emerald-400' : 'text-zinc-500'}`}
+              title="Channel analytics"
+            >
+              <BarChart2 size={16} />
+            </button>
+          )}
+          {channel?.my_role === 'owner' && paymentInfo?.is_paid && (
+            <button
+              onClick={() => { setShowSettings(!showSettings); setShowAnalytics(false) }}
               className={`p-1.5 rounded hover:bg-zinc-800 ${showSettings ? 'text-emerald-400' : 'text-zinc-500'}`}
               title="Channel settings"
             >
@@ -579,6 +590,14 @@ export default function ChannelView() {
           channelName={channel.name}
           isPaid={paymentInfo?.is_paid ?? false}
           onClose={() => setShowSettings(false)}
+        />
+      )}
+
+      {showAnalytics && channel && (
+        <ChannelAnalytics
+          channelId={channel.id}
+          channelName={channel.name}
+          onClose={() => setShowAnalytics(false)}
         />
       )}
 
