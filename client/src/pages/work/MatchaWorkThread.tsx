@@ -78,8 +78,9 @@ export default function MatchaWorkThread() {
   // Agent mode (local toggle, no backend persistence)
   const [agentMode, setAgentMode] = useState(false)
 
-  // Language tutor panel (shown before thread gets task_type)
+  // Language tutor panel (shown before thread gets task_type, dismissable)
   const [showTutorSetup, setShowTutorSetup] = useState(false)
+  const [tutorDismissed, setTutorDismissed] = useState(false)
 
   // Mobile panel toggle
   const [mobileView, setMobileView] = useState<'chat' | 'panel'>('chat')
@@ -472,7 +473,7 @@ export default function MatchaWorkThread() {
   const isProject = thread?.task_type === 'project'
   const showProjectPanel = isProject && thread?.current_state
   const isLanguageTutor = thread?.task_type === 'language_tutor'
-  const showLanguageTutorPanel = isLanguageTutor || showTutorSetup
+  const showLanguageTutorPanel = !tutorDismissed && (isLanguageTutor || showTutorSetup)
   const hasRightPanel = !!(pdfUrl || showPresentationPanel || showResumeBatchPanel || showInventoryPanel || showProjectPanel || showLanguageTutorPanel || agentMode)
   const isFinalized = thread?.status === 'finalized'
   const isArchived = thread?.status === 'archived'
@@ -762,6 +763,7 @@ export default function MatchaWorkThread() {
                       onClick={() => {
                         if (skill.id === 'language_tutor') {
                           setShowTutorSetup(true)
+                          setTutorDismissed(false)
                           return
                         }
                         if (skill.prompt) {
@@ -960,7 +962,7 @@ export default function MatchaWorkThread() {
         {showLanguageTutorPanel && (
           <div className="relative flex-1 min-w-0">
             <button
-              onClick={() => setShowTutorSetup(false)}
+              onClick={() => { setShowTutorSetup(false); setTutorDismissed(true) }}
               className="absolute top-2 right-2 z-10 p-1 rounded hover:bg-zinc-700/50 text-zinc-500 hover:text-zinc-300"
               title="Close tutor"
             >
