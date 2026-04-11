@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X, Compass, CreditCard } from 'lucide-react'
-import { listChannels, updateChannel } from '../../api/channels'
+import { listChannels, updateChannel, listPendingConnections } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
 import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew } from '../../api/matchaWork'
 import type { MWThread, MWProject } from '../../types/matcha-work'
@@ -26,6 +26,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [projects, setProjects] = useState<MWProject[]>([])
   const [threads, setThreads] = useState<MWThread[]>([])
   const [inboxUnread, setInboxUnread] = useState(0)
+  const [pendingConnections, setPendingConnections] = useState(0)
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [showProjectTypePicker, setShowProjectTypePicker] = useState(false)
 
@@ -43,6 +44,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     listProjects().then(setProjects).catch(() => {})
     listThreads('active').then(setThreads).catch(() => {})
     getUnreadCount().then((r) => setInboxUnread(r.count)).catch(() => {})
+    listPendingConnections().then((p) => setPendingConnections(p.length)).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -176,6 +178,19 @@ export default function WorkSidebar({ open, onToggle }: Props) {
         </button>
 
         <div className="flex-1" />
+
+        <button
+          onClick={() => navigate('/work/connections')}
+          className={`relative p-2 rounded-lg transition-colors ${isActive('/work/connections') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+          title="People"
+        >
+          <Users size={16} />
+          {pendingConnections > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-600 text-[8px] font-bold text-white flex items-center justify-center">
+              {pendingConnections > 9 ? '!' : pendingConnections}
+            </span>
+          )}
+        </button>
 
         <button
           onClick={() => navigate(inboxPath)}
@@ -442,6 +457,22 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           >
             <CreditCard size={14} strokeWidth={1.6} />
             Billing
+          </button>
+          <button
+            onClick={() => navigate('/work/connections')}
+            className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+              isActive('/work/connections')
+                ? 'bg-zinc-800/60 text-white font-medium'
+                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+            }`}
+          >
+            <Users size={14} strokeWidth={1.6} />
+            People
+            {pendingConnections > 0 && (
+              <span className="ml-auto w-4 h-4 rounded-full bg-emerald-600 text-[9px] font-bold text-white flex items-center justify-center shrink-0">
+                {pendingConnections > 9 ? '!' : pendingConnections}
+              </span>
+            )}
           </button>
           <button
             onClick={() => navigate(inboxPath)}

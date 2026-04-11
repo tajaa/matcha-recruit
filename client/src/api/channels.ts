@@ -207,6 +207,36 @@ export const sendChannelTip = (channelId: string, amountCents: number, message?:
 export const joinByInvite = (code: string) =>
   api.post<{ ok?: boolean; requires_payment?: boolean; channel_id?: string; checkout_url?: string }>(`/channels/join-by-invite/${code}`)
 
+// ---------------------------------------------------------------------------
+// Connections
+// ---------------------------------------------------------------------------
+
+export interface UserConnection {
+  user_id: string
+  name: string
+  email: string
+  avatar_url: string | null
+  created_at: string
+}
+
+export const listConnections = () =>
+  api.get<UserConnection[]>('/channels/connections')
+
+export const listPendingConnections = () =>
+  api.get<UserConnection[]>('/channels/connections/pending')
+
+export const sendConnectionRequest = (userId: string) =>
+  api.post<{ ok: boolean; status?: string }>('/channels/connections/request', { user_id: userId })
+
+export const acceptConnection = (userId: string) =>
+  api.post<{ ok: boolean }>('/channels/connections/accept', { user_id: userId })
+
+export const declineConnection = (userId: string) =>
+  api.post<{ ok: boolean }>('/channels/connections/decline', { user_id: userId })
+
+export const blockConnection = (userId: string) =>
+  api.post<{ ok: boolean }>('/channels/connections/block', { user_id: userId })
+
 export interface ChannelSubscription {
   channel_id: string
   channel_name: string

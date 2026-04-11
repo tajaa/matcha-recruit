@@ -504,6 +504,12 @@ async def search_invitable_users(
                 )
                 -- Source 4: Admins always discoverable
                 OR a.user_id IS NOT NULL
+                -- Source 5: Accepted connections
+                OR EXISTS(
+                  SELECT 1 FROM user_connections uc
+                  WHERE (uc.user_id = $1 AND uc.connected_user_id = u.id AND uc.status = 'accepted')
+                  OR (uc.connected_user_id = $1 AND uc.user_id = u.id AND uc.status = 'accepted')
+                )
               )
             ORDER BY {_USER_NAME_EXPR}
             LIMIT 20
@@ -518,6 +524,263 @@ async def search_invitable_users(
             )
             for r in rows
         ]
+
+
+# ---------------------------------------------------------------------------
+# Connections (friend/follow system)
+# ---------------------------------------------------------------------------
+
+
+class ConnectionRequest(BaseModel):
+    user_id: UUID
+
+
+class ConnectionUser(BaseModel):
+    user_id: UUID
+    name: str
+    email: str
+    avatar_url: Optional[str] = None
+    created_at: datetime
+
+
+@router.post("/connections/request")
+async def send_connection_request(
+    body: ConnectionRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Send a connection request to another user."""
+    if body.user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="Cannot connect with yourself")
+
+    async with get_connection() as conn:
+        # Check target user exists
+        target = await conn.fetchrow("SELECT id FROM users WHERE id = $1 AND is_active = true", body.user_id)
+        if not target:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Check if already connected or pending
+        existing = await conn.fetchrow(
+            "SELECT status FROM user_connections WHERE user_id = $1 AND connected_user_id = $2",
+            current_user.id, body.user_id,
+        )
+        if existing:
+            if existing["status"] == "accepted":
+                raise HTTPException(status_code=400, detail="Already connected")
+            if existing["status"] == "pending":
+                raise HTTPException(status_code=400, detail="Request already pending")
+            if existing["status"] == "blocked":
+                raise HTTPException(status_code=400, detail="Cannot send request")
+
+        # Check if they blocked us
+        blocked = await conn.fetchval(
+            "SELECT 1 FROM user_connections WHERE user_id = $1 AND connected_user_id = $2 AND status = 'blocked'",
+            body.user_id, current_user.id,
+        )
+        if blocked:
+            raise HTTPException(status_code=400, detail="Cannot send request")
+
+        # Check if they already sent us a request -- auto-accept
+        incoming = await conn.fetchrow(
+            "SELECT id FROM user_connections WHERE user_id = $1 AND connected_user_id = $2 AND status = 'pending'",
+            body.user_id, current_user.id,
+        )
+        if incoming:
+            await conn.execute(
+                "UPDATE user_connections SET status = 'accepted' WHERE user_id = $1 AND connected_user_id = $2",
+                body.user_id, current_user.id,
+            )
+            await conn.execute(
+                """INSERT INTO user_connections (user_id, connected_user_id, status)
+                   VALUES ($1, $2, 'accepted')
+                   ON CONFLICT (user_id, connected_user_id) DO UPDATE SET status = 'accepted'""",
+                current_user.id, body.user_id,
+            )
+            # Notify both
+            try:
+                from ...matcha.services import notification_service as notif_svc
+                sender_name = await conn.fetchval(
+                    f"SELECT {_USER_NAME_EXPR} FROM users u LEFT JOIN clients c ON c.user_id = u.id LEFT JOIN employees e ON e.user_id = u.id LEFT JOIN admins a ON a.user_id = u.id WHERE u.id = $1",
+                    current_user.id,
+                )
+                company_id = await conn.fetchval(
+                    "SELECT COALESCE(c.company_id, e.org_id) FROM users u LEFT JOIN clients c ON c.user_id = u.id LEFT JOIN employees e ON e.user_id = u.id WHERE u.id = $1",
+                    body.user_id,
+                )
+                if company_id:
+                    await notif_svc.create_notification(
+                        user_id=body.user_id,
+                        company_id=company_id,
+                        type="connection_accepted",
+                        title="Connection accepted",
+                        body=f"{sender_name} is now connected with you",
+                        link="/work/connections",
+                    )
+            except Exception:
+                pass
+            return {"ok": True, "status": "accepted"}
+
+        await conn.execute(
+            "INSERT INTO user_connections (user_id, connected_user_id, status) VALUES ($1, $2, 'pending')",
+            current_user.id, body.user_id,
+        )
+
+        # Notify target
+        try:
+            from ...matcha.services import notification_service as notif_svc
+            sender_name = await conn.fetchval(
+                f"SELECT {_USER_NAME_EXPR} FROM users u LEFT JOIN clients c ON c.user_id = u.id LEFT JOIN employees e ON e.user_id = u.id LEFT JOIN admins a ON a.user_id = u.id WHERE u.id = $1",
+                current_user.id,
+            )
+            company_id = await conn.fetchval(
+                "SELECT COALESCE(c.company_id, e.org_id) FROM users u LEFT JOIN clients c ON c.user_id = u.id LEFT JOIN employees e ON e.user_id = u.id WHERE u.id = $1",
+                body.user_id,
+            )
+            if company_id:
+                await notif_svc.create_notification(
+                    user_id=body.user_id,
+                    company_id=company_id,
+                    type="connection_request",
+                    title="New connection request",
+                    body=f"{sender_name} wants to connect with you",
+                    link="/work/connections",
+                )
+        except Exception:
+            pass
+
+    return {"ok": True, "status": "pending"}
+
+
+@router.post("/connections/accept")
+async def accept_connection(
+    body: ConnectionRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Accept a pending incoming connection request."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT id FROM user_connections WHERE user_id = $1 AND connected_user_id = $2 AND status = 'pending'",
+            body.user_id, current_user.id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="No pending request from this user")
+
+        await conn.execute(
+            "UPDATE user_connections SET status = 'accepted' WHERE user_id = $1 AND connected_user_id = $2",
+            body.user_id, current_user.id,
+        )
+        await conn.execute(
+            """INSERT INTO user_connections (user_id, connected_user_id, status)
+               VALUES ($1, $2, 'accepted')
+               ON CONFLICT (user_id, connected_user_id) DO UPDATE SET status = 'accepted'""",
+            current_user.id, body.user_id,
+        )
+
+        # Notify the requester
+        try:
+            from ...matcha.services import notification_service as notif_svc
+            accepter_name = await conn.fetchval(
+                f"SELECT {_USER_NAME_EXPR} FROM users u LEFT JOIN clients c ON c.user_id = u.id LEFT JOIN employees e ON e.user_id = u.id LEFT JOIN admins a ON a.user_id = u.id WHERE u.id = $1",
+                current_user.id,
+            )
+            company_id = await conn.fetchval(
+                "SELECT COALESCE(c.company_id, e.org_id) FROM users u LEFT JOIN clients c ON c.user_id = u.id LEFT JOIN employees e ON e.user_id = u.id WHERE u.id = $1",
+                body.user_id,
+            )
+            if company_id:
+                await notif_svc.create_notification(
+                    user_id=body.user_id,
+                    company_id=company_id,
+                    type="connection_accepted",
+                    title="Connection accepted",
+                    body=f"{accepter_name} accepted your connection request",
+                    link="/work/connections",
+                )
+        except Exception:
+            pass
+
+    return {"ok": True}
+
+
+@router.post("/connections/decline")
+async def decline_connection(
+    body: ConnectionRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Decline or remove a connection."""
+    async with get_connection() as conn:
+        await conn.execute(
+            "DELETE FROM user_connections WHERE (user_id = $1 AND connected_user_id = $2) OR (user_id = $2 AND connected_user_id = $1)",
+            body.user_id, current_user.id,
+        )
+    return {"ok": True}
+
+
+@router.get("/connections", response_model=list[ConnectionUser])
+async def list_connections(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """List all accepted connections for the current user."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT u.id AS user_id, u.email, u.avatar_url, uc.created_at,
+                   {_USER_NAME_EXPR} AS name
+            FROM user_connections uc
+            JOIN users u ON u.id = uc.connected_user_id
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE uc.user_id = $1 AND uc.status = 'accepted'
+            ORDER BY {_USER_NAME_EXPR}
+            """,
+            current_user.id,
+        )
+        return [ConnectionUser(user_id=r["user_id"], name=r["name"], email=r["email"], avatar_url=r["avatar_url"], created_at=r["created_at"]) for r in rows]
+
+
+@router.get("/connections/pending", response_model=list[ConnectionUser])
+async def list_pending_connections(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """List pending incoming connection requests."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT u.id AS user_id, u.email, u.avatar_url, uc.created_at,
+                   {_USER_NAME_EXPR} AS name
+            FROM user_connections uc
+            JOIN users u ON u.id = uc.user_id
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE uc.connected_user_id = $1 AND uc.status = 'pending'
+            ORDER BY uc.created_at DESC
+            """,
+            current_user.id,
+        )
+        return [ConnectionUser(user_id=r["user_id"], name=r["name"], email=r["email"], avatar_url=r["avatar_url"], created_at=r["created_at"]) for r in rows]
+
+
+@router.post("/connections/block")
+async def block_connection(
+    body: ConnectionRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Block a user. Removes any existing connection."""
+    async with get_connection() as conn:
+        # Remove any existing connection in both directions
+        await conn.execute(
+            "DELETE FROM user_connections WHERE (user_id = $1 AND connected_user_id = $2) OR (user_id = $2 AND connected_user_id = $1)",
+            current_user.id, body.user_id,
+        )
+        # Insert block row
+        await conn.execute(
+            """INSERT INTO user_connections (user_id, connected_user_id, status)
+               VALUES ($1, $2, 'blocked')
+               ON CONFLICT (user_id, connected_user_id) DO UPDATE SET status = 'blocked'""",
+            current_user.id, body.user_id,
+        )
+    return {"ok": True}
 
 
 @router.get("/{channel_id}", response_model=ChannelDetail)
