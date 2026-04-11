@@ -38,7 +38,8 @@ export default function ThreadCollaborators({ threadId, onlineUsers, lightMode }
 
   const onlineSet = new Set(onlineUsers.map((u) => u.id))
   const currentUserRole = collaborators.find((c) => c.user_id === me?.user?.id)?.role
-  const isOwner = currentUserRole === 'owner'
+  // Thread creator can always invite — if no collaborators loaded yet, they're the owner
+  const isOwner = currentUserRole === 'owner' || collaborators.length === 0
 
   useEffect(() => {
     listThreadCollaborators(threadId)
