@@ -795,6 +795,26 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields=", ".join(valid_fields),
         )
 
+        # Recruiting project context — add specific instructions
+        if current_skill == "project" and current_state.get("posting"):
+            posting = current_state.get("posting", {})
+            candidates_count = len(current_state.get("candidates", []))
+            is_finalized = bool(posting.get("finalized"))
+            dynamic_prompt += f"""
+RECRUITING PROJECT CONTEXT:
+You are helping with a recruiting/hiring project.
+- Posting finalized: {is_finalized}
+- Candidates: {candidates_count}
+
+IMPORTANT RULES FOR RECRUITING PROJECTS:
+1. NEVER output raw JSON, code, SVG, or internal state in your responses.
+2. Always respond in clear, human-readable language.
+3. To send interviews: tell the user to select candidates in the pipeline panel and click "Send Interviews". You cannot send interviews via chat.
+4. To upload resumes: tell the user to click the paperclip icon or drag-and-drop PDF resumes into the chat.
+5. To analyze candidates: tell the user to click "Analyze" in the Candidates tab of the pipeline panel.
+6. Keep responses concise and actionable — guide the user through the recruiting workflow step by step.
+"""
+
         if context_summary:
             dynamic_prompt += (
                 f"\n\n## Conversation Context Summary\n"
