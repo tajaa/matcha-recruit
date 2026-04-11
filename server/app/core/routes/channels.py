@@ -466,55 +466,51 @@ async def search_invitable_users(
             company_id = scope.get("company_id")
             is_personal = False
 
-        name_filter_2 = f"""AND (
-                    c.name ILIKE $2
-                    OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $2
-                    OR a.name ILIKE $2
-                    OR u.email ILIKE $2
-                  )""" if has_search else ""
-        name_filter_3 = f"""AND (
-                    c.name ILIKE $3
-                    OR CONCAT(e.first_name, ' ', e.last_name) ILIKE $3
-                    OR a.name ILIKE $3
-                    OR u.email ILIKE $3
-                  )""" if has_search else ""
+        name_filter = f"AND ({_USER_NAME_EXPR} ILIKE $2 OR u.email ILIKE $2)" if has_search else ""
+        params: list = [current_user.id]
+        if has_search:
+            params.append(search)
 
-        if company_id and not is_personal:
-            rows = await conn.fetch(
-                f"""
-                SELECT u.id, u.email, u.role, u.avatar_url,
-                       {_USER_NAME_EXPR} AS name
-                FROM users u
-                LEFT JOIN clients c ON c.user_id = u.id
-                LEFT JOIN employees e ON e.user_id = u.id
-                LEFT JOIN admins a ON a.user_id = u.id
-                WHERE u.id != $1 AND u.is_active = true
-                  AND (c.company_id = $2 OR e.org_id = $2)
-                  {name_filter_3}
-                ORDER BY {_USER_NAME_EXPR}
-                LIMIT 20
-                """,
-                current_user.id, company_id, *([search] if has_search else []),
-            )
-        else:
-            # Personal account: show inbox contacts
-            rows = await conn.fetch(
-                f"""
-                SELECT DISTINCT u.id, u.email, u.role, u.avatar_url,
-                       {_USER_NAME_EXPR} AS name
-                FROM users u
-                LEFT JOIN clients c ON c.user_id = u.id
-                LEFT JOIN employees e ON e.user_id = u.id
-                LEFT JOIN admins a ON a.user_id = u.id
-                JOIN inbox_participants ip ON ip.user_id = u.id
-                JOIN inbox_participants my ON my.conversation_id = ip.conversation_id AND my.user_id = $1
-                WHERE u.id != $1 AND u.is_active = true
-                  {name_filter_2}
-                ORDER BY {_USER_NAME_EXPR}
-                LIMIT 20
-                """,
-                current_user.id, *([search] if has_search else []),
-            )
+        # Company source: only for real companies (not personal workspaces)
+        company_clause = (
+            f"(c.company_id = '{company_id}' OR e.org_id = '{company_id}')"
+            if (company_id and not is_personal) else "false"
+        )
+
+        rows = await conn.fetch(
+            f"""
+            SELECT DISTINCT u.id, u.email, u.role, u.avatar_url,
+                   {_USER_NAME_EXPR} AS name
+            FROM users u
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE u.id != $1 AND u.is_active = true
+              {name_filter}
+              AND (
+                -- Source 1: Same company (real companies only)
+                {company_clause}
+                -- Source 2: Inbox contacts
+                OR EXISTS(
+                  SELECT 1 FROM inbox_participants ip1
+                  JOIN inbox_participants ip2 ON ip2.conversation_id = ip1.conversation_id
+                  WHERE ip1.user_id = $1 AND ip2.user_id = u.id
+                )
+                -- Source 3: Previous project collaborators
+                OR EXISTS(
+                  SELECT 1 FROM mw_project_collaborators pc1
+                  JOIN mw_project_collaborators pc2 ON pc2.project_id = pc1.project_id
+                  WHERE pc1.user_id = $1 AND pc2.user_id = u.id
+                  AND pc1.status = 'active' AND pc2.status = 'active'
+                )
+                -- Source 4: Admins always discoverable
+                OR a.user_id IS NOT NULL
+              )
+            ORDER BY {_USER_NAME_EXPR}
+            LIMIT 20
+            """,
+            *params,
+        )
 
         return [
             InvitableUser(
