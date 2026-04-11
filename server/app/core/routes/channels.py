@@ -780,6 +780,7 @@ async def add_members(
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can add members")
 
         # Verify all user_ids belong to the same company
+        added_uids = []
         for uid in body.user_ids:
             in_company = await conn.fetchval(
                 """
@@ -804,10 +805,11 @@ async def add_members(
                 """,
                 channel_id, uid,
             )
+            added_uids.append(uid)
 
-        # Notify added members
+        # Notify only users who were actually added
         channel_name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", channel_id)
-        for uid in body.user_ids:
+        for uid in added_uids:
             if uid == current_user.id:
                 continue
             try:
