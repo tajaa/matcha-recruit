@@ -8,6 +8,7 @@ import { listThreads, createThread, pinThread, archiveThread, createProjectNew, 
 import type { TaskBoardResponse } from '../../api/matchaWork'
 import TaskBoard from '../../components/work/TaskBoard'
 import { useMe } from '../../hooks/useMe'
+import OnboardingWizard, { ONBOARDING_STORAGE_KEY } from '../../components/work/OnboardingWizard'
 
 const TASK_LABELS: Record<string, string> = {
   chat: 'Chat',
@@ -24,7 +25,7 @@ type Tab = 'all' | 'active' | 'pinned' | 'archived' | 'tasks'
 
 export default function MatchaWorkList() {
   const navigate = useNavigate()
-  useMe() // auth guard
+  const { me } = useMe() // auth guard
   const [threads, setThreads] = useState<MWThread[]>([])
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [taskBoard, setTaskBoard] = useState<TaskBoardResponse | null>(null)
@@ -33,6 +34,16 @@ export default function MatchaWorkList() {
   const [showTypePicker, setShowTypePicker] = useState(false)
   const [tab, setTab] = useState<Tab>('all')
   const [error, setError] = useState('')
+  const [showOnboarding, setShowOnboarding] = useState(false)
+
+  useEffect(() => {
+    if (
+      me?.user?.role === 'individual' &&
+      !localStorage.getItem(ONBOARDING_STORAGE_KEY)
+    ) {
+      setShowOnboarding(true)
+    }
+  }, [me])
 
   async function load() {
     setLoading(true)
@@ -311,6 +322,10 @@ export default function MatchaWorkList() {
           ))}
         </div>
       )}
+      {showOnboarding && (
+        <OnboardingWizard onDismiss={() => setShowOnboarding(false)} />
+      )}
+
       {/* Project type picker modal */}
       {showTypePicker && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
