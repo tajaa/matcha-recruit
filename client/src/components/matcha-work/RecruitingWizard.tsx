@@ -282,7 +282,7 @@ function StepGetStarted() {
       </h2>
       <p className="text-sm leading-relaxed mb-4" style={{ color: c.muted }}>
         Start by describing the role in the chat below. The AI will create a structured job posting
-        that you can review and refine in the pipeline panel on the right.
+        that appears automatically in the pipeline panel on the right.
       </p>
 
       <div
@@ -291,8 +291,8 @@ function StepGetStarted() {
       >
         <div className="w-2 h-2 rounded-full shrink-0" style={{ background: c.green }} />
         <p className="text-xs" style={{ color: c.text }}>
-          Tip: After the posting is drafted, click <strong style={{ color: c.accent }}>"Add to Project"</strong> on
-          any chat message to add it as a posting section.
+          Tip: Review and edit the posting in the <strong style={{ color: c.accent }}>Posting</strong> tab,
+          then finalize it before uploading resumes.
         </p>
       </div>
     </div>

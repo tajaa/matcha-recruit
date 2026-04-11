@@ -957,6 +957,51 @@ def _scope_slide_update(ai_resp, current_state: dict, slide_index: Optional[int]
     ai_resp.structured_update["slides"] = merged
 
 
+async def _inject_recruiting_project_context(ctx: str, thread: dict, current_state: dict) -> str:
+    """If this thread belongs to a recruiting project, inject context so the AI
+    generates posting sections instead of creating a new project."""
+    project_id = thread.get("project_id")
+    if not project_id:
+        return ctx
+
+    from ..services import project_service as proj_svc
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT project_type, sections, project_data FROM mw_projects WHERE id = $1",
+            project_id,
+        )
+    if not row or row["project_type"] != "recruiting":
+        return ctx
+
+    sections = json.loads(row["sections"]) if isinstance(row["sections"], str) else (row["sections"] or [])
+    project_data = json.loads(row["project_data"]) if isinstance(row["project_data"], str) else (row["project_data"] or {})
+    posting = project_data.get("posting") or {}
+    is_finalized = bool(posting.get("finalized"))
+    candidates_count = len(project_data.get("candidates") or [])
+    section_count = len(sections)
+
+    ctx += f"""
+
+=== RECRUITING PROJECT CONTEXT ===
+This chat is part of a RECRUITING project. You are helping the user hire for a role.
+- Posting finalized: {is_finalized}
+- Existing posting sections: {section_count}
+- Candidates uploaded: {candidates_count}
+
+CRITICAL RULES FOR RECRUITING PROJECTS:
+1. When the user describes a role or asks you to create a job posting, generate the posting content using the "project" skill.
+   Set project_sections with sections like "Job Description", "Requirements", "Responsibilities", "Compensation & Benefits", etc.
+   The sections will automatically appear in the project's posting panel on the right.
+2. Do NOT create a new project. The project already exists — just output project_sections with the posting content.
+3. NEVER output raw JSON, code, SVG, or internal state in your responses. Always respond in clear, human-readable language.
+4. To send interviews: tell the user to select candidates in the pipeline panel and click "Send Interviews".
+5. To upload resumes: tell the user to click the paperclip icon or drag-and-drop PDF resumes into the chat.
+6. To analyze candidates: tell the user to click "Analyze" in the Candidates tab of the pipeline panel.
+7. Keep responses concise and actionable — guide the user through the recruiting workflow step by step.
+"""
+    return ctx
+
+
 async def _apply_ai_updates_and_operations(
     *,
     thread_id: UUID,
@@ -5243,6 +5288,9 @@ async def send_message(
             listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
             ctx += f"\n\n=== PROJECT ATTACHMENTS ===\nThe user has attached these files to the project. Reference them when relevant:\n{listing}\n"
 
+    # Inject recruiting project context so AI generates posting sections in the right project
+    ctx = await _inject_recruiting_project_context(ctx, thread, thread["current_state"])
+
     compliance_result: ComplianceContextResult | None = None
     if thread.get("node_mode"):
         node_ctx = await build_node_context(company_id)
@@ -5493,6 +5541,9 @@ async def send_message_stream(
         if pfiles:
             listing = "\n".join(f"- {f['filename']} ({f['content_type']}, {f['file_size']:,} bytes)" for f in pfiles)
             ctx += f"\n\n=== PROJECT ATTACHMENTS ===\nThe user has attached these files to the project. Reference them when relevant:\n{listing}\n"
+
+    # Inject recruiting project context so AI generates posting sections in the right project
+    ctx = await _inject_recruiting_project_context(ctx, thread, thread["current_state"])
 
     # Node/compliance context is built inside event_stream() so we can yield status events
 
