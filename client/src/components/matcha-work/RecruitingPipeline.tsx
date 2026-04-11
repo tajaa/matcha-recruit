@@ -240,33 +240,78 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   const interviewedCount = candidates.filter((cand) => cand.status === 'interview_completed').length
   const interviewSentCount = candidates.filter((cand) => cand.interview_id).length
 
+  // Tab unlock logic — can't jump ahead of the current pipeline stage
+  const tabUnlocked: Record<Tab, boolean> = {
+    status: true,
+    posting: true, // always accessible to draft
+    candidates: isFinalized, // need finalized posting first
+    interviews: candidates.length > 0, // need candidates first
+    shortlist: interviewedCount > 0, // need completed interviews
+  }
+
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'status', label: 'Status' },
     { key: 'posting', label: 'Posting', count: sections.length },
     { key: 'candidates', label: 'Candidates', count: candidates.length },
-    { key: 'shortlist', label: 'Shortlist', count: shortlistIds.size },
     { key: 'interviews', label: 'Interviews', count: interviewSentCount },
+    { key: 'shortlist', label: 'Shortlist', count: shortlistIds.size },
   ]
+
+  // Contextual guidance based on current state
+  const guidance = !isFinalized && sections.length === 0
+    ? { text: 'Describe the role in the chat to generate a job posting.', action: 'posting' as Tab }
+    : !isFinalized && sections.length > 0
+    ? { text: 'Review your posting, fill any placeholders, then finalize it.', action: 'posting' as Tab }
+    : isFinalized && candidates.length === 0
+    ? { text: 'Posting finalized. Drop resumes in the chat to add candidates.', action: 'candidates' as Tab }
+    : candidates.length > 0 && analyzedCount === 0
+    ? { text: 'Candidates uploaded. Click "Analyze" to rank them by match score.', action: 'candidates' as Tab }
+    : analyzedCount > 0 && interviewSentCount === 0
+    ? { text: 'Candidates ranked. Select candidates and send voice interviews.', action: 'candidates' as Tab }
+    : interviewSentCount > 0 && interviewedCount === 0
+    ? { text: 'Interviews sent. Waiting for candidates to complete their sessions.', action: 'interviews' as Tab }
+    : interviewedCount > 0 && shortlistIds.size === 0
+    ? { text: 'Interviews complete. Review scores and star your top picks.', action: 'shortlist' as Tab }
+    : shortlistIds.size > 0
+    ? { text: 'Shortlist ready. Generate offer letters for your top candidates.', action: 'shortlist' as Tab }
+    : null
 
   return (
     <div className="flex flex-col w-full" style={{ background: c.bg }}>
+      {/* Guidance banner */}
+      {guidance && (
+        <div
+          className="flex items-center gap-2 px-4 py-2.5 text-xs cursor-pointer"
+          style={{ background: `${c.accent}12`, borderBottom: `1px solid ${c.accent}30`, color: c.accent }}
+          onClick={() => { if (tabUnlocked[guidance.action]) setTab(guidance.action) }}
+        >
+          <span style={{ fontSize: 14 }}>→</span>
+          <span className="font-medium">{guidance.text}</span>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex items-center gap-0.5 px-3 py-2 overflow-x-auto" style={{ borderBottom: `1px solid ${c.border}` }}>
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className="px-3 py-1.5 text-xs font-medium rounded transition-colors whitespace-nowrap"
-            style={{
-              color: tab === t.key ? c.heading : c.muted,
-              background: tab === t.key ? c.hoverBg : 'transparent',
-            }}
-          >
-            {t.label}
-            {t.count != null && t.count > 0 && (
-              <span className="ml-1 text-[9px] px-1 py-0.5 rounded-full" style={{ background: c.border, color: c.muted }}>
-                {t.count}
-              </span>
+        {tabs.map((t) => {
+          const locked = !tabUnlocked[t.key]
+          return (
+            <button
+              key={t.key}
+              onClick={() => { if (!locked) setTab(t.key) }}
+              className="px-3 py-1.5 text-xs font-medium rounded transition-colors whitespace-nowrap"
+              style={{
+                color: locked ? `${c.muted}60` : tab === t.key ? c.heading : c.muted,
+                background: tab === t.key && !locked ? c.hoverBg : 'transparent',
+                cursor: locked ? 'not-allowed' : 'pointer',
+                opacity: locked ? 0.5 : 1,
+              }}
+              title={locked ? 'Complete previous steps first' : undefined}
+            >
+              {t.label}
+              {t.count != null && t.count > 0 && (
+                <span className="ml-1 text-[9px] px-1 py-0.5 rounded-full" style={{ background: c.border, color: c.muted }}>
+                  {t.count}
+                </span>
             )}
           </button>
         ))}
