@@ -966,6 +966,7 @@ async def _apply_ai_updates_and_operations(
     current_version: int,
     user_message: str,
     current_user_id: Optional[UUID] = None,
+    project_id: Optional[UUID] = None,
 ) -> tuple[dict, int, Optional[str], bool, str]:
     """Apply structured updates, execute supported operations, and return updated response state."""
     skill = ai_resp.skill or _infer_skill_from_state(current_state)
@@ -1007,6 +1008,24 @@ async def _apply_ai_updates_and_operations(
             current_version = result["version"]
             current_state = result["current_state"]
             changed = changed or current_version != initial_version
+
+            # Auto-sync AI-generated project_sections to the project's sections table
+            if project_id and "project_sections" in safe_updates:
+                from ..services import project_service as proj_svc
+                new_sections = safe_updates.get("project_sections") or []
+                if new_sections:
+                    try:
+                        existing = await proj_svc.get_sections(project_id)
+                        existing_contents = {s.get("content", "").strip() for s in existing}
+                        for section in new_sections:
+                            content = (section.get("content") or "").strip()
+                            if content and content not in existing_contents:
+                                await proj_svc.add_section(project_id, {
+                                    "title": section.get("title"),
+                                    "content": content,
+                                })
+                    except Exception:
+                        logger.warning("Failed to sync project_sections to project %s", project_id)
 
             inferred = _infer_skill_from_state(current_state)
             if inferred == "offer_letter":
@@ -1386,6 +1405,7 @@ async def create_thread(
             current_version=new_version,
             user_message=body.initial_message,
             current_user_id=current_user.id,
+            project_id=thread.get("project_id"),
         )
         thread["current_state"] = updated_state
 
@@ -3676,6 +3696,18 @@ async def toggle_project_shortlist(
     return await proj_svc.toggle_shortlist(project_id, candidate_id)
 
 
+@router.post("/projects/{project_id}/dismiss/{candidate_id}")
+async def toggle_project_dismiss(
+    project_id: UUID,
+    candidate_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Toggle a candidate on/off the dismissed list."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    return await proj_svc.toggle_dismiss(project_id, candidate_id)
+
+
 @router.post("/projects/{project_id}/resume/upload")
 async def upload_project_resumes(
     project_id: UUID,
@@ -5278,6 +5310,7 @@ async def send_message(
         current_version=current_version,
         user_message=body.content,
         current_user_id=current_user.id,
+        project_id=thread.get("project_id"),
     )
 
     # Build metadata from compliance reasoning chains + payer sources
@@ -5566,6 +5599,7 @@ async def send_message_stream(
                 current_version=current_version,
                 user_message=body.content,
                 current_user_id=current_user.id,
+                project_id=thread.get("project_id"),
             )
 
             # Build metadata from compliance reasoning chains + payer sources

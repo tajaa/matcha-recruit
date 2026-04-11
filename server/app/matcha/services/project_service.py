@@ -334,6 +334,27 @@ async def toggle_shortlist(project_id: UUID, candidate_id: str) -> dict:
     return _parse_project(result)
 
 
+async def toggle_dismiss(project_id: UUID, candidate_id: str) -> dict:
+    """Add or remove a candidate from the dismissed list with row lock."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                "SELECT project_data FROM mw_projects WHERE id = $1 FOR UPDATE", project_id
+            )
+            data = row["project_data"] if isinstance(row["project_data"], dict) else json.loads(row["project_data"] or "{}")
+            dismissed = set(data.get("dismissed_ids") or [])
+            if candidate_id in dismissed:
+                dismissed.discard(candidate_id)
+            else:
+                dismissed.add(candidate_id)
+            data["dismissed_ids"] = list(dismissed)
+            result = await conn.fetchrow(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2 RETURNING *",
+                json.dumps(data), project_id,
+            )
+    return _parse_project(result)
+
+
 # ── Collaborator operations ──
 
 

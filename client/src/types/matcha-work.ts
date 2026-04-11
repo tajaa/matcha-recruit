@@ -50,6 +50,7 @@ export interface RecruitingData {
   posting?: RecruitingPosting
   candidates?: ResumeCandidate[]
   shortlist_ids?: string[]
+  dismissed_ids?: string[]
 }
 
 export interface ProjectCollaborator {

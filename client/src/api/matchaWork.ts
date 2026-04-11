@@ -467,6 +467,10 @@ export function toggleProjectShortlist(projectId: string, candidateId: string) {
   return api.post(`/matcha-work/projects/${projectId}/shortlist/${candidateId}`)
 }
 
+export function toggleProjectDismiss(projectId: string, candidateId: string) {
+  return api.post(`/matcha-work/projects/${projectId}/dismiss/${candidateId}`)
+}
+
 export function updateProjectPosting(projectId: string, posting: Record<string, unknown>) {
   return api.put(`/matcha-work/projects/${projectId}/posting`, posting)
 }

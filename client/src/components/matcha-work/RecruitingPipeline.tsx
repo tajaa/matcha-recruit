@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
-import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video, Send, Square, CheckSquare, RefreshCw, GripVertical, Plus, Trash2, FileText } from 'lucide-react'
+import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video, Send, Square, CheckSquare, RefreshCw, GripVertical, Plus, Trash2, FileText, XCircle, Eye, EyeOff } from 'lucide-react'
 import type { MWProject, RecruitingData } from '../../types/matcha-work'
-import { toggleProjectShortlist, getProjectDetail, addProjectSectionNew, updateProjectSectionNew, deleteProjectSectionNew, updateProjectPosting } from '../../api/matchaWork'
+import { toggleProjectShortlist, toggleProjectDismiss, getProjectDetail, addProjectSectionNew, updateProjectSectionNew, deleteProjectSectionNew, updateProjectPosting } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
 
@@ -59,10 +59,12 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   const posting = data.posting || {}
   const candidates = data.candidates || []
   const shortlistIds = new Set(data.shortlist_ids || [])
+  const dismissedIds = new Set(data.dismissed_ids || [])
   const sections = project.sections ?? []
 
   const [tab, setTab] = useState<Tab>('status')
   const [search, setSearch] = useState('')
+  const [showDismissed, setShowDismissed] = useState(false)
   const [sortKey, setSortKey] = useState<SortKey>('experience_years')
   const [sortAsc, setSortAsc] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -171,6 +173,13 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     } catch {}
   }
 
+  async function handleToggleDismiss(candidateId: string) {
+    try {
+      const updated = await toggleProjectDismiss(projectId, candidateId) as unknown as MWProject
+      onUpdate(updated)
+    } catch {}
+  }
+
   const selectableIds = useMemo(() =>
     candidates.filter((c) => c.status === 'analyzed' && c.email).map((c) => c.id),
     [candidates]
@@ -214,7 +223,8 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     const q = search.toLowerCase()
     let list = [...candidates]
     if (tab === 'shortlist') list = list.filter((c) => shortlistIds.has(c.id))
-    if (tab === 'interviews') list = list.filter((c) => c.status === 'interview_sent' || c.status === 'interview_completed' || c.status === 'interview_in_progress')
+    else if (tab === 'interviews') list = list.filter((c) => c.status === 'interview_sent' || c.status === 'interview_completed' || c.status === 'interview_in_progress')
+    else if (tab === 'candidates' && !showDismissed) list = list.filter((c) => !dismissedIds.has(c.id))
     if (q) {
       list = list.filter((c) =>
         c.name?.toLowerCase().includes(q) ||
@@ -234,7 +244,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
       return 0
     })
     return list
-  }, [candidates, search, sortKey, sortAsc, tab, shortlistIds])
+  }, [candidates, search, sortKey, sortAsc, tab, shortlistIds, dismissedIds, showDismissed])
 
   const analyzedCount = candidates.filter((cand) => cand.match_score != null).length
   const interviewedCount = candidates.filter((cand) => cand.status === 'interview_completed').length
@@ -584,6 +594,17 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                   style={{ background: '#1a1a1a', color: c.text, borderColor: c.border }}
                 />
               </div>
+              {tab === 'candidates' && dismissedIds.size > 0 && (
+                <button
+                  onClick={() => setShowDismissed(!showDismissed)}
+                  className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded"
+                  style={{ color: showDismissed ? c.accent : c.muted }}
+                  title={showDismissed ? 'Hide dismissed' : `Show ${dismissedIds.size} dismissed`}
+                >
+                  {showDismissed ? <EyeOff size={10} /> : <Eye size={10} />}
+                  {dismissedIds.size}
+                </button>
+              )}
               {(hasMatchScores ? ['match_score', 'experience_years', 'name', 'location'] : ['experience_years', 'name', 'location']).map((key) => {
                 const labels: Record<string, string> = { match_score: 'Match', experience_years: 'Exp', name: 'Name', location: 'Loc' }
                 const active = sortKey === key
@@ -615,12 +636,18 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
               {filteredCandidates.map((cand) => {
                 const expanded = expandedId === cand.id
                 const isShortlisted = shortlistIds.has(cand.id)
+                const isDismissed = dismissedIds.has(cand.id)
+                const isLowMatch = cand.match_score != null && cand.match_score < 50
                 return (
                   <div
                     key={cand.id}
                     onClick={() => setExpandedId(expanded ? null : cand.id)}
                     className="rounded-lg border p-3 cursor-pointer transition-colors"
-                    style={{ background: c.cardBg, borderColor: c.border }}
+                    style={{
+                      background: c.cardBg,
+                      borderColor: isDismissed ? `${c.border}80` : c.border,
+                      opacity: isDismissed ? 0.4 : isLowMatch ? 0.6 : 1,
+                    }}
                   >
                     <div className="flex items-start gap-2">
                       {tab === 'candidates' && cand.email && cand.status === 'analyzed' && onSendInterviews && (
@@ -636,12 +663,21 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                         onClick={(e) => { e.stopPropagation(); handleToggleShortlist(cand.id) }}
                         className="shrink-0 mt-0.5"
                         style={{ color: isShortlisted ? c.amber : c.muted }}
+                        title={isShortlisted ? 'Remove from shortlist' : 'Add to shortlist'}
                       >
                         <Star size={14} fill={isShortlisted ? c.amber : 'none'} />
                       </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); handleToggleDismiss(cand.id) }}
+                        className="shrink-0 mt-0.5"
+                        style={{ color: isDismissed ? '#ef4444' : c.muted }}
+                        title={isDismissed ? 'Restore candidate' : 'Dismiss candidate'}
+                      >
+                        <XCircle size={14} />
+                      </button>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium truncate" style={{ color: c.heading }}>{cand.name ?? cand.filename}</p>
+                          <p className="text-sm font-medium truncate" style={{ color: c.heading, textDecoration: isDismissed ? 'line-through' : 'none' }}>{cand.name ?? cand.filename}</p>
                           {cand.status === 'interview_sent' && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#3b82f620', color: '#60a5fa', border: '1px solid #3b82f640' }}>Interviewing</span>
                           )}
