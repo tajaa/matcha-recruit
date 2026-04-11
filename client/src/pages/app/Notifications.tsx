@@ -37,6 +37,9 @@ const TYPE_LABEL: Record<string, { text: string; color: string }> = {
   employee: { text: 'Employee', color: 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40' },
   offer_letter: { text: 'Offer', color: 'bg-violet-900/30 text-violet-400 border-violet-800/40' },
   handbook: { text: 'Handbook', color: 'bg-cyan-900/30 text-cyan-400 border-cyan-800/40' },
+  job_posting_invite: { text: 'Job Invite', color: 'bg-emerald-900/30 text-emerald-400 border-emerald-800/40' },
+  job_application_received: { text: 'Application', color: 'bg-blue-900/30 text-blue-400 border-blue-800/40' },
+  job_application_status_changed: { text: 'Status Update', color: 'bg-purple-900/30 text-purple-400 border-purple-800/40' },
 }
 
 function relativeTime(iso: string): string {

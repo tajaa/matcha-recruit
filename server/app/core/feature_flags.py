@@ -13,6 +13,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "credential_templates": False,
     "hris_import": False,
     "paid_channel_creator": False,
+    "channel_job_postings": False,
 }
 
 

@@ -132,6 +132,31 @@ async def stripe_webhook(request: Request):
                 except Exception as exc:
                     logger.error("Failed to activate channel subscription: %s", exc)
 
+        elif session_mode == "subscription" and meta.get("type") == "job_posting_subscription":
+            # ── Job posting subscription checkout ───────────────────────
+            posting_id_str = meta.get("posting_id") or ""
+            channel_id_str = meta.get("channel_id") or ""
+            user_id_str = meta.get("user_id") or ""
+            stripe_sub_id = str(event_object.get("subscription") or "")
+
+            if posting_id_str and channel_id_str and user_id_str and stripe_sub_id:
+                try:
+                    from ..services.channel_job_posting_service import handle_job_posting_activated
+                    import asyncio
+                    import stripe as _stripe
+                    _stripe.api_key = StripeService().settings.stripe_secret_key
+                    sub = await asyncio.to_thread(_stripe.Subscription.retrieve, stripe_sub_id)
+                    await handle_job_posting_activated(
+                        posting_id=UUID(posting_id_str),
+                        channel_id=UUID(channel_id_str),
+                        user_id=UUID(user_id_str),
+                        stripe_subscription_id=stripe_sub_id,
+                        current_period_end=sub.current_period_end,
+                    )
+                    logger.info("Job posting subscription activated: %s for posting %s", stripe_sub_id, posting_id_str)
+                except Exception as exc:
+                    logger.error("Failed to activate job posting subscription: %s", exc)
+
         elif session_mode == "subscription":
             meta = event_object.get("metadata") or {}
             company_id_str = meta.get("company_id") or ""
@@ -188,6 +213,12 @@ async def stripe_webhook(request: Request):
             except Exception as exc:
                 logger.error("Channel payment failure handler error: %s", exc)
 
+            try:
+                from ..services.channel_job_posting_service import handle_job_posting_payment_failed
+                await handle_job_posting_payment_failed(stripe_sub_id)
+            except Exception as exc:
+                logger.error("Job posting payment failure handler error: %s", exc)
+
     # ── Monthly invoice paid → reset token budget ────────────────────────────
     elif event_type == "invoice.paid":
         stripe_sub_id = str(event_object.get("subscription") or "")
@@ -216,6 +247,22 @@ async def stripe_webhook(request: Request):
                         logger.warning("Channel subscription renewal %s missing period end", stripe_sub_id)
             except Exception as exc:
                 logger.error("Channel subscription renewal error: %s", exc)
+
+            # Also check for job posting subscription renewal
+            from ...database import get_connection as _get_conn2
+            async with _get_conn2() as _conn2:
+                is_job_sub = await _conn2.fetchval(
+                    "SELECT EXISTS(SELECT 1 FROM channel_job_postings WHERE stripe_subscription_id = $1)",
+                    stripe_sub_id,
+                )
+            if is_job_sub:
+                from ..services.channel_job_posting_service import handle_job_posting_renewed
+                amount = int(event_object.get("amount_paid") or 0)
+                lines = event_object.get("lines", {}).get("data", [])
+                period_end = lines[0]["period"]["end"] if lines else None
+                if period_end and period_end > 0:
+                    await handle_job_posting_renewed(stripe_sub_id, period_end, amount)
+                    logger.info("Job posting subscription renewed: %s", stripe_sub_id)
 
             # Look up the subscription to check if it's a token subscription
             sub = await billing_service.get_subscription_by_stripe_id(stripe_sub_id)
@@ -248,6 +295,12 @@ async def stripe_webhook(request: Request):
                 await handle_subscription_canceled(stripe_sub_id)
             except Exception as exc:
                 logger.error("Channel subscription cancellation error: %s", exc)
+
+            try:
+                from ..services.channel_job_posting_service import handle_job_posting_canceled
+                await handle_job_posting_canceled(stripe_sub_id)
+            except Exception as exc:
+                logger.error("Job posting cancellation handler error: %s", exc)
 
             # Fetch before canceling to get company_id and pack_id
             sub = await billing_service.get_subscription_by_stripe_id(stripe_sub_id)

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2 } from 'lucide-react'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2, Briefcase } from 'lucide-react'
 import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
@@ -11,6 +11,9 @@ import InactivityWarningBanner from '../../components/channels/InactivityWarning
 import ChannelSettingsPanel from '../../components/channels/ChannelSettingsPanel'
 import ChannelAnalytics from '../../components/channels/ChannelAnalytics'
 import TipModal from '../../components/channels/TipModal'
+import JobPostingsPanel from '../../components/channels/JobPostingsPanel'
+import JobPostingDetail from '../../components/channels/JobPostingDetail'
+import JobInviteBanner from '../../components/channels/JobInviteBanner'
 import VoiceCallBar from '../../components/channels/VoiceCallBar'
 import { useVoiceCall } from '../../hooks/useVoiceCall'
 
@@ -38,6 +41,8 @@ export default function ChannelView() {
   const [showSettings, setShowSettings] = useState(false)
   const [showAnalytics, setShowAnalytics] = useState(false)
   const [showTip, setShowTip] = useState(false)
+  const [showJobPostings, setShowJobPostings] = useState(false)
+  const [activePostingId, setActivePostingId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -50,6 +55,12 @@ export default function ChannelView() {
     channelId: channelId || null,
     myUserId: me?.user?.id || '',
   })
+
+  const postingParam = new URLSearchParams(window.location.search).get('posting')
+
+  useEffect(() => {
+    if (postingParam) setActivePostingId(postingParam)
+  }, [postingParam])
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -306,9 +317,27 @@ export default function ChannelView() {
               <UserPlus size={16} />
             </button>
           )}
+          {channel?.my_role && ['owner', 'moderator'].includes(channel.my_role) && paymentInfo?.is_paid && (
+            <button
+              onClick={() => { setShowJobPostings(!showJobPostings); setShowSettings(false); setShowAnalytics(false) }}
+              className={`p-1.5 rounded hover:bg-zinc-800 ${showJobPostings ? 'text-emerald-400' : 'text-zinc-500'}`}
+              title="Job postings"
+            >
+              <Briefcase size={16} />
+            </button>
+          )}
+          {channel?.my_role !== 'owner' && channel?.my_role !== 'moderator' && isMember && (
+            <button
+              onClick={() => { setShowJobPostings(!showJobPostings); setShowSettings(false); setShowAnalytics(false) }}
+              className={`p-1.5 rounded hover:bg-zinc-800 ${showJobPostings ? 'text-emerald-400' : 'text-zinc-500'}`}
+              title="Job postings"
+            >
+              <Briefcase size={16} />
+            </button>
+          )}
           {channel?.my_role === 'owner' && paymentInfo?.is_paid && (
             <button
-              onClick={() => { setShowAnalytics(!showAnalytics); setShowSettings(false) }}
+              onClick={() => { setShowAnalytics(!showAnalytics); setShowSettings(false); setShowJobPostings(false) }}
               className={`p-1.5 rounded hover:bg-zinc-800 ${showAnalytics ? 'text-emerald-400' : 'text-zinc-500'}`}
               title="Channel analytics"
             >
@@ -317,7 +346,7 @@ export default function ChannelView() {
           )}
           {channel?.my_role === 'owner' && paymentInfo?.is_paid && (
             <button
-              onClick={() => { setShowSettings(!showSettings); setShowAnalytics(false) }}
+              onClick={() => { setShowSettings(!showSettings); setShowAnalytics(false); setShowJobPostings(false) }}
               className={`p-1.5 rounded hover:bg-zinc-800 ${showSettings ? 'text-emerald-400' : 'text-zinc-500'}`}
               title="Channel settings"
             >
@@ -397,6 +426,14 @@ export default function ChannelView() {
           onToggleMute={voice.toggleMute}
           onToggleVideo={voice.toggleVideo}
           activeCallUsers={voice.participants.map(p => ({ user_id: p.userId, name: p.name }))}
+        />
+      )}
+
+      {postingParam && !activePostingId && channelId && (
+        <JobInviteBanner
+          channelId={channelId}
+          postingId={postingParam}
+          onView={() => setActivePostingId(postingParam)}
         />
       )}
 
@@ -606,6 +643,24 @@ export default function ChannelView() {
           channelId={channel.id}
           channelName={channel.name}
           onClose={() => setShowTip(false)}
+        />
+      )}
+
+      {showJobPostings && channel && (
+        <JobPostingsPanel
+          channelId={channel.id}
+          myRole={channel.my_role ?? 'member'}
+          onClose={() => setShowJobPostings(false)}
+          onOpenDetail={(id) => { setActivePostingId(id); setShowJobPostings(false) }}
+        />
+      )}
+
+      {activePostingId && channel && (
+        <JobPostingDetail
+          channelId={channel.id}
+          postingId={activePostingId}
+          myRole={channel.my_role ?? 'member'}
+          onClose={() => setActivePostingId(null)}
         />
       )}
 

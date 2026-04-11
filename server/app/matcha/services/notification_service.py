@@ -25,6 +25,10 @@ TYPES = {
     "channel_removed_for_inactivity": "Removed for Inactivity",
     "channel_payment_failed": "Payment Failed",
     "channel_tip_received": "Tip Received",
+    "job_posting_invite": "Job Posting Invitation",
+    "job_application_received": "Application Received",
+    "job_application_status_changed": "Application Updated",
+    "job_posting_payment_failed": "Job Posting Payment Failed",
 }
 
 
