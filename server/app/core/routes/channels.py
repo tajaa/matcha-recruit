@@ -488,7 +488,7 @@ async def search_invitable_users(
               {name_filter}
               AND (
                 -- Source 1: Same company (real companies only, skipped when $2 is NULL)
-                ($2 IS NOT NULL AND (c.company_id = $2 OR e.org_id = $2))
+                ($2::uuid IS NOT NULL AND (c.company_id = $2::uuid OR e.org_id = $2::uuid))
                 -- Source 2: Inbox contacts
                 OR EXISTS(
                   SELECT 1 FROM inbox_participants ip1
