@@ -339,6 +339,9 @@ async def create_channel(
         stripe_price_id = None
 
         if body.paid_config:
+            # Paid channels only for individual/creator accounts (not company users)
+            if current_user.role not in ("individual", "admin"):
+                raise HTTPException(status_code=403, detail="Paid channels are only available for creator accounts")
             from ..services.channel_payment_service import (
                 create_stripe_product_and_price,
                 MIN_PRICE_CENTS,

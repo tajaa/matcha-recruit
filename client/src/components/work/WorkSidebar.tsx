@@ -483,7 +483,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       {showCreateChannel && (
         <CreateChannelModal
           onClose={() => setShowCreateChannel(false)}
-          canCreatePaid={hasFeature('paid_channel_creator') || me?.user?.role === 'admin'}
+          canCreatePaid={(me?.user?.role === 'individual' && hasFeature('paid_channel_creator')) || me?.user?.role === 'admin'}
           onCreated={(ch) => {
             setShowCreateChannel(false)
             setChannels((prev) => [{ ...ch, member_count: 1, unread_count: 0, last_message_at: null, last_message_preview: null, is_member: true } as ChannelSummary, ...prev])
