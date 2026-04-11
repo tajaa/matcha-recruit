@@ -697,7 +697,28 @@ class GeminiLiveSession:
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "input_audio_transcription": {},
             "output_audio_transcription": {},
+            # VAD tuning for natural conversation flow
+            "realtime_input_config": {
+                "automatic_activity_detection": {
+                    "disabled": False,
+                    # LOW start sensitivity = less likely to trigger on background noise
+                    "start_of_speech_sensitivity": "START_SENSITIVITY_LOW",
+                    # LOW end sensitivity = waits longer before cutting off (fewer premature cutoffs)
+                    "end_of_speech_sensitivity": "END_SENSITIVITY_LOW",
+                    "prefix_padding_ms": 20,
+                    # 500ms silence before treating as end of speech
+                    "silence_duration_ms": 500,
+                },
+            },
+            # Enable thinking for better quality responses
+            "thinking_config": {
+                "thinking_level": "low",
+            },
         }
+
+        # Investigation interviews: disable interruptions so investigator finishes questions
+        if no_interruption:
+            config["realtime_input_config"]["activity_handling"] = "NO_INTERRUPTION"
 
         print(f"[Gemini] Connecting for interview with {company_name}")
 
@@ -731,6 +752,18 @@ class GeminiLiveSession:
             "system_instruction": {"parts": [{"text": system_prompt}]},
             "input_audio_transcription": {},
             "output_audio_transcription": {},
+            "realtime_input_config": {
+                "automatic_activity_detection": {
+                    "disabled": False,
+                    "start_of_speech_sensitivity": "START_SENSITIVITY_LOW",
+                    "end_of_speech_sensitivity": "END_SENSITIVITY_LOW",
+                    "prefix_padding_ms": 20,
+                    "silence_duration_ms": 500,
+                },
+            },
+            "thinking_config": {
+                "thinking_level": "low",
+            },
         }
 
         print("[Gemini] Connecting for phone call")
