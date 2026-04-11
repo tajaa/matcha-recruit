@@ -1054,7 +1054,7 @@ export interface UtteranceError {
   brief: string
 }
 
-export function checkUtterance(threadId: string, utterance: string, language: 'en' | 'es') {
+export function checkUtterance(threadId: string, utterance: string, language: 'en' | 'es-mx' | 'fr') {
   return api.post<{ errors: UtteranceError[] }>(`/matcha-work/threads/${threadId}/tutor/check`, {
     utterance,
     language,
