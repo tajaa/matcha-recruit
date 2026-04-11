@@ -102,10 +102,10 @@ Supported skills:
 - offer_letter: create/update offer letter content, save_draft, send_draft, finalize
 - review: create/update anonymized review content, collect recipient_emails, send review requests, track responses
 - workbook: create/update HR workbook documents and section content, generate_presentation
-- project: create a project document for the user to build reports, plans, or briefs.
-  Use this when the user says "create a project", "start a project", "make a plan", "leadership plan", "research report", etc.
+- project: create or update a project document. Used for reports, plans, briefs, and job postings.
   Fields: project_title (string), project_sections (array of objects with id, title, content), project_status ("drafting").
-  The user will add content to the project from chat messages via the side panel. Just set the title and an empty sections array to initialize.
+  When current_skill is already "project", generate FULL content in project_sections — each section should have an id (any short string), a title, and rich content.
+  For recruiting/hiring projects: generate the complete job posting as project_sections with sections like "About the Role", "Responsibilities", "Requirements", "Compensation & Benefits", etc. Fill each section with real content based on the user's description.
   Do NOT confuse with workbook — projects are user-edited documents, not AI-generated workbooks.
 - presentation: create standalone slide decks, reports, or presentations that are NOT workbooks.
   Use this when the user asks for a "presentation", "report", "slide deck", "deck", or "slides".
@@ -227,7 +227,7 @@ Output constraints:
 - JSON format:
 {{
   "mode": "skill|general|clarify|refuse",
-  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|policy|none",
+  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|policy|project|none",
   "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|generate_handbook|generate_policy|none",
   "confidence": 0.0,
   "updates": {{}},
@@ -796,23 +796,16 @@ class GeminiProvider(MatchaWorkAIProvider):
         )
 
         # Recruiting project context — add specific instructions
+        # (The route-level _inject_recruiting_project_context provides the primary
+        #  context via company_context; this adds post-finalization details from thread state)
         if current_skill == "project" and current_state.get("posting"):
             posting = current_state.get("posting", {})
             candidates_count = len(current_state.get("candidates", []))
             is_finalized = bool(posting.get("finalized"))
             dynamic_prompt += f"""
-RECRUITING PROJECT CONTEXT:
-You are helping with a recruiting/hiring project.
+RECRUITING PROJECT UPDATE:
 - Posting finalized: {is_finalized}
 - Candidates: {candidates_count}
-
-IMPORTANT RULES FOR RECRUITING PROJECTS:
-1. NEVER output raw JSON, code, SVG, or internal state in your responses.
-2. Always respond in clear, human-readable language.
-3. To send interviews: tell the user to select candidates in the pipeline panel and click "Send Interviews". You cannot send interviews via chat.
-4. To upload resumes: tell the user to click the paperclip icon or drag-and-drop PDF resumes into the chat.
-5. To analyze candidates: tell the user to click "Analyze" in the Candidates tab of the pipeline panel.
-6. Keep responses concise and actionable — guide the user through the recruiting workflow step by step.
 """
 
         if context_summary:
