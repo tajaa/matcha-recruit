@@ -836,19 +836,37 @@ async def create_thread(
         return d
 
 
-async def get_thread(thread_id: UUID, company_id: UUID) -> Optional[dict]:
+async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None = None) -> Optional[dict]:
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            SELECT id, company_id, created_by, title, status,
-                   current_state, version, is_pinned, node_mode, compliance_mode, linked_offer_letter_id,
-                   created_at, updated_at
-            FROM mw_threads
-            WHERE id=$1 AND company_id=$2
-            """,
-            thread_id,
-            company_id,
-        )
+        if user_id is not None:
+            # Allow access if company matches OR user is a collaborator
+            row = await conn.fetchrow(
+                """
+                SELECT id, company_id, created_by, title, status,
+                       current_state, version, is_pinned, node_mode, compliance_mode, linked_offer_letter_id,
+                       created_at, updated_at
+                FROM mw_threads
+                WHERE id=$1 AND (
+                    company_id IS NOT DISTINCT FROM $2
+                    OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = $1 AND user_id = $3)
+                )
+                """,
+                thread_id,
+                company_id,
+                user_id,
+            )
+        else:
+            row = await conn.fetchrow(
+                """
+                SELECT id, company_id, created_by, title, status,
+                       current_state, version, is_pinned, node_mode, compliance_mode, linked_offer_letter_id,
+                       created_at, updated_at
+                FROM mw_threads
+                WHERE id=$1 AND company_id=$2
+                """,
+                thread_id,
+                company_id,
+            )
         if row is None:
             return None
         d = dict(row)
@@ -865,6 +883,8 @@ async def list_threads(
     status: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
+    *,
+    user_id: UUID | None = None,
 ) -> list[dict]:
     async with get_connection() as conn:
         task_type_sql = """
@@ -879,35 +899,76 @@ async def list_threads(
                   ELSE 'chat'
                 END AS task_type
         """
-        if status:
-            rows = await conn.fetch(
-                f"""
-                SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
-                       {task_type_sql}
-                FROM mw_threads
-                WHERE company_id=$1 AND status=$2
-                ORDER BY is_pinned DESC, updated_at DESC
-                LIMIT $3 OFFSET $4
-                """,
-                company_id,
-                status,
-                limit,
-                offset,
-            )
+        # Build the access clause — include threads owned by company OR where user is a collaborator
+        if user_id is not None:
+            access_clause = "(company_id=$1 OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = ${user_param}))"
         else:
-            rows = await conn.fetch(
-                f"""
-                SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
-                       {task_type_sql}
-                FROM mw_threads
-                WHERE company_id=$1
-                ORDER BY is_pinned DESC, updated_at DESC
-                LIMIT $2 OFFSET $3
-                """,
-                company_id,
-                limit,
-                offset,
-            )
+            access_clause = "company_id=$1"
+
+        if status:
+            if user_id is not None:
+                clause = access_clause.replace("${user_param}", "5")
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
+                           {task_type_sql}
+                    FROM mw_threads
+                    WHERE {clause} AND status=$2
+                    ORDER BY is_pinned DESC, updated_at DESC
+                    LIMIT $3 OFFSET $4
+                    """,
+                    company_id,
+                    status,
+                    limit,
+                    offset,
+                    user_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
+                           {task_type_sql}
+                    FROM mw_threads
+                    WHERE company_id=$1 AND status=$2
+                    ORDER BY is_pinned DESC, updated_at DESC
+                    LIMIT $3 OFFSET $4
+                    """,
+                    company_id,
+                    status,
+                    limit,
+                    offset,
+                )
+        else:
+            if user_id is not None:
+                clause = access_clause.replace("${user_param}", "4")
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
+                           {task_type_sql}
+                    FROM mw_threads
+                    WHERE {clause}
+                    ORDER BY is_pinned DESC, updated_at DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    company_id,
+                    limit,
+                    offset,
+                    user_id,
+                )
+            else:
+                rows = await conn.fetch(
+                    f"""
+                    SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
+                           {task_type_sql}
+                    FROM mw_threads
+                    WHERE company_id=$1
+                    ORDER BY is_pinned DESC, updated_at DESC
+                    LIMIT $2 OFFSET $3
+                    """,
+                    company_id,
+                    limit,
+                    offset,
+                )
         return [_thread_list_item_from_row(dict(r)) for r in rows]
 
 

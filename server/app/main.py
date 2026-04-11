@@ -238,6 +238,9 @@ app.include_router(stripe_webhook_router)
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
 app.include_router(channels_ws_router, prefix="/ws/channels", tags=["channels-websocket"])
 
+from .matcha.routes.thread_ws import router as thread_ws_router
+app.include_router(thread_ws_router, prefix="/ws/threads", tags=["threads-websocket"])
+
 
 # Serve locally-uploaded files (logos, resumes, etc.) when S3 is not configured
 _uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")

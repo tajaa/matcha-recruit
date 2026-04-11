@@ -390,6 +390,7 @@ class ThreadDetailResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     messages: list[MWMessageOut]
+    collaborators: list[dict] = []
 
 
 class DocumentVersionResponse(BaseModel):

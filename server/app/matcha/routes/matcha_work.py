@@ -338,8 +338,8 @@ def _build_handbook_upload_summary(
     )
 
 
-async def _build_thread_detail_response(thread_id: UUID, company_id: UUID) -> ThreadDetailResponse:
-    thread = await doc_svc.get_thread(thread_id, company_id)
+async def _build_thread_detail_response(thread_id: UUID, company_id: UUID, *, user_id: UUID | None = None) -> ThreadDetailResponse:
+    thread = await doc_svc.get_thread(thread_id, company_id, user_id=user_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -349,6 +349,37 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: UUID) -> Th
         thread["current_state"],
     )
     messages = await doc_svc.get_thread_messages(thread_id)
+
+    # Fetch collaborators
+    collaborators = []
+    async with get_connection() as conn:
+        collab_rows = await conn.fetch(
+            """
+            SELECT tc.user_id, tc.role, tc.created_at,
+                   u.email, u.avatar_url,
+                   COALESCE(cl.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+            FROM mw_thread_collaborators tc
+            JOIN users u ON u.id = tc.user_id
+            LEFT JOIN clients cl ON cl.user_id = tc.user_id
+            LEFT JOIN employees e ON e.user_id = tc.user_id
+            LEFT JOIN admins a ON a.user_id = tc.user_id
+            WHERE tc.thread_id = $1
+            ORDER BY tc.created_at
+            """,
+            thread_id,
+        )
+        collaborators = [
+            {
+                "user_id": str(r["user_id"]),
+                "name": r["name"],
+                "email": r["email"],
+                "role": r["role"],
+                "avatar_url": r["avatar_url"],
+                "added_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in collab_rows
+        ]
+
     return ThreadDetailResponse(
         id=thread["id"],
         title=thread["title"],
@@ -363,6 +394,7 @@ async def _build_thread_detail_response(thread_id: UUID, company_id: UUID) -> Th
         created_at=thread["created_at"],
         updated_at=thread["updated_at"],
         messages=[_row_to_message(row) for row in messages],
+        collaborators=collaborators,
     )
 
 
@@ -5092,12 +5124,12 @@ async def list_threads(
     offset: int = Query(0, ge=0),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """List threads for the current company."""
+    """List threads for the current company (includes threads where user is a collaborator)."""
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
 
-    threads = await doc_svc.list_threads(company_id, status=status, limit=limit, offset=offset)
+    threads = await doc_svc.list_threads(company_id, status=status, limit=limit, offset=offset, user_id=current_user.id)
     return [ThreadListItem(**t) for t in threads]
 
 
@@ -5126,7 +5158,7 @@ async def get_thread(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    return await _build_thread_detail_response(thread_id, company_id)
+    return await _build_thread_detail_response(thread_id, company_id, user_id=current_user.id)
 
 
 @router.post("/threads/{thread_id}/messages", response_model=SendMessageResponse)
@@ -5140,7 +5172,7 @@ async def send_message(
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    thread = await doc_svc.get_thread(thread_id, company_id)
+    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -5383,7 +5415,7 @@ async def send_message_stream(
     if company_id is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    thread = await doc_svc.get_thread(thread_id, company_id)
+    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
@@ -5571,6 +5603,15 @@ async def send_message_stream(
                 version_created=current_version if changed else None,
                 metadata=msg_metadata,
             )
+
+            # Broadcast new messages to connected thread collaborators via WS
+            try:
+                from .thread_ws import thread_manager
+                user_msg_dict = _row_to_message(user_msg).model_dump(mode="json")
+                assistant_msg_dict = _row_to_message(assistant_msg).model_dump(mode="json")
+                await thread_manager.broadcast_new_message(str(thread_id), [user_msg_dict, assistant_msg_dict])
+            except Exception:
+                logger.debug("Thread WS broadcast skipped for thread %s", thread_id)
 
             # Escalate low-confidence queries for human review
             if should_escalate(ai_resp):
@@ -6799,3 +6840,231 @@ async def check_tutor_utterance(
     except Exception as e:
         logger.warning("Utterance check failed: %s", e)
         return {"errors": []}
+
+
+# ---------------------------------------------------------------------------
+# Thread Collaborator endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/threads/{thread_id}/collaborators")
+async def list_thread_collaborators(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List collaborators on a thread with user info."""
+    company_id = await get_client_company_id(current_user)
+    # Verify the user can access the thread
+    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT tc.user_id, tc.role, tc.created_at,
+                   u.email, u.avatar_url,
+                   COALESCE(cl.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+            FROM mw_thread_collaborators tc
+            JOIN users u ON u.id = tc.user_id
+            LEFT JOIN clients cl ON cl.user_id = tc.user_id
+            LEFT JOIN employees e ON e.user_id = tc.user_id
+            LEFT JOIN admins a ON a.user_id = tc.user_id
+            WHERE tc.thread_id = $1
+            ORDER BY tc.created_at
+            """,
+            thread_id,
+        )
+    return [
+        {
+            "user_id": str(r["user_id"]),
+            "name": r["name"],
+            "email": r["email"],
+            "role": r["role"],
+            "avatar_url": r["avatar_url"],
+            "added_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/threads/{thread_id}/collaborators")
+async def add_thread_collaborator(
+    thread_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Add a collaborator to a thread. Only the thread owner or admin can invite."""
+    company_id = await get_client_company_id(current_user)
+    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Only the owner or an admin can add collaborators
+    if current_user.role != "admin" and thread["created_by"] != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the thread owner can add collaborators")
+
+    user_id = body.get("user_id")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="user_id is required")
+
+    try:
+        collab_user_id = UUID(user_id)
+    except (ValueError, TypeError):
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    if collab_user_id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot add yourself as a collaborator")
+
+    async with get_connection() as conn:
+        # Verify user exists and is active
+        target_user = await conn.fetchrow(
+            "SELECT id, email FROM users WHERE id = $1 AND is_active = true",
+            collab_user_id,
+        )
+        if not target_user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # Check if already a collaborator
+        existing = await conn.fetchval(
+            "SELECT id FROM mw_thread_collaborators WHERE thread_id = $1 AND user_id = $2",
+            thread_id, collab_user_id,
+        )
+        if existing:
+            raise HTTPException(status_code=400, detail="User is already a collaborator")
+
+        await conn.execute(
+            """INSERT INTO mw_thread_collaborators (thread_id, user_id, invited_by, role)
+               VALUES ($1, $2, $3, 'collaborator')""",
+            thread_id, collab_user_id, current_user.id,
+        )
+
+        # Send inbox notification
+        try:
+            inviter = await conn.fetchrow("SELECT email FROM users WHERE id = $1", current_user.id)
+            inviter_client = await conn.fetchrow("SELECT name FROM clients WHERE user_id = $1", current_user.id)
+            inviter_name = (inviter_client["name"] if inviter_client else None) or inviter["email"].split("@")[0]
+            thread_title = thread.get("title") or "a thread"
+
+            msg_content = f"**{inviter_name}** has invited you to collaborate on the thread **{thread_title}**."
+            conversation = await conn.fetchrow(
+                """INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
+                   VALUES ($1, false, $2, NOW(), $3)
+                   RETURNING id""",
+                f"Thread Invite: {thread_title}", current_user.id, msg_content[:100],
+            )
+            conv_id = conversation["id"]
+            await conn.execute(
+                "INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, current_user.id,
+            )
+            await conn.execute(
+                "INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, collab_user_id,
+            )
+            await conn.execute(
+                """INSERT INTO inbox_messages (conversation_id, sender_id, content)
+                   VALUES ($1, $2, $3)""",
+                conv_id, current_user.id, msg_content,
+            )
+        except Exception as e:
+            logger.warning("Failed to send thread collaborator inbox notification: %s", e)
+
+        # Create MW notification
+        try:
+            from ..services import notification_service as notif_svc
+            inviter_client = await conn.fetchrow("SELECT name FROM clients WHERE user_id = $1", current_user.id)
+            inviter_name = (inviter_client["name"] if inviter_client else None) or "Someone"
+            await notif_svc.create_notification(
+                user_id=collab_user_id,
+                company_id=company_id,
+                type="thread_collaborator_added",
+                title=f"{inviter_name} added you to a thread",
+                body=f"You've been added as a collaborator on \"{thread.get('title', 'a thread')}\"",
+                link="/work",
+                metadata={"thread_id": str(thread_id), "invited_by": str(current_user.id)},
+            )
+        except Exception as e:
+            logger.warning("Failed to create thread collaborator notification: %s", e)
+
+    return {"added": True, "user_id": str(collab_user_id)}
+
+
+@router.delete("/threads/{thread_id}/collaborators/{user_id}")
+async def remove_thread_collaborator(
+    thread_id: UUID,
+    user_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Remove a collaborator from a thread. Owner, admin, or the collaborator themselves can do this."""
+    company_id = await get_client_company_id(current_user)
+    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Allow removal if: admin, thread owner, or self-removal
+    is_owner = thread["created_by"] == current_user.id
+    is_self = user_id == current_user.id
+    if current_user.role != "admin" and not is_owner and not is_self:
+        raise HTTPException(status_code=403, detail="Only the thread owner can remove collaborators")
+
+    async with get_connection() as conn:
+        result = await conn.execute(
+            "DELETE FROM mw_thread_collaborators WHERE thread_id = $1 AND user_id = $2",
+            thread_id, user_id,
+        )
+        if result.endswith("0"):
+            raise HTTPException(status_code=404, detail="Collaborator not found")
+
+    return {"removed": True, "user_id": str(user_id)}
+
+
+@router.get("/threads/{thread_id}/collaborators/search")
+async def search_thread_collaborator_candidates(
+    thread_id: UUID,
+    q: str = Query(..., min_length=2, max_length=100),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Search users to invite as thread collaborators."""
+    company_id = await get_client_company_id(current_user)
+    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    pattern = f"%{q}%"
+    async with get_connection() as conn:
+        # Search users in the same company (clients + employees) plus admins
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT u.id AS user_id, u.email, u.avatar_url,
+                   COALESCE(cl.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+            FROM users u
+            LEFT JOIN clients cl ON cl.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE u.id != $1
+              AND u.is_active = true
+              AND (
+                  COALESCE(cl.name, CONCAT(e.first_name, ' ', e.last_name), a.name, '') ILIKE $2
+                  OR u.email ILIKE $2
+              )
+              AND (
+                  (cl.company_id = $3)
+                  OR (e.org_id = $3)
+                  OR (a.user_id IS NOT NULL)
+              )
+              AND NOT EXISTS(
+                  SELECT 1 FROM mw_thread_collaborators tc
+                  WHERE tc.thread_id = $4 AND tc.user_id = u.id
+              )
+            ORDER BY u.email
+            LIMIT 10
+            """,
+            current_user.id, pattern, company_id, thread_id,
+        )
+    return [
+        {
+            "user_id": str(r["user_id"]),
+            "name": r["name"],
+            "email": r["email"],
+            "avatar_url": r["avatar_url"],
+        }
+        for r in rows
+    ]
