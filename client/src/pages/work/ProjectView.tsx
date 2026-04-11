@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Send, Loader2, Plus, MessageSquare, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil, Menu } from 'lucide-react'
+import { ArrowLeft, Send, Loader2, Plus, MessageSquare, HelpCircle, UserPlus, Mail, Pin, PinOff, Pencil, Menu, Paperclip } from 'lucide-react'
 import { listConversations, getConversation, sendMessage as sendInboxMessage, getUnreadCount } from '../../api/inbox'
 import type { ConversationSummary, Conversation } from '../../api/inbox'
 import { ConversationList } from '../../components/inbox/ConversationList'
@@ -106,6 +106,7 @@ export default function ProjectView() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const resumeFileRef = useRef<HTMLInputElement>(null)
 
   // Load project
   useEffect(() => {
@@ -660,12 +661,37 @@ export default function ProjectView() {
         {/* Input */}
         <div className="px-4 py-3" style={{ borderTop: '1px solid #333' }}>
           <div className="flex items-end gap-2">
+            {project?.project_type === 'recruiting' && isPostingFinalized && (
+              <>
+                <input
+                  type="file"
+                  ref={resumeFileRef}
+                  multiple
+                  accept=".pdf,.doc,.docx,.txt"
+                  className="hidden"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files || [])
+                    if (files.length > 0) handleResumeDropForProject(files)
+                    e.target.value = ''
+                  }}
+                />
+                <button
+                  onClick={() => resumeFileRef.current?.click()}
+                  disabled={streaming}
+                  className="p-2.5 rounded-lg transition-colors disabled:opacity-40 hover:bg-zinc-700/50"
+                  style={{ color: '#6a737d' }}
+                  title="Upload resumes"
+                >
+                  <Paperclip size={18} />
+                </button>
+              </>
+            )}
             <textarea
               ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend() } }}
-              placeholder="Type a message..."
+              placeholder={project?.project_type === 'recruiting' && isPostingFinalized ? 'Type a message or upload resumes...' : 'Type a message...'}
               rows={1}
               disabled={streaming || (!activeChatId && pendingPlaceholders.current.length === 0)}
               className="flex-1 text-sm rounded-lg px-3 py-2.5 border focus:outline-none resize-none disabled:opacity-50 min-h-[44px]"
