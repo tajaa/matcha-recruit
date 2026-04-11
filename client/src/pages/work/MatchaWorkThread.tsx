@@ -4,6 +4,8 @@ import { ArrowLeft, Send, Loader2, Pencil, Check, X, Database, Shield, Stethosco
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent } from '../../types/matcha-work'
 import { getThread, sendMessageStream, uploadResumes, uploadInventory, sendCandidateInterviews, syncInterviewStatuses, addProjectSection, updateTitle, getPdfProxyUrl, setNodeMode, setComplianceMode, setPayerMode, fetchUsageSummary, fetchUsageSummary24h } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
+import { ThreadSocket } from '../../api/threadSocket'
+import ThreadCollaborators from '../../components/matcha-work/ThreadCollaborators'
 import { fetchLocations } from '../../api/compliance'
 import type { BusinessLocation } from '../../types/compliance'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
@@ -93,6 +95,13 @@ export default function MatchaWorkThread() {
   const [isDragOver, setIsDragOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Real-time collaboration
+  const [onlineUsers, setOnlineUsers] = useState<{ id: string; name: string }[]>([])
+  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map())
+  const threadSocketRef = useRef<ThreadSocket | null>(null)
+  const typingTimeoutsRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
+  const lastTypingSentRef = useRef(0)
+
   // Mode toggles — derived from thread, only toggling state is local
   const [togglingMode, setTogglingMode] = useState<'node' | 'compliance' | 'payer' | null>(null)
   const nodeMode = thread?.node_mode ?? false
@@ -155,6 +164,74 @@ export default function MatchaWorkThread() {
     }
     prevLenRef.current = messages.length
   }, [messages.length])
+
+  // Real-time collaboration WebSocket
+  useEffect(() => {
+    if (!threadId) return
+
+    const sock = new ThreadSocket()
+    threadSocketRef.current = sock
+
+    sock.onNewMessage = (newMessages) => {
+      setMessages((prev) => [...prev, ...newMessages])
+    }
+
+    sock.onTyping = (user) => {
+      setTypingUsers((prev) => {
+        const next = new Map(prev)
+        next.set(user.id, user.name)
+        return next
+      })
+      // Clear after 3 seconds
+      const existing = typingTimeoutsRef.current.get(user.id)
+      if (existing) clearTimeout(existing)
+      typingTimeoutsRef.current.set(
+        user.id,
+        setTimeout(() => {
+          setTypingUsers((prev) => {
+            const next = new Map(prev)
+            next.delete(user.id)
+            return next
+          })
+          typingTimeoutsRef.current.delete(user.id)
+        }, 3000)
+      )
+    }
+
+    sock.onOnlineUsers = (users) => {
+      setOnlineUsers(users)
+    }
+
+    sock.onUserJoined = (user) => {
+      setOnlineUsers((prev) => {
+        if (prev.some((u) => u.id === user.id)) return prev
+        return [...prev, user]
+      })
+    }
+
+    sock.onUserLeft = (user) => {
+      setOnlineUsers((prev) => prev.filter((u) => u.id !== user.id))
+      // Clear typing state for the user who left
+      setTypingUsers((prev) => {
+        if (!prev.has(user.id)) return prev
+        const next = new Map(prev)
+        next.delete(user.id)
+        return next
+      })
+    }
+
+    sock.connect()
+    sock.joinThread(threadId)
+
+    return () => {
+      sock.leaveThread(threadId)
+      sock.disconnect()
+      threadSocketRef.current = null
+      // Clean up typing timeouts
+      typingTimeoutsRef.current.forEach((t) => clearTimeout(t))
+      typingTimeoutsRef.current.clear()
+    }
+  }, [threadId])
 
   function handleSend(overrideContent?: string, slideIndex?: number) {
     const content = (overrideContent ?? input).trim()
@@ -500,6 +577,13 @@ export default function MatchaWorkThread() {
               >
                 <Pencil size={14} />
               </button>
+              {threadId && (
+                <ThreadCollaborators
+                  threadId={threadId}
+                  onlineUsers={onlineUsers}
+                  lightMode={lm}
+                />
+              )}
             </div>
           )}
 
@@ -722,6 +806,13 @@ export default function MatchaWorkThread() {
             </div>
           )}
 
+          {typingUsers.size > 0 && (
+            <div className={`text-xs ${th.streamText} px-1`}>
+              {Array.from(typingUsers.values()).join(', ')}{' '}
+              {typingUsers.size === 1 ? 'is' : 'are'} typing...
+            </div>
+          )}
+
           <div ref={messagesEndRef} />
         </div>
 
@@ -772,7 +863,14 @@ export default function MatchaWorkThread() {
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => {
+                  setInput(e.target.value)
+                  // Throttle typing indicator to once per 2 seconds
+                  if (threadId && threadSocketRef.current && Date.now() - lastTypingSentRef.current > 2000) {
+                    threadSocketRef.current.sendTyping(threadId)
+                    lastTypingSentRef.current = Date.now()
+                  }
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder="Type a message..."
                 rows={1}

@@ -928,6 +928,35 @@ export function sendMessageStream(
 }
 
 
+// ── Thread collaborators ──
+
+export interface ThreadCollaborator {
+  user_id: string
+  name: string
+  email: string
+  avatar_url: string | null
+  role: 'owner' | 'collaborator'
+  created_at: string
+}
+
+export function listThreadCollaborators(threadId: string) {
+  return api.get<ThreadCollaborator[]>(`/matcha-work/threads/${threadId}/collaborators`)
+}
+
+export function addThreadCollaborator(threadId: string, userId: string) {
+  return api.post(`/matcha-work/threads/${threadId}/collaborators`, { user_id: userId })
+}
+
+export function removeThreadCollaborator(threadId: string, userId: string) {
+  return api.delete(`/matcha-work/threads/${threadId}/collaborators/${userId}`)
+}
+
+export function searchThreadInvitableUsers(query: string) {
+  return api.get<{ id: string; name: string; email: string; avatar_url: string | null }[]>(
+    `/matcha-work/threads/collaborators/search?q=${encodeURIComponent(query)}`
+  )
+}
+
 // ── Token Usage ──────────────────────────────────────────────────
 
 export interface UsageSummary {
