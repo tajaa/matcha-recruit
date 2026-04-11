@@ -247,7 +247,10 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
       setIsMuted(false)
       socketRef.current.voiceJoin(channelIdRef.current)
     } catch (err) {
-      console.error('[useVoiceCall] Failed to get microphone:', err)
+      console.error('[useVoiceCall] Failed to start call:', err)
+      localStream.current?.getTracks().forEach(t => t.stop())
+      localStream.current = null
+      setLocalStreamState(null)
       setCallState('idle')
     }
   }, [])

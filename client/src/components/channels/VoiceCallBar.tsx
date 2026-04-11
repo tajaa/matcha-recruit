@@ -1,4 +1,4 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useState } from 'react'
 import { Phone, PhoneOff, Mic, MicOff, Camera, CameraOff, Loader2 } from 'lucide-react'
 
 interface VoiceCallBarProps {
@@ -29,25 +29,44 @@ function VideoTile({ stream, muted, label, isSpeaking, isSelf }: {
   isSelf?: boolean
 }) {
   const ref = useRef<HTMLVideoElement>(null)
+  const [hasVideo, setHasVideo] = useState(false)
 
   useEffect(() => {
     if (ref.current) {
       ref.current.srcObject = stream
     }
+    // Check initial video state and listen for track changes
+    const checkVideo = () => {
+      setHasVideo(stream?.getVideoTracks().some(t => t.enabled && !t.muted) ?? false)
+    }
+    checkVideo()
+    // Listen for track enabled/disabled/muted changes
+    const tracks = stream?.getVideoTracks() ?? []
+    for (const track of tracks) {
+      track.addEventListener('ended', checkVideo)
+      track.addEventListener('mute', checkVideo)
+      track.addEventListener('unmute', checkVideo)
+    }
+    return () => {
+      for (const track of tracks) {
+        track.removeEventListener('ended', checkVideo)
+        track.removeEventListener('mute', checkVideo)
+        track.removeEventListener('unmute', checkVideo)
+      }
+    }
   }, [stream])
-
-  const hasVideo = stream?.getVideoTracks().some(t => t.enabled) ?? false
 
   return (
     <div className={`relative overflow-hidden rounded-lg bg-zinc-800 aspect-video ${
       isSpeaking ? 'ring-2 ring-emerald-400' : ''
     }`}>
+      {/* Always render video for audio playback; hide visually when no video */}
       <video
         ref={ref}
         autoPlay
         playsInline
         muted={muted}
-        className={`w-full h-full object-cover ${hasVideo ? '' : 'opacity-0 absolute inset-0'} ${isSelf ? 'mirror' : ''}`}
+        className={`w-full h-full object-cover ${hasVideo ? '' : 'invisible'}`}
         style={isSelf ? { transform: 'scaleX(-1)' } : undefined}
       />
       {!hasVideo && (
