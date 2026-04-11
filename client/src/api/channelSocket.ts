@@ -32,6 +32,14 @@ export class ChannelSocket {
   onConnected: (() => void) | null = null
   onDisconnected: (() => void) | null = null
 
+  // Voice call signaling callbacks
+  onVoiceUserJoined: ((user: { user_id: string; name: string }) => void) | null = null
+  onVoiceUserLeft: ((user: { user_id: string }) => void) | null = null
+  onVoiceParticipants: ((participants: { user_id: string; name: string }[]) => void) | null = null
+  onVoiceOffer: ((data: { from_user_id: string; sdp: RTCSessionDescriptionInit }) => void) | null = null
+  onVoiceAnswer: ((data: { from_user_id: string; sdp: RTCSessionDescriptionInit }) => void) | null = null
+  onVoiceIceCandidate: ((data: { from_user_id: string; candidate: RTCIceCandidateInit }) => void) | null = null
+
   connect() {
     this._closed = false
     const token = localStorage.getItem('matcha_access_token')
@@ -71,6 +79,24 @@ export class ChannelSocket {
             break
           case 'user_left':
             this.onUserLeft?.(data.user)
+            break
+          case 'voice_user_joined':
+            this.onVoiceUserJoined?.(data.user)
+            break
+          case 'voice_user_left':
+            this.onVoiceUserLeft?.(data.user)
+            break
+          case 'voice_participants':
+            this.onVoiceParticipants?.(data.participants)
+            break
+          case 'voice_offer':
+            this.onVoiceOffer?.({ from_user_id: data.from_user_id, sdp: data.sdp })
+            break
+          case 'voice_answer':
+            this.onVoiceAnswer?.({ from_user_id: data.from_user_id, sdp: data.sdp })
+            break
+          case 'voice_ice':
+            this.onVoiceIceCandidate?.({ from_user_id: data.from_user_id, candidate: data.candidate })
             break
         }
       } catch { /* ignore malformed messages */ }
@@ -115,6 +141,27 @@ export class ChannelSocket {
 
   sendTyping(channelId: string) {
     this._send({ type: 'typing', channel_id: channelId })
+  }
+
+  // Voice call signaling methods
+  voiceJoin(channelId: string) {
+    this._send({ type: 'voice_join', channel_id: channelId })
+  }
+
+  voiceLeave(channelId: string) {
+    this._send({ type: 'voice_leave', channel_id: channelId })
+  }
+
+  sendVoiceOffer(targetUserId: string, sdp: RTCSessionDescriptionInit) {
+    this._send({ type: 'voice_offer', target_user_id: targetUserId, sdp })
+  }
+
+  sendVoiceAnswer(targetUserId: string, sdp: RTCSessionDescriptionInit) {
+    this._send({ type: 'voice_answer', target_user_id: targetUserId, sdp })
+  }
+
+  sendVoiceIceCandidate(targetUserId: string, candidate: RTCIceCandidateInit) {
+    this._send({ type: 'voice_ice', target_user_id: targetUserId, candidate })
   }
 
   private _send(data: Record<string, unknown>) {
