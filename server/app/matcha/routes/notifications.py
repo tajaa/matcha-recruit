@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..dependencies import require_admin_or_client
+from ..dependencies import require_admin_or_client, get_client_company_id
 from ...core.dependencies import get_current_user
 from ...core.models.auth import CurrentUser
 from ..services import notification_service as notif_svc
@@ -40,9 +40,10 @@ async def list_notifications(
     offset: int = 0,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Get notifications for the current user."""
+    """Get notifications for the current user, scoped to their current company."""
+    company_id = await get_client_company_id(current_user)
     items = await notif_svc.get_notifications(
-        current_user.id, unread_only=unread_only, limit=limit, offset=offset,
+        current_user.id, company_id=company_id, unread_only=unread_only, limit=limit, offset=offset,
     )
     return {
         "notifications": [
@@ -65,8 +66,9 @@ async def list_notifications(
 async def unread_count(
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Get unread notification count."""
-    count = await notif_svc.get_unread_count(current_user.id)
+    """Get unread notification count, scoped to current company."""
+    company_id = await get_client_company_id(current_user)
+    count = await notif_svc.get_unread_count(current_user.id, company_id=company_id)
     return {"count": count}
 
 

@@ -64,15 +64,21 @@ async def create_notification(
 async def get_notifications(
     user_id: UUID,
     *,
+    company_id: UUID | None = None,
     unread_only: bool = False,
     limit: int = 30,
     offset: int = 0,
 ) -> list[dict]:
-    """Get notifications for a user, newest first."""
+    """Get notifications for a user, newest first. Scoped to company if provided."""
     where = "WHERE user_id = $1"
+    params: list = [user_id]
+    if company_id is not None:
+        params.append(company_id)
+        where += f" AND (company_id = ${len(params)} OR company_id IS NULL)"
     if unread_only:
         where += " AND is_read = FALSE"
 
+    params.extend([limit, offset])
     async with get_connection() as conn:
         rows = await conn.fetch(
             f"""
@@ -80,15 +86,20 @@ async def get_notifications(
             FROM mw_notifications
             {where}
             ORDER BY created_at DESC
-            LIMIT $2 OFFSET $3
+            LIMIT ${len(params) - 1} OFFSET ${len(params)}
             """,
-            user_id, limit, offset,
+            *params,
         )
     return [dict(r) for r in rows]
 
 
-async def get_unread_count(user_id: UUID) -> int:
+async def get_unread_count(user_id: UUID, company_id: UUID | None = None) -> int:
     async with get_connection() as conn:
+        if company_id is not None:
+            return await conn.fetchval(
+                "SELECT COUNT(*) FROM mw_notifications WHERE user_id = $1 AND is_read = FALSE AND (company_id = $2 OR company_id IS NULL)",
+                user_id, company_id,
+            )
         return await conn.fetchval(
             "SELECT COUNT(*) FROM mw_notifications WHERE user_id = $1 AND is_read = FALSE",
             user_id,

@@ -238,7 +238,7 @@ export default function ProjectView() {
       onEvent: (event: MWStreamEvent) => {
         if (event.type === 'status') setStatusMessage(event.message)
       },
-      onComplete: (data: MWSendResponse) => {
+      onComplete: async (data: MWSendResponse) => {
         setStatusMessage('')
         setMessages((prev) => {
           const withoutTemp = prev.filter((m) => m.id !== tempMsg.id)
@@ -246,6 +246,11 @@ export default function ProjectView() {
         })
         setStreaming(false)
         refreshUsage()
+        // Refresh project data so side panel picks up AI-generated updates (posting, sections, etc.)
+        if (projectId) {
+          const updated = await getProjectDetail(projectId)
+          setProject(updated)
+        }
       },
       onError: (err) => {
         setStatusMessage('')
