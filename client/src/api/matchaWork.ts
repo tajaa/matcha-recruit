@@ -843,7 +843,7 @@ export function sendMessageStream(
   options?: { slide_index?: number; model?: string },
 ): AbortController {
   const ctrl = new AbortController()
-  const timeout = setTimeout(() => ctrl.abort('timeout'), 90_000)
+  const timeout = setTimeout(() => ctrl.abort('timeout'), 180_000)
 
   ;(async () => {
     const token = await ensureFreshToken()
