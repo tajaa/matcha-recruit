@@ -378,10 +378,13 @@ export default function ChannelView() {
           callState={voice.callState}
           participants={voice.participants}
           isMuted={voice.isMuted}
+          isVideoEnabled={voice.isVideoEnabled}
           elapsedSeconds={voice.elapsedSeconds}
+          localStream={voice.localStream}
           onJoin={voice.joinCall}
           onLeave={voice.leaveCall}
           onToggleMute={voice.toggleMute}
+          onToggleVideo={voice.toggleVideo}
           activeCallUsers={voice.participants.map(p => ({ user_id: p.userId, name: p.name }))}
         />
       )}

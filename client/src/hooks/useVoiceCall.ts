@@ -13,6 +13,7 @@ export interface CallParticipant {
   userId: string
   name: string
   isSpeaking: boolean
+  stream: MediaStream | null
 }
 
 export type CallState = 'idle' | 'joining' | 'active'
@@ -32,13 +33,14 @@ const SPEAKING_POLL_MS = 100
 export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOptions) {
   const [callState, setCallState] = useState<CallState>('idle')
   const [isMuted, setIsMuted] = useState(false)
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true)
   const [participants, setParticipants] = useState<CallParticipant[]>([])
   const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const [localStreamState, setLocalStreamState] = useState<MediaStream | null>(null)
 
   // Refs for WebRTC state (not rendered directly)
   const peerConnections = useRef<Map<string, RTCPeerConnection>>(new Map())
   const localStream = useRef<MediaStream | null>(null)
-  const remoteAudios = useRef<Map<string, HTMLAudioElement>>(new Map())
   const analysers = useRef<Map<string, AnalyserNode>>(new Map())
   const audioCtx = useRef<AudioContext | null>(null)
   const speakingInterval = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -115,13 +117,10 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
   }, [])
 
   const attachRemoteStream = useCallback((peerId: string, stream: MediaStream) => {
-    // Create audio element and attach to DOM for playback
-    const audio = document.createElement('audio')
-    audio.srcObject = stream
-    audio.autoplay = true
-    audio.style.display = 'none'
-    document.body.appendChild(audio)
-    remoteAudios.current.set(peerId, audio)
+    // Store stream on participant so UI <video> elements handle playback
+    setParticipants(prev => prev.map(p =>
+      p.userId === peerId ? { ...p, stream } : p
+    ))
 
     // Create analyser for speaking detection
     try {
@@ -137,14 +136,10 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
   }, [getOrCreateAudioContext])
 
   const removeRemoteStream = useCallback((peerId: string) => {
-    // Remove audio element
-    const audio = remoteAudios.current.get(peerId)
-    if (audio) {
-      audio.pause()
-      audio.srcObject = null
-      audio.remove()
-      remoteAudios.current.delete(peerId)
-    }
+    // Clear stream from participant
+    setParticipants(prev => prev.map(p =>
+      p.userId === peerId ? { ...p, stream: null } : p
+    ))
     // Remove analyser
     analysers.current.delete(peerId)
   }, [])
@@ -191,17 +186,9 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
   }, [removeRemoteStream])
 
   const closeAllConnections = useCallback(() => {
-    peerConnections.current.forEach((pc, _peerId) => {
+    peerConnections.current.forEach((pc) => {
       pc.close()
     })
-    // Remove all remote streams
-    remoteAudios.current.forEach((audio, peerId) => {
-      audio.pause()
-      audio.srcObject = null
-      audio.remove()
-      analysers.current.delete(peerId)
-    })
-    remoteAudios.current.clear()
     peerConnections.current.clear()
     analysers.current.clear()
   }, [])
@@ -225,8 +212,10 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
 
     setCallState('idle')
     setIsMuted(false)
+    setIsVideoEnabled(true)
     setParticipants([])
     setElapsedSeconds(0)
+    setLocalStreamState(null)
   }, [closeAllConnections, stopSpeakingDetection, stopElapsedTimer])
 
   // ── Public methods ─────────────────────────────────────────────────
@@ -238,10 +227,23 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
     setCallState('joining')
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true },
-      })
+      // Try to get both audio and video
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: 'user' },
+        })
+        setIsVideoEnabled(true)
+      } catch {
+        // Video denied or unavailable — fall back to audio-only
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        })
+        setIsVideoEnabled(false)
+      }
       localStream.current = stream
+      setLocalStreamState(stream)
       setIsMuted(false)
       socketRef.current.voiceJoin(channelIdRef.current)
     } catch (err) {
@@ -267,6 +269,16 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
     }
   }, [])
 
+  const toggleVideo = useCallback(() => {
+    const stream = localStream.current
+    if (!stream) return
+    const track = stream.getVideoTracks()[0]
+    if (track) {
+      track.enabled = !track.enabled
+      setIsVideoEnabled(track.enabled)
+    }
+  }, [])
+
   // ── Socket callback wiring ─────────────────────────────────────────
 
   useEffect(() => {
@@ -278,6 +290,7 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
         userId: p.user_id,
         name: p.name,
         isSpeaking: false,
+        stream: null,
       })))
 
       setCallState('active')
@@ -302,7 +315,7 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
     socket.onVoiceUserJoined = (user) => {
       setParticipants(prev => {
         if (prev.some(p => p.userId === user.user_id)) return prev
-        return [...prev, { userId: user.user_id, name: user.name, isSpeaking: false }]
+        return [...prev, { userId: user.user_id, name: user.name, isSpeaking: false, stream: null }]
       })
     }
 
@@ -376,12 +389,6 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
         // Inline cleanup to avoid stale closure on the cleanup callback
         peerConnections.current.forEach(pc => pc.close())
         peerConnections.current.clear()
-        remoteAudios.current.forEach(audio => {
-          audio.pause()
-          audio.srcObject = null
-          audio.remove()
-        })
-        remoteAudios.current.clear()
         analysers.current.clear()
         localStream.current?.getTracks().forEach(t => t.stop())
         localStream.current = null
@@ -395,5 +402,5 @@ export function useVoiceCall({ socket, channelId, myUserId }: UseVoiceCallOption
     }
   }, [])
 
-  return { joinCall, leaveCall, toggleMute, isMuted, callState, participants, elapsedSeconds }
+  return { joinCall, leaveCall, toggleMute, toggleVideo, isMuted, isVideoEnabled, callState, participants, elapsedSeconds, localStream: localStreamState }
 }

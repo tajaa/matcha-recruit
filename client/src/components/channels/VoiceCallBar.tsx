@@ -1,13 +1,17 @@
-import { Phone, PhoneOff, Mic, MicOff, Loader2 } from 'lucide-react'
+import { useRef, useEffect } from 'react'
+import { Phone, PhoneOff, Mic, MicOff, Camera, CameraOff, Loader2 } from 'lucide-react'
 
 interface VoiceCallBarProps {
   callState: 'idle' | 'joining' | 'active'
-  participants: { userId: string; name: string; isSpeaking: boolean }[]
+  participants: { userId: string; name: string; isSpeaking: boolean; stream: MediaStream | null }[]
   isMuted: boolean
+  isVideoEnabled: boolean
   elapsedSeconds: number
+  localStream: MediaStream | null
   onJoin: () => void
   onLeave: () => void
   onToggleMute: () => void
+  onToggleVideo: () => void
   activeCallUsers?: { user_id: string; name: string }[]
 }
 
@@ -17,14 +21,62 @@ function formatTime(seconds: number): string {
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
 }
 
+function VideoTile({ stream, muted, label, isSpeaking, isSelf }: {
+  stream: MediaStream | null
+  muted?: boolean
+  label: string
+  isSpeaking?: boolean
+  isSelf?: boolean
+}) {
+  const ref = useRef<HTMLVideoElement>(null)
+
+  useEffect(() => {
+    if (ref.current) {
+      ref.current.srcObject = stream
+    }
+  }, [stream])
+
+  const hasVideo = stream?.getVideoTracks().some(t => t.enabled) ?? false
+
+  return (
+    <div className={`relative overflow-hidden rounded-lg bg-zinc-800 aspect-video ${
+      isSpeaking ? 'ring-2 ring-emerald-400' : ''
+    }`}>
+      <video
+        ref={ref}
+        autoPlay
+        playsInline
+        muted={muted}
+        className={`w-full h-full object-cover ${hasVideo ? '' : 'opacity-0 absolute inset-0'} ${isSelf ? 'mirror' : ''}`}
+        style={isSelf ? { transform: 'scaleX(-1)' } : undefined}
+      />
+      {!hasVideo && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className={`w-12 h-12 rounded-full flex items-center justify-center text-lg font-medium ${
+            isSpeaking ? 'bg-emerald-600/40 text-emerald-300' : 'bg-zinc-700 text-zinc-400'
+          }`}>
+            {label.charAt(0).toUpperCase()}
+          </div>
+        </div>
+      )}
+      <div className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded bg-black/60 text-[10px] text-zinc-300 font-medium">
+        {label}{isSelf ? ' (You)' : ''}
+      </div>
+    </div>
+  )
+}
+
 export default function VoiceCallBar({
   callState,
   participants,
   isMuted,
+  isVideoEnabled,
   elapsedSeconds,
+  localStream,
   onJoin,
   onLeave,
   onToggleMute,
+  onToggleVideo,
   activeCallUsers,
 }: VoiceCallBarProps) {
   // State A: Call available but not joined
@@ -57,65 +109,88 @@ export default function VoiceCallBar({
     )
   }
 
-  // State C: In call
+  // State C: In call — video grid + controls
   if (callState === 'active') {
+    const totalTiles = participants.length + 1 // participants + self
+    const gridCols = totalTiles <= 2 ? 'grid-cols-1 sm:grid-cols-2' : 'grid-cols-2'
+
     return (
-      <div className="flex items-center gap-2 px-4 h-11 border-b border-emerald-900/40 bg-zinc-900/95 shrink-0">
-        {/* Voice label */}
-        <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-400 shrink-0">
-          <span className="w-2 h-2 bg-emerald-500 rounded-full" />
-          Voice
-        </span>
-
-        <div className="w-px h-5 bg-zinc-700/50 mx-1" />
-
-        {/* Participant circles */}
-        <div className="flex items-center gap-1.5 min-w-0">
+      <div className="border-b border-emerald-900/40 bg-zinc-900/95 shrink-0">
+        {/* Video grid */}
+        <div className={`grid ${gridCols} gap-1 p-2 max-h-[50vh] overflow-hidden`}>
+          {/* Remote participants */}
           {participants.map((p) => (
-            <div
+            <VideoTile
               key={p.userId}
-              className={`relative w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-medium shrink-0 ${
-                p.isSpeaking
-                  ? 'bg-emerald-600/30 text-emerald-300'
-                  : 'bg-zinc-700/60 text-zinc-400'
-              }`}
-              title={p.name}
-            >
-              {/* Speaking ring */}
-              {p.isSpeaking && (
-                <span className="absolute inset-0 rounded-full border-2 border-emerald-400 animate-pulse" />
-              )}
-              {p.name.charAt(0).toUpperCase()}
-            </div>
+              stream={p.stream}
+              label={p.name}
+              isSpeaking={p.isSpeaking}
+            />
           ))}
+          {/* Self-view */}
+          <VideoTile
+            stream={localStream}
+            muted
+            label="You"
+            isSelf
+          />
         </div>
 
-        {/* Timer */}
-        <span className="text-xs text-zinc-500 tabular-nums ml-auto shrink-0">
-          {formatTime(elapsedSeconds)}
-        </span>
+        {/* Controls bar */}
+        <div className="flex items-center gap-2 px-4 h-11 border-t border-zinc-800/50">
+          {/* Voice label */}
+          <span className="flex items-center gap-1.5 text-xs font-medium text-emerald-400 shrink-0">
+            <span className="w-2 h-2 bg-emerald-500 rounded-full" />
+            Call
+          </span>
 
-        {/* Mute toggle */}
-        <button
-          onClick={onToggleMute}
-          className={`p-1.5 rounded-md transition-colors shrink-0 ${
-            isMuted
-              ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
-              : 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30'
-          }`}
-          title={isMuted ? 'Unmute' : 'Mute'}
-        >
-          {isMuted ? <MicOff size={14} /> : <Mic size={14} />}
-        </button>
+          <div className="w-px h-5 bg-zinc-700/50 mx-1" />
 
-        {/* Leave call */}
-        <button
-          onClick={onLeave}
-          className="p-1.5 rounded-md bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors shrink-0"
-          title="Leave call"
-        >
-          <PhoneOff size={14} />
-        </button>
+          {/* Participant count */}
+          <span className="text-xs text-zinc-500">
+            {participants.length + 1} participant{participants.length !== 0 ? 's' : ''}
+          </span>
+
+          {/* Timer */}
+          <span className="text-xs text-zinc-500 tabular-nums ml-auto shrink-0">
+            {formatTime(elapsedSeconds)}
+          </span>
+
+          {/* Mute toggle */}
+          <button
+            onClick={onToggleMute}
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              isMuted
+                ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                : 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30'
+            }`}
+            title={isMuted ? 'Unmute' : 'Mute'}
+          >
+            {isMuted ? <MicOff size={14} /> : <Mic size={14} />}
+          </button>
+
+          {/* Video toggle */}
+          <button
+            onClick={onToggleVideo}
+            className={`p-1.5 rounded-md transition-colors shrink-0 ${
+              !isVideoEnabled
+                ? 'bg-red-600/20 text-red-400 hover:bg-red-600/30'
+                : 'bg-blue-600/20 text-blue-400 hover:bg-blue-600/30'
+            }`}
+            title={isVideoEnabled ? 'Turn off camera' : 'Turn on camera'}
+          >
+            {isVideoEnabled ? <Camera size={14} /> : <CameraOff size={14} />}
+          </button>
+
+          {/* Leave call */}
+          <button
+            onClick={onLeave}
+            className="p-1.5 rounded-md bg-red-600/20 text-red-400 hover:bg-red-600/30 transition-colors shrink-0"
+            title="Leave call"
+          >
+            <PhoneOff size={14} />
+          </button>
+        </div>
       </div>
     )
   }
