@@ -317,9 +317,10 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                 <span className="ml-1 text-[9px] px-1 py-0.5 rounded-full" style={{ background: c.border, color: c.muted }}>
                   {t.count}
                 </span>
-            )}
-          </button>
-        ))}
+              )}
+            </button>
+          )
+        })}
         <div className="flex items-center gap-1.5 ml-auto">
           {saving && <Loader2 size={10} className="animate-spin" style={{ color: c.muted }} />}
           {!saving && showSaved && <span className="text-[10px] font-medium" style={{ color: c.green }}>Saved</span>}
