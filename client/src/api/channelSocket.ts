@@ -81,10 +81,13 @@ export class ChannelSocket {
             this.onUserLeft?.(data.user)
             break
           case 'voice_user_joined':
-            this.onVoiceUserJoined?.(data.user)
+            this.onVoiceUserJoined?.({ user_id: data.user_id, name: data.user_name })
             break
           case 'voice_user_left':
-            this.onVoiceUserLeft?.(data.user)
+            this.onVoiceUserLeft?.({ user_id: data.user_id })
+            break
+          case 'voice_error':
+            console.warn('[VoiceCall]', data.message)
             break
           case 'voice_participants':
             this.onVoiceParticipants?.(data.participants)

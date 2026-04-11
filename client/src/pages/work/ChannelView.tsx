@@ -176,7 +176,9 @@ export default function ChannelView() {
         // Redirect to Stripe checkout for paid channels
         const { checkout_url } = await createChannelCheckout(channelId)
         window.location.href = checkout_url
-        return // don't setJoining(false) — page is navigating away
+        // Reset after 5s in case redirect fails (popup blocker, etc.)
+        setTimeout(() => setJoining(false), 5000)
+        return
       }
       await joinChannel(channelId)
       setIsMember(true)

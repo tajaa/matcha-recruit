@@ -85,7 +85,7 @@ class ChannelConnectionManager:
 
                         # Clean up voice calls and notify participants
                         user_name = user.name if user else "Unknown"
-                        affected_channels = cleanup_user_from_calls(user_id)
+                        affected_channels = await cleanup_user_from_calls(user_id)
                         for channel_id in affected_channels:
                             await self._broadcast_to_room(channel_id, {
                                 "type": "voice_user_left",
@@ -151,17 +151,21 @@ class ChannelConnectionManager:
 
     async def send_to_user(self, user_id: UUID, message: dict):
         """Send a message to a specific user (all their connections)."""
-        if user_id not in self.active_connections:
+        async with self.lock:
+            conns = set(self.active_connections.get(user_id, set()))
+        if not conns:
             return
         data = json.dumps(message, default=str)
         dead = []
-        for ws in self.active_connections[user_id]:
+        for ws in conns:
             try:
                 await ws.send_text(data)
             except Exception:
                 dead.append(ws)
-        for ws in dead:
-            self.active_connections[user_id].discard(ws)
+        if dead:
+            async with self.lock:
+                for ws in dead:
+                    self.active_connections.get(user_id, set()).discard(ws)
 
     async def _broadcast_to_room(self, room_key: str, message: dict, exclude_user: UUID = None):
         if room_key not in self.room_members:
