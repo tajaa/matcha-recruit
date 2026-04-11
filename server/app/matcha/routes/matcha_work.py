@@ -5609,9 +5609,10 @@ async def send_message_stream(
                 from .thread_ws import thread_manager
                 user_msg_dict = _row_to_message(user_msg).model_dump(mode="json")
                 assistant_msg_dict = _row_to_message(assistant_msg).model_dump(mode="json")
-                await thread_manager.broadcast_new_message(str(thread_id), [user_msg_dict, assistant_msg_dict])
+                # Exclude sender — they already get messages via SSE
+                await thread_manager.broadcast_new_message(str(thread_id), [user_msg_dict, assistant_msg_dict], exclude_user=current_user.id)
             except Exception:
-                logger.debug("Thread WS broadcast skipped for thread %s", thread_id)
+                logger.warning("Thread WS broadcast failed for thread %s", thread_id)
 
             # Escalate low-confidence queries for human review
             if should_escalate(ai_resp):

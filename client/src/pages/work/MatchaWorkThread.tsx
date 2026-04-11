@@ -173,7 +173,11 @@ export default function MatchaWorkThread() {
     threadSocketRef.current = sock
 
     sock.onNewMessage = (newMessages) => {
-      setMessages((prev) => [...prev, ...newMessages])
+      setMessages((prev) => {
+        const existingIds = new Set(prev.map(m => m.id))
+        const deduped = newMessages.filter(m => !existingIds.has(m.id))
+        return deduped.length > 0 ? [...prev, ...deduped] : prev
+      })
     }
 
     sock.onTyping = (user) => {

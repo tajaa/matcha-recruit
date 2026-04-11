@@ -113,17 +113,13 @@ class ThreadConnectionManager:
             "user": user.model_dump(mode='json'),
         }, exclude_user=user.id)
 
-    async def broadcast_new_message(self, thread_id: str, messages: list):
-        """Broadcast new messages to all connected clients in a thread room.
-
-        Called by external code (e.g., the stream endpoint) to push new
-        messages to connected collaborators in real time.
-        """
+    async def broadcast_new_message(self, thread_id: str, messages: list, exclude_user: UUID = None):
+        """Broadcast new messages to all connected clients in a thread room."""
         await self._broadcast_to_room(thread_id, {
-            "type": "new_message",
+            "type": "new_messages",
             "room": thread_id,
             "messages": messages,
-        })
+        }, exclude_user=exclude_user)
 
     async def get_online_users(self, room_key: str) -> list:
         async with self.lock:
@@ -136,21 +132,30 @@ class ThreadConnectionManager:
             ]
 
     async def _broadcast_to_room(self, room_key: str, message: dict, exclude_user: UUID = None):
-        if room_key not in self.room_members:
-            return
+        # Copy targets under lock, broadcast outside lock
+        async with self.lock:
+            if room_key not in self.room_members:
+                return
+            targets: list[tuple[UUID, set]] = []
+            for uid in self.room_members[room_key]:
+                if exclude_user and uid == exclude_user:
+                    continue
+                conns = self.active_connections.get(uid)
+                if conns:
+                    targets.append((uid, set(conns)))
+
         data = json.dumps(message, default=str)
-        for user_id in self.room_members[room_key]:
-            if exclude_user and user_id == exclude_user:
-                continue
-            if user_id in self.active_connections:
-                dead = []
-                for ws in self.active_connections[user_id]:
-                    try:
-                        await ws.send_text(data)
-                    except Exception:
-                        dead.append(ws)
-                for ws in dead:
-                    self.active_connections[user_id].discard(ws)
+        for uid, conns in targets:
+            dead = []
+            for ws in conns:
+                try:
+                    await ws.send_text(data)
+                except Exception:
+                    dead.append(ws)
+            if dead:
+                async with self.lock:
+                    for ws in dead:
+                        self.active_connections.get(uid, set()).discard(ws)
 
 
 thread_manager = ThreadConnectionManager()

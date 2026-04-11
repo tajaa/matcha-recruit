@@ -951,9 +951,9 @@ export function removeThreadCollaborator(threadId: string, userId: string) {
   return api.delete(`/matcha-work/threads/${threadId}/collaborators/${userId}`)
 }
 
-export function searchThreadInvitableUsers(query: string) {
+export function searchThreadInvitableUsers(threadId: string, query: string) {
   return api.get<{ id: string; name: string; email: string; avatar_url: string | null }[]>(
-    `/matcha-work/threads/collaborators/search?q=${encodeURIComponent(query)}`
+    `/matcha-work/threads/${threadId}/collaborators/search?q=${encodeURIComponent(query)}`
   )
 }
 

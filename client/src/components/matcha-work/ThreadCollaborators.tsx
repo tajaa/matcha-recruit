@@ -69,7 +69,7 @@ export default function ThreadCollaborators({ threadId, onlineUsers, lightMode }
     setSearching(true)
     searchTimeout.current = setTimeout(async () => {
       try {
-        const results = await searchThreadInvitableUsers(q)
+        const results = await searchThreadInvitableUsers(threadId, q)
         const existingIds = new Set(collaborators.map((c) => c.user_id))
         setSearchResults(results.filter((r) => !existingIds.has(r.id)))
       } catch {
