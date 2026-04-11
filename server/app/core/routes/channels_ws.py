@@ -11,6 +11,14 @@ from pydantic import BaseModel
 
 from ...database import get_connection
 from ..services.auth import decode_token
+from .voice_signaling import (
+    handle_voice_join,
+    handle_voice_leave,
+    handle_voice_offer,
+    handle_voice_answer,
+    handle_voice_ice,
+    cleanup_user_from_calls,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +83,17 @@ class ChannelConnectionManager:
                                         "user": user.model_dump(mode='json'),
                                     }, exclude_user=user_id)
 
+                        # Clean up voice calls and notify participants
+                        user_name = user.name if user else "Unknown"
+                        affected_channels = cleanup_user_from_calls(user_id)
+                        for channel_id in affected_channels:
+                            await self._broadcast_to_room(channel_id, {
+                                "type": "voice_user_left",
+                                "channel_id": channel_id,
+                                "user_id": str(user_id),
+                                "user_name": user_name,
+                            }, exclude_user=user_id)
+
     async def join_room(self, user_id: UUID, room_key: str):
         async with self.lock:
             if room_key not in self.room_members:
@@ -129,6 +148,20 @@ class ChannelConnectionManager:
                 for uid in self.room_members[room_key]
                 if uid in self.users
             ]
+
+    async def send_to_user(self, user_id: UUID, message: dict):
+        """Send a message to a specific user (all their connections)."""
+        if user_id not in self.active_connections:
+            return
+        data = json.dumps(message, default=str)
+        dead = []
+        for ws in self.active_connections[user_id]:
+            try:
+                await ws.send_text(data)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.active_connections[user_id].discard(ws)
 
     async def _broadcast_to_room(self, room_key: str, message: dict, exclude_user: UUID = None):
         if room_key not in self.room_members:
@@ -334,6 +367,25 @@ async def channel_websocket(
                 channel_id = data.get("channel_id")
                 if channel_id:
                     await manager.broadcast_typing(str(channel_id), user)
+
+            elif msg_type == "voice_join":
+                channel_id = data.get("channel_id")
+                if channel_id:
+                    await handle_voice_join(manager, user.id, user.name, str(channel_id), str(channel_id))
+
+            elif msg_type == "voice_leave":
+                channel_id = data.get("channel_id")
+                if channel_id:
+                    await handle_voice_leave(manager, user.id, user.name, str(channel_id), str(channel_id))
+
+            elif msg_type == "voice_offer":
+                await handle_voice_offer(manager, user.id, data)
+
+            elif msg_type == "voice_answer":
+                await handle_voice_answer(manager, user.id, data)
+
+            elif msg_type == "voice_ice":
+                await handle_voice_ice(manager, user.id, data)
 
     except WebSocketDisconnect:
         pass
