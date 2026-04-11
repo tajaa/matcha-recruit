@@ -35,7 +35,7 @@ const HR_SKILLS = [
   { id: 'policy', icon: Scale, label: 'Policy', desc: 'Draft compliance policies', prompt: 'Draft a policy for ', requiresCompany: true },
   { id: 'onboarding', icon: Users, label: 'Onboarding', desc: 'Create employee records', prompt: 'Onboard a new employee', requiresCompany: true },
   { id: 'review', icon: Briefcase, label: 'Review', desc: 'Run performance reviews', prompt: 'Create a performance review for ', requiresCompany: true },
-  { id: 'language_tutor', icon: Languages, label: 'Language Tutor', desc: 'Practice English or Spanish', prompt: '', requiresCompany: false },
+  { id: 'language_tutor', icon: Languages, label: 'Language Tutor', desc: 'Practice English, Spanish, or French', prompt: '', requiresCompany: false },
 ] as const
 
 const PERSONAL_SKILLS = [
@@ -44,7 +44,7 @@ const PERSONAL_SKILLS = [
   { id: 'presentation', icon: Presentation, label: 'Presentation', desc: 'Generate slide decks', prompt: 'Create a presentation about ', requiresCompany: false },
   { id: 'resume_batch', icon: ClipboardList, label: 'Resume Batch', desc: 'Analyze candidate resumes', prompt: '', requiresCompany: false, dropHint: 'Drop resumes to start' },
   { id: 'inventory', icon: Package, label: 'Inventory', desc: 'Process invoices & track stock', prompt: '', requiresCompany: false, dropHint: 'Drop invoices to start' },
-  { id: 'language_tutor', icon: Languages, label: 'Language Tutor', desc: 'Practice English or Spanish', prompt: '', requiresCompany: false },
+  { id: 'language_tutor', icon: Languages, label: 'Language Tutor', desc: 'Practice English, Spanish, or French', prompt: '', requiresCompany: false },
 ] as const
 
 const TASK_LABELS: Record<string, string> = {
@@ -958,15 +958,23 @@ export default function MatchaWorkThread() {
         )}
 
         {showLanguageTutorPanel && (
-          <LanguageTutorPanel
-            threadId={threadId!}
-            lightMode={lightMode}
-            currentState={thread?.current_state ?? null}
-            onStateUpdate={() => {
-              // Re-fetch thread to pick up updated current_state + task_type
-              if (threadId) getThread(threadId).then(t => { setThread(t); setMessages(t.messages ?? []) }).catch(() => {})
-            }}
-          />
+          <div className="relative flex-1 min-w-0">
+            <button
+              onClick={() => setShowTutorSetup(false)}
+              className="absolute top-2 right-2 z-10 p-1 rounded hover:bg-zinc-700/50 text-zinc-500 hover:text-zinc-300"
+              title="Close tutor"
+            >
+              <X size={16} />
+            </button>
+            <LanguageTutorPanel
+              threadId={threadId!}
+              lightMode={lightMode}
+              currentState={thread?.current_state ?? null}
+              onStateUpdate={() => {
+                if (threadId) getThread(threadId).then(t => { setThread(t); setMessages(t.messages ?? []) }).catch(() => {})
+              }}
+            />
+          </div>
         )}
 
         {agentMode && !showPresentationPanel && !showResumeBatchPanel && !showInventoryPanel && !showProjectPanel && !showLanguageTutorPanel && (
