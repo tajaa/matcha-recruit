@@ -466,16 +466,15 @@ async def search_invitable_users(
             company_id = scope.get("company_id")
             is_personal = False
 
-        name_filter = f"AND ({_USER_NAME_EXPR} ILIKE $2 OR u.email ILIKE $2)" if has_search else ""
-        params: list = [current_user.id]
+        # Build params: $1=user_id, $2=company_id (UUID or NULL), $3=search (optional)
+        include_company = bool(company_id and not is_personal)
+        params: list = [current_user.id, company_id if include_company else None]
         if has_search:
             params.append(search)
-
-        # Company source: only for real companies (not personal workspaces)
-        company_clause = (
-            f"(c.company_id = '{company_id}' OR e.org_id = '{company_id}')"
-            if (company_id and not is_personal) else "false"
-        )
+            search_idx = len(params)
+            name_filter = f"AND ({_USER_NAME_EXPR} ILIKE ${search_idx} OR u.email ILIKE ${search_idx})"
+        else:
+            name_filter = ""
 
         rows = await conn.fetch(
             f"""
@@ -488,8 +487,8 @@ async def search_invitable_users(
             WHERE u.id != $1 AND u.is_active = true
               {name_filter}
               AND (
-                -- Source 1: Same company (real companies only)
-                {company_clause}
+                -- Source 1: Same company (real companies only, skipped when $2 is NULL)
+                ($2 IS NOT NULL AND (c.company_id = $2 OR e.org_id = $2))
                 -- Source 2: Inbox contacts
                 OR EXISTS(
                   SELECT 1 FROM inbox_participants ip1
