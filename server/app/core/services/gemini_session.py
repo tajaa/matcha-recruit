@@ -740,7 +740,7 @@ class GeminiLiveSession:
             return
         try:
             await self.session.send_realtime_input(
-                media=types.Blob(
+                audio=types.Blob(
                     data=pcm_data,
                     mime_type="audio/pcm;rate=16000",
                 )
