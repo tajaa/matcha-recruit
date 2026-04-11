@@ -901,27 +901,27 @@ async def list_threads(
         """
         # Build the access clause — include threads owned by company OR where user is a collaborator
         if user_id is not None:
-            access_clause = "(company_id=$1 OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = ${user_param}::uuid))"
+            # $1=company_id(UUID), $2=user_id(UUID) — UUIDs first, ints after
+            access_clause = "(company_id=$1 OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = $2))"
         else:
             access_clause = "company_id=$1"
 
         if status:
             if user_id is not None:
-                clause = access_clause.replace("${user_param}", "5")
                 rows = await conn.fetch(
                     f"""
                     SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
                            {task_type_sql}
                     FROM mw_threads
-                    WHERE {clause} AND status=$2
+                    WHERE {access_clause} AND status=$3
                     ORDER BY is_pinned DESC, updated_at DESC
-                    LIMIT $3 OFFSET $4
+                    LIMIT $4 OFFSET $5
                     """,
                     company_id,
+                    user_id,
                     status,
                     limit,
                     offset,
-                    user_id,
                 )
             else:
                 rows = await conn.fetch(
@@ -940,20 +940,19 @@ async def list_threads(
                 )
         else:
             if user_id is not None:
-                clause = access_clause.replace("${user_param}", "4")
                 rows = await conn.fetch(
                     f"""
                     SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
                            {task_type_sql}
                     FROM mw_threads
-                    WHERE {clause}
+                    WHERE {access_clause}
                     ORDER BY is_pinned DESC, updated_at DESC
-                    LIMIT $2 OFFSET $3
+                    LIMIT $3 OFFSET $4
                     """,
                     company_id,
+                    user_id,
                     limit,
                     offset,
-                    user_id,
                 )
             else:
                 rows = await conn.fetch(
