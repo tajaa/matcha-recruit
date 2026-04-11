@@ -618,10 +618,11 @@ export default function MatchaWorkThread() {
             </div>
           )}
 
+          {!isIndividual && (
           <button
             onClick={() => handleModeToggle('node')}
             disabled={togglingMode === 'node'}
-            title={nodeMode ? 'Node ON — Try: "Our CA clinical staff vs NY clinical staff — which group is missing meal break policy coverage?" or "Do any of our CO employees fall under departments with no active handbook?"' : 'Node OFF — click to query your employees, policies, and handbooks'}
+            title={nodeMode ? 'Node ON — query employees, policies, handbooks' : 'Node OFF'}
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               nodeMode
                 ? 'bg-purple-600 text-white hover:bg-purple-500'
@@ -631,11 +632,13 @@ export default function MatchaWorkThread() {
             <Database size={12} />
             Node
           </button>
+          )}
 
+          {!isIndividual && (
           <button
             onClick={() => handleModeToggle('compliance')}
             disabled={togglingMode === 'compliance'}
-            title={complianceMode ? 'Compliance ON — Try: "CA allows healthcare meal break waivers for shifts over 12 hours — does this override the standard 6-hour waiver threshold, and what\'s the penalty if we miss it?" or "Compare overtime rules for our NY vs IL employees"' : 'Compliance OFF — click to inject jurisdiction requirements into AI context'}
+            title={complianceMode ? 'Compliance ON — jurisdiction requirements injected' : 'Compliance OFF'}
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               complianceMode
                 ? 'bg-cyan-600 text-white hover:bg-cyan-500'
@@ -645,11 +648,13 @@ export default function MatchaWorkThread() {
             <Shield size={12} />
             Compliance
           </button>
+          )}
 
+          {!isIndividual && (
           <button
             onClick={() => handleModeToggle('payer')}
             disabled={togglingMode === 'payer'}
-            title={payerMode ? 'Payer ON — Try: "Medicare NCD 30.3 covers acupuncture for chronic lower back pain but not fibromyalgia — what are the exact clinical criteria that distinguish covered vs non-covered?" or "Does NCD 260.1 liver transplant coverage require the patient to have end-stage liver disease, and what documentation is needed?"' : 'Payer OFF — click to search Medicare NCD/LCD coverage policies'}
+            title={payerMode ? 'Payer ON — Medicare NCD/LCD search active' : 'Payer OFF'}
             className={`hidden sm:inline-flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full transition-colors disabled:opacity-50 ${
               payerMode
                 ? 'bg-emerald-600 text-white hover:bg-emerald-500'
@@ -659,6 +664,7 @@ export default function MatchaWorkThread() {
             <Stethoscope size={12} />
             Payer
           </button>
+          )}
 
           <button
             onClick={() => setAgentMode(!agentMode)}

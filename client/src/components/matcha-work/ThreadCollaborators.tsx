@@ -152,18 +152,19 @@ export default function ThreadCollaborators({ threadId, onlineUsers, lightMode }
         ))}
       </div>
 
-      {/* Add button */}
+      {/* Invite button — always visible for thread owner */}
       {isOwner && (
         <button
           onClick={() => setShowSearch(!showSearch)}
-          className={`w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+          className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors ${
             lightMode
-              ? 'bg-zinc-200 hover:bg-zinc-300 text-zinc-500'
-              : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-400'
+              ? 'bg-zinc-200 hover:bg-zinc-300 text-zinc-600'
+              : 'bg-zinc-700 hover:bg-zinc-600 text-zinc-400 hover:text-zinc-200'
           }`}
-          title="Add collaborator"
+          title="Invite someone to collaborate"
         >
           <Plus size={12} />
+          <span className="hidden sm:inline">Invite</span>
         </button>
       )}
 
