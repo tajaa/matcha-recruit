@@ -6591,8 +6591,8 @@ async def start_tutor_voice_session(
     from ...core.services.auth import create_interview_ws_token
 
     language = body.get("language", "en")
-    if language not in ("en", "es"):
-        raise HTTPException(status_code=400, detail="Language must be 'en' or 'es'")
+    if language not in ("en", "es-mx", "fr"):
+        raise HTTPException(status_code=400, detail="Language must be 'en', 'es-mx', or 'fr'")
     duration_minutes = body.get("duration_minutes", 5)
     if duration_minutes not in (0.33, 2, 5, 8):
         raise HTTPException(status_code=400, detail="Duration must be 0.33 (20s test), 2, 5, or 8 minutes")
@@ -6803,6 +6803,21 @@ Solo marca errores claros, no preferencias de estilo. Sé conciso.
 Devuelve SOLO JSON válido, sin markdown."""
 
 
+UTTERANCE_CHECK_PROMPT_FR = """Tu es un tuteur de langues analysant une phrase en français d'un étudiant.
+
+Phrase: "{utterance}"
+
+Renvoie un tableau JSON des erreurs trouvées. Chaque objet contient:
+- "error": le mot/la phrase incorrecte exactement comme prononcé
+- "correction": la forme correcte
+- "type": l'un de "grammar", "vocabulary", "pronunciation"
+- "brief": explication de 5 mots maximum
+
+S'il n'y a pas d'erreurs, renvoie un tableau vide [].
+Ne signale que les erreurs claires, pas les préférences stylistiques. Sois concis.
+Renvoie UNIQUEMENT du JSON valide, pas de markdown."""
+
+
 @router.post("/threads/{thread_id}/tutor/check")
 async def check_tutor_utterance(
     thread_id: UUID,
@@ -6828,7 +6843,12 @@ async def check_tutor_utterance(
         else:
             client = genai.Client(api_key=settings.gemini_api_key)
 
-        prompt = (UTTERANCE_CHECK_PROMPT_ES if language == "es" else UTTERANCE_CHECK_PROMPT_EN).format(utterance=utterance)
+        if language in ("es", "es-mx"):
+            prompt = UTTERANCE_CHECK_PROMPT_ES.format(utterance=utterance)
+        elif language == "fr":
+            prompt = UTTERANCE_CHECK_PROMPT_FR.format(utterance=utterance)
+        else:
+            prompt = UTTERANCE_CHECK_PROMPT_EN.format(utterance=utterance)
         response = await client.aio.models.generate_content(model="gemini-2.5-flash", contents=prompt)
         text = response.text.strip()
         if text.startswith("```"):

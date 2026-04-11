@@ -47,8 +47,8 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
     if (tutorState.status === 'active') return 'setup' // WS disconnected, let user restart
     return 'setup'
   })
-  const [language, setLanguage] = useState<'en' | 'es'>(
-    (tutorState?.language as 'en' | 'es') ?? 'en'
+  const [language, setLanguage] = useState<'en' | 'es-mx' | 'fr'>(
+    (tutorState?.language as 'en' | 'es-mx' | 'fr') ?? 'en'
   )
   const [duration, setDuration] = useState(5)
   const [transcripts, setTranscripts] = useState<Transcript[]>([])
@@ -219,24 +219,28 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
         <Globe size={48} style={{ color: muted, opacity: 0.6 }} />
         <div style={{ fontSize: 20, fontWeight: 600 }}>Language Practice</div>
         <div style={{ color: muted, fontSize: 13, textAlign: 'center', maxWidth: 280 }}>
-          Practice conversational {language === 'en' ? 'English' : 'Spanish'} with an AI tutor.
+          Practice conversational {language === 'en' ? 'English' : language === 'es-mx' ? 'Spanish' : 'French'} with an AI tutor.
           Get real-time feedback and a detailed analysis when you're done.
         </div>
 
         {/* Language toggle */}
-        <div style={{ display: 'flex', gap: 8 }}>
-          {(['en', 'es'] as const).map(l => (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {([
+            { code: 'en' as const, label: 'English' },
+            { code: 'es-mx' as const, label: 'Espa\u00f1ol (MX)' },
+            { code: 'fr' as const, label: 'Fran\u00e7ais' },
+          ]).map(l => (
             <button
-              key={l}
-              onClick={() => setLanguage(l)}
+              key={l.code}
+              onClick={() => setLanguage(l.code)}
               style={{
-                padding: '8px 20px', borderRadius: 8, border: `1px solid ${border}`,
-                background: language === l ? '#3b82f6' : cardBg,
-                color: language === l ? '#fff' : fg,
-                cursor: 'pointer', fontSize: 14, fontWeight: 500,
+                padding: '8px 16px', borderRadius: 8, border: `1px solid ${border}`,
+                background: language === l.code ? '#3b82f6' : cardBg,
+                color: language === l.code ? '#fff' : fg,
+                cursor: 'pointer', fontSize: 13, fontWeight: 500,
               }}
             >
-              {l === 'en' ? 'English' : 'Espa\u00f1ol'}
+              {l.label}
             </button>
           ))}
         </div>
@@ -288,7 +292,9 @@ export default function LanguageTutorPanel({ threadId, lightMode, currentState, 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{ width: 8, height: 8, borderRadius: '50%', background: voice.status === 'active' ? '#22c55e' : '#eab308', animation: voice.status === 'active' ? 'pulse 2s infinite' : undefined }} />
             <span style={{ fontSize: 13, fontWeight: 500 }}>
-              {voice.status === 'connecting' ? 'Connecting...' : voice.status === 'active' ? (language === 'en' ? 'English Practice' : 'Pr\u00e1ctica de Espa\u00f1ol') : 'Ending...'}
+              {voice.status === 'connecting' ? 'Connecting...' : voice.status === 'active' ? (
+                language === 'en' ? 'English Practice' : language === 'es-mx' ? 'Pr\u00e1ctica de Espa\u00f1ol' : 'Pratique du Fran\u00e7ais'
+              ) : 'Ending...'}
             </span>
           </div>
           <span style={{ fontSize: 13, color: muted, fontFamily: 'monospace' }}>

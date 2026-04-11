@@ -1288,6 +1288,9 @@ async def interview_websocket(
                     cancelled = True
                     break
                 elif cmd and cmd.command == "stop_session":
+                    # For tutor sessions, stop = cancel (no analysis needed)
+                    if interview_type in ("tutor_language", "tutor_interview"):
+                        cancelled = True
                     break
                 elif cmd and cmd.command == "send_text":
                     # Allow sending text messages (for testing)

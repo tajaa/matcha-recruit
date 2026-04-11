@@ -1036,7 +1036,7 @@ export interface TutorStatusResponse {
   tutor_analysis: TutorAnalysis | null
 }
 
-export function startTutorSession(threadId: string, language: 'en' | 'es', durationMinutes = 5) {
+export function startTutorSession(threadId: string, language: 'en' | 'es-mx' | 'fr', durationMinutes = 5) {
   return api.post<TutorStartResponse>(`/matcha-work/threads/${threadId}/tutor/start`, {
     language,
     duration_minutes: durationMinutes,
