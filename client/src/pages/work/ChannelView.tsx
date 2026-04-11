@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart } from 'lucide-react'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone } from 'lucide-react'
 import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket } from '../../api/channelSocket'
@@ -10,6 +10,8 @@ import PaidChannelJoinWizard from '../../components/channels/PaidChannelJoinWiza
 import InactivityWarningBanner from '../../components/channels/InactivityWarningBanner'
 import ChannelSettingsPanel from '../../components/channels/ChannelSettingsPanel'
 import TipModal from '../../components/channels/TipModal'
+import VoiceCallBar from '../../components/channels/VoiceCallBar'
+import { useVoiceCall } from '../../hooks/useVoiceCall'
 
 export default function ChannelView() {
   const { channelId } = useParams<{ channelId: string }>()
@@ -40,6 +42,12 @@ export default function ChannelView() {
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const socketRef = useRef<ChannelSocket | null>(null)
   const lastTypingSentRef = useRef(0)
+
+  const voice = useVoiceCall({
+    socket: socketRef.current,
+    channelId: channelId || null,
+    myUserId: me?.user?.id || '',
+  })
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -305,6 +313,15 @@ export default function ChannelView() {
           >
             <Users size={16} />
           </button>
+          {isMember && (
+            <button
+              onClick={voice.callState === 'idle' ? voice.joinCall : undefined}
+              className="p-1.5 rounded hover:bg-zinc-700/50 text-zinc-400 hover:text-emerald-400"
+              title="Voice call"
+            >
+              <Phone size={16} />
+            </button>
+          )}
           {channel?.my_role !== 'owner' && isMember && (
             <button
               onClick={() => setShowTip(true)}
@@ -347,6 +364,19 @@ export default function ChannelView() {
             </button>
           )}
         </div>
+      )}
+
+      {(voice.callState !== 'idle' || voice.participants.length > 0) && (
+        <VoiceCallBar
+          callState={voice.callState}
+          participants={voice.participants}
+          isMuted={voice.isMuted}
+          elapsedSeconds={voice.elapsedSeconds}
+          onJoin={voice.joinCall}
+          onLeave={voice.leaveCall}
+          onToggleMute={voice.toggleMute}
+          activeCallUsers={voice.participants.map(p => ({ user_id: p.userId, name: p.name }))}
+        />
       )}
 
       <div className="flex flex-1 min-h-0">
