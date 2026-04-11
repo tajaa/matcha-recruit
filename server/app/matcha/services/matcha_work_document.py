@@ -901,7 +901,7 @@ async def list_threads(
         """
         # Build the access clause — include threads owned by company OR where user is a collaborator
         if user_id is not None:
-            access_clause = "(company_id=$1 OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = ${user_param}))"
+            access_clause = "(company_id=$1 OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = ${user_param}::uuid))"
         else:
             access_clause = "company_id=$1"
 
