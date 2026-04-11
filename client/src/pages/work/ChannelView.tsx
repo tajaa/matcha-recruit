@@ -450,22 +450,34 @@ export default function ChannelView() {
               const showAuthor = i === 0 || messages[i - 1].sender_id !== msg.sender_id
               const isOwn = msg.sender_id === userId
               return (
-                <div key={msg.id} className={`${showAuthor && i > 0 ? 'mt-3' : ''}`}>
-                  {showAuthor && (
-                    <div className="flex items-baseline gap-2 mb-0.5">
-                      <span className={`text-sm font-medium ${isOwn ? 'text-emerald-400' : 'text-blue-400'}`}>
-                        {msg.sender_name}
-                      </span>
-                      <span className="text-[10px] text-zinc-600">
-                        {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </span>
-                    </div>
+                <div key={msg.id} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5`}>
+                  {showAuthor ? (
+                    msg.sender_avatar_url ? (
+                      <img src={msg.sender_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 mt-0.5" />
+                    ) : (
+                      <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-medium text-zinc-400 shrink-0 mt-0.5">
+                        {(msg.sender_name || '?')[0].toUpperCase()}
+                      </div>
+                    )
+                  ) : (
+                    <div className="w-8 shrink-0" />
                   )}
-                  {msg.content && (
-                    <p className="text-sm text-zinc-200 whitespace-pre-wrap break-words pl-0">
-                      {msg.content}
-                    </p>
-                  )}
+                  <div className="min-w-0 flex-1">
+                    {showAuthor && (
+                      <div className="flex items-baseline gap-2 mb-0.5">
+                        <span className={`text-sm font-medium ${isOwn ? 'text-emerald-400' : 'text-blue-400'}`}>
+                          {msg.sender_name}
+                        </span>
+                        <span className="text-[10px] text-zinc-600">
+                          {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    )}
+                    {msg.content && (
+                      <p className="text-sm text-zinc-200 whitespace-pre-wrap break-words">
+                        {msg.content}
+                      </p>
+                    )}
                   {msg.attachments && msg.attachments.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-1">
                       {msg.attachments.map((att, ai) =>
@@ -491,6 +503,7 @@ export default function ChannelView() {
                       )}
                     </div>
                   )}
+                  </div>
                 </div>
               )
             })}

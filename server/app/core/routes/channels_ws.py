@@ -356,6 +356,7 @@ async def channel_websocket(
                                 "channel_id": str(row["channel_id"]),
                                 "sender_id": str(row["sender_id"]),
                                 "sender_name": user.name,
+                                "sender_avatar_url": user.avatar_url,
                                 "content": row["content"],
                                 "attachments": broadcast_attachments,
                                 "created_at": row["created_at"].isoformat(),

@@ -38,6 +38,7 @@ export interface ChannelMessage {
   channel_id: string
   sender_id: string
   sender_name: string
+  sender_avatar_url: string | null
   content: string
   attachments?: ChannelAttachment[]
   created_at: string
@@ -268,6 +269,9 @@ export const listConnections = () =>
 
 export const listPendingConnections = () =>
   api.get<UserConnection[]>('/channels/connections/pending')
+
+export const listSentConnections = () =>
+  api.get<UserConnection[]>('/channels/connections/sent')
 
 export const sendConnectionRequest = (userId: string) =>
   api.post<{ ok: boolean; status?: string }>('/channels/connections/request', { user_id: userId })

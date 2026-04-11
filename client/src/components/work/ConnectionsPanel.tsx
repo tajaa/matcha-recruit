@@ -3,6 +3,7 @@ import { Users, UserPlus, UserCheck, UserX, Search, X, Shield } from 'lucide-rea
 import {
   listConnections,
   listPendingConnections,
+  listSentConnections,
   sendConnectionRequest,
   acceptConnection,
   declineConnection,
@@ -25,6 +26,7 @@ export default function ConnectionsPanel() {
   const [tab, setTab] = useState<Tab>('connections')
   const [connections, setConnections] = useState<UserConnection[]>([])
   const [pending, setPending] = useState<UserConnection[]>([])
+  const [sent, setSent] = useState<UserConnection[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [searching, setSearching] = useState(false)
@@ -34,9 +36,10 @@ export default function ConnectionsPanel() {
   const refresh = useCallback(async () => {
     setLoading(true)
     try {
-      const [conn, pend] = await Promise.all([listConnections(), listPendingConnections()])
+      const [conn, pend, s] = await Promise.all([listConnections(), listPendingConnections(), listSentConnections()])
       setConnections(conn)
       setPending(pend)
+      setSent(s)
     } catch {
       // ignore
     } finally {
@@ -60,8 +63,9 @@ export default function ConnectionsPanel() {
         // Filter out already-connected users
         const connectedIds = new Set(connections.map((c) => c.user_id))
         const pendingIds = new Set(pending.map((p) => p.user_id))
+        const sentIds = new Set(sent.map((s) => s.user_id))
         setSearchResults(
-          results.filter((r) => !connectedIds.has(r.id) && !pendingIds.has(r.id))
+          results.filter((r) => !connectedIds.has(r.id) && !pendingIds.has(r.id) && !sentIds.has(r.id))
         )
       } catch {
         // ignore
@@ -70,7 +74,7 @@ export default function ConnectionsPanel() {
       }
     }, 300)
     return () => clearTimeout(timeout)
-  }, [searchQuery, tab, connections, pending])
+  }, [searchQuery, tab, connections, pending, sent])
 
   async function handleAccept(userId: string) {
     try {
@@ -111,11 +115,15 @@ export default function ConnectionsPanel() {
 
   async function handleConnect(userId: string) {
     try {
+      const match = searchResults.find((r) => r.id === userId)
       const res = await sendConnectionRequest(userId)
       if (res.status === 'accepted') {
         await refresh()
       } else {
         setSentRequests((prev) => new Set(prev).add(userId))
+        if (match) {
+          setSent((prev) => [...prev, { user_id: match.id, name: match.name, email: match.email, avatar_url: match.avatar_url, created_at: new Date().toISOString() }])
+        }
       }
       setSearchResults((prev) => prev.filter((r) => r.id !== userId))
     } catch {
@@ -138,7 +146,7 @@ export default function ConnectionsPanel() {
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
     { key: 'connections', label: 'Connections', count: connections.length || undefined },
-    { key: 'pending', label: 'Pending', count: pending.length || undefined },
+    { key: 'pending', label: 'Pending', count: (pending.length + sent.length) || undefined },
     { key: 'find', label: 'Find People' },
   ]
 
@@ -224,40 +232,66 @@ export default function ConnectionsPanel() {
         )}
 
         {tab === 'pending' && (
-          <div className="space-y-2">
+          <div className="space-y-4">
             {loading ? (
               <p className="text-zinc-500 text-sm">Loading...</p>
-            ) : pending.length === 0 ? (
+            ) : pending.length === 0 && sent.length === 0 ? (
               <div className="text-center py-12">
                 <UserCheck size={32} className="mx-auto text-zinc-700 mb-3" />
                 <p className="text-zinc-500 text-sm">No pending requests</p>
               </div>
             ) : (
-              pending.map((p) => (
-                <div key={p.user_id} className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800/30 transition-colors">
-                  <Avatar name={p.name} url={p.avatar_url} />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-200 truncate">{p.name}</p>
-                    <p className="text-xs text-zinc-500 truncate">{p.email}</p>
+              <>
+                {pending.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">Incoming Requests</p>
+                    <div className="space-y-2">
+                      {pending.map((p) => (
+                        <div key={p.user_id} className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800/30 transition-colors">
+                          <Avatar name={p.name} url={p.avatar_url} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-zinc-200 truncate">{p.name}</p>
+                            <p className="text-xs text-zinc-500 truncate">{p.email}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleAccept(p.user_id)}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors"
+                            >
+                              <UserCheck size={13} />
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => handleDecline(p.user_id)}
+                              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs font-medium transition-colors"
+                            >
+                              <UserX size={13} />
+                              Decline
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleAccept(p.user_id)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium transition-colors"
-                    >
-                      <UserCheck size={13} />
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => handleDecline(p.user_id)}
-                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-zinc-700 hover:bg-zinc-600 text-zinc-300 text-xs font-medium transition-colors"
-                    >
-                      <UserX size={13} />
-                      Decline
-                    </button>
+                )}
+                {sent.length > 0 && (
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 mb-2">Sent Requests</p>
+                    <div className="space-y-2">
+                      {sent.map((s) => (
+                        <div key={s.user_id} className="flex items-center gap-3 p-3 rounded-lg bg-zinc-800/30 transition-colors">
+                          <Avatar name={s.name} url={s.avatar_url} />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-zinc-200 truncate">{s.name}</p>
+                            <p className="text-xs text-zinc-500 truncate">{s.email}</p>
+                          </div>
+                          <span className="text-xs text-zinc-500 px-3 py-1.5">Awaiting response</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))
+                )}
+              </>
             )}
           </div>
         )}

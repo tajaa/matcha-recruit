@@ -51,6 +51,7 @@ class ChannelMessage(BaseModel):
     channel_id: UUID
     sender_id: UUID
     sender_name: str
+    sender_avatar_url: Optional[str] = None
     content: str
     attachments: list[ChannelAttachment] = []
     created_at: datetime
@@ -761,6 +762,29 @@ async def list_pending_connections(
         return [ConnectionUser(user_id=r["user_id"], name=r["name"], email=r["email"], avatar_url=r["avatar_url"], created_at=r["created_at"]) for r in rows]
 
 
+@router.get("/connections/sent", response_model=list[ConnectionUser])
+async def list_sent_connections(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """List pending outgoing connection requests sent by the current user."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT u.id AS user_id, u.email, u.avatar_url, uc.created_at,
+                   {_USER_NAME_EXPR} AS name
+            FROM user_connections uc
+            JOIN users u ON u.id = uc.connected_user_id
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE uc.user_id = $1 AND uc.status = 'pending'
+            ORDER BY uc.created_at DESC
+            """,
+            current_user.id,
+        )
+        return [ConnectionUser(user_id=r["user_id"], name=r["name"], email=r["email"], avatar_url=r["avatar_url"], created_at=r["created_at"]) for r in rows]
+
+
 @router.post("/connections/block")
 async def block_connection(
     body: ConnectionRequest,
@@ -827,7 +851,7 @@ async def get_channel(
         messages = await conn.fetch(
             f"""
             SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
-                   {_USER_NAME_EXPR} AS sender_name
+                   {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
             FROM channel_messages m
             JOIN users u ON u.id = m.sender_id
             LEFT JOIN clients c ON c.user_id = u.id
@@ -873,7 +897,8 @@ async def get_channel(
             messages=[
                 ChannelMessage(
                     id=m["id"], channel_id=m["channel_id"], sender_id=m["sender_id"],
-                    sender_name=m["sender_name"], content=m["content"],
+                    sender_name=m["sender_name"], sender_avatar_url=m["sender_avatar_url"],
+                    content=m["content"],
                     attachments=json.loads(m["attachments"]) if isinstance(m["attachments"], str) else (m["attachments"] or []),
                     created_at=m["created_at"], edited_at=m["edited_at"],
                 )
@@ -915,7 +940,7 @@ async def get_channel_messages(
             rows = await conn.fetch(
                 f"""
                 SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
-                       {_USER_NAME_EXPR} AS sender_name
+                       {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
                 FROM channel_messages m
                 JOIN users u ON u.id = m.sender_id
                 LEFT JOIN clients c ON c.user_id = u.id
@@ -931,7 +956,7 @@ async def get_channel_messages(
             rows = await conn.fetch(
                 f"""
                 SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
-                       {_USER_NAME_EXPR} AS sender_name
+                       {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
                 FROM channel_messages m
                 JOIN users u ON u.id = m.sender_id
                 LEFT JOIN clients c ON c.user_id = u.id
@@ -947,7 +972,8 @@ async def get_channel_messages(
         return [
             ChannelMessage(
                 id=r["id"], channel_id=r["channel_id"], sender_id=r["sender_id"],
-                sender_name=r["sender_name"], content=r["content"],
+                sender_name=r["sender_name"], sender_avatar_url=r["sender_avatar_url"],
+                content=r["content"],
                 attachments=json.loads(r["attachments"]) if isinstance(r["attachments"], str) else (r["attachments"] or []),
                 created_at=r["created_at"], edited_at=r["edited_at"],
             )
