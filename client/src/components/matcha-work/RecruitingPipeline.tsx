@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from 'react'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video, Send, Square, CheckSquare, RefreshCw, GripVertical, Plus, Trash2, FileText } from 'lucide-react'
 import type { MWProject, RecruitingData } from '../../types/matcha-work'
 import { toggleProjectShortlist, getProjectDetail, addProjectSectionNew, updateProjectSectionNew, deleteProjectSectionNew, updateProjectPosting } from '../../api/matchaWork'
@@ -256,6 +256,11 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     { key: 'interviews', label: 'Interviews', count: interviewSentCount },
     { key: 'shortlist', label: 'Shortlist', count: shortlistIds.size },
   ]
+
+  // Auto-reset to an unlocked tab if current tab becomes locked
+  useEffect(() => {
+    if (!tabUnlocked[tab]) setTab('status')
+  }, [tabUnlocked[tab]]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Contextual guidance based on current state
   const guidance = !isFinalized && sections.length === 0
