@@ -441,6 +441,37 @@ export function analyzeProjectCandidates(projectId: string) {
   )
 }
 
+export interface ScreeningAttribute {
+  score: number
+  evidence: string[]
+  notes?: string | null
+}
+
+export interface ScreeningAnalysis {
+  communication_clarity: ScreeningAttribute
+  engagement_energy: ScreeningAttribute
+  critical_thinking: ScreeningAttribute
+  professionalism: ScreeningAttribute
+  overall_score: number
+  recommendation: 'strong_pass' | 'pass' | 'borderline' | 'fail'
+  summary: string
+  analyzed_at: string
+}
+
+export interface InterviewDetail {
+  id: string
+  interview_type: string
+  status: string
+  transcript?: string | null
+  screening_analysis?: ScreeningAnalysis | null
+  created_at: string
+  completed_at?: string | null
+}
+
+export function getInterview(interviewId: string) {
+  return api.get<InterviewDetail>(`/interviews/${interviewId}`)
+}
+
 export function sendProjectInterviews(
   projectId: string,
   candidateIds: string[],

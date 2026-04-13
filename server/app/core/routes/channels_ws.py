@@ -274,24 +274,11 @@ async def channel_websocket(
                         await websocket.send_json({"type": "error", "message": "Invalid channel ID"})
                         continue
                     async with get_connection() as conn:
-                        # Verify membership + company access (exclude removed-for-inactivity members)
-                        if user.role == "admin":
-                            ok = await conn.fetchval(
-                                "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2 AND removed_for_inactivity IS NOT TRUE)",
-                                ch_uuid, user.id,
-                            )
-                        else:
-                            ok = await conn.fetchval(
-                                """
-                                SELECT EXISTS(
-                                    SELECT 1 FROM channel_members cm
-                                    JOIN channels ch ON ch.id = cm.channel_id
-                                    WHERE cm.channel_id = $1 AND cm.user_id = $2 AND ch.company_id = $3
-                                      AND cm.removed_for_inactivity IS NOT TRUE
-                                )
-                                """,
-                                ch_uuid, user.id, user.company_id,
-                            )
+                        # Verify membership (allows cross-tenant memberships; REST uses the same rule)
+                        ok = await conn.fetchval(
+                            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2 AND removed_for_inactivity IS NOT TRUE)",
+                            ch_uuid, user.id,
+                        )
 
                         if ok:
                             room_key = str(channel_id)

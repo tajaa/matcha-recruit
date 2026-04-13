@@ -4,6 +4,7 @@ import type { MWProject, RecruitingData } from '../../types/matcha-work'
 import { toggleProjectShortlist, toggleProjectDismiss, getProjectDetail, addProjectSectionNew, updateProjectSectionNew, deleteProjectSectionNew, updateProjectPosting } from '../../api/matchaWork'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
+import InterviewReviewModal from './InterviewReviewModal'
 
 type Tab = 'status' | 'posting' | 'candidates' | 'interviews' | 'shortlist'
 type SortKey = 'name' | 'experience_years' | 'location' | 'match_score'
@@ -74,6 +75,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   const [analyzing, setAnalyzing] = useState(false)
   const [positionInput, setPositionInput] = useState('')
   const [showPositionPrompt, setShowPositionPrompt] = useState(false)
+  const [reviewInterview, setReviewInterview] = useState<{ id: string; name: string } | null>(null)
 
   // Section title editing + save feedback
   const [sectionTitleEditing, setSectionTitleEditing] = useState<string | null>(null)
@@ -747,9 +749,23 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                         )}
                         {cand.interview_summary && (
                           <div className="mt-1 pt-1" style={{ borderTop: `1px dashed ${c.border}` }}>
-                            <p className="text-[10px] font-medium" style={{ color: '#60a5fa' }}>
-                              <Video size={10} className="inline mr-1" />Interview{cand.interview_score != null ? ` — ${cand.interview_score}%` : ''}
-                            </p>
+                            <div className="flex items-center justify-between gap-2">
+                              <p className="text-[10px] font-medium" style={{ color: '#60a5fa' }}>
+                                <Video size={10} className="inline mr-1" />Interview{cand.interview_score != null ? ` — ${cand.interview_score}%` : ''}
+                              </p>
+                              {cand.interview_id && (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    setReviewInterview({ id: cand.interview_id!, name: cand.name })
+                                  }}
+                                  className="rounded px-2 py-0.5 text-[10px] font-medium hover:underline"
+                                  style={{ color: '#60a5fa', background: 'rgba(96,165,250,0.1)' }}
+                                >
+                                  Review
+                                </button>
+                              )}
+                            </div>
                             <p className="text-xs" style={{ color: c.muted }}>{cand.interview_summary}</p>
                           </div>
                         )}
@@ -762,6 +778,13 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
           </div>
         )}
       </div>
+      {reviewInterview && (
+        <InterviewReviewModal
+          interviewId={reviewInterview.id}
+          candidateName={reviewInterview.name}
+          onClose={() => setReviewInterview(null)}
+        />
+      )}
     </div>
   )
 }
