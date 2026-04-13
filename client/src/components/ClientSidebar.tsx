@@ -80,14 +80,21 @@ export default function ClientSidebar() {
     })
   }
 
+  // Footer shows the company context for business accounts (matches the
+  // source used by the Company tab via /companies/me), and the user's own
+  // name for personal accounts (which don't have a meaningful company).
+  const footerName = me?.profile
+    ? (isPersonal ? me.profile.name : me.profile.company_name)
+    : undefined
+
   return (
     <SidebarShell
       logoTo={isPersonal ? '/work' : '/app'}
       logoLabel="Matcha"
       nav={loading ? [] : isPersonal ? personalNav : withBadges(nav)}
-      user={me?.profile ? {
-        name: me.profile.name,
-        avatarUrl: me.user?.avatar_url,
+      user={footerName ? {
+        name: footerName,
+        avatarUrl: me?.user?.avatar_url,
         settingsTo: '/app/settings',
       } : undefined}
     />

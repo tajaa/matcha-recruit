@@ -4,6 +4,7 @@ import { LogOut, Settings, ChevronDown } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { Logo } from './ui'
 import Avatar from './Avatar'
+import { invalidateMeCache } from '../hooks/useMe'
 
 export type NavItem = {
   to: string
@@ -107,6 +108,9 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user }: SidebarSh
   function handleLogout() {
     localStorage.removeItem('matcha_access_token')
     localStorage.removeItem('matcha_refresh_token')
+    // Drop cached /auth/me so the next user's data is fetched fresh
+    // (client-side navigation keeps module state alive otherwise).
+    invalidateMeCache()
     navigate('/login')
   }
 

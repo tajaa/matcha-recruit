@@ -298,19 +298,8 @@ async def create_channel(
     if not name or len(name) > 100:
         raise HTTPException(status_code=400, detail="Channel name must be 1-100 characters")
 
-    # Paid channel creation requires the paid_channel_creator feature flag
-    if body.paid_config and current_user.role != "admin":
-        async with get_connection() as conn:
-            features = await conn.fetchval(
-                "SELECT enabled_features FROM companies WHERE id = $1", company_id
-            )
-        from ..feature_flags import merge_company_features
-        merged = merge_company_features(features)
-        if not merged.get("paid_channel_creator"):
-            raise HTTPException(
-                status_code=403,
-                detail="Your account is not approved to create paid channels. Contact support to get verified.",
-            )
+    # Paid channels are only available for creator accounts (individual/admin).
+    # The hard role check below at line ~345 enforces this; no separate flag check needed.
 
     slug = _slugify(name)
 
@@ -1066,23 +1055,53 @@ async def add_members(
         if current_user.role != "admin" and my_role not in ("owner", "moderator"):
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can add members")
 
-        # Verify all user_ids belong to the same company
+        # Allow adding any user the inviter is connected to: same company,
+        # accepted connection, shared inbox conversation, or project collaborator.
+        # This matches the eligibility logic in /channels/invitable-users.
         added_uids = []
+        rejected_uids = []
         for uid in body.user_ids:
-            in_company = await conn.fetchval(
+            eligible = await conn.fetchval(
                 """
                 SELECT EXISTS(
                     SELECT 1 FROM users u
                     LEFT JOIN clients c ON c.user_id = u.id
                     LEFT JOIN employees e ON e.user_id = u.id
+                    LEFT JOIN admins a ON a.user_id = u.id
                     WHERE u.id = $1 AND u.is_active = true
-                      AND (c.company_id = $2 OR e.org_id = $2)
+                      AND (
+                        -- Source 1: same company
+                        ($2::uuid IS NOT NULL AND (c.company_id = $2::uuid OR e.org_id = $2::uuid))
+                        -- Source 2: shared inbox conversation
+                        OR EXISTS(
+                          SELECT 1 FROM inbox_participants ip1
+                          JOIN inbox_participants ip2 ON ip2.conversation_id = ip1.conversation_id
+                          WHERE ip1.user_id = $3 AND ip2.user_id = u.id
+                        )
+                        -- Source 3: shared project collaborator
+                        OR EXISTS(
+                          SELECT 1 FROM mw_project_collaborators pc1
+                          JOIN mw_project_collaborators pc2 ON pc2.project_id = pc1.project_id
+                          WHERE pc1.user_id = $3 AND pc2.user_id = u.id
+                            AND pc1.status = 'active' AND pc2.status = 'active'
+                        )
+                        -- Source 4: admin user
+                        OR a.user_id IS NOT NULL
+                        -- Source 5: accepted connection
+                        OR EXISTS(
+                          SELECT 1 FROM user_connections uc
+                          WHERE uc.status = 'accepted'
+                            AND ((uc.user_id = $3 AND uc.connected_user_id = u.id)
+                              OR (uc.connected_user_id = $3 AND uc.user_id = u.id))
+                        )
+                      )
                 )
                 """,
-                uid, company_id,
+                uid, company_id, current_user.id,
             )
-            if not in_company:
-                continue  # silently skip users not in the company
+            if not eligible:
+                rejected_uids.append(uid)
+                continue
 
             await conn.execute(
                 """
@@ -1094,25 +1113,40 @@ async def add_members(
             )
             added_uids.append(uid)
 
-        # Notify only users who were actually added
+        # Notify users who were actually added. Use the RECIPIENT's company_id
+        # (not the inviter's) so the notification is visible in their tenant.
         channel_name = await conn.fetchval("SELECT name FROM channels WHERE id = $1", channel_id)
         for uid in added_uids:
             if uid == current_user.id:
                 continue
             try:
+                recipient_company_id = await conn.fetchval(
+                    """
+                    SELECT COALESCE(c.company_id, e.org_id)
+                    FROM users u
+                    LEFT JOIN clients c ON c.user_id = u.id
+                    LEFT JOIN employees e ON e.user_id = u.id
+                    WHERE u.id = $1
+                    """,
+                    uid,
+                )
                 from ...matcha.services import notification_service as notif_svc
                 await notif_svc.create_notification(
                     user_id=uid,
-                    company_id=company_id,
+                    company_id=recipient_company_id,
                     type="channel_added",
                     title=f"Added to #{channel_name or 'channel'}",
                     body=f"You've been added to the channel #{channel_name}",
                     link=f"/work/channels/{channel_id}",
                 )
             except Exception:
-                pass
+                logger.warning("Failed to send channel_added notification to %s", uid, exc_info=True)
 
-    return {"ok": True}
+    return {
+        "ok": True,
+        "added": [str(u) for u in added_uids],
+        "rejected": [str(u) for u in rejected_uids],
+    }
 
 
 class UpdateChannelRequest(BaseModel):

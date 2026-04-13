@@ -268,13 +268,25 @@ async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID,
             )
             title = f"Chat {count + 1}"
 
+        # Seed initial thread state for recruiting projects so the AI
+        # infers skill="project" from the first message instead of "chat"
+        project_row = await conn.fetchrow(
+            "SELECT project_type, title FROM mw_projects WHERE id = $1", project_id
+        )
+        initial_state = '{}'
+        if project_row and project_row["project_type"] == 'recruiting':
+            initial_state = json.dumps({
+                "project_title": project_row["title"],
+                "project_sections": [],
+            })
+
         row = await conn.fetchrow(
             """
-            INSERT INTO mw_threads (company_id, created_by, title, project_id)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO mw_threads (company_id, created_by, title, project_id, current_state)
+            VALUES ($1, $2, $3, $4, $5::jsonb)
             RETURNING id, title, status, version, created_at, updated_at, is_pinned, project_id
             """,
-            company_id, user_id, title, project_id,
+            company_id, user_id, title, project_id, initial_state,
         )
         # Update project timestamp
         await conn.execute(

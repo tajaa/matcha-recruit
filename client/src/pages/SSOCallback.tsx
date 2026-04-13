@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { invalidateMeCache } from "../hooks/useMe";
 
 /**
  * Handles the redirect back from SAML IdP.
@@ -17,6 +18,8 @@ export default function SSOCallback() {
     if (accessToken && refreshToken) {
       localStorage.setItem("matcha_access_token", accessToken);
       localStorage.setItem("matcha_refresh_token", refreshToken);
+      // Clear any stale /auth/me cache from a prior session.
+      invalidateMeCache();
       // Clear the hash so tokens aren't visible in the URL
       window.history.replaceState(null, "", "/sso/callback");
       navigate("/app", { replace: true });

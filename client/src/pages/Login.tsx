@@ -4,6 +4,7 @@ import { Button, Logo } from '../components/ui'
 import { AsciiHalftone } from '../components/AsciiHalftone'
 import { PricingContactModal } from '../components/PricingContactModal'
 import { api } from '../api/client'
+import { invalidateMeCache } from '../hooks/useMe'
 
 type LoginResponse = {
   access_token: string
@@ -52,6 +53,9 @@ export default function Login() {
       const res = await api.post<LoginResponse>('/auth/login', { email, password })
       localStorage.setItem('matcha_access_token', res.access_token)
       localStorage.setItem('matcha_refresh_token', res.refresh_token)
+      // Clear any stale /auth/me cache from a previous session so the new
+      // user's profile/company data is fetched fresh on the next mount.
+      invalidateMeCache()
       navigate(roleRoutes[res.user.role] ?? '/app')
     } catch {
       setError('Invalid email or password')

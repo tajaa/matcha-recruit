@@ -843,7 +843,8 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
             row = await conn.fetchrow(
                 """
                 SELECT id, company_id, created_by, title, status,
-                       current_state, version, is_pinned, node_mode, compliance_mode, linked_offer_letter_id,
+                       current_state, version, is_pinned, node_mode, compliance_mode, payer_mode,
+                       linked_offer_letter_id, project_id,
                        created_at, updated_at
                 FROM mw_threads
                 WHERE id=$1 AND (
@@ -859,7 +860,8 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
             row = await conn.fetchrow(
                 """
                 SELECT id, company_id, created_by, title, status,
-                       current_state, version, is_pinned, node_mode, compliance_mode, linked_offer_letter_id,
+                       current_state, version, is_pinned, node_mode, compliance_mode, payer_mode,
+                       linked_offer_letter_id, project_id,
                        created_at, updated_at
                 FROM mw_threads
                 WHERE id=$1 AND company_id=$2

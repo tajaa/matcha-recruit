@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
+import { invalidateMeCache } from '../hooks/useMe'
 
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -47,6 +48,8 @@ export default function BetaRegister() {
       }
       localStorage.setItem('matcha_access_token', data.access_token)
       localStorage.setItem('matcha_refresh_token', data.refresh_token)
+      // Drop any cached /auth/me from a previous session.
+      invalidateMeCache()
       navigate('/work')
     } catch {
       setError('Something went wrong. Please try again.')

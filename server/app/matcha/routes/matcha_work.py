@@ -1054,23 +1054,54 @@ async def _apply_ai_updates_and_operations(
             current_state = result["current_state"]
             changed = changed or current_version != initial_version
 
-            # Auto-sync AI-generated project_sections to the project's sections table
+            # Auto-sync AI-generated project_sections to the project's sections table.
+            # Match by title (case-insensitive) so regenerations update existing
+            # sections in place instead of appending duplicates. Sections added
+            # manually by the user keep their own titles and are preserved.
             if project_id and "project_sections" in safe_updates:
                 from ..services import project_service as proj_svc
                 new_sections = safe_updates.get("project_sections") or []
                 if new_sections:
                     try:
-                        existing = await proj_svc.get_sections(project_id)
-                        existing_contents = {s.get("content", "").strip() for s in existing}
+                        existing = list(await proj_svc.get_sections(project_id))
+                        existing_by_title: dict[str, int] = {}
+                        for idx, s in enumerate(existing):
+                            title_key = (s.get("title") or "").strip().lower()
+                            if title_key and title_key not in existing_by_title:
+                                existing_by_title[title_key] = idx
+                        changed_sections = False
                         for section in new_sections:
+                            if not isinstance(section, dict):
+                                continue
                             content = (section.get("content") or "").strip()
-                            if content and content not in existing_contents:
-                                await proj_svc.add_section(project_id, {
-                                    "title": section.get("title"),
+                            if not content:
+                                continue
+                            title = (section.get("title") or "").strip()
+                            title_key = title.lower()
+                            existing_idx = existing_by_title.get(title_key) if title_key else None
+                            if existing_idx is not None:
+                                # Update existing section in place
+                                merged = {**existing[existing_idx], "content": content}
+                                if title:
+                                    merged["title"] = title
+                                existing[existing_idx] = merged
+                                changed_sections = True
+                            else:
+                                # Append a new section with a fresh id
+                                new_entry = {
+                                    "id": os.urandom(8).hex(),
+                                    "title": title or None,
                                     "content": content,
-                                })
+                                    "source_message_id": None,
+                                }
+                                existing.append(new_entry)
+                                if title_key:
+                                    existing_by_title[title_key] = len(existing) - 1
+                                changed_sections = True
+                        if changed_sections:
+                            await proj_svc._update_sections(project_id, existing)
                     except Exception:
-                        logger.warning("Failed to sync project_sections to project %s", project_id)
+                        logger.warning("Failed to sync project_sections to project %s", project_id, exc_info=True)
 
             inferred = _infer_skill_from_state(current_state)
             if inferred == "offer_letter":
