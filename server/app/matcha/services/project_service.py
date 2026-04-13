@@ -11,15 +11,28 @@ from ...database import get_connection
 logger = logging.getLogger(__name__)
 
 
-async def create_project(company_id: UUID, user_id: UUID, title: str = "Untitled Project", project_type: str = "general") -> dict:
+async def create_project(
+    company_id: UUID,
+    user_id: UUID,
+    title: str = "Untitled Project",
+    project_type: str = "general",
+    hiring_client_id: Optional[UUID] = None,
+) -> dict:
     async with get_connection() as conn:
+        if hiring_client_id is not None:
+            owner_check = await conn.fetchval(
+                "SELECT company_id FROM recruiting_clients WHERE id = $1",
+                hiring_client_id,
+            )
+            if owner_check != company_id:
+                raise ValueError("Hiring client does not belong to this workspace")
         row = await conn.fetchrow(
             """
-            INSERT INTO mw_projects (company_id, created_by, title, project_type)
-            VALUES ($1, $2, $3, $4)
+            INSERT INTO mw_projects (company_id, created_by, title, project_type, hiring_client_id)
+            VALUES ($1, $2, $3, $4, $5)
             RETURNING *
             """,
-            company_id, user_id, title, project_type,
+            company_id, user_id, title, project_type, hiring_client_id,
         )
         # Seed initial thread state for recruiting projects so the AI
         # infers skill="project" from the first message instead of "chat"
@@ -66,12 +79,18 @@ def _parse_project(row) -> dict:
 async def get_project(project_id: UUID, company_id: UUID, user_id: UUID | None = None) -> Optional[dict]:
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT * FROM mw_projects WHERE id = $1 AND company_id = $2",
+            """
+            SELECT p.*, rc.name AS hiring_client_name
+            FROM mw_projects p
+            LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
+            WHERE p.id = $1 AND p.company_id = $2
+            """,
             project_id, company_id,
         )
         if not row:
             return None
         project = _parse_project(row)
+        project["hiring_client_name"] = row["hiring_client_name"]
 
         chats = await conn.fetch(
             """
@@ -98,7 +117,12 @@ async def get_project(project_id: UUID, company_id: UUID, user_id: UUID | None =
     return project
 
 
-async def list_projects(company_id: Optional[UUID], status: Optional[str] = None, user_id: Optional[UUID] = None) -> list[dict]:
+async def list_projects(
+    company_id: Optional[UUID],
+    status: Optional[str] = None,
+    user_id: Optional[UUID] = None,
+    hiring_client_id: Optional[UUID] = None,
+) -> list[dict]:
     """List projects. If user_id is provided, list via collaborator table (admin path)."""
     async with get_connection() as conn:
         if user_id:
@@ -127,38 +151,41 @@ async def list_projects(company_id: Optional[UUID], status: Optional[str] = None
                     """,
                     user_id,
                 )
-        elif status:
-            rows = await conn.fetch(
-                """
-                SELECT p.*, (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
-                FROM mw_projects p
-                WHERE p.company_id = $1 AND p.status = $2
-                ORDER BY p.updated_at DESC
-                """,
-                company_id, status,
-            )
         else:
+            filters = ["p.company_id = $1"]
+            args: list = [company_id]
+            if status:
+                args.append(status)
+                filters.append(f"p.status = ${len(args)}")
+            if hiring_client_id is not None:
+                args.append(hiring_client_id)
+                filters.append(f"p.hiring_client_id = ${len(args)}")
             rows = await conn.fetch(
-                """
-                SELECT p.*, (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
+                f"""
+                SELECT p.*,
+                       rc.name AS hiring_client_name,
+                       (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
                 FROM mw_projects p
-                WHERE p.company_id = $1
+                LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
+                WHERE {' AND '.join(filters)}
                 ORDER BY p.updated_at DESC
                 """,
-                company_id,
+                *args,
             )
     results = []
     for r in rows:
         p = _parse_project(r)
         if "collaborator_role" in r.keys():
             p["collaborator_role"] = r["collaborator_role"]
+        if "hiring_client_name" in r.keys():
+            p["hiring_client_name"] = r["hiring_client_name"]
         results.append(p)
     return results
 
 
 async def update_project(project_id: UUID, updates: dict) -> dict:
     async with get_connection() as conn:
-        allowed = {"title", "is_pinned", "status"}
+        allowed = {"title", "is_pinned", "status", "hiring_client_id"}
         sets = []
         vals = []
         idx = 1

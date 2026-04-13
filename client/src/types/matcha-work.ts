@@ -111,8 +111,22 @@ export interface MWProject {
   chats?: MWThread[]
   collaborator_role?: 'owner' | 'collaborator'
   collaborators?: ProjectCollaborator[]
+  hiring_client_id?: string | null
+  hiring_client_name?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface RecruitingClient {
+  id: string
+  name: string
+  website?: string | null
+  logo_url?: string | null
+  notes?: string | null
+  created_at: string
+  updated_at: string
+  archived_at?: string | null
+  project_count?: number
 }
 
 export interface AgentEmail {

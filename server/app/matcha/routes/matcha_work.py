@@ -2493,6 +2493,7 @@ async def _verify_project_access(project_id: UUID, current_user: CurrentUser) ->
 @router.get("/projects")
 async def list_projects_endpoint(
     status: Optional[str] = Query(None, pattern="^(active|archived)$"),
+    hiring_client_id: Optional[UUID] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """List all projects for the current user."""
@@ -2502,7 +2503,7 @@ async def list_projects_endpoint(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
-    return await proj_svc.list_projects(company_id, status)
+    return await proj_svc.list_projects(company_id, status, hiring_client_id=hiring_client_id)
 
 
 @router.post("/projects", status_code=201)
@@ -2517,7 +2518,112 @@ async def create_project_endpoint(
         raise HTTPException(status_code=400, detail="No company associated")
     title = body.get("title", "Untitled Project")
     project_type = body.get("project_type", "general")
-    return await proj_svc.create_project(company_id, current_user.id, title, project_type)
+    hiring_client_id_raw = body.get("hiring_client_id")
+    hiring_client_id = UUID(hiring_client_id_raw) if hiring_client_id_raw else None
+    try:
+        return await proj_svc.create_project(
+            company_id, current_user.id, title, project_type, hiring_client_id=hiring_client_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Recruiting clients (hiring clients a recruiter works for) ──
+
+
+@router.get("/recruiting-clients")
+async def list_recruiting_clients_endpoint(
+    include_archived: bool = Query(False),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import recruiting_client_service as rc_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return []
+    return await rc_svc.list_clients(company_id, include_archived=include_archived)
+
+
+@router.post("/recruiting-clients", status_code=201)
+async def create_recruiting_client_endpoint(
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import recruiting_client_service as rc_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Name required")
+    return await rc_svc.create_client(
+        company_id,
+        current_user.id,
+        name=name,
+        website=body.get("website"),
+        logo_url=body.get("logo_url"),
+        notes=body.get("notes"),
+    )
+
+
+@router.get("/recruiting-clients/{client_id}")
+async def get_recruiting_client_endpoint(
+    client_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import recruiting_client_service as rc_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    rc = await rc_svc.get_client(client_id, company_id)
+    if not rc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return rc
+
+
+@router.patch("/recruiting-clients/{client_id}")
+async def update_recruiting_client_endpoint(
+    client_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import recruiting_client_service as rc_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    rc = await rc_svc.update_client(client_id, company_id, body)
+    if not rc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return rc
+
+
+@router.post("/recruiting-clients/{client_id}/archive")
+async def archive_recruiting_client_endpoint(
+    client_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import recruiting_client_service as rc_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    ok = await rc_svc.archive_client(client_id, company_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"status": "archived"}
+
+
+@router.post("/recruiting-clients/{client_id}/unarchive")
+async def unarchive_recruiting_client_endpoint(
+    client_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import recruiting_client_service as rc_svc
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    ok = await rc_svc.unarchive_client(client_id, company_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"status": "active"}
 
 
 @router.get("/projects/{project_id}")
@@ -2536,9 +2642,18 @@ async def update_project_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Update project title, pin, or status."""
+    """Update project title, pin, status, or hiring client."""
     from ..services import project_service as proj_svc
+    from ..services import recruiting_client_service as rc_svc
     await _verify_project_access(project_id, current_user)
+    if "hiring_client_id" in body and body["hiring_client_id"] is not None:
+        company_id = await get_client_company_id(current_user)
+        try:
+            body["hiring_client_id"] = UUID(body["hiring_client_id"])
+        except (ValueError, TypeError):
+            raise HTTPException(status_code=400, detail="Invalid hiring_client_id")
+        if company_id is None or not await rc_svc.get_client(body["hiring_client_id"], company_id):
+            raise HTTPException(status_code=400, detail="Hiring client does not belong to this workspace")
     return await proj_svc.update_project(project_id, body)
 
 

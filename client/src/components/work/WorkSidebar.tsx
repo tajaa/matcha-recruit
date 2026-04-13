@@ -8,6 +8,8 @@ import type { MWThread, MWProject } from '../../types/matcha-work'
 import { getUnreadCount } from '../../api/inbox'
 import { useMe } from '../../hooks/useMe'
 import CreateChannelModal from '../channels/CreateChannelModal'
+import HiringClientPickerModal from '../matcha-work/HiringClientPickerModal'
+import type { RecruitingClient } from '../../types/matcha-work'
 
 interface Props {
   open: boolean
@@ -19,7 +21,7 @@ type RenameItem = { type: 'channel' | 'project' | 'thread'; id: string; name: st
 export default function WorkSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { me, hasFeature } = useMe()
+  const { me, hasFeature, isPersonal } = useMe()
   const canCreateChannel = ['client', 'admin', 'individual'].includes(me?.user?.role ?? '')
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
@@ -29,6 +31,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [pendingConnections, setPendingConnections] = useState(0)
   const [showCreateChannel, setShowCreateChannel] = useState(false)
   const [showProjectTypePicker, setShowProjectTypePicker] = useState(false)
+  const [showHiringClientPicker, setShowHiringClientPicker] = useState(false)
 
   const [channelsOpen, setChannelsOpen] = useState(true)
   const [projectsOpen, setProjectsOpen] = useState(true)
@@ -94,6 +97,10 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
   async function handleCreateProject(type: 'general' | 'presentation' | 'recruiting' = 'general') {
     setShowProjectTypePicker(false)
+    if (type === 'recruiting' && isPersonal) {
+      setShowHiringClientPicker(true)
+      return
+    }
     const titles: Record<string, string> = {
       general: 'New Project',
       presentation: 'New Presentation',
@@ -101,6 +108,16 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     }
     try {
       const project = await createProjectNew(titles[type], type)
+      setProjects((prev) => [project, ...prev])
+      navigate(`/work/projects/${project.id}`)
+    } catch {}
+  }
+
+  async function handlePickHiringClient(client: RecruitingClient | null) {
+    setShowHiringClientPicker(false)
+    try {
+      const title = client ? `New role at ${client.name}` : 'New Job Posting'
+      const project = await createProjectNew(title, 'recruiting', client?.id ?? null)
       setProjects((prev) => [project, ...prev])
       navigate(`/work/projects/${project.id}`)
     } catch {}
@@ -364,37 +381,68 @@ export default function WorkSidebar({ open, onToggle }: Props) {
                 {projects.length === 0 && (
                   <p className="px-2.5 py-1 text-[11px] text-zinc-600">No projects</p>
                 )}
-                {projects.slice(0, 10).map((p) => (
-                  <div
-                    key={p.id}
-                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                      isActive(`/work/projects/${p.id}`)
-                        ? 'bg-zinc-800/60 text-white font-medium'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
-                    }`}
-                  >
-                    <FolderOpen size={14} className="text-[#ce9178] shrink-0" strokeWidth={1.6} />
-                    {renaming?.type === 'project' && renaming.id === p.id ? (
-                      renderRenameInput()
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => navigate(`/work/projects/${p.id}`)}
-                          className="flex-1 min-w-0 text-left truncate"
-                        >
-                          {p.title}
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); startRename('project', p.id, p.title) }}
-                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
-                          title="Rename"
-                        >
-                          <Pencil size={11} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
+                {(() => {
+                  const renderProjectRow = (p: MWProject) => (
+                    <div
+                      key={p.id}
+                      className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                        isActive(`/work/projects/${p.id}`)
+                          ? 'bg-zinc-800/60 text-white font-medium'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                      }`}
+                    >
+                      <FolderOpen size={14} className="text-[#ce9178] shrink-0" strokeWidth={1.6} />
+                      {renaming?.type === 'project' && renaming.id === p.id ? (
+                        renderRenameInput()
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => navigate(`/work/projects/${p.id}`)}
+                            className="flex-1 min-w-0 text-left truncate"
+                          >
+                            {p.title}
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); startRename('project', p.id, p.title) }}
+                            className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                            title="Rename"
+                          >
+                            <Pencil size={11} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )
+
+                  if (!isPersonal) {
+                    return projects.slice(0, 10).map(renderProjectRow)
+                  }
+
+                  // Personal: group by hiring client (Unassigned last)
+                  const groups = new Map<string, { name: string; items: MWProject[] }>()
+                  for (const p of projects) {
+                    const key = p.hiring_client_id || '__unassigned'
+                    const name = p.hiring_client_name || 'Unassigned'
+                    if (!groups.has(key)) groups.set(key, { name, items: [] })
+                    groups.get(key)!.items.push(p)
+                  }
+                  const orderedKeys = Array.from(groups.keys()).sort((a, b) => {
+                    if (a === '__unassigned') return 1
+                    if (b === '__unassigned') return -1
+                    return groups.get(a)!.name.localeCompare(groups.get(b)!.name)
+                  })
+                  return orderedKeys.map((key) => {
+                    const g = groups.get(key)!
+                    return (
+                      <div key={key}>
+                        <p className="px-2.5 pt-1 pb-0.5 text-[10px] uppercase tracking-wider text-zinc-600 truncate">
+                          {g.name}
+                        </p>
+                        {g.items.map(renderProjectRow)}
+                      </div>
+                    )
+                  })
+                })()}
               </div>
             )}
           </div>
@@ -554,6 +602,13 @@ export default function WorkSidebar({ open, onToggle }: Props) {
             </div>
           </div>
         </div>
+      )}
+
+      {showHiringClientPicker && (
+        <HiringClientPickerModal
+          onClose={() => setShowHiringClientPicker(false)}
+          onPicked={handlePickHiringClient}
+        />
       )}
     </>
   )
