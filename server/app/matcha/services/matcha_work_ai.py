@@ -651,6 +651,55 @@ class GeminiProvider(MatchaWorkAIProvider):
                 operation="none",
             )
 
+        # Gemini sometimes returns a list-wrapped response (e.g. [{...}]) even
+        # though the prompt asks for an object. Try to unwrap or salvage.
+        if isinstance(parsed, list):
+            # Case 1: single-item list containing the expected response object
+            if len(parsed) == 1 and isinstance(parsed[0], dict) and (
+                "mode" in parsed[0] or "skill" in parsed[0] or "reply" in parsed[0]
+            ):
+                parsed = parsed[0]
+            # Case 2: bare list of section-shaped dicts — treat as project_sections
+            elif (
+                inferred_skill == "project"
+                and all(isinstance(item, dict) and ("title" in item or "content" in item) for item in parsed)
+            ):
+                logger.info("Salvaging bare section list as project_sections update")
+                parsed = {
+                    "mode": "skill",
+                    "skill": "project",
+                    "operation": "update",
+                    "confidence": 0.8,
+                    "updates": {"project_sections": parsed},
+                    "reply": "I've drafted the posting sections. Review them in the panel on the right.",
+                }
+            else:
+                logger.warning(
+                    "Gemini returned list response, cannot unwrap: %s",
+                    raw_text[:300],
+                )
+                return AIResponse(
+                    assistant_reply="I processed your request.",
+                    structured_update=None,
+                    mode="general",
+                    skill="none",
+                    operation="none",
+                )
+
+        if not isinstance(parsed, dict):
+            logger.warning(
+                "Gemini returned non-dict response (%s): %s",
+                type(parsed).__name__,
+                raw_text[:300],
+            )
+            return AIResponse(
+                assistant_reply="I processed your request.",
+                structured_update=None,
+                mode="general",
+                skill="none",
+                operation="none",
+            )
+
         reply = parsed.get("reply", "Done.")
         raw_updates = parsed.get("updates", {})
         if isinstance(raw_updates, dict):
