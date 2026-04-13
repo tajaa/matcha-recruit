@@ -4442,6 +4442,22 @@ async def init_db():
             """,
             json.dumps({"compliance": 0.30, "incidents": 0.25, "er_cases": 0.25, "workforce": 0.15, "legislative": 0.05})
         )
+        await conn.execute(
+            """
+            INSERT INTO platform_settings (key, value)
+            VALUES ('landing_media', $1::jsonb)
+            ON CONFLICT (key) DO NOTHING
+            """,
+            json.dumps({
+                "hero_video_url": None,
+                "hero_poster_url": None,
+                "hero_headline": "Hiring, Perfected.",
+                "hero_subcopy": "Today's leading teams trust Matcha to elevate recruiting, HR, and compliance.",
+                "sizzle_videos": [],
+                "customer_logos": [],
+                "testimonials": [],
+            })
+        )
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS risk_assessment_snapshots (
                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

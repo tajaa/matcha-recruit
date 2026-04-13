@@ -1,268 +1,391 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
 
-import { LinkButton } from "../components/ui";
-import LandingNav from "./landing/LandingNav";
-import { AsciiHalftone } from "../components/AsciiHalftone";
-import { GlitchText } from "../components/GlitchText";
-import { PricingContactModal } from "../components/PricingContactModal";
-import { JurisdictionCascade } from "../components/landing/JurisdictionCascade";
-import { SignalMonitor as _SignalMonitor } from "../components/landing/SignalMonitor";
-import { MatchaWorkMockup } from "../components/landing/MatchaWorkMockup";
-import { MonteCarloDistribution } from "../components/landing/MonteCarloDistribution";
-import { TimelineConstructor } from "../components/landing/TimelineConstructor";
-import { PatternGrid } from "../components/landing/PatternGrid";
-import { RadarChart } from "../components/landing/RadarChart";
+import MarketingNav from './landing/MarketingNav'
+import { ComplianceHeroAnimation } from './landing/ComplianceHeroAnimation'
+import { PricingContactModal } from '../components/PricingContactModal'
+import { useLandingMedia } from '../hooks/useLandingMedia'
+import type { LandingMedia, LandingSizzleVideo, LandingCustomerLogo, LandingTestimonial } from '../api/client'
 
-import { FeatureSectionItem } from "../components/landing/FeatureSectionItem";
-import { ComplianceTicker } from "../components/landing/ComplianceTicker";
+const INK = 'var(--color-ivory-ink)'
+const BG = 'var(--color-ivory-bg)'
+const MUTED = 'var(--color-ivory-muted)'
+const LINE = 'var(--color-ivory-line)'
+const DISPLAY = 'var(--font-display)'
 
-const ParticleSphere = lazy(() => import("../components/ParticleSphere"));
-
-/* ── Feature Section Data ─────────────────────────────────────── */
-const SECTIONS = [
+const DEFAULT_SIZZLES: LandingSizzleVideo[] = [
   {
-    category: "COMPLIANCE & LEGAL",
-    accent: "#10b981",
-    title: "Compliance Engine",
-    desc: "Agentic jurisdiction research across federal, state, and local regulatory frameworks. The system walks through regulatory logic step by step — citing sources, applying preemption rules, and surfacing gaps before they become audit findings or enforcement actions.",
-    graphic: JurisdictionCascade,
-  },
-  // Legislative Tracker — muted for now
-  // {
-  //   category: 'COMPLIANCE & LEGAL',
-  //   accent: '#f59e0b',
-  //   title: 'Legislative Tracker',
-  //   desc: 'Continuous monitoring of regulatory changes with pattern detection for coordinated legislative activity across jurisdictions. Real-time signal processing flags relevant changes before they become compliance gaps.',
-  //   graphic: _SignalMonitor,
-  // },
-  {
-    category: "COMPLIANCE & LEGAL",
-    accent: "#10b981",
-    title: "Risk Assessment",
-    desc: "5-dimension live scoring with Monte Carlo simulation across 10,000 iterations. Statistical anomaly detection on time-series metrics with NAICS-benchmarked peer comparison — so you know exactly where you stand relative to your industry before regulators tell you.",
-    graphic: MonteCarloDistribution,
+    id: 'recruiting',
+    title: 'Recruiting, reimagined.',
+    caption: 'Post a role, screen candidates, and surface shortlists in minutes — not weeks.',
+    url: null,
   },
   {
-    category: "INVESTIGATIONS & RISK",
-    accent: "#f59e0b",
-    title: "ER Copilot",
-    desc: "Employment relations case management that catches discrepancies human reviewers miss. Automated timeline construction, document analysis, and encrypted PDF reports ready for counsel — turning weeks of investigation prep into hours.",
-    graphic: TimelineConstructor,
+    id: 'compliance',
+    title: 'Compliance, continuous.',
+    caption: 'Jurisdiction-aware monitoring across federal, state, and local regulations.',
+    url: null,
   },
   {
-    category: "INVESTIGATIONS & RISK",
-    accent: "#f59e0b",
-    title: "Incident Reports",
-    desc: "OSHA 300/300A auto-generation, anonymous reporting, and cross-location pattern detection. Surface systemic issues before they become pattern-or-practice investigations — the kind that led to DOJ settlements at companies like National Mentor Holdings.",
-    graphic: PatternGrid,
+    id: 'er',
+    title: 'People operations, elevated.',
+    caption: 'Employee relations, investigations, and HR ops — all in one workspace.',
+    url: null,
   },
-  {
-    category: "INVESTIGATIONS & RISK",
-    accent: "#f59e0b",
-    title: "Pre-Termination Intel",
-    desc: "9-dimension risk assessment scanning legal, compliance, and organizational factors before any separation. The system connects protected activity, pending complaints, and regulatory exposure that decision-makers typically can't see — generating a counsel-ready memo before the decision is made, not after the filing.",
-    graphic: RadarChart,
-  },
-  {
-    category: "COLLABORATION",
-    accent: "#10b981",
-    title: "Matcha Work",
-    desc: "Secure internal collaboration where HR, legal, compliance, and operations share context in real time. Threaded channels, direct messaging, and document sharing — so the cross-functional decisions that create or prevent liability happen with full visibility, not in disconnected email chains.",
-    graphic: MatchaWorkMockup,
-  },
-];
+]
 
 export default function Landing() {
-  const [isPricingOpen, setIsPricingOpen] = useState(false);
+  const [isPricingOpen, setIsPricingOpen] = useState(false)
+  const { data } = useLandingMedia()
+
+  const sizzles = data.sizzle_videos.length > 0 ? data.sizzle_videos : DEFAULT_SIZZLES
 
   return (
-    <div className="relative bg-zinc-900 text-zinc-100 overflow-x-hidden md:snap-y md:snap-proximity md:h-screen md:overflow-y-auto">
-      <PricingContactModal
-        isOpen={isPricingOpen}
-        onClose={() => setIsPricingOpen(false)}
-      />
-      <div className="relative z-10">
-        {/* Nav */}
-        <LandingNav onPricingClick={() => setIsPricingOpen(true)} />
+    <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
+      <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
+      <MarketingNav onPricingClick={() => setIsPricingOpen(true)} />
 
-        {/* Compliance Ticker */}
-        <ComplianceTicker />
+      <Hero data={data} />
 
-        {/* Hero */}
-        <div className="relative pt-[90px] sm:pt-[96px] md:snap-start min-h-[100svh]">
-          <AsciiHalftone />
-          <section className="relative max-w-7xl mx-auto px-4 sm:px-8 min-h-[100svh] flex items-center py-20 sm:py-0">
-            {/* System tag */}
-            <div className="absolute top-8 left-8 text-[11px] text-zinc-600 border border-zinc-700/40 px-3 py-1.5 rounded-sm">
-              SYSTEM CORE // OFFLINE MODE
-            </div>
-
-            {/* Left content */}
-            <div className="relative z-10 max-w-xl">
-              <h1 className="font-[Orbitron] text-4xl sm:text-5xl lg:text-7xl font-black uppercase tracking-tight leading-[0.95]">
-                Agentic
-              </h1>
-              <GlitchText
-                text="Intelligence."
-                cycleWords={[
-                  "Compliance.",
-                  "Risk Assessment.",
-                  "Risk Management.",
-                ]}
-                className="block text-4xl sm:text-5xl lg:text-7xl italic font-light tracking-tight leading-[1.1] mt-1"
-              />
-              <p className="mt-8 text-lg sm:text-xl text-zinc-400 font-light">
-                Increase your{" "}
-                <span className="text-amber-500 font-normal">
-                  signal to noise ratio
-                </span>
-                .
-              </p>
-              <div className="mt-10">
-                <LinkButton
-                  to="/login"
-                  variant="secondary"
-                  size="lg"
-                  className="uppercase border border-zinc-600 hover:border-zinc-400 px-10"
-                >
-                  Initialize Account
-                </LinkButton>
-              </div>
-            </div>
-
-            {/* Particle Sphere */}
-            <div className="absolute right-0 top-0 bottom-0 w-[60%] hidden lg:flex items-center justify-center">
-              <Suspense
-                fallback={
-                  <div className="text-zinc-600 text-[8px] uppercase animate-pulse">
-                    Booting Neural Sphere...
-                  </div>
-                }
-              >
-                <ParticleSphere className="w-full h-[70vh] opacity-80" />
-              </Suspense>
-            </div>
-
-            {/* Scroll Down Chevron */}
-            <button
-              onClick={() => {
-                document
-                  .getElementById("features")
-                  ?.scrollIntoView({ behavior: "smooth" });
-              }}
-              className="absolute bottom-8 left-1/2 -translate-x-1/2 flex flex-col items-center gap-1 group cursor-pointer z-10"
-              aria-label="Scroll down"
-            >
-              <span className="text-[9px] text-zinc-600 uppercase group-hover:text-zinc-400 transition-colors duration-300">
-                Explore
-              </span>
-              <svg
-                width="24"
-                height="24"
-                viewBox="0 0 24 24"
-                fill="none"
-                className="text-zinc-500 group-hover:text-emerald-400 transition-colors duration-300"
-                style={{ animation: "chevron-bounce 2s ease-in-out infinite" }}
-              >
-                <path
-                  d="M6 9l6 6 6-6"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-            </button>
-          </section>
-        </div>
-
-        {/* ── Global keyframes ──────────────────────────────────── */}
-        <style>{`
-          @keyframes ripple-expand {
-            0% { transform: translate(-50%,-50%) scale(0.5); opacity: 0.3; }
-            100% { transform: translate(-50%,-50%) scale(1.5); opacity: 0; }
-          }
-          @keyframes chevron-bounce {
-            0%, 100% { transform: translateY(0); opacity: 0.6; }
-            50% { transform: translateY(6px); opacity: 1; }
-          }
-        `}</style>
-
-        {/* ── Feature Sections ─────────────────────────────────── */}
-        {SECTIONS.map((section, idx) => (
-          <FeatureSectionItem key={section.title} section={section} idx={idx} />
+      <main>
+        {sizzles.map((s, i) => (
+          <ProductSizzle key={s.id} sizzle={s} reverse={i % 2 === 1} />
         ))}
 
-        {/* ── About / Elevator Pitch ───────────────────────────── */}
-        <section
-          id="about"
-          className="relative min-h-[100svh] md:min-h-screen flex items-center md:snap-start border-t border-zinc-700/40 px-4 sm:px-8 py-20 sm:py-24"
-        >
-          <div className="max-w-4xl mx-auto" style={{ fontFamily: "'Inter', sans-serif" }}>
-            <p className="text-xs font-medium tracking-[0.3em] uppercase text-zinc-500 mb-8">
-              At The Core
-            </p>
-            <h2 className="text-2xl sm:text-3xl lg:text-5xl font-semibold text-zinc-100 leading-[1.2] mb-8 sm:mb-10">
-              Regulated companies don't fail from one bad decision — they
-              collapse under{" "}
-              <span className="text-amber-500">disconnected gaps</span> that
-              compound into unsurvivable events.
-            </h2>
-            <div className="space-y-5 mb-10 sm:mb-12">
-              <p className="text-base sm:text-lg text-zinc-400 leading-relaxed">
-                Compliance data, investigation records, credential tracking, and
-                HR decisions all live in separate systems. The people making
-                termination decisions can't see protected activity. The people
-                tracking credentials can't see compliance implications. Every one
-                of these gaps is a future claim nobody knows exists yet.
-              </p>
-              <p className="text-base sm:text-lg text-zinc-400 leading-relaxed">
-                Matcha closes every one of those gaps. One system where compliance
-                obligations, investigations, credentials, policies, and workforce
-                decisions are connected — so when someone is about to make a
-                decision that creates liability, the system catches it before it
-                becomes a filing.
-              </p>
-            </div>
-            <div className="h-px w-32 bg-gradient-to-r from-amber-500/60 to-transparent mb-10" />
-            <p className="text-sm text-zinc-500 max-w-2xl leading-relaxed mb-12" style={{ fontStyle: 'italic' }}>
-              The companies that survive in regulated industries aren't the ones
-              with the best lawyers. They're the ones whose systems make
-              catastrophic mistakes structurally improbable.
-            </p>
-            <a
-              href="/login"
-              className="inline-block uppercase text-sm font-medium tracking-[0.15em] px-10 py-3 border border-zinc-600 hover:border-zinc-400 text-zinc-300 hover:text-zinc-100 transition-colors duration-300 rounded-sm"
-            >
-              Initialize Account
-            </a>
-          </div>
-        </section>
+        <Testimonials testimonials={data.testimonials} />
+      </main>
 
-        {/* Footer */}
-        <footer className="border-t border-zinc-700/50 py-6 px-8 md:snap-start">
-          <div className="flex items-center justify-between max-w-7xl mx-auto">
-            <p className="text-[10px] text-zinc-600 uppercase">
-              &copy; {new Date().getFullYear()} Matcha Systems Inc.
-              {import.meta.env.VITE_LANDING_BUILD_VERSION ? (
-                <span className="ml-2 text-zinc-700">
-                  build {import.meta.env.VITE_LANDING_BUILD_VERSION}
-                </span>
-              ) : null}
+      <Footer />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Hero
+// ---------------------------------------------------------------------------
+
+function Hero({ data }: { data: LandingMedia }) {
+  if (data.hero_video_url) return <VideoHero data={data} />
+  return <AnimationHero data={data} />
+}
+
+// Full-bleed cinematic video with overlaid text
+function VideoHero({ data }: { data: LandingMedia }) {
+  return (
+    <section className="relative w-full h-[100svh] min-h-[640px] overflow-hidden" style={{ backgroundColor: '#1a1a1a' }}>
+      <video
+        className="absolute inset-0 w-full h-full object-cover"
+        src={data.hero_video_url ?? undefined}
+        poster={data.hero_poster_url ?? undefined}
+        autoPlay
+        muted
+        loop
+        playsInline
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(90deg, rgba(10,10,8,0.72) 0%, rgba(10,10,8,0.45) 35%, rgba(10,10,8,0) 70%)',
+        }}
+      />
+      <div className="relative z-10 h-full max-w-[1440px] mx-auto px-6 sm:px-10 flex flex-col">
+        <div className="flex-1 flex items-center">
+          <div className="max-w-2xl pt-24">
+            <h1
+              className="text-white leading-[0.95] tracking-tight"
+              style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: 'clamp(3rem, 7vw, 6rem)' }}
+            >
+              {data.hero_headline}
+            </h1>
+            <p className="mt-6 text-white/80 max-w-xl" style={{ fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.5 }}>
+              {data.hero_subcopy}
             </p>
-            <div className="flex gap-6">
-              {["Terms", "Privacy", "Status"].map((link) => (
-                <span
-                  key={link}
-                  className="text-[10px] text-zinc-600 uppercase hover:text-zinc-400 cursor-pointer transition-colors"
-                >
-                  {link}
-                </span>
-              ))}
+            <div className="mt-10">
+              <Link
+                to="/login"
+                className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium bg-white hover:bg-white/90 transition-colors"
+                style={{ color: INK }}
+              >
+                Request a Demo
+              </Link>
             </div>
           </div>
-        </footer>
+        </div>
+        {data.customer_logos.length > 0 && (
+          <div className="pb-10">
+            <LogoStrip logos={data.customer_logos} dark />
+          </div>
+        )}
       </div>
+    </section>
+  )
+}
+
+// Ivory hero with compliance dashboard animation on the right
+function AnimationHero({ data }: { data: LandingMedia }) {
+  return (
+    <section
+      className="relative w-full min-h-[100svh] overflow-hidden"
+      style={{ backgroundColor: BG }}
+    >
+      {/* Subtle warm radial glow from the animation side */}
+      <div
+        className="absolute inset-0 pointer-events-none"
+        style={{
+          background:
+            'radial-gradient(ellipse 60% 80% at 80% 50%, rgba(31,29,26,0.06) 0%, rgba(31,29,26,0) 60%)',
+        }}
+      />
+
+      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-28 pb-16 min-h-[100svh] flex flex-col">
+        <div className="flex-1 grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-16 items-center">
+          {/* Left: text */}
+          <div className="max-w-xl">
+            <div
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8"
+              style={{
+                backgroundColor: 'rgba(31,29,26,0.06)',
+                color: MUTED,
+              }}
+            >
+              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
+              <span className="text-[11px] uppercase tracking-wider font-medium">
+                Compliance in motion
+              </span>
+            </div>
+            <h1
+              className="leading-[0.95] tracking-tight"
+              style={{
+                fontFamily: DISPLAY,
+                fontWeight: 400,
+                color: INK,
+                fontSize: 'clamp(2.75rem, 6vw, 5.25rem)',
+              }}
+            >
+              {data.hero_headline}
+            </h1>
+            <p
+              className="mt-6 max-w-lg"
+              style={{ color: MUTED, fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.55 }}
+            >
+              {data.hero_subcopy}
+            </p>
+            <div className="mt-10 flex items-center gap-4">
+              <Link
+                to="/login"
+                className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
+                style={{ backgroundColor: INK, color: BG }}
+              >
+                Request a Demo
+              </Link>
+              <Link
+                to="/matcha-work"
+                className="inline-flex items-center h-12 text-[15px] transition-opacity hover:opacity-60"
+                style={{ color: INK }}
+              >
+                See the platform →
+              </Link>
+            </div>
+          </div>
+
+          {/* Right: compliance animation */}
+          <div className="relative flex justify-center lg:justify-end">
+            <ComplianceHeroAnimation />
+          </div>
+        </div>
+
+        {/* Logo strip */}
+        {data.customer_logos.length > 0 && (
+          <div className="pt-10 mt-10 border-t" style={{ borderColor: LINE }}>
+            <LogoStrip logos={data.customer_logos} />
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function LogoStrip({ logos, dark = false }: { logos: LandingCustomerLogo[]; dark?: boolean }) {
+  return (
+    <div className="flex items-center gap-10 sm:gap-14 flex-wrap opacity-70">
+      {logos.map((logo) => (
+        <img
+          key={logo.name}
+          src={logo.url}
+          alt={logo.name}
+          className="h-6 sm:h-7 w-auto object-contain"
+          style={{
+            filter: dark
+              ? 'brightness(0) invert(1)'
+              : 'brightness(0) saturate(100%) invert(10%)',
+          }}
+        />
+      ))}
     </div>
-  );
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Product sizzle
+// ---------------------------------------------------------------------------
+
+function ProductSizzle({ sizzle, reverse }: { sizzle: LandingSizzleVideo; reverse: boolean }) {
+  return (
+    <section className="py-24 sm:py-32 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
+        <div
+          className={`grid md:grid-cols-2 gap-10 md:gap-16 items-center ${
+            reverse ? 'md:[&>*:first-child]:order-2' : ''
+          }`}
+        >
+          <div className="max-w-xl">
+            <h2
+              className="tracking-tight"
+              style={{
+                fontFamily: DISPLAY,
+                fontWeight: 400,
+                color: INK,
+                fontSize: 'clamp(2.25rem, 4vw, 3.5rem)',
+                lineHeight: 1.05,
+              }}
+            >
+              {sizzle.title}
+            </h2>
+            {sizzle.caption && (
+              <p className="mt-5 text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
+                {sizzle.caption}
+              </p>
+            )}
+          </div>
+
+          <div
+            className="relative rounded-xl overflow-hidden ring-1 shadow-2xl"
+            style={{
+              backgroundColor: '#1a1a1a',
+              boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.25)',
+              borderColor: 'rgba(0,0,0,0.08)',
+            }}
+          >
+            <div className="aspect-[16/10] w-full">
+              {sizzle.url ? (
+                <video
+                  className="w-full h-full object-cover"
+                  src={sizzle.url}
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                />
+              ) : (
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  style={{
+                    background:
+                      'linear-gradient(135deg, #2a2826 0%, #1f1d1a 60%, #14130f 100%)',
+                  }}
+                >
+                  <span className="text-white/30 text-sm tracking-wide uppercase">
+                    Product walkthrough
+                  </span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Testimonials
+// ---------------------------------------------------------------------------
+
+function Testimonials({ testimonials }: { testimonials: LandingTestimonial[] }) {
+  if (testimonials.length === 0) return null
+  return (
+    <section id="about" className="py-24 sm:py-32 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
+        <div className="grid md:grid-cols-3 gap-12">
+          {testimonials.map((t, i) => (
+            <figure key={i}>
+              <blockquote
+                className="text-2xl leading-snug"
+                style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK }}
+              >
+                &ldquo;{t.quote}&rdquo;
+              </blockquote>
+              <figcaption className="mt-6 text-sm" style={{ color: MUTED }}>
+                <div className="font-medium" style={{ color: INK }}>{t.author}</div>
+                <div>{t.title}</div>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Footer
+// ---------------------------------------------------------------------------
+
+function Footer() {
+  return (
+    <footer className="border-t py-16" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
+        <div className="grid md:grid-cols-4 gap-10">
+          <div>
+            <span
+              className="text-2xl tracking-tight"
+              style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+            >
+              Matcha
+            </span>
+            <p className="mt-4 text-sm max-w-xs" style={{ color: MUTED }}>
+              AI-powered recruiting, HR, and compliance for modern teams.
+            </p>
+          </div>
+          <FooterCol title="Platform" links={[
+            { label: 'Recruiting', to: '/matcha-work' },
+            { label: 'HR Operations', to: '/services' },
+            { label: 'Compliance', to: '/services' },
+          ]} />
+          <FooterCol title="Company" links={[
+            { label: 'Customers', to: '#about' },
+            { label: 'Services', to: '/services' },
+            { label: 'Login', to: '/login' },
+          ]} />
+          <FooterCol title="Legal" links={[
+            { label: 'Terms', to: '/terms' },
+            { label: 'Privacy', to: '/privacy' },
+            { label: 'Status', to: '/status' },
+          ]} />
+        </div>
+        <div className="mt-14 pt-6 border-t text-xs flex flex-col sm:flex-row justify-between gap-3" style={{ borderColor: LINE, color: MUTED }}>
+          <span>© {new Date().getFullYear()} Matcha, Inc. All rights reserved.</span>
+          <span>Made with care.</span>
+        </div>
+      </div>
+    </footer>
+  )
+}
+
+function FooterCol({ title, links }: { title: string; links: { label: string; to: string }[] }) {
+  return (
+    <div>
+      <div className="text-xs uppercase tracking-wider mb-4" style={{ color: MUTED }}>{title}</div>
+      <ul className="space-y-3">
+        {links.map(link => (
+          <li key={link.label}>
+            <Link to={link.to} className="text-sm hover:opacity-60 transition-opacity" style={{ color: INK }}>
+              {link.label}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
 }

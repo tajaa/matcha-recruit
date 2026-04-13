@@ -757,7 +757,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                                 <button
                                   onClick={(e) => {
                                     e.stopPropagation()
-                                    setReviewInterview({ id: cand.interview_id!, name: cand.name })
+                                    setReviewInterview({ id: cand.interview_id!, name: cand.name ?? 'Candidate' })
                                   }}
                                   className="rounded px-2 py-0.5 text-[10px] font-medium hover:underline"
                                   style={{ color: '#60a5fa', background: 'rgba(96,165,250,0.1)' }}

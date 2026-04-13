@@ -19,6 +19,7 @@ import Brokers from './pages/admin/Brokers'
 import ComplianceManagement from './pages/admin/ComplianceManagement'
 import Individuals from './pages/admin/Individuals'
 import NewsletterAdmin from './pages/admin/Newsletter'
+import LandingMediaAdmin from './pages/admin/LandingMedia'
 import Subscribe from './pages/landing/Subscribe'
 import CategoryDetailPage from './pages/admin/CategoryDetailPage'
 import PolicyDetailPage from './pages/admin/PolicyDetailPage'
@@ -107,6 +108,7 @@ export default function App() {
         <Route path="brokers" element={<Brokers />} />
         <Route path="compliance-mgmt" element={<ComplianceManagement />} />
         <Route path="newsletter" element={<NewsletterAdmin />} />
+        <Route path="landing-media" element={<LandingMediaAdmin />} />
       </Route>
       <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
         <Route index element={<BrokerDashboard />} />

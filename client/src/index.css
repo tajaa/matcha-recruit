@@ -29,6 +29,13 @@
   --color-sev-row-from: #3d2a1a;
   --color-sev-row-via: #2e2015;
   --color-sev-row-to: transparent;
+
+  /* Marketing/landing palette — ivory paper with ink text */
+  --color-ivory-bg: #F5F2ED;
+  --color-ivory-ink: #1F1D1A;
+  --color-ivory-muted: #6B6760;
+  --color-ivory-line: #E4DED2;
+  --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
 }
 
 body {
