@@ -9482,6 +9482,56 @@ async def send_beta_invitations(
     return {"sent": sent, "skipped": skipped}
 
 
+class IndividualInviteRequest(BaseModel):
+    email: EmailStr
+
+
+@router.post("/individual-invites")
+async def create_individual_invite(
+    body: IndividualInviteRequest,
+    current_user=Depends(require_admin),
+):
+    """Generate a matcha-work individual signup URL without sending email.
+
+    Creates a beta_invitation row and returns the invite URL for the admin
+    to copy and share manually. The invited user registers at /register/beta
+    which provisions a personal workspace (auth.py register_individual flow).
+    """
+    from ...config import get_settings
+    settings = get_settings()
+    base_url = settings.app_base_url.rstrip("/")
+
+    email_lower = body.email.lower().strip()
+
+    async with get_connection() as conn:
+        existing = await conn.fetchrow(
+            "SELECT id, token, status FROM beta_invitations WHERE email = $1 AND status IN ('pending', 'registered') LIMIT 1",
+            email_lower,
+        )
+        if existing:
+            if existing["status"] == "registered":
+                raise HTTPException(status_code=409, detail="Already registered")
+            # Reuse the pending invite
+            return {
+                "email": email_lower,
+                "invite_url": f"{base_url}/register/beta?token={existing['token']}",
+                "reused": True,
+            }
+
+        token = secrets.token_hex(32)
+        await conn.execute(
+            """INSERT INTO beta_invitations (email, token, invited_by)
+               VALUES ($1, $2, $3)""",
+            email_lower, token, current_user.id,
+        )
+
+    return {
+        "email": email_lower,
+        "invite_url": f"{base_url}/register/beta?token={token}",
+        "reused": False,
+    }
+
+
 @router.get("/beta-invitations")
 async def list_beta_invitations(current_user=Depends(require_admin)):
     """List all beta invitations."""

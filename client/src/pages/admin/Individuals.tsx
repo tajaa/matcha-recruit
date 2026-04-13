@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Loader2, Search, Zap, Plus } from 'lucide-react'
+import { Loader2, Search, Zap, Plus, UserPlus, Copy, Check } from 'lucide-react'
 import { api } from '../../api/client'
 
 interface IndividualUser {
@@ -37,6 +37,12 @@ export default function Individuals() {
   const [grantTarget, setGrantTarget] = useState<IndividualUser | null>(null)
   const [grantAmount, setGrantAmount] = useState('')
   const [granting, setGranting] = useState(false)
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteResult, setInviteResult] = useState<{ invite_url: string; email: string; reused: boolean } | null>(null)
+  const [inviteError, setInviteError] = useState('')
+  const [inviting, setInviting] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     api.get<IndividualUser[]>('/matcha-work/billing/admin/individuals')
@@ -44,6 +50,41 @@ export default function Individuals() {
       .catch(() => {})
       .finally(() => setLoading(false))
   }, [])
+
+  async function handleCreateInvite() {
+    if (!inviteEmail.trim()) return
+    setInviting(true)
+    setInviteError('')
+    setInviteResult(null)
+    try {
+      const res = await api.post<{ invite_url: string; email: string; reused: boolean }>(
+        '/admin/individual-invites',
+        { email: inviteEmail.trim() },
+      )
+      setInviteResult(res)
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : 'Failed to generate invite')
+    } finally {
+      setInviting(false)
+    }
+  }
+
+  async function handleCopyInvite() {
+    if (!inviteResult) return
+    try {
+      await navigator.clipboard.writeText(inviteResult.invite_url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  function closeInvite() {
+    setShowInvite(false)
+    setInviteEmail('')
+    setInviteResult(null)
+    setInviteError('')
+    setCopied(false)
+  }
 
   async function handleGrant() {
     if (!grantTarget || !grantAmount) return
@@ -87,6 +128,13 @@ export default function Individuals() {
             Personal account users ({users.length} total)
           </p>
         </div>
+        <button
+          onClick={() => setShowInvite(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-medium hover:bg-emerald-600 transition-colors"
+        >
+          <UserPlus size={12} />
+          Generate Signup URL
+        </button>
       </div>
 
       {/* Search */}
@@ -165,6 +213,76 @@ export default function Individuals() {
           </tbody>
         </table>
       </div>
+
+      {/* Generate signup URL modal */}
+      {showInvite && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-6 w-full max-w-md">
+            <h3 className="text-sm font-semibold text-zinc-100 mb-1">Generate Individual Signup URL</h3>
+            <p className="text-xs text-zinc-500 mb-4">
+              Creates a one-time matcha-work invite link for an individual account. No email is sent — share the URL manually.
+            </p>
+            {!inviteResult ? (
+              <>
+                <label className="block text-[11px] font-medium text-zinc-400 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  placeholder="user@example.com"
+                  autoFocus
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-500 outline-none focus:border-zinc-600 mb-3"
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleCreateInvite() }}
+                />
+                {inviteError && (
+                  <p className="text-[11px] text-red-400 mb-3">{inviteError}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={closeInvite}
+                    className="px-3 py-1.5 rounded-lg text-xs text-zinc-400 hover:text-zinc-200"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleCreateInvite}
+                    disabled={!inviteEmail.trim() || inviting}
+                    className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-emerald-700 text-white text-xs font-medium hover:bg-emerald-600 disabled:opacity-40 transition-colors"
+                  >
+                    {inviting ? <Loader2 size={12} className="animate-spin" /> : <UserPlus size={12} />}
+                    Generate URL
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] text-zinc-500 mb-2">
+                  Invite for <span className="text-zinc-300">{inviteResult.email}</span>
+                  {inviteResult.reused && <span className="ml-2 text-amber-400">(existing pending invite reused)</span>}
+                </p>
+                <div className="flex items-center gap-2 p-2 rounded-lg border border-zinc-700 bg-zinc-800 mb-4">
+                  <code className="flex-1 text-[11px] text-zinc-300 truncate font-mono">{inviteResult.invite_url}</code>
+                  <button
+                    onClick={handleCopyInvite}
+                    className="shrink-0 flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-zinc-700 text-zinc-200 hover:bg-zinc-600 transition-colors"
+                  >
+                    {copied ? <Check size={10} /> : <Copy size={10} />}
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    onClick={closeInvite}
+                    className="px-4 py-1.5 rounded-lg bg-zinc-800 border border-zinc-700 text-xs text-zinc-300 hover:bg-zinc-700"
+                  >
+                    Done
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Grant tokens modal */}
       {grantTarget && (
