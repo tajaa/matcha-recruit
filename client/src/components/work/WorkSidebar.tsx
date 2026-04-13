@@ -118,7 +118,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     try {
       const title = client ? `New role at ${client.name}` : 'New Job Posting'
       const project = await createProjectNew(title, 'recruiting', client?.id ?? null)
-      setProjects((prev) => [project, ...prev])
+      const enriched = { ...project, hiring_client_name: client?.name ?? null }
+      setProjects((prev) => [enriched, ...prev])
       navigate(`/work/projects/${project.id}`)
     } catch {}
   }
