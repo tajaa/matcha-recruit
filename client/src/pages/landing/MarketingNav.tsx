@@ -7,8 +7,8 @@ interface Props {
 }
 
 const NAV_LINKS = [
-  { to: '/matcha-work', label: 'Platform' },
-  { to: '/services', label: 'Solutions' },
+  { to: '/matcha-work', label: 'Matcha Work' },
+  { to: '/services', label: 'Consulting' },
 ]
 
 export default function MarketingNav({ onPricingClick }: Props) {
@@ -70,13 +70,6 @@ export default function MarketingNav({ onPricingClick }: Props) {
               </Link>
             ))}
             <button
-              onClick={() => document.getElementById('about')?.scrollIntoView({ behavior: 'smooth' })}
-              className="text-sm transition-opacity hover:opacity-60"
-              style={{ color: textColor }}
-            >
-              Customers
-            </button>
-            <button
               onClick={onPricingClick}
               className="text-sm transition-opacity hover:opacity-60"
               style={{ color: textColor }}
@@ -136,20 +129,6 @@ export default function MarketingNav({ onPricingClick }: Props) {
                 {link.label}
               </Link>
             ))}
-            <button
-              onClick={() => {
-                setMenuOpen(false)
-                setTimeout(() => document.getElementById('about')?.scrollIntoView({ behavior: 'smooth' }), 50)
-              }}
-              className="py-4 text-2xl text-left border-b"
-              style={{
-                fontFamily: 'var(--font-display)',
-                color: 'var(--color-ivory-ink)',
-                borderColor: 'var(--color-ivory-line)',
-              }}
-            >
-              Customers
-            </button>
             <button
               onClick={() => handleLinkClick(onPricingClick)}
               className="py-4 text-2xl text-left border-b"

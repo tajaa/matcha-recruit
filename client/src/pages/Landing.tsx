@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import MarketingNav from './landing/MarketingNav'
+import MarketingFooter from './landing/MarketingFooter'
 import { ComplianceHeroAnimation } from './landing/ComplianceHeroAnimation'
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
 import { ComplianceTicker } from '../components/landing/ComplianceTicker'
@@ -72,7 +73,7 @@ export default function Landing() {
         <Testimonials testimonials={data.testimonials} />
       </main>
 
-      <Footer />
+      <MarketingFooter />
     </div>
   )
 }
@@ -162,6 +163,25 @@ function AnimationHero({ data }: { data: LandingMedia }) {
       />
 
       <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-28 pb-16 min-h-[100svh] flex flex-col">
+        {/* Centered product label */}
+        <div className="flex justify-center pt-4 pb-2">
+          <div
+            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full"
+            style={{
+              backgroundColor: 'rgba(31,29,26,0.05)',
+              border: '1px solid rgba(31,29,26,0.08)',
+            }}
+          >
+            <span className="w-1 h-1 rounded-full" style={{ backgroundColor: '#86efac' }} />
+            <span
+              className="text-[11px] uppercase tracking-[0.2em] font-medium"
+              style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}
+            >
+              Matcha Platform
+            </span>
+          </div>
+        </div>
+
         <div className="flex-1 grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-16 items-center">
           {/* Left: text */}
           <div className="max-w-xl">
@@ -360,65 +380,3 @@ function Testimonials({ testimonials }: { testimonials: LandingTestimonial[] }) 
   )
 }
 
-// ---------------------------------------------------------------------------
-// Footer
-// ---------------------------------------------------------------------------
-
-function Footer() {
-  return (
-    <footer className="border-t py-16" style={{ borderColor: LINE }}>
-      <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
-        <div className="grid md:grid-cols-4 gap-10">
-          <div>
-            <span
-              className="text-2xl tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
-            >
-              Matcha
-            </span>
-            <p className="mt-4 text-sm max-w-xs" style={{ color: MUTED }}>
-              Bespoke HR, GRC, employee relations, and AI integration consulting.
-            </p>
-          </div>
-          <FooterCol title="Services" links={[
-            { label: 'HR Consulting', to: '/services' },
-            { label: 'GRC Consulting', to: '/services' },
-            { label: 'Employee Relations', to: '/services' },
-            { label: 'AI Integration', to: '/services' },
-          ]} />
-          <FooterCol title="Company" links={[
-            { label: 'About', to: '#about' },
-            { label: 'Book a Consultation', to: '/login' },
-            { label: 'Client Login', to: '/login' },
-          ]} />
-          <FooterCol title="Legal" links={[
-            { label: 'Terms', to: '/terms' },
-            { label: 'Privacy', to: '/privacy' },
-            { label: 'Status', to: '/status' },
-          ]} />
-        </div>
-        <div className="mt-14 pt-6 border-t text-xs flex flex-col sm:flex-row justify-between gap-3" style={{ borderColor: LINE, color: MUTED }}>
-          <span>© {new Date().getFullYear()} Matcha, Inc. All rights reserved.</span>
-          <span>Made with care.</span>
-        </div>
-      </div>
-    </footer>
-  )
-}
-
-function FooterCol({ title, links }: { title: string; links: { label: string; to: string }[] }) {
-  return (
-    <div>
-      <div className="text-xs uppercase tracking-wider mb-4" style={{ color: MUTED }}>{title}</div>
-      <ul className="space-y-3">
-        {links.map(link => (
-          <li key={link.label}>
-            <Link to={link.to} className="text-sm hover:opacity-60 transition-opacity" style={{ color: INK }}>
-              {link.label}
-            </Link>
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
-}
