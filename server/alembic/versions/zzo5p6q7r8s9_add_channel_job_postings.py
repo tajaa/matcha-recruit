@@ -1,13 +1,13 @@
 """Add channel job postings: postings, invitations, and applications.
 
 Revision ID: zzo5p6q7r8s9
-Revises: zzn4o5p6q7r8
+Revises: zzm3n4o5p6q7
 Create Date: 2026-04-11
 """
 from alembic import op
 
 revision = "zzo5p6q7r8s9"
-down_revision = "zzn4o5p6q7r8"
+down_revision = "zzm3n4o5p6q7"
 branch_labels = None
 depends_on = None
 
