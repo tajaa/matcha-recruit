@@ -338,10 +338,11 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
             <button
               onClick={onSyncInterviews}
               title="Refresh interview statuses"
-              className="p-1 rounded transition-colors"
+              className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded transition-colors hover:bg-zinc-800"
               style={{ color: c.muted }}
             >
               <RefreshCw size={10} />
+              Refresh
             </button>
           )}
           {tab === 'candidates' && candidates.length > 0 && onAnalyzeCandidates && (

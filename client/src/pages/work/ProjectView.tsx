@@ -113,7 +113,7 @@ export default function ProjectView() {
     if (!projectId) return
     setLoading(true)
     getProjectDetail(projectId)
-      .then((p) => {
+      .then(async (p) => {
         setProject(p)
         if (p.chats && p.chats.length > 0) {
           setActiveChatId(p.chats[0].id)
@@ -125,12 +125,46 @@ export default function ProjectView() {
           if (candidates.length === 0 && !localStorage.getItem(`wizard-dismissed-${projectId}`)) {
             setShowWizard(true)
           }
+          // Auto-sync interview statuses on load if any candidates have pending interviews
+          const hasPendingInterview = (candidates as Record<string, unknown>[]).some(
+            (c) => c.interview_id && c.status !== 'interview_completed'
+          )
+          if (hasPendingInterview) {
+            try {
+              await syncProjectInterviews(projectId)
+              const refreshed = await getProjectDetail(projectId)
+              setProject(refreshed)
+            } catch {
+              // ignore — user can still manually refresh
+            }
+          }
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load project'))
       .finally(() => setLoading(false))
     return () => { abortRef.current?.abort() }
   }, [projectId])
+
+  // Periodic auto-sync for pending interviews while the page is open
+  useEffect(() => {
+    if (!projectId || !project || project.project_type !== 'recruiting') return
+    const data = (project.project_data || {}) as Record<string, unknown>
+    const candidates = (data.candidates as Record<string, unknown>[]) || []
+    const hasPendingInterview = candidates.some(
+      (c) => c.interview_id && c.status !== 'interview_completed'
+    )
+    if (!hasPendingInterview) return
+    const interval = setInterval(async () => {
+      try {
+        await syncProjectInterviews(projectId)
+        const updated = await getProjectDetail(projectId)
+        setProject(updated)
+      } catch {
+        // ignore
+      }
+    }, 30_000)
+    return () => clearInterval(interval)
+  }, [projectId, project])
 
   // Load token usage
   const refreshUsage = () => {
