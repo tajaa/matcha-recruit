@@ -6,8 +6,6 @@ import { landingMedia, type LandingMedia, type LandingSizzleVideo, type LandingC
 const EMPTY: LandingMedia = {
   hero_video_url: null,
   hero_poster_url: null,
-  hero_headline: 'Hiring, Perfected.',
-  hero_subcopy: "Today's leading teams trust Matcha to elevate recruiting, HR, and compliance.",
   sizzle_videos: [],
   customer_logos: [],
   testimonials: [],
@@ -157,23 +155,10 @@ export default function LandingMediaAdmin() {
       <Card>
         <div className="p-5 space-y-4">
           <h2 className="text-sm font-semibold text-zinc-200 uppercase tracking-wide">Hero</h2>
-
-          <Field label="Headline">
-            <input
-              className="w-full bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100"
-              value={data.hero_headline}
-              onChange={(e) => setData({ ...data, hero_headline: e.target.value })}
-            />
-          </Field>
-
-          <Field label="Subcopy">
-            <textarea
-              className="w-full bg-zinc-900 border border-zinc-700 rounded px-3 py-2 text-sm text-zinc-100"
-              rows={2}
-              value={data.hero_subcopy}
-              onChange={(e) => setData({ ...data, hero_subcopy: e.target.value })}
-            />
-          </Field>
+          <p className="text-xs text-zinc-500">
+            Headline and subcopy are managed in code. Upload a cinematic video here to replace the default
+            animated GRC dashboard in the hero. Poster image is shown while the video loads.
+          </p>
 
           <Field label="Hero Video (mp4/mov/webm, max 25MB — compress with HandBrake first)">
             <MediaUploader

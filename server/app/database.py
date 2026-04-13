@@ -4451,8 +4451,6 @@ async def init_db():
             json.dumps({
                 "hero_video_url": None,
                 "hero_poster_url": None,
-                "hero_headline": "Hiring, Perfected.",
-                "hero_subcopy": "Today's leading teams trust Matcha to elevate recruiting, HR, and compliance.",
                 "sizzle_videos": [],
                 "customer_logos": [],
                 "testimonials": [],

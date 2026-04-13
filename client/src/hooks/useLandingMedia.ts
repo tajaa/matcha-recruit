@@ -4,8 +4,6 @@ import { landingMedia, type LandingMedia } from '../api/client'
 const FALLBACK: LandingMedia = {
   hero_video_url: null,
   hero_poster_url: null,
-  hero_headline: 'Hiring, Perfected.',
-  hero_subcopy: "Today's leading teams trust Matcha to elevate recruiting, HR, and compliance.",
   sizzle_videos: [],
   customer_logos: [],
   testimonials: [],

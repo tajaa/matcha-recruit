@@ -247,8 +247,6 @@ export type LandingTestimonial = { quote: string; author: string; title: string 
 export type LandingMedia = {
   hero_video_url: string | null
   hero_poster_url: string | null
-  hero_headline: string
-  hero_subcopy: string
   sizzle_videos: LandingSizzleVideo[]
   customer_logos: LandingCustomerLogo[]
   testimonials: LandingTestimonial[]

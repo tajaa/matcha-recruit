@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom'
 
 import MarketingNav from './landing/MarketingNav'
 import { ComplianceHeroAnimation } from './landing/ComplianceHeroAnimation'
+import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
+import { ComplianceTicker } from '../components/landing/ComplianceTicker'
 import { PricingContactModal } from '../components/PricingContactModal'
 import { useLandingMedia } from '../hooks/useLandingMedia'
 import type { LandingMedia, LandingSizzleVideo, LandingCustomerLogo, LandingTestimonial } from '../api/client'
@@ -13,23 +15,37 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
+const HERO_HEADLINE = 'Agentic Risk Management'
+const HERO_SUBCOPY =
+  'Bespoke HR, governance, employee relations, and AI integration consulting — for organizations that can\u2019t afford to guess.'
+
 const DEFAULT_SIZZLES: LandingSizzleVideo[] = [
   {
-    id: 'recruiting',
-    title: 'Recruiting, reimagined.',
-    caption: 'Post a role, screen candidates, and surface shortlists in minutes — not weeks.',
+    id: 'hr',
+    title: 'People strategy, with precision.',
+    caption:
+      'Compensation, handbooks, performance programs, and organizational design — guided by seasoned HR practitioners.',
     url: null,
   },
   {
-    id: 'compliance',
-    title: 'Compliance, continuous.',
-    caption: 'Jurisdiction-aware monitoring across federal, state, and local regulations.',
+    id: 'grc',
+    title: 'Governance, risk, and compliance.',
+    caption:
+      'Frameworks tailored to your jurisdiction, industry, and stage of growth. Built to scale, audit-ready from day one.',
     url: null,
   },
   {
     id: 'er',
-    title: 'People operations, elevated.',
-    caption: 'Employee relations, investigations, and HR ops — all in one workspace.',
+    title: 'Employee relations, handled with care.',
+    caption:
+      'Workplace investigations, conflict resolution, and ER case strategy led by experienced employment specialists.',
+    url: null,
+  },
+  {
+    id: 'ai',
+    title: 'AI integration, analyzed.',
+    caption:
+      'Independent evaluation of the AI tools you\u2019re considering — surfacing compliance, bias, and operational risk before you deploy.',
     url: null,
   },
 ]
@@ -43,6 +59,7 @@ export default function Landing() {
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
+      <ComplianceTicker />
       <MarketingNav onPricingClick={() => setIsPricingOpen(true)} />
 
       <Hero data={data} />
@@ -96,18 +113,24 @@ function VideoHero({ data }: { data: LandingMedia }) {
               className="text-white leading-[0.95] tracking-tight"
               style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: 'clamp(3rem, 7vw, 6rem)' }}
             >
-              {data.hero_headline}
+              {HERO_HEADLINE}
             </h1>
             <p className="mt-6 text-white/80 max-w-xl" style={{ fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.5 }}>
-              {data.hero_subcopy}
+              {HERO_SUBCOPY}
             </p>
-            <div className="mt-10">
+            <div className="mt-10 flex items-center gap-4">
               <Link
                 to="/login"
                 className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium bg-white hover:bg-white/90 transition-colors"
                 style={{ color: INK }}
               >
-                Request a Demo
+                Book a Consultation
+              </Link>
+              <Link
+                to="/services"
+                className="inline-flex items-center h-12 text-[15px] text-white/80 hover:text-white transition-colors"
+              >
+                Explore services →
               </Link>
             </div>
           </div>
@@ -151,7 +174,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
             >
               <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
               <span className="text-[11px] uppercase tracking-wider font-medium">
-                Compliance in motion
+                Live GRC preview
               </span>
             </div>
             <h1
@@ -163,13 +186,13 @@ function AnimationHero({ data }: { data: LandingMedia }) {
                 fontSize: 'clamp(2.75rem, 6vw, 5.25rem)',
               }}
             >
-              {data.hero_headline}
+              {HERO_HEADLINE}
             </h1>
             <p
               className="mt-6 max-w-lg"
               style={{ color: MUTED, fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.55 }}
             >
-              {data.hero_subcopy}
+              {HERO_SUBCOPY}
             </p>
             <div className="mt-10 flex items-center gap-4">
               <Link
@@ -177,14 +200,14 @@ function AnimationHero({ data }: { data: LandingMedia }) {
                 className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
                 style={{ backgroundColor: INK, color: BG }}
               >
-                Request a Demo
+                Book a Consultation
               </Link>
               <Link
-                to="/matcha-work"
+                to="/services"
                 className="inline-flex items-center h-12 text-[15px] transition-opacity hover:opacity-60"
                 style={{ color: INK }}
               >
-                See the platform →
+                Explore services →
               </Link>
             </div>
           </div>
@@ -259,42 +282,51 @@ function ProductSizzle({ sizzle, reverse }: { sizzle: LandingSizzleVideo; revers
             )}
           </div>
 
-          <div
-            className="relative rounded-xl overflow-hidden ring-1 shadow-2xl"
-            style={{
-              backgroundColor: '#1a1a1a',
-              boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.25)',
-              borderColor: 'rgba(0,0,0,0.08)',
-            }}
-          >
-            <div className="aspect-[16/10] w-full">
-              {sizzle.url ? (
-                <video
-                  className="w-full h-full object-cover"
-                  src={sizzle.url}
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                />
-              ) : (
-                <div
-                  className="w-full h-full flex items-center justify-center"
-                  style={{
-                    background:
-                      'linear-gradient(135deg, #2a2826 0%, #1f1d1a 60%, #14130f 100%)',
-                  }}
-                >
-                  <span className="text-white/30 text-sm tracking-wide uppercase">
-                    Product walkthrough
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
+          <SizzleVisual sizzle={sizzle} />
         </div>
       </div>
     </section>
+  )
+}
+
+function SizzleVisual({ sizzle }: { sizzle: LandingSizzleVideo }) {
+  const Animation = ANIMATION_BY_SIZZLE_ID[sizzle.id]
+  return (
+    <div
+      className="relative rounded-xl overflow-hidden ring-1 shadow-2xl"
+      style={{
+        backgroundColor: '#151412',
+        boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.28)',
+        borderColor: 'rgba(0,0,0,0.08)',
+      }}
+    >
+      <div className="aspect-[16/10] w-full">
+        {sizzle.url ? (
+          <video
+            className="w-full h-full object-cover"
+            src={sizzle.url}
+            autoPlay
+            muted
+            loop
+            playsInline
+          />
+        ) : Animation ? (
+          <Animation />
+        ) : (
+          <div
+            className="w-full h-full flex items-center justify-center"
+            style={{
+              background:
+                'linear-gradient(135deg, #2a2826 0%, #1f1d1a 60%, #14130f 100%)',
+            }}
+          >
+            <span className="text-white/30 text-sm tracking-wide uppercase">
+              Coming soon
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -345,18 +377,19 @@ function Footer() {
               Matcha
             </span>
             <p className="mt-4 text-sm max-w-xs" style={{ color: MUTED }}>
-              AI-powered recruiting, HR, and compliance for modern teams.
+              Bespoke HR, GRC, employee relations, and AI integration consulting.
             </p>
           </div>
-          <FooterCol title="Platform" links={[
-            { label: 'Recruiting', to: '/matcha-work' },
-            { label: 'HR Operations', to: '/services' },
-            { label: 'Compliance', to: '/services' },
+          <FooterCol title="Services" links={[
+            { label: 'HR Consulting', to: '/services' },
+            { label: 'GRC Consulting', to: '/services' },
+            { label: 'Employee Relations', to: '/services' },
+            { label: 'AI Integration', to: '/services' },
           ]} />
           <FooterCol title="Company" links={[
-            { label: 'Customers', to: '#about' },
-            { label: 'Services', to: '/services' },
-            { label: 'Login', to: '/login' },
+            { label: 'About', to: '#about' },
+            { label: 'Book a Consultation', to: '/login' },
+            { label: 'Client Login', to: '/login' },
           ]} />
           <FooterCol title="Legal" links={[
             { label: 'Terms', to: '/terms' },

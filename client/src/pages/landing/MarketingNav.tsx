@@ -35,8 +35,9 @@ export default function MarketingNav({ onPricingClick }: Props) {
   return (
     <>
       <nav
-        className="fixed top-0 left-0 right-0 z-50 transition-colors duration-300"
+        className="fixed left-0 right-0 z-50 transition-colors duration-300"
         style={{
+          top: '44px',
           backgroundColor: overHero ? 'transparent' : 'rgba(245, 242, 237, 0.92)',
           backdropFilter: overHero ? 'none' : 'blur(10px)',
           WebkitBackdropFilter: overHero ? 'none' : 'blur(10px)',
@@ -119,7 +120,7 @@ export default function MarketingNav({ onPricingClick }: Props) {
           className="fixed inset-0 z-40 md:hidden"
           style={{ backgroundColor: 'var(--color-ivory-bg)' }}
         >
-          <div className="pt-20 px-6 flex flex-col gap-1">
+          <div className="pt-32 px-6 flex flex-col gap-1">
             {NAV_LINKS.map(link => (
               <Link
                 key={link.to}

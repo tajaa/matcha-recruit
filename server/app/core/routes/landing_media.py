@@ -23,8 +23,6 @@ admin_router = APIRouter()
 DEFAULT_LANDING_MEDIA: dict[str, Any] = {
     "hero_video_url": None,
     "hero_poster_url": None,
-    "hero_headline": "Hiring, Perfected.",
-    "hero_subcopy": "Today's leading teams trust Matcha to elevate recruiting, HR, and compliance.",
     "sizzle_videos": [],
     "customer_logos": [],
     "testimonials": [],
