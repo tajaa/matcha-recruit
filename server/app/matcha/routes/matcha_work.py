@@ -2370,7 +2370,10 @@ async def sync_resume_batch_interviews(
         new_status = c.get("status")
         interview_status = row["status"]
 
-        if interview_status in ("completed", "analyzed") and c.get("status") != "interview_completed":
+        # Treat analyzing as completed for UI purposes — interview is over,
+        # only the AI analysis is still running. The review modal handles the
+        # "no analysis yet" state gracefully.
+        if interview_status in ("completed", "analyzed", "analyzing") and c.get("status") != "interview_completed":
             new_status = "interview_completed"
         elif interview_status == "in_progress" and c.get("status") == "interview_sent":
             new_status = "interview_in_progress"
@@ -4350,7 +4353,10 @@ async def sync_project_interviews(
         new_status = c.get("status")
         interview_status = row["status"]
 
-        if interview_status in ("completed", "analyzed") and c.get("status") != "interview_completed":
+        # Treat analyzing as completed for UI purposes — interview is over,
+        # only the AI analysis is still running. The review modal handles the
+        # "no analysis yet" state gracefully.
+        if interview_status in ("completed", "analyzed", "analyzing") and c.get("status") != "interview_completed":
             new_status = "interview_completed"
         elif interview_status == "in_progress" and c.get("status") == "interview_sent":
             new_status = "interview_in_progress"

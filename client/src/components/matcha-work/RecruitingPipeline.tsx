@@ -684,10 +684,25 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                           {cand.status === 'interview_sent' && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#3b82f620', color: '#60a5fa', border: '1px solid #3b82f640' }}>Interviewing</span>
                           )}
+                          {cand.status === 'interview_in_progress' && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b20', color: c.amber, border: `1px solid ${c.amber}40` }}>In progress</span>
+                          )}
                           {cand.status === 'interview_completed' && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#22c55e20', color: c.green, border: `1px solid ${c.green}40` }}>
                               Done{cand.interview_score != null ? ` · ${cand.interview_score}%` : ''}
                             </span>
+                          )}
+                          {cand.interview_id && (cand.status === 'interview_completed' || cand.status === 'interview_in_progress') && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                setReviewInterview({ id: cand.interview_id!, name: cand.name ?? 'Candidate' })
+                              }}
+                              className="text-[9px] px-1.5 py-0.5 rounded-full hover:underline"
+                              style={{ background: 'rgba(96,165,250,0.15)', color: '#60a5fa', border: '1px solid rgba(96,165,250,0.3)' }}
+                            >
+                              <Video size={9} className="inline mr-0.5" />Review
+                            </button>
                           )}
                           {cand.match_score != null && (
                             <span
