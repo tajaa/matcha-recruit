@@ -19,7 +19,7 @@ type RenameItem = { type: 'channel' | 'project' | 'thread'; id: string; name: st
 export default function WorkSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { me } = useMe()
+  const { me, hasFeature } = useMe()
   const canCreateChannel = ['client', 'admin', 'individual'].includes(me?.user?.role ?? '')
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
@@ -514,7 +514,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       {showCreateChannel && (
         <CreateChannelModal
           onClose={() => setShowCreateChannel(false)}
-          canCreatePaid={me?.user?.role === 'individual' || me?.user?.role === 'admin'}
+          canCreatePaid={me?.user?.role === 'individual' || me?.user?.role === 'admin' || hasFeature('paid_channel_creator')}
           onCreated={(ch) => {
             setShowCreateChannel(false)
             setChannels((prev) => [{ ...ch, member_count: 1, unread_count: 0, last_message_at: null, last_message_preview: null, is_member: true } as ChannelSummary, ...prev])

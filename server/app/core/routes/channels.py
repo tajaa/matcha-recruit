@@ -179,8 +179,13 @@ async def list_channels(
                    cm.user_id IS NOT NULL AS is_member
             FROM channels ch
             LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
-            WHERE ch.company_id = $2 AND ch.is_archived = false
-              AND (COALESCE(ch.visibility, 'public') != 'private' OR cm.user_id IS NOT NULL)
+            WHERE ch.is_archived = false
+              AND (
+                -- Channels in the user's current tenant (excluding private ones they're not in)
+                (ch.company_id = $2 AND (COALESCE(ch.visibility, 'public') != 'private' OR cm.user_id IS NOT NULL))
+                -- OR any channel where the user is already a member (cross-tenant memberships)
+                OR cm.user_id IS NOT NULL
+              )
             ORDER BY last_message_at DESC NULLS LAST, ch.created_at DESC
             """,
             current_user.id,
@@ -298,8 +303,20 @@ async def create_channel(
     if not name or len(name) > 100:
         raise HTTPException(status_code=400, detail="Channel name must be 1-100 characters")
 
-    # Paid channels are only available for creator accounts (individual/admin).
-    # The hard role check below at line ~345 enforces this; no separate flag check needed.
+    # Paid channels: individual/admin users are approved by role;
+    # client (company) users require the paid_channel_creator feature flag.
+    if body.paid_config and current_user.role not in ("admin", "individual"):
+        async with get_connection() as conn:
+            features = await conn.fetchval(
+                "SELECT enabled_features FROM companies WHERE id = $1", company_id
+            )
+        from ..feature_flags import merge_company_features
+        merged = merge_company_features(features)
+        if not merged.get("paid_channel_creator"):
+            raise HTTPException(
+                status_code=403,
+                detail="Your account is not approved to create paid channels. Contact support to get verified.",
+            )
 
     slug = _slugify(name)
 
@@ -329,9 +346,6 @@ async def create_channel(
         stripe_price_id = None
 
         if body.paid_config:
-            # Paid channels only for individual/creator accounts (not company users)
-            if current_user.role not in ("individual", "admin"):
-                raise HTTPException(status_code=403, detail="Paid channels are only available for creator accounts")
             from ..services.channel_payment_service import (
                 create_stripe_product_and_price,
                 MIN_PRICE_CENTS,
@@ -806,8 +820,8 @@ async def get_channel(
 
     async with get_connection() as conn:
         ch = await conn.fetchrow(
-            "SELECT id, name, slug, description, is_archived, created_by, created_at, COALESCE(visibility, 'public') AS visibility, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency FROM channels WHERE id = $1 AND company_id = $2",
-            channel_id, company_id,
+            "SELECT id, name, slug, description, is_archived, created_by, created_at, company_id, COALESCE(visibility, 'public') AS visibility, COALESCE(is_paid, false) AS is_paid, price_cents, COALESCE(currency, 'usd') AS currency FROM channels WHERE id = $1",
+            channel_id,
         )
         if not ch:
             raise HTTPException(status_code=404, detail="Channel not found")
@@ -819,6 +833,23 @@ async def get_channel(
         )
         is_member = my_membership is not None
         my_role = my_membership["role"] if my_membership else None
+
+        # Access control: must either be in the channel's tenant, be a member,
+        # or be a platform admin. Otherwise 404 (don't reveal existence).
+        if (
+            not is_member
+            and ch["company_id"] != company_id
+            and current_user.role != "admin"
+        ):
+            raise HTTPException(status_code=404, detail="Channel not found")
+
+        # Private channels in your own tenant are still gated to members
+        if (
+            ch["visibility"] == "private"
+            and not is_member
+            and current_user.role != "admin"
+        ):
+            raise HTTPException(status_code=404, detail="Channel not found")
 
         # Members
         members = await conn.fetch(
@@ -907,18 +938,17 @@ async def get_channel_messages(
     company_id = await _get_company_id(current_user)
 
     async with get_connection() as conn:
-        # Verify channel + membership
+        # Verify channel + membership (allows cross-tenant memberships)
         is_member = await conn.fetchval(
             """
             SELECT EXISTS(
-                SELECT 1 FROM channels ch
-                JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $2
-                WHERE ch.id = $1 AND ch.company_id = $3
+                SELECT 1 FROM channel_members cm
+                WHERE cm.channel_id = $1 AND cm.user_id = $2
             )
             """,
-            channel_id, current_user.id, company_id,
+            channel_id, current_user.id,
         )
-        if not is_member:
+        if not is_member and current_user.role != "admin":
             raise HTTPException(status_code=404, detail="Channel not found or not a member")
 
         if before:
