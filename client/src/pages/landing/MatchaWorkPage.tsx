@@ -89,14 +89,14 @@ function Hero() {
         }}
       />
 
-      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-36 pb-16">
+      <div className="relative z-10 max-w-[1440px] mx-auto px-5 sm:px-10 pt-28 sm:pt-36 pb-12 sm:pb-16">
         <div className="text-center max-w-3xl mx-auto">
           <div
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-6 sm:mb-8"
             style={{ backgroundColor: 'rgba(31,29,26,0.06)', color: MUTED }}
           >
             <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
-            <span className="text-[11px] uppercase tracking-wider font-medium">
+            <span className="text-[10px] sm:text-[11px] uppercase tracking-wider font-medium">
               Agentic workspace
             </span>
             <span
@@ -107,26 +107,26 @@ function Hero() {
             </span>
           </div>
           <h1
-            className="leading-[0.95] tracking-tight"
+            className="leading-[0.95] tracking-tight px-2"
             style={{
               fontFamily: DISPLAY,
               fontWeight: 400,
               color: INK,
-              fontSize: 'clamp(2.75rem, 6vw, 5.25rem)',
+              fontSize: 'clamp(2.25rem, 7vw, 5.25rem)',
             }}
           >
             Recruiting, re-engineered.
           </h1>
           <p
-            className="mt-6 mx-auto max-w-xl"
-            style={{ color: MUTED, fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.55 }}
+            className="mt-5 sm:mt-6 mx-auto max-w-xl text-[15px] sm:text-base px-2"
+            style={{ color: MUTED, lineHeight: 1.55 }}
           >
             An AI-powered pipeline, live voice interviews, and a document workspace — all in a single place built for senior HR and recruiting teams.
           </p>
-          <div className="mt-10 flex items-center justify-center gap-4 flex-wrap">
+          <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Link
               to="/login"
-              className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
+              className="inline-flex items-center justify-center w-full sm:w-auto px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
               style={{ backgroundColor: INK, color: BG }}
             >
               Launch Workspace
@@ -142,11 +142,11 @@ function Hero() {
         </div>
 
         {/* Product mockup inside dark frame */}
-        <div className="mt-16 max-w-6xl mx-auto">
+        <div className="mt-12 sm:mt-16 max-w-6xl mx-auto -mx-2 sm:mx-auto">
           <div
-            className="relative rounded-xl overflow-hidden ring-1 shadow-2xl"
+            className="relative rounded-lg sm:rounded-xl overflow-hidden ring-1 shadow-2xl"
             style={{
-              boxShadow: '0 60px 100px -30px rgba(31, 29, 26, 0.35)',
+              boxShadow: '0 40px 80px -25px rgba(31, 29, 26, 0.3)',
               borderColor: 'rgba(0,0,0,0.08)',
             }}
           >
@@ -166,8 +166,8 @@ type Pillar = (typeof PILLARS)[number]
 
 function ProductPillar({ pillar, reverse }: { pillar: Pillar; reverse: boolean }) {
   return (
-    <section className="py-24 sm:py-32 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
+    <section className="py-16 sm:py-24 md:py-32 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
         <div
           className={`grid md:grid-cols-2 gap-10 md:gap-16 items-center ${
             reverse ? 'md:[&>*:first-child]:order-2' : ''
@@ -175,7 +175,7 @@ function ProductPillar({ pillar, reverse }: { pillar: Pillar; reverse: boolean }
         >
           <div className="max-w-xl">
             <div
-              className="text-[11px] uppercase tracking-wider font-medium mb-4"
+              className="text-[11px] uppercase tracking-wider font-medium mb-3 sm:mb-4"
               style={{ color: MUTED }}
             >
               {pillar.id === 'pipeline' ? '01 · Pipeline' : pillar.id === 'interviews' ? '02 · Interviews' : '03 · Workspace'}
@@ -186,28 +186,28 @@ function ProductPillar({ pillar, reverse }: { pillar: Pillar; reverse: boolean }
                 fontFamily: DISPLAY,
                 fontWeight: 400,
                 color: INK,
-                fontSize: 'clamp(2.25rem, 4vw, 3.5rem)',
+                fontSize: 'clamp(1.875rem, 5vw, 3.5rem)',
                 lineHeight: 1.05,
               }}
             >
               {pillar.title}
             </h2>
-            <p className="mt-5 text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
+            <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED, lineHeight: 1.6 }}>
               {pillar.caption}
             </p>
 
-            <div className="mt-8 grid grid-cols-3 gap-px rounded-lg overflow-hidden" style={{ backgroundColor: LINE }}>
+            <div className="mt-6 sm:mt-8 grid grid-cols-3 gap-px rounded-lg overflow-hidden" style={{ backgroundColor: LINE }}>
               {pillar.stats.map((s) => (
                 <div
                   key={s.label}
-                  className="flex flex-col items-start p-4"
+                  className="flex flex-col items-start p-3 sm:p-4"
                   style={{ backgroundColor: BG }}
                 >
-                  <span className="text-[10px] uppercase tracking-wider" style={{ color: MUTED }}>
+                  <span className="text-[9px] sm:text-[10px] uppercase tracking-wider" style={{ color: MUTED }}>
                     {s.label}
                   </span>
                   <span
-                    className="text-3xl font-light font-mono tabular-nums mt-1"
+                    className="text-xl sm:text-3xl font-light font-mono tabular-nums mt-1"
                     style={{ color: INK }}
                   >
                     {s.value}
@@ -218,10 +218,10 @@ function ProductPillar({ pillar, reverse }: { pillar: Pillar; reverse: boolean }
           </div>
 
           <div
-            className="relative rounded-xl overflow-hidden ring-1 shadow-2xl"
+            className="relative rounded-lg sm:rounded-xl overflow-hidden ring-1 shadow-2xl"
             style={{
               backgroundColor: '#0e0d0b',
-              boxShadow: '0 40px 80px -20px rgba(31, 29, 26, 0.28)',
+              boxShadow: '0 30px 60px -20px rgba(31, 29, 26, 0.25)',
               borderColor: 'rgba(0,0,0,0.08)',
             }}
           >
@@ -691,11 +691,11 @@ function BetaWaitlistCta() {
   }
 
   return (
-    <section className="py-24 sm:py-32 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-[1440px] mx-auto px-6 sm:px-10">
+    <section className="py-16 sm:py-24 md:py-32 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10">
         <div className="max-w-xl mx-auto text-center">
           <p
-            className="text-[11px] uppercase tracking-[0.2em] mb-5"
+            className="text-[11px] uppercase tracking-[0.2em] mb-4 sm:mb-5"
             style={{ color: MUTED }}
           >
             Private Beta
@@ -706,13 +706,13 @@ function BetaWaitlistCta() {
               fontFamily: DISPLAY,
               fontWeight: 400,
               color: INK,
-              fontSize: 'clamp(2rem, 3.5vw, 3rem)',
+              fontSize: 'clamp(1.75rem, 5vw, 3rem)',
               lineHeight: 1.05,
             }}
           >
             Join the Matcha Work waitlist.
           </h2>
-          <p className="mt-5 text-lg" style={{ color: MUTED }}>
+          <p className="mt-4 sm:mt-5 text-base sm:text-lg" style={{ color: MUTED }}>
             Early access opens in waves. We'll email you when your seat is ready.
           </p>
 
@@ -726,7 +726,7 @@ function BetaWaitlistCta() {
           ) : (
             <form
               onSubmit={handleSubmit}
-              className="mt-10 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 max-w-lg mx-auto"
+              className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 max-w-lg mx-auto"
             >
               <input
                 type="text"
@@ -734,7 +734,7 @@ function BetaWaitlistCta() {
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 disabled={submitting}
-                className="sm:w-40 px-4 h-12 rounded-full text-[15px] outline-none transition-colors"
+                className="sm:w-40 px-4 h-12 rounded-full text-[15px] outline-none transition-colors w-full"
                 style={{
                   border: `1px solid ${LINE}`,
                   backgroundColor: 'transparent',
@@ -790,21 +790,21 @@ function BetaWaitlistCta() {
 
 function ClosingCta({ onPricingClick }: { onPricingClick: () => void }) {
   return (
-    <section className="py-24 sm:py-32 border-t" style={{ borderColor: LINE }}>
-      <div className="max-w-[1440px] mx-auto px-6 sm:px-10 text-center">
+    <section className="py-16 sm:py-24 md:py-32 border-t" style={{ borderColor: LINE }}>
+      <div className="max-w-[1440px] mx-auto px-5 sm:px-10 text-center">
         <h2
           className="tracking-tight max-w-2xl mx-auto"
-          style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(2.25rem, 4vw, 3.5rem)', lineHeight: 1.05 }}
+          style={{ fontFamily: DISPLAY, fontWeight: 400, color: INK, fontSize: 'clamp(1.875rem, 5vw, 3.5rem)', lineHeight: 1.05 }}
         >
           Ready to put it to work?
         </h2>
-        <p className="mt-5 max-w-xl mx-auto text-lg" style={{ color: MUTED }}>
+        <p className="mt-4 sm:mt-5 max-w-xl mx-auto text-base sm:text-lg" style={{ color: MUTED }}>
           Launch the workspace or book a walkthrough with our team.
         </p>
-        <div className="mt-10 flex items-center justify-center gap-4 flex-wrap">
+        <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
           <Link
             to="/login"
-            className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
+            className="inline-flex items-center justify-center w-full sm:w-auto px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
             style={{ backgroundColor: INK, color: BG }}
           >
             Launch Workspace
