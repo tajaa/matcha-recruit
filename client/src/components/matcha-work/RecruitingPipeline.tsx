@@ -687,10 +687,11 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                           {cand.status === 'interview_in_progress' && cand.interview_id ? (
                             <button
                               onClick={(e) => { e.stopPropagation(); setReviewInterview({ id: cand.interview_id!, name: cand.name ?? 'Candidate' }) }}
-                              className="text-[9px] px-1.5 py-0.5 rounded-full transition-opacity hover:opacity-80"
+                              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full transition-all hover:opacity-80 hover:underline cursor-pointer"
                               style={{ background: '#f59e0b20', color: c.amber, border: `1px solid ${c.amber}40` }}
                               title="Review interview"
                             >
+                              <Video size={9} />
                               In progress
                             </button>
                           ) : cand.status === 'interview_in_progress' ? (
@@ -699,10 +700,11 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                           {cand.status === 'interview_completed' && cand.interview_id ? (
                             <button
                               onClick={(e) => { e.stopPropagation(); setReviewInterview({ id: cand.interview_id!, name: cand.name ?? 'Candidate' }) }}
-                              className="text-[9px] px-1.5 py-0.5 rounded-full transition-opacity hover:opacity-80"
+                              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full transition-all hover:opacity-80 hover:underline cursor-pointer"
                               style={{ background: '#22c55e20', color: c.green, border: `1px solid ${c.green}40` }}
                               title="Review interview"
                             >
+                              <Video size={9} />
                               Done{cand.interview_score != null ? ` · ${cand.interview_score}%` : ''}
                             </button>
                           ) : cand.status === 'interview_completed' ? (
