@@ -198,9 +198,7 @@ Channels — real-time chat rooms for teams and creators.
   - public: Listed in the channel browser; anyone in the workspace can join directly.
   - invite_only: Listed in the channel browser, but joining requires an invite link from a member.
   - private: Hidden from the channel browser entirely; only current members can see it, and joining requires an invite.
-- Paid channels: creators charge a monthly subscription for access. Who can create a paid channel:
-  - Individual (creator) accounts and platform admins can create paid channels unconditionally.
-  - Business (client) accounts can create paid channels only if the company has the paid_channel_creator feature flag enabled by a platform admin.
+- Paid channels: creators charge a monthly subscription for access. Only individual (personal) accounts can create paid channels. Company (business/client) accounts are not allowed to be paid channel creators — a company admin who wants to run a creator side channel must create a separate personal account. Platform admins can create paid channels for testing.
 - Cross-tenant membership is allowed — a user invited to a channel in another workspace keeps access.
 - Channels support text messages, file attachments, voice calls, and (in paid channels) job postings at $200/mo.
 

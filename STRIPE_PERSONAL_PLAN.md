@@ -11,7 +11,7 @@ Company billing split:
 - Company **AI credit top-ups = existing Stripe flow** (`create_token_subscription_checkout` / token packs at `stripe_service.py`). Functionally unchanged, but the hardcoded `CREDIT_PACKS` dict and $40 Pro tier numbers migrate from module-level constants to `platform_settings.billing` lookups. Same Stripe API shape, same webhook handling, different read path for the numbers.
 - Company users do NOT get channel credit (that's a Personal-only feature).
 
-Matcha Work Personal is the $20/mo consumer tier. Individuals sign up, get AI tokens for their personal workspace + a $10/mo credit spendable against paid channels. Creators (who may be individual users OR company users running a side paid channel) receive payouts via Stripe Connect. Promos are granted via 100% off Stripe coupons applied at checkout so the card is captured and auto-converts when the coupon expires.
+Matcha Work Personal is the $20/mo consumer tier. Individuals sign up, get AI tokens for their personal workspace + a $10/mo credit spendable against paid channels. **Creators must be individual (personal) accounts. Company users are not allowed to be paid channel creators — a company admin who wants to run a personal paid channel must create a separate individual account.** This simplifies the Stripe Connect flow (always user-level, never company-level) and keeps the creator-payout liability off company tenants. Promos are granted via 100% off Stripe coupons applied at checkout so the card is captured and auto-converts when the coupon expires.
 
 We need four tightly-coupled additions:
 
@@ -241,7 +241,7 @@ The comp-invite flow looks up by `(percent_off, duration, duration_in_months)`; 
 
 ### Stripe Connect onboarding flow
 
-**Scope note (v1 limit):** `stripe_connect_account_id` lives on `users`, not `companies`. For an individual creator this is right. For a company-owned paid channel, payouts flow to whichever admin onboarded Connect — if that admin leaves, the company loses payouts. Acceptable for v1 (single-creator channels); v2 should add `companies.stripe_connect_account_id` for company-owned payouts with proper ownership handoff. Document this limit in onboarding copy so company admins understand what they're agreeing to.
+**Scope rule (permanent, not a v1 limit):** `stripe_connect_account_id` lives on `users`, not `companies`. **Only individual (personal) accounts can create paid channels.** Company users — even admins — are blocked from creating paid channels. Rationale: company tenants are billed by invoice and don't get a creator-payout liability mixed into their relationship with us; if a company admin wants to run a creator side channel they create a separate individual account. This is enforced server-side in `POST /channels` by rejecting any `paid_config` body when `current_user.role != 'individual'` (admin can override for testing).
 
 1. **Creator opens Settings** → sees "Payouts" card. If `stripe_connect_account_id IS NULL`: "Connect Stripe" button.
 2. **Click Connect** → `POST /api/stripe/connect/onboard` creates Express account via `stripe.Account.create(type='express', ...)` + `stripe.AccountLink.create(type='account_onboarding', return_url, refresh_url)`. Returns link URL.
@@ -479,7 +479,7 @@ Run against Stripe **test mode**. Stripe provides test Connect accounts and test
 
 - **Q1 (before live):** Credit ledger edge case — user cancels mid-month. Default **yes, credit remains until `current_period_end`, `used_cents` frozen at cancel time; credit-funded channel memberships expire at the same `period_end` with one grace-period notification**.
 - **Q2 (before build):** Phase ordering — ship Phase 1 (Connect onboarding) alone, or bundle with Phase 2 (rewrite channel payments to use Connect)? Default **bundled** — Phase 1 alone does nothing user-visible.
-- **Q3 (before build):** Company-as-creator Connect. v1 locks Connect to users (`users.stripe_connect_account_id`). For company-owned channels, payouts route through whichever admin onboarded. Known v1 limit; v2 adds `companies.stripe_connect_account_id` with ownership handoff. Acceptable?
+- **Q3 (resolved):** Creators are individual accounts only — company users cannot create paid channels, period. Not a v1 limit; a permanent product rule.
 - **Q4 (before build):** Admin credit-amount reduction mid-subscription. If admin drops channel credit from $10 to $5, existing credit-funded memberships at $8 get auto-expired on next renewal. Default **yes, expire + notify at next `invoice.paid`**. Alternative: grandfather existing memberships at original credit amount, only apply to new subscriptions. Pick one.
 - **Q5 (before build):** Waitlist → comp invite conversion. `newsletter_subscribers` with `source='matcha_work_beta_waitlist'` (already shipped) is the waitlist. Admin reviews the list, cherry-picks high-value signups, and generates individual-invites with N months free. Is the curation fully manual for v1, or do we auto-comp N% of waitlist signups on an interval?
 - **Q6 (nice-to-have):** Should the admin Settings UI surface a live preview of "if you change this, X existing subs will be affected at next renewal"? Default **no for v1**, but a "Settings changed on [date]" audit log would help.

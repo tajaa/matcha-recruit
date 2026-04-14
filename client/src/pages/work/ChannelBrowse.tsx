@@ -16,7 +16,7 @@ function formatPrice(cents: number | null | undefined, _currency?: string): stri
 
 export default function ChannelBrowse() {
   const navigate = useNavigate()
-  const { me, hasFeature } = useMe()
+  const { me } = useMe()
   const [channels, setChannels] = useState<ChannelSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -240,7 +240,7 @@ export default function ChannelBrowse() {
         <Suspense fallback={null}>
           <CreateChannelModal
             onClose={() => setShowCreate(false)}
-            canCreatePaid={me?.user?.role === 'individual' || me?.user?.role === 'admin' || hasFeature('paid_channel_creator')}
+            canCreatePaid={me?.user?.role === 'individual' || me?.user?.role === 'admin'}
             onCreated={(ch) => {
               setShowCreate(false)
               navigate(`/work/channels/${ch.id}`)
