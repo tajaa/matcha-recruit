@@ -179,6 +179,63 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Stripe subscription session: {exc}") from exc
 
+    async def create_personal_subscription_checkout(
+        self,
+        company_id: UUID,
+        user_id: UUID,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Create the $20/month Matcha Work Personal Plus checkout for an individual user.
+
+        Plus unlocks the pro Gemini model in matcha-work chat. Token quota stays
+        at the free-tier level (1M/mo) — this is a model-access upgrade, not a
+        token top-up. Reuses the existing subscription webhook path with a
+        distinct pack_id.
+        """
+        self._ensure_secret_key()
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        metadata = {
+            "company_id": str(company_id),
+            "user_id": str(user_id),
+            "pack_id": "matcha_work_personal",
+            "billing_type": "token_budget",
+            "tokens_per_cycle": "1000000",
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": 2000,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": "Matcha Work Plus",
+                                "description": "Access to the pro AI model — better reasoning, longer context",
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Personal subscription session: {exc}") from exc
+
     async def create_token_subscription_checkout(
         self,
         company_id: UUID,

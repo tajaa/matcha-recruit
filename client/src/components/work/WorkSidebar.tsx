@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X, Compass, CreditCard } from 'lucide-react'
+import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X, Compass, CreditCard, Sparkles } from 'lucide-react'
 import { listChannels, updateChannel, listPendingConnections } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
-import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew } from '../../api/matchaWork'
+import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew, getMWSubscription, startPersonalCheckout } from '../../api/matchaWork'
 import type { MWThread, MWProject } from '../../types/matcha-work'
 import { getUnreadCount } from '../../api/inbox'
 import { useMe } from '../../hooks/useMe'
@@ -36,6 +36,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
   const [channelsOpen, setChannelsOpen] = useState(true)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [threadsOpen, setThreadsOpen] = useState(false)
+  const [plusActive, setPlusActive] = useState<boolean | null>(null)
+  const [upgrading, setUpgrading] = useState(false)
 
   // Inline rename state
   const [renaming, setRenaming] = useState<RenameItem | null>(null)
@@ -48,6 +50,13 @@ export default function WorkSidebar({ open, onToggle }: Props) {
     listThreads('active').then(setThreads).catch(() => {})
     getUnreadCount().then((r) => setInboxUnread(r.count)).catch(() => {})
     listPendingConnections().then((p) => setPendingConnections(p.length)).catch(() => {})
+    if (isPersonal) {
+      getMWSubscription()
+        .then((s) => setPlusActive(
+          !!s.active && s.pack_id === 'matcha_work_personal'
+        ))
+        .catch(() => setPlusActive(false))
+    }
   }, [])
 
   useEffect(() => {
@@ -111,6 +120,17 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       setProjects((prev) => [project, ...prev])
       navigate(`/work/projects/${project.id}`)
     } catch {}
+  }
+
+  async function handleUpgradeToPlus() {
+    if (upgrading) return
+    setUpgrading(true)
+    try {
+      const { checkout_url } = await startPersonalCheckout()
+      window.location.href = checkout_url
+    } catch {
+      setUpgrading(false)
+    }
   }
 
   async function handlePickHiringClient(client: RecruitingClient | null) {
@@ -500,6 +520,22 @@ export default function WorkSidebar({ open, onToggle }: Props) {
 
         {/* Footer: Inbox + User profile + Logout */}
         <div className="px-2 py-2 border-t border-zinc-800/30 space-y-1">
+          {isPersonal && plusActive === false && (
+            <button
+              onClick={handleUpgradeToPlus}
+              disabled={upgrading}
+              className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-amber-400 hover:text-amber-300 hover:bg-amber-500/10 transition-colors disabled:opacity-50"
+            >
+              <Sparkles size={14} strokeWidth={1.8} />
+              {upgrading ? 'Opening checkout…' : 'Upgrade to Plus'}
+            </button>
+          )}
+          {isPersonal && plusActive === true && (
+            <div className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-amber-400/80">
+              <Sparkles size={14} strokeWidth={1.8} />
+              Plus active
+            </div>
+          )}
           <button
             onClick={() => navigate('/work/billing')}
             className="w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30 transition-colors"

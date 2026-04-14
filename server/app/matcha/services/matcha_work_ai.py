@@ -433,12 +433,29 @@ SUPPORTED_MODELS = {
     "gemini-3.1-pro-preview",
 }
 
-async def _get_model(settings, model_override: str | None = None) -> str:
+async def _get_model(
+    settings,
+    model_override: str | None = None,
+    company_id: str | None = None,
+) -> str:
     if model_override and model_override in SUPPORTED_MODELS:
         return model_override
     mode = await get_matcha_work_model_mode()
     if mode == "heavy":
         return "gemini-3.1-pro-preview"
+
+    # Plus tier upgrade: users with an active matcha_work_personal
+    # subscription get the pro model.
+    if company_id:
+        try:
+            from uuid import UUID as _UUID
+            from . import billing_service
+            sub = await billing_service.get_active_subscription(_UUID(company_id))
+            if sub and sub.get("pack_id") == "matcha_work_personal":
+                return "gemini-3.1-pro-preview"
+        except Exception:
+            pass
+
     return settings.analysis_model
 
 
@@ -561,7 +578,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             if context_summary:
                 full_prompt += f"\n\nPrior conversation summary:\n{context_summary}"
 
-            model = await _get_model(self.settings, model_override)
+            model = await _get_model(self.settings, model_override, company_id=company_id)
             try:
                 response = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -590,7 +607,7 @@ class GeminiProvider(MatchaWorkAIProvider):
             messages, current_state, company_context=company_context, slide_index=slide_index,
             context_summary=context_summary,
         )
-        model = await _get_model(self.settings, model_override)
+        model = await _get_model(self.settings, model_override, company_id=company_id)
 
         try:
             response = await asyncio.wait_for(

@@ -155,6 +155,57 @@ async def create_checkout_session(
     return CheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
 
 
+@router.post("/checkout/personal", response_model=CheckoutResponse)
+async def create_personal_checkout_session(
+    body: CheckoutRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Start Matcha Work Plus ($20/mo) checkout for an individual user.
+
+    Plus unlocks the pro AI model; token quota is unchanged from free.
+    Only individual accounts (or admins for testing) can subscribe —
+    business users stay on Pro.
+    """
+    if current_user.role not in ("individual", "admin"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Plus is available for personal accounts only",
+        )
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No workspace associated with this account")
+
+    stripe_service = StripeService()
+    try:
+        session = await stripe_service.create_personal_subscription_checkout(
+            company_id=company_id,
+            user_id=current_user.id,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    stripe_session_id = str(getattr(session, "id", "") or "")
+    checkout_url = str(getattr(session, "url", "") or "")
+    if not stripe_session_id or not checkout_url:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Stripe checkout session did not return expected fields",
+        )
+
+    await billing_service.create_pending_stripe_session(
+        company_id=company_id,
+        stripe_session_id=stripe_session_id,
+        credit_pack_id="matcha_work_personal",
+        credits_to_add=0,
+        amount_cents=2000,
+    )
+
+    return CheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
 @router.get("/subscription", response_model=SubscriptionResponse)
 async def get_subscription(
     current_user: CurrentUser = Depends(require_admin_or_client),
