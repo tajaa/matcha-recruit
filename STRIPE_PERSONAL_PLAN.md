@@ -2,11 +2,13 @@
 
 ## Context
 
-**Scope: Matcha Work Personal ($20/mo consumer tier) + creator payouts + admin comp flow.**
+**Scope: Matcha Work Personal ($20/mo consumer tier) + creator payouts + admin comp flow + unified billing config.**
+
+**Top-level rule, non-negotiable:** No pricing number is hardcoded in a `.py` file after this plan ships. All numeric pricing lives in `platform_settings.billing` and is read at request time. Env vars only hold Stripe API credentials and webhook secrets — never prices, pack definitions, or fee percentages. Changing a price = admin edits a form = next checkout uses the new value. No code path, no deploy, no Stripe dashboard round-trip.
 
 Company billing split:
-- Company **base tier = manual invoicing** (not Stripe, out of scope here — do not touch)
-- Company **AI credit top-ups = existing Stripe flow** (`create_token_subscription_checkout` / token packs at `stripe_service.py`). Already works, leave alone.
+- Company **base tier = manual invoicing** (not Stripe, out of scope here — do not touch the invoicing flow itself)
+- Company **AI credit top-ups = existing Stripe flow** (`create_token_subscription_checkout` / token packs at `stripe_service.py`). Functionally unchanged, but the hardcoded `CREDIT_PACKS` dict and $40 Pro tier numbers migrate from module-level constants to `platform_settings.billing` lookups. Same Stripe API shape, same webhook handling, different read path for the numbers.
 - Company users do NOT get channel credit (that's a Personal-only feature).
 
 Matcha Work Personal is the $20/mo consumer tier. Individuals sign up, get AI tokens for their personal workspace + a $10/mo credit spendable against paid channels. Creators (who may be individual users OR company users running a side paid channel) receive payouts via Stripe Connect. Promos are granted via 100% off Stripe coupons applied at checkout so the card is captured and auto-converts when the coupon expires.
@@ -30,8 +32,15 @@ Existing scaffolding to reuse:
 
 **Explicitly out of this plan** (do not touch):
 - Company base tier billing (manual invoicing flow outside the app)
-- Existing `create_token_subscription_checkout` and company token pack flow — works, leave alone
 - Any channel-credit-like feature for company users (company users don't get the $10/mo credit; that's a Personal consumer perk)
+
+**Touched by this plan** (config externalization, not behavior change):
+- `stripe_service.CREDIT_PACKS` hardcoded dict → migrates to `platform_settings.billing.credit_packs`
+- `stripe_service.FEE_CENTS` = 250 → migrates to `platform_settings.billing.credit_pack_processing_fee_cents`
+- `stripe_service.FREE_SIGNUP_CREDITS` = 5.0 → migrates to `platform_settings.billing.free_signup_credit_dollars`
+- `stripe_service.create_token_subscription_checkout` hardcoded $40 / 5M tokens / "Matcha Work Pro" → reads from `platform_settings.billing.pro_tier.{unit_amount_cents, tokens_per_cycle, product_name, product_description}`
+- `token_budget_service.FREE_TOKEN_GRANT` = 1_000_000 → migrates to `platform_settings.billing.free_signup_token_grant`
+- Checkout session shape (inline `price_data`) is unchanged — still works the same way against Stripe, just reading numbers from DB instead of Python constants
 
 ## Product decisions
 
@@ -41,13 +50,20 @@ Existing scaffolding to reuse:
 
 The `platform_settings` table + cached getter pattern at `server/app/core/services/platform_settings.py` already exists — used for `visible_features`, `risk_assessment_weights`, `matcha_work_model_mode`. Extend with billing keys. Admin UI at `client/src/pages/admin/Settings.tsx` is the editor.
 
+**Env vars** — ONLY API credentials and infra. No prices, no IDs of specific SKUs:
+- `STRIPE_SECRET_KEY` — sk_test / sk_live
+- `STRIPE_WEBHOOK_SECRET` — rotates on test→live
+- `STRIPE_PUBLISHABLE_KEY` — frontend-consumed
+
 | Knob | Venue | Default | Notes |
 |---|---|---|---|
-| Personal tier Stripe **price ID** | **Env var** `STRIPE_PERSONAL_PRICE_ID` | — | Different test/live; not a "business" knob |
-| Personal tier price displayed ($20) | **Derived from Stripe** (price.unit_amount) | — | Source of truth = Stripe price |
-| Personal tier monthly token grant | `platform_settings.billing.personal_token_grant` | 1_000_000 | Tunable as product evolves |
-| Personal tier **channel credit** cents/month | `platform_settings.billing.channel_credit_cents` | 1000 ($10) | Most likely to A/B |
-| Platform fee % on direct channel subs (non-credit path) | `platform_settings.billing.channel_platform_fee_percent` | 15 | Tunable for promos, competitive pressure |
+| **Pro tier** — unit amount, tokens/cycle, name, description, enabled | `platform_settings.billing.pro_tier.*` | 4000c / 5M / "Matcha Work Pro" | Currently hardcoded in `stripe_service.create_token_subscription_checkout`; migrate |
+| **Personal tier** — unit amount, tokens/cycle, channel credit, name, description, enabled | `platform_settings.billing.personal_tier.*` | 2000c / 1M / 1000c credit / "Matcha Work Personal" | All numeric, all admin-editable |
+| **Credit packs** (one-time dollar packs) | `platform_settings.billing.credit_packs` (array) | `[twenty, fifty]` with base_cents, credits, label, description | Add/edit/remove whole packs from admin UI |
+| Credit pack processing fee | `platform_settings.billing.credit_pack_processing_fee_cents` | 250 ($2.50) | Was `FEE_CENTS` constant |
+| Free signup credit (business) | `platform_settings.billing.free_signup_credit_dollars` | 5.0 | Was `FREE_SIGNUP_CREDITS` constant |
+| Free signup token grant | `platform_settings.billing.free_signup_token_grant` | 1_000_000 | Was `FREE_TOKEN_GRANT` in `token_budget_service.py` |
+| Platform fee % on direct channel subs | `platform_settings.billing.channel_platform_fee_percent` | 15 | Tunable for promos, competitive pressure |
 | Platform fee % on channel job postings ($200/mo) | `platform_settings.billing.job_posting_platform_fee_percent` | 50 | Per PAID_CHANNELS_PLAN (50/50 split) |
 | Available comp coupon durations | `platform_settings.billing.comp_durations_months` | `[3, 6, 12]` + `forever` | Admin invite dropdown options |
 | Min channel price cents | **Hard-coded** (`channel_payment_service.MIN_PRICE_CENTS = 50`) | 50 | Already hard-coded, leave |
@@ -57,7 +73,7 @@ The `platform_settings` table + cached getter pattern at `server/app/core/servic
 | Multiple Personal subs per user | **Hard-coded** (no, DB unique constraint) | — | Structural |
 | Refund policy | **Hard-coded** (Stripe default: cancel at period end) | — | Structural |
 | Credit applies to $200 job postings? | **Hard-coded** (no — member subs only) | — | Structural |
-| Company tier billing | **Not touched — manual invoicing, out of scope** | — | — |
+| Company base tier (invoicing) | **Not touched — manual invoicing, out of scope** | — | — |
 
 ### Why not put everything in admin?
 
@@ -73,7 +89,7 @@ Add a `PersonalBillingSettings` card at `client/src/pages/admin/Settings.tsx` sh
 - Platform fee % on channel job postings (50%)
 - Personal tier monthly AI token grant (1M, editable)
 - Comp duration options (multi-select: 3 mo / 6 mo / 12 mo — "forever" always allowed in admin invite)
-- Read-only display of `STRIPE_PERSONAL_PRICE_ID` env value for sanity (plus an in-Stripe-dashboard link)
+- Read-only display of current Stripe mode (test vs live) and a link to the Stripe dashboard for audit
 
 Copy labelled "Matcha Work Personal only" at top. Company billing is managed via invoicing outside the app — not configurable here.
 
@@ -84,17 +100,52 @@ Each save hits `PATCH /admin/platform-settings/billing` with the JSON blob, cach
 Add to `server/app/core/services/platform_settings.py`:
 ```python
 DEFAULT_BILLING_SETTINGS = {
-    "channel_credit_cents": 1000,              # Personal tier monthly credit
-    "personal_token_grant": 1_000_000,         # Personal tier AI token grant
-    "channel_platform_fee_percent": 15,        # fee on direct (non-credit) channel subs
-    "job_posting_platform_fee_percent": 50,    # fee on $200/mo channel job postings
-    "comp_durations_months": [3, 6, 12],       # admin-invite dropdown; forever always allowed
+    # Company Pro tier (existing, currently hardcoded in stripe_service)
+    "pro_tier": {
+        "enabled": True,
+        "unit_amount_cents": 4000,
+        "currency": "usd",
+        "tokens_per_cycle": 5_000_000,
+        "product_name": "Matcha Work Pro",
+        "product_description": "5M AI tokens per month",
+    },
+
+    # Matcha Work Personal tier (new)
+    "personal_tier": {
+        "enabled": True,
+        "unit_amount_cents": 2000,
+        "currency": "usd",
+        "tokens_per_cycle": 1_000_000,
+        "product_name": "Matcha Work Personal",
+        "product_description": "AI workspace + $10/mo channel credit",
+        "channel_credit_cents": 1000,   # monthly credit issued to each Personal sub
+    },
+
+    # One-time credit packs (replaces hardcoded CREDIT_PACKS dict)
+    "credit_packs": [
+        {"pack_id": "twenty", "base_cents": 2000, "credits": 20.0,
+         "label": "$20 AI Credits", "description": "$20 of AI usage"},
+        {"pack_id": "fifty",  "base_cents": 5000, "credits": 50.0,
+         "label": "$50 AI Credits", "description": "$50 of AI usage"},
+    ],
+    "credit_pack_processing_fee_cents": 250,   # was FEE_CENTS constant
+
+    # Free grants on signup
+    "free_signup_credit_dollars": 5.0,         # was FREE_SIGNUP_CREDITS constant
+    "free_signup_token_grant": 1_000_000,      # was FREE_TOKEN_GRANT constant
+
+    # Platform fees on paid channels (Stripe Connect destination charges)
+    "channel_platform_fee_percent": 15,
+    "job_posting_platform_fee_percent": 50,
+
+    # Comp invite flow
+    "comp_durations_months": [3, 6, 12],
 }
 
-def get_billing_settings() -> dict: ...
+async def get_billing_settings() -> dict: ...
 def invalidate_billing_settings_cache() -> None: ...
 ```
-Same 30-second cache TTL pattern as existing getters.
+Same 30-second cache TTL pattern as existing `visible_features` / `matcha_work_model_mode` getters. Merge with `DEFAULT_BILLING_SETTINGS` so partial admin overrides still return a complete config object.
 
 ## Architecture
 
@@ -201,8 +252,8 @@ The comp-invite flow looks up by `(percent_off, duration, duration_in_months)`; 
 
 ### $20 Personal subscription flow
 
-1. **User hits `/billing` or signup** → sees Personal tier ($20/mo).
-2. **Click Subscribe** → `POST /api/matcha-work/billing/checkout?tier=personal` → creates `stripe.checkout.Session` with `mode='subscription'`, `line_items=[{price: STRIPE_PERSONAL_PRICE_ID}]`, optional `discounts=[{coupon: coupon_id}]` for comped signups.
+1. **User hits `/billing` or signup** → sees Personal tier at whatever `platform_settings.billing.personal_tier.unit_amount_cents` currently says.
+2. **Click Subscribe** → `POST /api/matcha-work/billing/checkout?tier=personal` → creates `stripe.checkout.Session` with `mode='subscription'` and inline `line_items=[{price_data: {unit_amount: personal_tier.unit_amount_cents, recurring: {interval: 'month'}, product_data: {name: personal_tier.product_name, description: personal_tier.product_description}}}]`. Optional `discounts=[{coupon: coupon_id}]` for comped signups. No pre-created Stripe price IDs — Stripe creates the price records as a side effect of the first session, we don't reference them.
 3. **Checkout completes** → `checkout.session.completed` webhook:
    - persists `users.stripe_customer_id` from the session (first time only)
    - calls `upsert_subscription()` (existing)
@@ -311,12 +362,13 @@ Renewal (on Personal sub `invoice.paid` webhook, after new credit row is created
 
 **Config — split across three surfaces**:
 
-1. **Env vars** (`config.py` + `.env.backend`):
-   - `STRIPE_PERSONAL_PRICE_ID` — created in Stripe dashboard, different for test/live
-   - `STRIPE_WEBHOOK_SECRET` — live-mode webhook secret (replace test value before live)
-   - No new numeric knobs in env — all business knobs go to `platform_settings`
+1. **Env vars** (`config.py` + `.env.backend`) — ONLY API credentials:
+   - `STRIPE_SECRET_KEY` — test/live rotation
+   - `STRIPE_WEBHOOK_SECRET` — test/live rotation
+   - `STRIPE_PUBLISHABLE_KEY` — frontend-consumed
+   - **No price IDs, no pack definitions, no fee percentages.** Every checkout session uses inline `price_data` that reads from `platform_settings.billing` at request time.
 
-2. **`platform_settings.billing` JSONB row** (admin-editable, see Billing Settings table above for keys)
+2. **`platform_settings.billing` JSONB row** (admin-editable, see Billing Settings table above for the full key set — pro_tier, personal_tier, credit_packs, fees, free grants, comp durations)
 
 3. **Hard-coded constants** (`channel_payment_service.py`):
    - `MIN_PRICE_CENTS`, `MAX_PRICE_CENTS` — already there, leave alone
@@ -351,7 +403,7 @@ Ship in four independent phases — each deployable and testable alone:
 - **Ship gate:** admin generates 3-month-free invite, user completes $0 checkout, card captured, credit granted, user subscribes to paid channel at no further charge, creator receives credit transfer
 
 **Phase 4 — Live switch**
-- Create products in Stripe **live** mode, record live price IDs in env (`STRIPE_PERSONAL_PRICE_ID`)
+- No Stripe product/price records to pre-create — everything uses inline `price_data` at checkout time. Live flip only requires swapping API keys (below)
 - Swap secrets to `sk_live_...`, update webhook secrets for live
 - Clear test-mode dead data from DB:
   - Channels: `UPDATE channels SET stripe_product_id = NULL, stripe_price_id = NULL WHERE is_paid = true` (forces re-creation against live account)
