@@ -338,14 +338,18 @@ def _build_handbook_upload_summary(
     )
 
 
-async def _build_thread_detail_response(thread_id: UUID, company_id: UUID, *, user_id: UUID | None = None) -> ThreadDetailResponse:
+async def _build_thread_detail_response(thread_id: UUID, company_id: Optional[UUID], *, user_id: UUID | None = None) -> ThreadDetailResponse:
     thread = await doc_svc.get_thread(thread_id, company_id, user_id=user_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
+    # Use the thread's actual company_id — callers who are collaborators on a
+    # thread from another company would otherwise pass their own company_id.
+    thread_company_id = thread["company_id"]
+
     thread["current_state"] = await doc_svc.ensure_matcha_work_thread_storage_scope(
         thread_id,
-        company_id,
+        thread_company_id,
         thread["current_state"],
     )
     messages = await doc_svc.get_thread_messages(thread_id)
@@ -5385,8 +5389,9 @@ async def get_thread(
 ):
     """Get thread detail with all messages."""
     company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
+    # Don't 404 on missing company_id — collaborators (individuals invited to a
+    # thread) may have no company of their own. Let _build_thread_detail_response
+    # resolve access via the collaborator check in get_thread().
     return await _build_thread_detail_response(thread_id, company_id, user_id=current_user.id)
 
 
@@ -5644,13 +5649,17 @@ async def send_message_stream(
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
     """Send message with SSE progress + token usage events."""
-    company_id = await get_client_company_id(current_user)
-    if company_id is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
-    thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
+    caller_company_id = await get_client_company_id(current_user)
+    # Don't 404 on None — collaborators (individuals invited to another user's
+    # thread) may have no company of their own.
+    thread = await doc_svc.get_thread(thread_id, caller_company_id, user_id=current_user.id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Use the thread's actual company for all downstream operations (AI profile,
+    # token budget, etc.) so collaborators don't accidentally scope ops to their
+    # own (possibly absent) company.
+    company_id = thread["company_id"]
 
     if thread["status"] == "finalized":
         raise HTTPException(status_code=400, detail="Cannot send messages to a finalized thread")
@@ -5778,13 +5787,22 @@ async def send_message_stream(
             )
 
             yield _sse_data({"type": "status", "message": "Generating response..."})
-            ai_resp = await ai_provider.generate(
+            # Run generation as a background task and emit keepalives every 15 s
+            # so proxies with short read-timeouts (e.g. nginx default 60 s) don't
+            # close the SSE connection while we wait for the AI to finish.
+            _ai_task = asyncio.create_task(ai_provider.generate(
                 msg_dicts, thread["current_state"], company_context=ctx,
                 slide_index=body.slide_index, context_summary=context_summary,
                 payer_mode_prompt=stream_payer_prompt,
                 model_override=body.model,
                 company_id=str(company_id),
-            )
+            ))
+            while True:
+                done, _ = await asyncio.wait({_ai_task}, timeout=15.0)
+                if done:
+                    break
+                yield _sse_data({"type": "keepalive"})
+            ai_resp = await _ai_task
             _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 
             current_version = thread["version"]
@@ -5923,14 +5941,19 @@ async def send_message_stream(
 
             # Trigger compaction in the background if needed
             asyncio.create_task(_maybe_compact(thread_id, ai_provider, summary_at_count))
-        except Exception as e:
-            logger.error("Matcha Work stream failed for thread %s: %s", thread_id, e, exc_info=True)
-            yield _sse_data(
-                {
-                    "type": "error",
-                    "message": "Failed to process message. Please try again.",
-                }
-            )
+        except BaseException as e:
+            logger.error("Matcha Work stream failed for thread %s: %s (%s)", thread_id, e, type(e).__name__, exc_info=True)
+            try:
+                yield _sse_data(
+                    {
+                        "type": "error",
+                        "message": "Failed to process message. Please try again.",
+                    }
+                )
+            except Exception:
+                pass
+            if not isinstance(e, Exception):
+                raise
         finally:
             yield "data: [DONE]\n\n"
 
