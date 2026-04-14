@@ -1049,7 +1049,7 @@ export function removeThreadCollaborator(threadId: string, userId: string) {
 }
 
 export function searchThreadInvitableUsers(threadId: string, query: string) {
-  return api.get<{ id: string; name: string; email: string; avatar_url: string | null }[]>(
+  return api.get<{ user_id: string; name: string; email: string; avatar_url: string | null }[]>(
     `/matcha-work/threads/${threadId}/collaborators/search?q=${encodeURIComponent(query)}`
   )
 }
