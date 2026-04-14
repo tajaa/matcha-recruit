@@ -495,10 +495,12 @@ export default function ProjectView() {
         {SidebarContent}
       </div>
 
-      {/* Desktop Chat Sidebar */}
-      <div className="hidden md:flex flex-col w-[180px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
-        {SidebarContent}
-      </div>
+      {/* Desktop Chat Sidebar — hidden for recruiting projects (single-chat flow, no list needed) */}
+      {!isRecruiting && (
+        <div className="hidden md:flex flex-col w-[180px] shrink-0" style={{ borderRight: '1px solid #333', background: '#252526' }}>
+          {SidebarContent}
+        </div>
+      )}
 
       {/* Center — inbox view when sidebar is in inbox mode */}
       {sidebarMode === 'inbox' && (
@@ -550,9 +552,15 @@ export default function ProjectView() {
       <div className={`flex-1 flex flex-col min-w-0 ${mobileView === 'panel' ? 'hidden md:flex' : 'flex'}`} style={{ borderRight: '1px solid #333' }}>
         {/* Header */}
         <div className="px-4 py-2 flex items-center gap-2" style={{ borderBottom: '1px solid #333' }}>
-          <button onClick={() => setMobileMenuOpen(true)} className="sm:hidden text-[#6a737d] hover:text-[#e8e8e8]">
-            <Menu size={14} />
-          </button>
+          {isRecruiting ? (
+            <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]" title="Back to workspace">
+              <ArrowLeft size={14} />
+            </Link>
+          ) : (
+            <button onClick={() => setMobileMenuOpen(true)} className="sm:hidden text-[#6a737d] hover:text-[#e8e8e8]">
+              <Menu size={14} />
+            </button>
+          )}
           <h2 className="text-xs font-medium truncate" style={{ color: '#e8e8e8' }}>
             {project.title}
           </h2>
