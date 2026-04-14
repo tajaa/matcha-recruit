@@ -7109,12 +7109,19 @@ async def list_thread_collaborators(
     thread_id: UUID,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """List collaborators on a thread with user info."""
+    """List collaborators on a thread with user info.
+
+    Always includes the thread creator as a synthetic 'owner' row even if
+    they don't have an explicit mw_thread_collaborators entry. Without this,
+    the moment the first invitee is added the owner disappears from the
+    collaborator list and their client-side `isOwner` flag flips to false.
+    """
     company_id = await get_client_company_id(current_user)
-    # Verify the user can access the thread
     thread = await doc_svc.get_thread(thread_id, company_id, user_id=current_user.id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+
+    owner_id = thread.get("created_by")
 
     async with get_connection() as conn:
         rows = await conn.fetch(
@@ -7132,17 +7139,44 @@ async def list_thread_collaborators(
             """,
             thread_id,
         )
-    return [
-        {
-            "user_id": str(r["user_id"]),
-            "name": r["name"],
-            "email": r["email"],
-            "role": r["role"],
-            "avatar_url": r["avatar_url"],
-            "added_at": r["created_at"].isoformat() if r["created_at"] else None,
-        }
-        for r in rows
-    ]
+
+        result = [
+            {
+                "user_id": str(r["user_id"]),
+                "name": r["name"],
+                "email": r["email"],
+                "role": r["role"],
+                "avatar_url": r["avatar_url"],
+                "added_at": r["created_at"].isoformat() if r["created_at"] else None,
+            }
+            for r in rows
+        ]
+
+        # Include the thread creator as a synthetic owner row if not already present
+        if owner_id is not None and not any(c["user_id"] == str(owner_id) for c in result):
+            owner_row = await conn.fetchrow(
+                """
+                SELECT u.id, u.email, u.avatar_url,
+                       COALESCE(cl.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS name
+                FROM users u
+                LEFT JOIN clients cl ON cl.user_id = u.id
+                LEFT JOIN employees e ON e.user_id = u.id
+                LEFT JOIN admins a ON a.user_id = u.id
+                WHERE u.id = $1
+                """,
+                owner_id,
+            )
+            if owner_row:
+                result.insert(0, {
+                    "user_id": str(owner_row["id"]),
+                    "name": owner_row["name"],
+                    "email": owner_row["email"],
+                    "role": "owner",
+                    "avatar_url": owner_row["avatar_url"],
+                    "added_at": None,
+                })
+
+    return result
 
 
 @router.post("/threads/{thread_id}/collaborators")

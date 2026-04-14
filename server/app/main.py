@@ -26,9 +26,16 @@ async def lifespan(app: FastAPI):
     """Startup and shutdown events."""
     settings = load_settings()
     print(f"[Matcha] Starting server on port {settings.port}")
-    print(
-        f"[Matcha] Using {'Vertex AI' if settings.use_vertex else 'API Key'} for Gemini"
+    # Gemini client preference: matcha-work chat and most analyzers check
+    # GEMINI_API_KEY first and use direct API when set. Vertex is only used
+    # as fallback when the API key is absent AND VERTEX_PROJECT is set.
+    _gemini_mode = (
+        "Direct API (GEMINI_API_KEY set)"
+        if os.getenv("GEMINI_API_KEY")
+        else "Vertex AI" if settings.use_vertex
+        else "none configured — chat will fail"
     )
+    print(f"[Matcha] Gemini client: {_gemini_mode}")
 
     # Initialize database
     await init_pool(settings.database_url, ssl_mode=settings.database_ssl)
