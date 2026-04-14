@@ -103,7 +103,7 @@ export default function WorkLayout() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 flex flex-col">
+    <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden">
       <header className="flex items-center gap-2 sm:gap-3 px-3 sm:px-6 py-3 border-b border-zinc-800 shrink-0">
         <button 
           onClick={() => setMobileMenuOpen(true)}
