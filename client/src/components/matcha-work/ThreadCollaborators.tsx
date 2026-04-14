@@ -30,7 +30,7 @@ export default function ThreadCollaborators({ threadId, onlineUsers, lightMode }
   const [collaborators, setCollaborators] = useState<ThreadCollaborator[]>([])
   const [showSearch, setShowSearch] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<{ id: string; name: string; email: string; avatar_url: string | null }[]>([])
+  const [searchResults, setSearchResults] = useState<{ user_id: string; name: string; email: string; avatar_url: string | null }[]>([])
   const [searching, setSearching] = useState(false)
   const [contextMenu, setContextMenu] = useState<{ userId: string; x: number; y: number } | null>(null)
   const searchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -72,7 +72,7 @@ export default function ThreadCollaborators({ threadId, onlineUsers, lightMode }
       try {
         const results = await searchThreadInvitableUsers(threadId, q)
         const existingIds = new Set(collaborators.map((c) => c.user_id))
-        setSearchResults(results.filter((r) => !existingIds.has(r.id)))
+        setSearchResults(results.filter((r) => !existingIds.has(r.user_id)))
       } catch {
         setSearchResults([])
       }
@@ -85,7 +85,7 @@ export default function ThreadCollaborators({ threadId, onlineUsers, lightMode }
       await addThreadCollaborator(threadId, userId)
       const updated = await listThreadCollaborators(threadId)
       setCollaborators(updated)
-      setSearchResults((prev) => prev.filter((r) => r.id !== userId))
+      setSearchResults((prev) => prev.filter((r) => r.user_id !== userId))
       setSearchQuery('')
     } catch (err: unknown) {
       console.error('Failed to add collaborator', err)
@@ -191,8 +191,8 @@ export default function ThreadCollaborators({ threadId, onlineUsers, lightMode }
               {searching && <div className={`text-[10px] ${textSecondary} px-1 py-1`}>Searching...</div>}
               {searchResults.map((user) => (
                 <button
-                  key={user.id}
-                  onClick={() => handleAdd(user.id)}
+                  key={user.user_id}
+                  onClick={() => handleAdd(user.user_id)}
                   className={`flex items-center gap-2 w-full px-2 py-1.5 rounded text-left ${hoverBg} transition-colors`}
                 >
                   {user.avatar_url ? (
@@ -200,7 +200,7 @@ export default function ThreadCollaborators({ threadId, onlineUsers, lightMode }
                   ) : (
                     <div
                       className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-medium text-white shrink-0"
-                      style={{ background: avatarColor(user.id) }}
+                      style={{ background: avatarColor(user.user_id) }}
                     >
                       {user.name.charAt(0).toUpperCase()}
                     </div>
