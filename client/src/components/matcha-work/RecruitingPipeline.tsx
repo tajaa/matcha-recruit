@@ -731,19 +731,27 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                         </p>
                       </div>
                       {cand.location && (
-                        <span className="flex items-center gap-1 text-[11px] shrink-0" style={{ color: c.muted }}>
+                        <span className="flex items-center gap-1 text-[11px] shrink-0 mt-0.5" style={{ color: c.muted }}>
                           <MapPin size={11} />{cand.location}
                         </span>
                       )}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setExpandedId(expanded ? null : cand.id) }}
+                        className="shrink-0 mt-0.5 p-0.5 transition-transform"
+                        style={{ color: c.muted, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+                        title={expanded ? 'Collapse' : 'Expand'}
+                      >
+                        <ChevronDown size={14} />
+                      </button>
                     </div>
 
-                    {cand.summary && (
-                      <p className="text-[13px] mt-2.5 leading-[1.55]" style={{ color: c.text }}>{cand.summary}</p>
+                    {expanded && cand.summary && (
+                      <p className="text-[13px] mt-3 leading-[1.55]" style={{ color: c.text }}>{cand.summary}</p>
                     )}
 
-                    {cand.skills && cand.skills.length > 0 && (
+                    {expanded && cand.skills && cand.skills.length > 0 && (
                       <div className="flex flex-wrap gap-1.5 mt-3">
-                        {(expanded ? cand.skills : cand.skills.slice(0, 5)).map((s, i) => (
+                        {cand.skills.map((s, i) => (
                           <span
                             key={i}
                             className="text-[11px] font-medium px-2 py-0.5 rounded-md"
@@ -752,9 +760,6 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                             {s}
                           </span>
                         ))}
-                        {!expanded && cand.skills.length > 5 && (
-                          <span className="text-[11px] px-1.5 py-0.5 self-center" style={{ color: c.muted }}>+{cand.skills.length - 5}</span>
-                        )}
                       </div>
                     )}
 
