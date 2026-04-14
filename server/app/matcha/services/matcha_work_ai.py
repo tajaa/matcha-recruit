@@ -11,7 +11,8 @@ from typing import Optional, Any
 from google import genai
 from google.genai import types
 
-# Google Search grounding tool — enables real-time web data in all MW responses
+# Google Search grounding tool — used only for payer mode (real-world coverage data).
+# NOT used in general chat: grounding adds 5-15s latency per query.
 _GOOGLE_SEARCH_TOOL = types.Tool(google_search=types.GoogleSearch())
 
 from ...config import get_settings
@@ -534,7 +535,6 @@ class GeminiProvider(MatchaWorkAIProvider):
                 model=model,
                 config=types.CreateCachedContentConfig(
                     system_instruction=static_prompt,
-                    tools=[_GOOGLE_SEARCH_TOOL],
                     ttl=f"{_CACHE_TTL_SECONDS}s",
                 ),
             )
@@ -676,7 +676,6 @@ class GeminiProvider(MatchaWorkAIProvider):
                     system_instruction=static_prompt + "\n\n" + dynamic_prompt,
                     temperature=0.2,
                     response_mime_type="application/json",
-                    tools=[_GOOGLE_SEARCH_TOOL],
                 ),
             )
         raw_text = response.text or ""
