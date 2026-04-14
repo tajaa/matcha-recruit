@@ -647,9 +647,13 @@ class GeminiProvider(MatchaWorkAIProvider):
         inferred_skill: str,
         company_id: str = "",
     ) -> AIResponse:
+        import time as _time
         # Try to cache the static prompt (instructions + company context)
+        _tc0 = _time.monotonic()
         cache_name = self._get_or_create_cache(model, static_prompt, company_id)
+        logger.info("[TIMING] cache lookup/create %.2fs (cache_name=%s)", _time.monotonic() - _tc0, cache_name)
 
+        _tg0 = _time.monotonic()
         if cache_name:
             # Cached: static prompt is in the cache. Dynamic context goes as a
             # content prefix because Gemini doesn't allow system_instruction + cached_content together.
@@ -678,6 +682,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     response_mime_type="application/json",
                 ),
             )
+        logger.info("[TIMING] generate_content %.2fs", _time.monotonic() - _tg0)
         raw_text = response.text or ""
         raw_text = _clean_json_text(raw_text)
 

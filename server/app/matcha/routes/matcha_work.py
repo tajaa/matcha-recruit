@@ -5787,6 +5787,8 @@ async def send_message_stream(
             )
 
             yield _sse_data({"type": "status", "message": "Generating response..."})
+            import time as _time
+            _t0 = _time.monotonic()
             # Run generation as a background task and emit keepalives every 15 s
             # so proxies with short read-timeouts (e.g. nginx default 60 s) don't
             # close the SSE connection while we wait for the AI to finish.
@@ -5803,6 +5805,7 @@ async def send_message_stream(
                     break
                 yield _sse_data({"type": "keepalive"})
             ai_resp = await _ai_task
+            logger.info("[TIMING] AI generate took %.2fs for thread %s", _time.monotonic() - _t0, thread_id)
             _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
 
             current_version = thread["version"]
@@ -5859,13 +5862,18 @@ async def send_message_stream(
                 metadata=msg_metadata,
             )
 
-            # Broadcast new messages to connected thread collaborators via WS
+            # Broadcast new messages to collaborators via WS — fire-and-forget so
+            # a CancelledError inside the lock doesn't kill the SSE generator before
+            # the complete event is sent.
             try:
                 from .thread_ws import thread_manager
                 user_msg_dict = _row_to_message(user_msg).model_dump(mode="json")
                 assistant_msg_dict = _row_to_message(assistant_msg).model_dump(mode="json")
-                # Exclude sender — they already get messages via SSE
-                await thread_manager.broadcast_new_message(str(thread_id), [user_msg_dict, assistant_msg_dict], exclude_user=current_user.id)
+                asyncio.create_task(
+                    thread_manager.broadcast_new_message(
+                        str(thread_id), [user_msg_dict, assistant_msg_dict], exclude_user=current_user.id
+                    )
+                )
             except Exception:
                 logger.warning("Thread WS broadcast failed for thread %s", thread_id)
 
