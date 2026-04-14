@@ -38,9 +38,12 @@
   --font-display: 'Fraunces', Georgia, 'Times New Roman', serif;
 }
 
-body {
+html, body {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 @keyframes ticker {

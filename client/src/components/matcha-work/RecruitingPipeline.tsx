@@ -50,8 +50,8 @@ function extractPlaceholders(html: string): PlaceholderInfo[] {
 }
 
 const c = {
-  bg: '#1e1e1e', cardBg: '#252526', border: '#333', text: '#d4d4d4',
-  heading: '#e8e8e8', muted: '#6a737d', accent: '#ce9178', hoverBg: '#2a2d2e',
+  bg: '#1e1e1e', cardBg: '#252526', border: '#3a3a3a', text: '#e4e4e7',
+  heading: '#f4f4f5', muted: '#8b8b8b', subMuted: '#a1a1a1', accent: '#ce9178', hoverBg: '#2a2d2e',
   green: '#22c55e', amber: '#f59e0b',
 }
 
@@ -645,14 +645,14 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                   <div
                     key={cand.id}
                     onClick={() => setExpandedId(expanded ? null : cand.id)}
-                    className="rounded-lg border p-3 cursor-pointer transition-colors"
+                    className="rounded-lg border px-4 py-3.5 cursor-pointer transition-colors hover:bg-white/[0.02]"
                     style={{
                       background: c.cardBg,
                       borderColor: isDismissed ? `${c.border}80` : c.border,
                       opacity: isDismissed ? 0.4 : isLowMatch ? 0.6 : 1,
                     }}
                   >
-                    <div className="flex items-start gap-2">
+                    <div className="flex items-start gap-2.5">
                       {tab === 'candidates' && cand.email && cand.status === 'analyzed' && onSendInterviews && (
                         <button
                           onClick={(e) => toggleSelect(cand.id, e)}
@@ -679,8 +679,8 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                         <XCircle size={14} />
                       </button>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-2">
-                          <p className="text-sm font-medium truncate" style={{ color: c.heading, textDecoration: isDismissed ? 'line-through' : 'none' }}>{cand.name ?? cand.filename}</p>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <p className="text-[15px] font-semibold truncate tracking-tight" style={{ color: c.heading, textDecoration: isDismissed ? 'line-through' : 'none' }}>{cand.name ?? cand.filename}</p>
                           {cand.status === 'interview_sent' && (
                             <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#3b82f620', color: '#60a5fa', border: '1px solid #3b82f640' }}>Interviewing</span>
                           )}
@@ -725,29 +725,35 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                             </span>
                           )}
                         </div>
-                        <p className="text-xs" style={{ color: c.muted }}>
+                        <p className="text-[12px] mt-0.5" style={{ color: c.subMuted }}>
                           {cand.current_title ?? 'N/A'}
                           {cand.experience_years != null && ` · ${cand.experience_years} yrs`}
                         </p>
                       </div>
                       {cand.location && (
-                        <span className="flex items-center gap-1 text-[10px] shrink-0" style={{ color: c.muted }}>
-                          <MapPin size={10} />{cand.location}
+                        <span className="flex items-center gap-1 text-[11px] shrink-0" style={{ color: c.muted }}>
+                          <MapPin size={11} />{cand.location}
                         </span>
                       )}
                     </div>
 
                     {cand.summary && (
-                      <p className="text-xs mt-1.5 leading-relaxed" style={{ color: c.muted }}>{cand.summary}</p>
+                      <p className="text-[13px] mt-2.5 leading-[1.55]" style={{ color: c.text }}>{cand.summary}</p>
                     )}
 
                     {cand.skills && cand.skills.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
+                      <div className="flex flex-wrap gap-1.5 mt-3">
                         {(expanded ? cand.skills : cand.skills.slice(0, 5)).map((s, i) => (
-                          <span key={i} className="text-[10px] px-1.5 py-0.5 rounded" style={{ background: c.border, color: c.text }}>{s}</span>
+                          <span
+                            key={i}
+                            className="text-[11px] font-medium px-2 py-0.5 rounded-md"
+                            style={{ background: '#1a1a1a', color: c.text, border: `1px solid ${c.border}` }}
+                          >
+                            {s}
+                          </span>
                         ))}
                         {!expanded && cand.skills.length > 5 && (
-                          <span className="text-[10px] px-1.5 py-0.5" style={{ color: c.muted }}>+{cand.skills.length - 5}</span>
+                          <span className="text-[11px] px-1.5 py-0.5 self-center" style={{ color: c.muted }}>+{cand.skills.length - 5}</span>
                         )}
                       </div>
                     )}
