@@ -58,7 +58,7 @@ export default function Landing() {
   const sizzles = data.sizzle_videos.length > 0 ? data.sizzle_videos : DEFAULT_SIZZLES
 
   return (
-    <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
+    <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <ComplianceTicker />
       <MarketingNav onPricingClick={() => setIsPricingOpen(true)} />
@@ -184,7 +184,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
 
         <div className="flex-1 grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-16 items-center">
           {/* Left: text */}
-          <div className="max-w-xl">
+          <div className="min-w-0 max-w-xl">
             <div
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8"
               style={{
@@ -214,7 +214,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
             >
               {HERO_SUBCOPY}
             </p>
-            <div className="mt-10 flex items-center gap-4">
+            <div className="mt-10 flex flex-wrap items-center gap-4">
               <Link
                 to="/login"
                 className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
@@ -232,8 +232,8 @@ function AnimationHero({ data }: { data: LandingMedia }) {
             </div>
           </div>
 
-          {/* Right: compliance animation */}
-          <div className="relative flex justify-center lg:justify-end">
+          {/* Right: compliance animation — hidden on mobile to avoid horizontal overflow */}
+          <div className="hidden lg:flex min-w-0 justify-end">
             <ComplianceHeroAnimation />
           </div>
         </div>
