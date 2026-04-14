@@ -185,18 +185,6 @@ function AnimationHero({ data }: { data: LandingMedia }) {
         <div className="flex-1 grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-16 items-center">
           {/* Left: text */}
           <div className="min-w-0 max-w-xl">
-            <div
-              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full mb-8"
-              style={{
-                backgroundColor: 'rgba(31,29,26,0.06)',
-                color: MUTED,
-              }}
-            >
-              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: '#86efac' }} />
-              <span className="text-[11px] uppercase tracking-wider font-medium">
-                Live GRC preview
-              </span>
-            </div>
             <h1
               className="leading-[0.95] tracking-tight"
               style={{
