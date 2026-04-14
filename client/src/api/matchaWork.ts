@@ -1,4 +1,5 @@
 import { api, ensureFreshToken } from './client'
+import { reportApiError, reportJsError } from './errorReporter'
 import type {
   MWThread,
   MWThreadDetail,
@@ -958,13 +959,25 @@ export function sendMessageStream(
         if (!res.ok) {
           clearTimeout(timeout)
           const text = await res.text().catch(() => res.statusText)
-          callbacks.onError(`${res.status}: ${text}`)
+          const msg = `${res.status}: ${text}`
+          reportApiError({
+            endpoint: `/matcha-work/threads/${threadId}/messages/stream`,
+            status: res.status,
+            message: msg,
+            body: { text: text.slice(0, 500) },
+          })
+          callbacks.onError(msg)
           return
         }
 
         const reader = res.body?.getReader()
         if (!reader) {
           clearTimeout(timeout)
+          reportApiError({
+            endpoint: `/matcha-work/threads/${threadId}/messages/stream`,
+            status: 0,
+            message: 'No response body on SSE stream',
+          })
           callbacks.onError('No response body')
           return
         }
@@ -998,11 +1011,19 @@ export function sendMessageStream(
               }
               if (event.type === 'error') {
                 clearTimeout(timeout)
+                reportApiError({
+                  endpoint: `/matcha-work/threads/${threadId}/messages/stream`,
+                  status: 200,
+                  message: `SSE error event: ${event.message}`,
+                })
                 callbacks.onError(event.message)
                 return
               }
-            } catch {
-              /* skip malformed */
+            } catch (parseErr) {
+              reportJsError(parseErr, {
+                source: 'sendMessageStream SSE parse',
+                raw: raw.slice(0, 300),
+              })
             }
           }
         }
@@ -1012,11 +1033,22 @@ export function sendMessageStream(
         clearTimeout(timeout)
         if (ctrl.signal.aborted) {
           if (ctrl.signal.reason === 'timeout') {
+            reportApiError({
+              endpoint: `/matcha-work/threads/${threadId}/messages/stream`,
+              status: 0,
+              message: 'SSE stream timed out after 180s',
+            })
             callbacks.onError('Request timed out. Please try again.')
           }
           // else: user-initiated abort (navigated away), do nothing
         } else {
-          callbacks.onError(e instanceof Error ? e.message : 'Stream failed')
+          const msg = e instanceof Error ? e.message : 'Stream failed'
+          reportApiError({
+            endpoint: `/matcha-work/threads/${threadId}/messages/stream`,
+            status: 0,
+            message: `SSE network/transport error: ${msg}`,
+          })
+          callbacks.onError(msg)
         }
       })
   })()

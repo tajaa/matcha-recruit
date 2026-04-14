@@ -11,12 +11,12 @@ installErrorReporter()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ErrorBoundary>
-      <BrowserRouter>
+    <BrowserRouter>
+      <ErrorBoundary>
         <ToastProvider>
           <App />
         </ToastProvider>
-      </BrowserRouter>
-    </ErrorBoundary>
+      </ErrorBoundary>
+    </BrowserRouter>
   </StrictMode>,
 )

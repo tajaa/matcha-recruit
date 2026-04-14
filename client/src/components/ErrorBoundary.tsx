@@ -1,9 +1,12 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react'
+import { Component, useEffect, useRef, type ErrorInfo, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 import { reportReactError } from '../api/errorReporter'
 
 interface Props {
   children: ReactNode
   fallback?: ReactNode
+  // Bump this key to force the boundary to reset its error state
+  resetKey?: string
 }
 
 interface State {
@@ -11,7 +14,7 @@ interface State {
   error: Error | null
 }
 
-export class ErrorBoundary extends Component<Props, State> {
+class ErrorBoundaryInner extends Component<Props, State> {
   state: State = { hasError: false, error: null }
 
   static getDerivedStateFromError(error: Error): State {
@@ -25,8 +28,11 @@ export class ErrorBoundary extends Component<Props, State> {
     }
   }
 
-  reset = () => {
-    this.setState({ hasError: false, error: null })
+  componentDidUpdate(prevProps: Props): void {
+    // Reset error state when the route-derived resetKey changes
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: null })
+    }
   }
 
   render() {
@@ -37,7 +43,7 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="max-w-md text-center">
             <h1 className="text-xl font-semibold mb-2">Something went wrong</h1>
             <p className="text-sm text-zinc-400 mb-4">
-              The error has been reported automatically. Try reloading the page.
+              The error has been reported automatically. Try reloading the page or navigating away.
             </p>
             <button
               onClick={() => window.location.reload()}
@@ -51,4 +57,21 @@ export class ErrorBoundary extends Component<Props, State> {
     }
     return this.props.children
   }
+}
+
+/** Route-aware wrapper — resets the error boundary when the user navigates,
+ * so a crash on one page doesn't stick when the user clicks elsewhere. */
+export function ErrorBoundary({ children, fallback }: Omit<Props, 'resetKey'>) {
+  const location = useLocation()
+  const prevPathRef = useRef(location.pathname)
+
+  useEffect(() => {
+    prevPathRef.current = location.pathname
+  }, [location.pathname])
+
+  return (
+    <ErrorBoundaryInner resetKey={location.pathname} fallback={fallback}>
+      {children}
+    </ErrorBoundaryInner>
+  )
 }
