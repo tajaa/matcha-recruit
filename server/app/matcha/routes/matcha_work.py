@@ -7288,7 +7288,7 @@ async def search_thread_collaborator_candidates(
 
     pattern = f"%{q}%"
     async with get_connection() as conn:
-        # Search users in the same company (clients + employees) plus admins
+        # Search eligible invitees: same-company users + admins + accepted cross-tenant connections
         rows = await conn.fetch(
             """
             SELECT DISTINCT u.id AS user_id, u.email, u.avatar_url,
@@ -7307,6 +7307,14 @@ async def search_thread_collaborator_candidates(
                   (cl.company_id = $3)
                   OR (e.org_id = $3)
                   OR (a.user_id IS NOT NULL)
+                  OR EXISTS (
+                      SELECT 1 FROM user_connections uc
+                      WHERE uc.status = 'accepted'
+                        AND (
+                          (uc.user_id = $1 AND uc.connected_user_id = u.id)
+                          OR (uc.connected_user_id = $1 AND uc.user_id = u.id)
+                        )
+                  )
               )
               AND NOT EXISTS(
                   SELECT 1 FROM mw_thread_collaborators tc
