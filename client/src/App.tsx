@@ -18,6 +18,7 @@ import SpecializationResearch from './pages/admin/SpecializationResearch'
 import Brokers from './pages/admin/Brokers'
 import ComplianceManagement from './pages/admin/ComplianceManagement'
 import Individuals from './pages/admin/Individuals'
+import ClientErrors from './pages/admin/ClientErrors'
 import NewsletterAdmin from './pages/admin/Newsletter'
 import LandingMediaAdmin from './pages/admin/LandingMedia'
 import Subscribe from './pages/landing/Subscribe'
@@ -96,6 +97,7 @@ export default function App() {
         <Route path="companies" element={<Companies />} />
         <Route path="companies/:companyId" element={<AdminCompanyDetail />} />
         <Route path="individuals" element={<Individuals />} />
+        <Route path="client-errors" element={<ClientErrors />} />
         <Route path="features" element={<Features />} />
         <Route path="settings" element={<Settings />} />
         <Route path="jurisdiction-data" element={<JurisdictionData />} />
