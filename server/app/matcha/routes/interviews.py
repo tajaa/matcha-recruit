@@ -1251,19 +1251,21 @@ async def interview_websocket(
 
         forward_task = asyncio.create_task(forward_responses())
 
-        # Auto-stop timer for screening interviews (test mode: 30 seconds)
+        # Auto-stop timer for screening interviews — full 2-minute vetting interview.
+        # Hard cap at 150s (2.5 min) gives the model headroom to wrap up gracefully
+        # if a candidate is mid-answer when the wrap-up signal fires at 120s.
         session_timeout = None
         if interview_type == "screening":
-            SCREENING_DURATION_SECONDS = 30
+            SCREENING_DURATION_SECONDS = 120
 
             async def auto_stop_session():
                 await asyncio.sleep(SCREENING_DURATION_SECONDS)
-                print(f"[Interview {interview_id}] Screening auto-stop after {SCREENING_DURATION_SECONDS}s")
+                print(f"[Interview {interview_id}] Screening wrap-up signal after {SCREENING_DURATION_SECONDS}s")
                 await send_message(MessageType.STATUS, "session_ending")
                 # Tell the model to wrap up
                 if gemini_session:
-                    await gemini_session.send_text("Time is up. Please wrap up the interview now with a brief thank you and goodbye. Keep it to one sentence.")
-                await asyncio.sleep(8)  # Give model time to say goodbye
+                    await gemini_session.send_text("Time is almost up. Please wrap up the interview now with a brief thank you and goodbye, keeping it to one or two sentences.")
+                await asyncio.sleep(20)  # Give model time to finish current answer + say goodbye
                 await send_message(MessageType.STATUS, "session_ended")
 
             session_timeout = asyncio.create_task(auto_stop_session())

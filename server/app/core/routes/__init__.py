@@ -26,6 +26,7 @@ from .channels import router as channels_router
 from .channels_ws import router as channels_ws_router
 from .channel_job_postings import router as channel_job_postings_router
 from .newsletter import public_router as newsletter_public_router, admin_router as newsletter_admin_router
+from .client_errors import router as client_errors_router
 from .landing_media import public_router as landing_media_public_router, admin_router as landing_media_admin_router
 from ...matcha.dependencies import require_feature
 
@@ -65,6 +66,7 @@ core_router.include_router(newsletter_public_router, prefix="/newsletter", tags=
 core_router.include_router(newsletter_admin_router, prefix="/admin/newsletter", tags=["newsletter-admin"])
 core_router.include_router(landing_media_public_router, tags=["landing-media-public"])
 core_router.include_router(landing_media_admin_router, prefix="/admin", tags=["landing-media-admin"])
+core_router.include_router(client_errors_router, tags=["client-errors"])
 
 # Export individual routers for backwards compatibility
 __all__ = [

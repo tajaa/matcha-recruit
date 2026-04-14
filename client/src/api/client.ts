@@ -1,3 +1,5 @@
+import { reportApiError } from './errorReporter'
+
 const BASE = import.meta.env.VITE_API_URL ?? '/api'
 
 let _refreshing: Promise<boolean> | null = null
@@ -83,7 +85,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       })
       if (!retry.ok) {
         const retryBody = await retry.json().catch(() => null)
-        throw new Error(retryBody?.detail || `${retry.status} ${retry.statusText}`)
+        const msg = retryBody?.detail || `${retry.status} ${retry.statusText}`
+        if (path !== '/client-errors') {
+          reportApiError({ endpoint: path, status: retry.status, message: msg, body: retryBody })
+        }
+        throw new Error(msg)
       }
       return retry.json()
     }
@@ -94,7 +100,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!res.ok) {
     const errBody = await res.json().catch(() => null)
-    throw new Error(errBody?.detail || `${res.status} ${res.statusText}`)
+    const msg = errBody?.detail || `${res.status} ${res.statusText}`
+    // Don't recursively report errors from the reporter endpoint itself
+    if (path !== '/client-errors') {
+      reportApiError({ endpoint: path, status: res.status, message: msg, body: errBody })
+    }
+    throw new Error(msg)
   }
   if (res.status === 204) return null as T
   return res.json()
