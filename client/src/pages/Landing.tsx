@@ -162,7 +162,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
         }}
       />
 
-      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-28 pb-16 min-h-[100svh] flex flex-col">
+      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-20 lg:pt-28 pb-16 min-h-[100svh] flex flex-col">
         {/* Centered product label */}
         <div className="flex justify-center pt-4 pb-2">
           <div
@@ -182,7 +182,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
           </div>
         </div>
 
-        <div className="flex-1 grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-16 items-center">
+        <div className="flex-1 grid lg:grid-cols-[1.05fr_1fr] gap-8 lg:gap-16 items-center">
           {/* Left: text */}
           <div className="min-w-0 max-w-xl">
             <h1
@@ -220,8 +220,8 @@ function AnimationHero({ data }: { data: LandingMedia }) {
             </div>
           </div>
 
-          {/* Right: compliance animation — hidden on mobile to avoid horizontal overflow */}
-          <div className="hidden lg:flex min-w-0 justify-end">
+          {/* Right: compliance animation */}
+          <div className="min-w-0 overflow-hidden flex justify-center lg:justify-end">
             <ComplianceHeroAnimation />
           </div>
         </div>
