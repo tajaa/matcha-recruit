@@ -116,9 +116,9 @@ function SimpleForm({ onClose, onCreated }: Omit<Props, 'canCreatePaid'>) {
             <label className="block text-xs text-zinc-400 mb-1.5">Visibility</label>
             <div className="flex gap-2">
               {([
-                { value: 'public' as const, icon: Globe, label: 'Public', desc: 'Anyone can join' },
-                { value: 'invite_only' as const, icon: UserPlus, label: 'Invite Only', desc: 'Visible, but must be invited' },
-                { value: 'private' as const, icon: Lock, label: 'Private', desc: 'Hidden from non-members' },
+                { value: 'public' as const, icon: Globe, label: 'Public', desc: 'Listed; anyone can join' },
+                { value: 'invite_only' as const, icon: UserPlus, label: 'Invite Only', desc: 'Listed; invite required' },
+                { value: 'private' as const, icon: Lock, label: 'Private', desc: 'Hidden; invite required' },
               ]).map((opt) => (
                 <button
                   key={opt.value}
@@ -132,6 +132,7 @@ function SimpleForm({ onClose, onCreated }: Omit<Props, 'canCreatePaid'>) {
                 >
                   <opt.icon size={14} />
                   <span className="font-medium">{opt.label}</span>
+                  <span className="text-[9px] opacity-70 leading-tight text-center">{opt.desc}</span>
                 </button>
               ))}
             </div>
@@ -403,9 +404,9 @@ function StepBasics({
         <label className="block text-xs text-zinc-400 mb-1.5">Visibility</label>
         <div className="flex gap-2">
           {([
-            { value: 'public' as const, icon: Globe, label: 'Public', desc: 'Anyone can find & join' },
-            { value: 'invite_only' as const, icon: UserPlus, label: 'Invite Only', desc: 'Visible, invite to join' },
-            { value: 'private' as const, icon: Lock, label: 'Private', desc: 'Hidden from non-members' },
+            { value: 'public' as const, icon: Globe, label: 'Public', desc: 'Listed; anyone can join' },
+            { value: 'invite_only' as const, icon: UserPlus, label: 'Invite Only', desc: 'Listed; invite required' },
+            { value: 'private' as const, icon: Lock, label: 'Private', desc: 'Hidden; invite required' },
           ]).map((opt) => (
             <button
               key={opt.value}
@@ -419,6 +420,7 @@ function StepBasics({
             >
               <opt.icon size={14} />
               <span className="font-medium">{opt.label}</span>
+              <span className="text-[9px] opacity-70 leading-tight text-center">{opt.desc}</span>
             </button>
           ))}
         </div>

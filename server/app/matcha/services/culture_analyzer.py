@@ -53,14 +53,15 @@ class CultureAnalyzer:
     ):
         self.model = model
 
-        if vertex_project:
+        # Prefer direct Gemini API when api_key is set. Vertex lacks preview models.
+        if api_key:
+            self.client = genai.Client(api_key=api_key)
+        elif vertex_project:
             self.client = genai.Client(
                 vertexai=True,
                 project=vertex_project,
                 location=vertex_location,
             )
-        elif api_key:
-            self.client = genai.Client(api_key=api_key)
         else:
             raise ValueError("Either api_key or vertex_project must be provided")
 
