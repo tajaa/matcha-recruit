@@ -368,23 +368,33 @@ export default function ProjectView() {
     if (projectId) localStorage.setItem(`wizard-dismissed-${projectId}`, '1')
   }
 
+  const isRecruiting = project.project_type === 'recruiting'
+
   const SidebarContent = (
     <>
-      {/* Top: back + new chat */}
+      {/* Top: back + (new chat, non-recruiting only) */}
       <div className="px-3 py-3 flex items-center justify-between shrink-0" style={{ borderBottom: '1px solid #333' }}>
         <Link to="/work" className="text-[#6a737d] hover:text-[#e8e8e8]">
           <ArrowLeft size={14} />
         </Link>
-        <button
-          onClick={handleNewChat}
-          title="New chat"
-          className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
-        >
-          <Plus size={14} />
-        </button>
+        {!isRecruiting && (
+          <button
+            onClick={handleNewChat}
+            title="New chat"
+            className="p-1 rounded transition-colors text-[#6a737d] hover:text-[#ce9178]"
+          >
+            <Plus size={14} />
+          </button>
+        )}
       </div>
 
-      {/* Chat list */}
+      {/* Project title (recruiting) or Chat list (other) */}
+      {isRecruiting ? (
+        <div className="flex-1 overflow-y-auto py-2 px-3">
+          <p className="text-[10px] uppercase tracking-wider text-[#6a737d] mb-1">Project</p>
+          <p className="text-xs font-medium text-[#e8e8e8] truncate" title={project.title}>{project.title}</p>
+        </div>
+      ) : (
       <div className="flex-1 overflow-y-auto py-1">
         {[...(chats || [])].sort((a, b) => (b.is_pinned ? 1 : 0) - (a.is_pinned ? 1 : 0)).map((c) => (
           <div
@@ -434,6 +444,7 @@ export default function ProjectView() {
           </div>
         ))}
       </div>
+      )}
 
       {/* Bottom: Inbox + User */}
       <div style={{ borderTop: '1px solid #333' }} className="shrink-0">
