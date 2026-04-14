@@ -12,6 +12,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 logger = logging.getLogger(__name__)
 
 from .config import get_settings, load_settings
+from .core.services.error_reporter import install_error_logging, report_server_error
 from .database import close_pool, get_connection, init_db, init_pool
 from .core.services.notification_manager import (
     close_notification_manager,
@@ -41,6 +42,11 @@ async def lifespan(app: FastAPI):
     await init_pool(settings.database_url, ssl_mode=settings.database_ssl)
     await init_db()
     print("[Matcha] Database initialized")
+
+    # Install root logger handler that persists ERROR+ logs to server_error_reports.
+    # Must run AFTER init_pool so the handler's first write has a working pool.
+    install_error_logging(source="api")
+    print("[Matcha] Server error reporter installed")
 
     # Recover documents stuck in 'processing' from a previous crash
     async with get_connection() as conn:
@@ -171,18 +177,19 @@ async def add_security_headers(request: Request, call_next):
 
 @app.middleware("http")
 async def capture_errors(request: Request, call_next):
-    """Log unhandled exceptions to the error_logs table."""
-    if request.url.path in ("/health", "/api/admin/error-logs"):
+    """Log unhandled exceptions to both the legacy error_logs table and the
+    new server_error_reports table."""
+    if request.url.path in ("/health", "/api/admin/error-logs", "/api/admin/server-errors"):
         return await call_next(request)
     try:
         response = await call_next(request)
         return response
     except Exception as exc:
-        # Extract user info from request state if auth middleware set it
         user_id = getattr(request.state, "user_id", None)
         user_role = getattr(request.state, "user_role", None)
         company_id = getattr(request.state, "company_id", None)
         traceback_str = tb_module.format_exc()
+        # Legacy error_logs insert (keeps existing admin page working)
         try:
             async with get_connection() as conn:
                 await conn.execute(
@@ -202,6 +209,23 @@ async def capture_errors(request: Request, call_next):
                 )
         except Exception:
             logger.warning("Failed to persist error log", exc_info=True)
+        # New structured reporter
+        report_server_error(
+            kind="http_error",
+            message=f"{type(exc).__name__}: {exc}",
+            exception=exc,
+            traceback_str=traceback_str,
+            source="api",
+            request_method=request.method,
+            request_path=str(request.url.path),
+            request_status=500,
+            user_id=str(user_id) if user_id else None,
+            context={
+                "user_role": user_role,
+                "company_id": str(company_id) if company_id else None,
+                "query": str(request.url.query) if request.url.query else None,
+            },
+        )
         raise
 
 
@@ -209,7 +233,7 @@ async def capture_errors(request: Request, call_next):
 # (e.g. route handler exceptions) before they become 500 responses.
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):
-    """Persist unhandled exceptions to error_logs and return 500."""
+    """Persist unhandled exceptions and return 500."""
     traceback_str = tb_module.format_exc()
     logger.error("Unhandled %s on %s %s: %s", type(exc).__name__, request.method, request.url.path, exc)
     try:
@@ -228,6 +252,16 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             )
     except Exception:
         logger.warning("Failed to persist error log", exc_info=True)
+    report_server_error(
+        kind="http_error",
+        message=f"{type(exc).__name__}: {exc}",
+        exception=exc,
+        traceback_str=traceback_str,
+        source="api",
+        request_method=request.method,
+        request_path=str(request.url.path),
+        request_status=500,
+    )
     return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 

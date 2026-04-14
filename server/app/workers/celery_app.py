@@ -2,7 +2,7 @@
 
 import os
 from celery import Celery
-from celery.signals import worker_ready
+from celery.signals import worker_ready, task_failure, worker_process_init
 from dotenv import load_dotenv
 
 # Load environment variables for worker process
@@ -171,3 +171,44 @@ def on_worker_ready(**kwargs):
         enqueue_scheduled_risk_assessments.delay()
     else:
         print("[Worker] Risk assessment scheduler is disabled, skipping.")
+
+
+# ── Server error reporter integration ───────────────────────────────────────
+# Every Celery worker installs the root-logger DB handler so logger.error/exception
+# calls inside task code persist to server_error_reports. task_failure captures
+# task exceptions with full traceback + task id context.
+
+@worker_process_init.connect
+def _install_error_reporter(**kwargs):
+    try:
+        from app.core.services.error_reporter import install_error_logging
+        install_error_logging(source="celery")
+        print("[Worker] Server error reporter installed")
+    except Exception as e:
+        print(f"[Worker] Failed to install error reporter: {e}")
+
+
+@task_failure.connect
+def _on_task_failure(
+    sender=None, task_id=None, exception=None, args=None, kwargs=None, traceback=None, einfo=None, **_
+):
+    try:
+        from app.core.services.error_reporter import report_server_error
+        task_name = getattr(sender, "name", "unknown")
+        tb_str = str(einfo) if einfo else None
+        report_server_error(
+            kind="celery_task",
+            message=f"{task_name} failed: {exception}",
+            exception=exception if isinstance(exception, BaseException) else None,
+            traceback_str=tb_str,
+            source="celery",
+            logger_name=task_name,
+            context={
+                "task_id": task_id,
+                "task_name": task_name,
+                "args": args,
+                "kwargs": kwargs,
+            },
+        )
+    except Exception as e:
+        print(f"[Worker] Failed to report task failure: {e}")
