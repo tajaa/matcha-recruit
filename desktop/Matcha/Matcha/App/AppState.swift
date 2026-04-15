@@ -71,11 +71,28 @@ class AppState {
         KeychainHelper.delete(key: KeychainHelper.Keys.refreshToken)
     }
 
-    private func restoreSession() async {
+    func restoreSession() async {
         guard let user = await AuthService.shared.restoreSession() else { return }
         await MainActor.run {
             didLogin(user: user)
         }
+    }
+
+    /// Called when the app scene becomes active. Retries the session
+    /// restore if the user is not authenticated (fixes the "started the
+    /// dev server after launching the app" case) and kicks the channels
+    /// WebSocket to reconnect if already authenticated.
+    @MainActor
+    func onSceneActive() async {
+        if !isAuthenticated {
+            await restoreSession()
+            return
+        }
+        await refreshSubscription()
+        // Nudge the channels socket to reconnect if it dropped.
+        ChannelsWebSocket.shared.connect()
+        // Best-effort heartbeat so presence flips green immediately.
+        Task { try? await MatchaWorkService.shared.sendHeartbeat() }
     }
 
     private func startInboxPolling() {

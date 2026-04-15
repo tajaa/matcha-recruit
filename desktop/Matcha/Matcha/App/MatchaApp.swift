@@ -7,22 +7,23 @@ struct MatchaApp: App {
 
     var body: some Scene {
         WindowGroup {
-            if appState.isAuthenticated {
-                ContentView()
-                    .environment(appState)
-                    .preferredColorScheme(.dark)
-                    .onChange(of: scenePhase) { _, phase in
-                        // When the user returns to the app (e.g. after
-                        // completing Stripe checkout in the browser), re-pull
-                        // the subscription so the Plus badge updates.
-                        if phase == .active && appState.isAuthenticated {
-                            Task { await appState.refreshSubscription() }
-                        }
-                    }
-            } else {
-                LoginView()
-                    .environment(appState)
-                    .preferredColorScheme(.dark)
+            Group {
+                if appState.isAuthenticated {
+                    ContentView()
+                        .environment(appState)
+                } else {
+                    LoginView()
+                        .environment(appState)
+                }
+            }
+            .preferredColorScheme(.dark)
+            .onChange(of: scenePhase) { _, phase in
+                // When the app scene becomes active, retry session restore
+                // (fixes the case where the dev server wasn't running at
+                // launch) and nudge the channels WebSocket back to life.
+                if phase == .active {
+                    Task { await appState.onSceneActive() }
+                }
             }
         }
         .windowStyle(.hiddenTitleBar)

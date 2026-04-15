@@ -171,26 +171,23 @@ struct ChannelDetailView: View {
     }
 
     private func messageRow(_ msg: ChannelMessage) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 0) {
-            HStack(spacing: 6) {
-                Text(handleFor(msg.senderName))
-                    .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.55))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 4)
-                Text(formatTimestamp(msg.createdAt))
-                    .font(.system(size: 10))
-                    .foregroundColor(.white.opacity(0.3))
-            }
-            .frame(width: senderColumnWidth, alignment: .leading)
-            .padding(.trailing, 12)
+        HStack(alignment: .top, spacing: 10) {
+            senderAvatar(msg)
+                .frame(width: 36, height: 36)
 
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text(msg.senderName)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text(formatTimestamp(msg.createdAt))
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
                 if !msg.content.isEmpty {
                     Text(msg.content)
                         .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.85))
+                        .foregroundColor(.primary.opacity(0.9))
                         .textSelection(.enabled)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -199,7 +196,78 @@ struct ChannelDetailView: View {
                     attachmentList(msg.attachments)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .contextMenu {
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(msg.content, forType: .string)
+            } label: {
+                Label("Copy text", systemImage: "doc.on.doc")
+            }
+            .disabled(msg.content.isEmpty)
+
+            Button {
+                inputText = "> \(msg.senderName): \(msg.content.prefix(200))\n"
+            } label: {
+                Label("Reply", systemImage: "arrowshape.turn.up.left")
+            }
+
+            Divider()
+
+            Menu {
+                ForEach(["👍", "❤️", "🎉", "😂", "🤔", "👀"], id: \.self) { emoji in
+                    Button(emoji) {
+                        // Placeholder — backend reaction endpoint not yet wired.
+                        // For now, append the emoji as a visible reply so the
+                        // interaction still feels responsive.
+                        ws.sendMessage(channelId: channelId, content: emoji)
+                    }
+                }
+            } label: {
+                Label("React", systemImage: "face.smiling")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func senderAvatar(_ msg: ChannelMessage) -> some View {
+        if let urlStr = msg.senderAvatarUrl, let url = URL(string: urlStr) {
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 36, height: 36)
+                        .clipShape(Circle())
+                default:
+                    avatarFallback(msg.senderName)
+                }
+            }
+        } else {
+            avatarFallback(msg.senderName)
+        }
+    }
+
+    private func avatarFallback(_ name: String) -> some View {
+        let initials = name
+            .split(separator: " ")
+            .prefix(2)
+            .compactMap { $0.first.map(String.init) }
+            .joined()
+            .uppercased()
+        let hue = Double(abs(name.hashValue) % 360) / 360.0
+        return Circle()
+            .fill(Color(hue: hue, saturation: 0.55, brightness: 0.6))
+            .frame(width: 36, height: 36)
+            .overlay(
+                Text(initials.isEmpty ? "?" : initials)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+            )
     }
 
     @ViewBuilder
