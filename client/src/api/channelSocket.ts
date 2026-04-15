@@ -21,10 +21,33 @@ export class ChannelSocket {
   private ws: WebSocket | null = null
   private pingInterval: ReturnType<typeof setInterval> | null = null
   private reconnectTimeout: ReturnType<typeof setTimeout> | null = null
-  private currentRoom: string | null = null
+  private joinedRooms: Set<string> = new Set()
+  private messageListeners: Set<MessageHandler> = new Set()
   private _closed = false
 
-  onMessage: MessageHandler | null = null
+  // Deprecated single-handler; kept for backward compat. Setting this adds
+  // the handler to the multi-listener set. Prefer addMessageListener.
+  set onMessage(handler: MessageHandler | null) {
+    if (handler) this.messageListeners.add(handler)
+  }
+  get onMessage(): MessageHandler | null {
+    return null
+  }
+
+  addMessageListener(handler: MessageHandler) {
+    this.messageListeners.add(handler)
+  }
+
+  removeMessageListener(handler: MessageHandler) {
+    this.messageListeners.delete(handler)
+  }
+
+  private _dispatchMessage(msg: ChannelMessage) {
+    for (const fn of this.messageListeners) {
+      try { fn(msg) } catch { /* swallow so one bad listener doesn't kill others */ }
+    }
+  }
+
   onTyping: TypingHandler | null = null
   onOnlineUsers: OnlineHandler | null = null
   onUserJoined: UserEventHandler | null = null
@@ -39,6 +62,14 @@ export class ChannelSocket {
   onVoiceOffer: ((data: { from_user_id: string; sdp: RTCSessionDescriptionInit }) => void) | null = null
   onVoiceAnswer: ((data: { from_user_id: string; sdp: RTCSessionDescriptionInit }) => void) | null = null
   onVoiceIceCandidate: ((data: { from_user_id: string; candidate: RTCIceCandidateInit }) => void) | null = null
+
+  get isOpen(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
+  }
+
+  get hasSocket(): boolean {
+    return this.ws !== null
+  }
 
   connect() {
     this._closed = false
@@ -55,9 +86,9 @@ export class ChannelSocket {
     this.ws.onopen = () => {
       this.onConnected?.()
       this._startPing()
-      // Rejoin room if we were in one
-      if (this.currentRoom) {
-        this._send({ type: 'join_room', channel_id: this.currentRoom })
+      // Rejoin all rooms we were in
+      for (const room of this.joinedRooms) {
+        this._send({ type: 'join_room', channel_id: room })
       }
     }
 
@@ -66,7 +97,7 @@ export class ChannelSocket {
         const data = JSON.parse(event.data)
         switch (data.type) {
           case 'message':
-            this.onMessage?.(data.message)
+            this._dispatchMessage(data.message)
             break
           case 'typing':
             this.onTyping?.(data.user)
@@ -125,17 +156,18 @@ export class ChannelSocket {
     }
     this.ws?.close()
     this.ws = null
-    this.currentRoom = null
+    this.joinedRooms.clear()
   }
 
   joinRoom(channelId: string) {
-    this.currentRoom = channelId
+    if (this.joinedRooms.has(channelId)) return
+    this.joinedRooms.add(channelId)
     this._send({ type: 'join_room', channel_id: channelId })
   }
 
   leaveRoom(channelId: string) {
     this._send({ type: 'leave_room', channel_id: channelId })
-    if (this.currentRoom === channelId) this.currentRoom = null
+    this.joinedRooms.delete(channelId)
   }
 
   sendMessage(channelId: string, content: string, attachments?: { url: string; filename: string; content_type: string; size: number }[]) {
@@ -193,4 +225,26 @@ export class ChannelSocket {
       this.connect()
     }, 3000)
   }
+}
+
+// Process-wide singleton so the global notification listener and individual
+// channel views share one WebSocket connection and one set of joined rooms.
+let _sharedSocket: ChannelSocket | null = null
+export function getSharedChannelSocket(): ChannelSocket {
+  if (!_sharedSocket) {
+    _sharedSocket = new ChannelSocket()
+  }
+  // connect() is idempotent: it bails if already open, and retries here
+  // cover the case where the very first connect() ran before the auth token
+  // was in localStorage and silently returned. Accessing the socket later
+  // (e.g. when the user lands on /work after login) will re-attempt.
+  if (!_sharedSocket.hasSocket) {
+    _sharedSocket.connect()
+  }
+  return _sharedSocket
+}
+
+export function disconnectSharedChannelSocket() {
+  _sharedSocket?.disconnect()
+  _sharedSocket = null
 }

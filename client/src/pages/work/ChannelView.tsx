@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2, Briefcase } from 'lucide-react'
 import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
-import { ChannelSocket } from '../../api/channelSocket'
+import { ChannelSocket, getSharedChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
 import AddMembersModal from '../../components/channels/AddMembersModal'
 import PaidChannelJoinWizard from '../../components/channels/PaidChannelJoinWizard'
@@ -90,15 +90,18 @@ export default function ChannelView() {
     getChannelPaymentInfo(channelId).then(setPaymentInfo).catch(() => {})
   }, [channelId])
 
-  // WebSocket connection
+  // WebSocket connection — uses the process-wide shared socket so the global
+  // notification listener and this view share one connection and one set of
+  // joined rooms. We only subscribe to events; we don't disconnect on unmount.
   useEffect(() => {
     if (!channelId || !isMember) return
 
-    const socket = new ChannelSocket()
+    const socket = getSharedChannelSocket()
     socketRef.current = socket
 
-    socket.onMessage = (msg) => {
-      setMessages((prev) => [...prev, msg])
+    const handleMessage = (msg: ChannelMessage) => {
+      if (msg.channel_id !== channelId) return
+      setMessages((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]))
       // Auto-scroll if near bottom
       const container = messagesContainerRef.current
       if (container) {
@@ -107,6 +110,8 @@ export default function ChannelView() {
       }
     }
 
+    socket.addMessageListener(handleMessage)
+
     socket.onTyping = (user) => {
       if (user.id === userId) return
       setTypingUsers((prev) => {
@@ -114,7 +119,6 @@ export default function ChannelView() {
         next.set(user.id, user.name)
         return next
       })
-      // Clear after 3s
       setTimeout(() => {
         setTypingUsers((prev) => {
           const next = new Map(prev)
@@ -132,15 +136,20 @@ export default function ChannelView() {
       setOnlineUsers((prev) => prev.filter((u) => u.id !== user.id))
     }
 
-    socket.connect()
-    // Small delay for WS to open before joining room
-    const joinTimer = setTimeout(() => socket.joinRoom(channelId), 500)
+    // Global hook should already have joined this room, but joinRoom is
+    // idempotent on the client and the server allows duplicate joins.
+    socket.joinRoom(channelId)
 
     return () => {
-      clearTimeout(joinTimer)
-      socket.leaveRoom(channelId)
-      socket.disconnect()
+      socket.removeMessageListener(handleMessage)
+      // Null the singular handlers on the shared socket so this unmounted
+      // component's state setters aren't held in stale closures.
+      socket.onTyping = null
+      socket.onOnlineUsers = null
+      socket.onUserJoined = null
+      socket.onUserLeft = null
       socketRef.current = null
+      // Do NOT call disconnect() or leaveRoom() — the shared socket persists.
     }
   }, [channelId, isMember, userId, scrollToBottom])
 

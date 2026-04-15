@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Logo } from './ui'
 import Avatar from './Avatar'
 import { invalidateMeCache } from '../hooks/useMe'
+import { disconnectSharedChannelSocket } from '../api/channelSocket'
 
 export type NavItem = {
   to: string
@@ -111,6 +112,9 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user }: SidebarSh
     // Drop cached /auth/me so the next user's data is fetched fresh
     // (client-side navigation keeps module state alive otherwise).
     invalidateMeCache()
+    // Tear down the shared channel WebSocket so the next user gets a fresh
+    // connection authenticated with their token.
+    disconnectSharedChannelSocket()
     navigate('/login')
   }
 

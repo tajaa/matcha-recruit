@@ -1,8 +1,10 @@
 import { Link, Outlet, useLocation } from 'react-router-dom'
 import { ArrowLeft, Zap, Menu, X } from 'lucide-react'
 import { usePresenceHeartbeat } from '../hooks/usePresenceHeartbeat'
+import { useChannelNotifications } from '../hooks/useChannelNotifications'
 import { OnlineUsersPanel } from '../components/work/OnlineUsersPanel'
 import NotificationBell from '../components/work/NotificationBell'
+import NotificationSettingsMenu from '../components/work/NotificationSettingsMenu'
 import WorkSidebar from '../components/work/WorkSidebar'
 import { useEffect, useState } from 'react'
 import { useMe } from '../hooks/useMe'
@@ -81,6 +83,7 @@ function TokenIndicator() {
 
 export default function WorkLayout() {
   usePresenceHeartbeat()
+  useChannelNotifications()
   const { isPersonal } = useMe()
   const { pathname } = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(() => {
@@ -133,6 +136,7 @@ export default function WorkLayout() {
 
         <div className="ml-auto flex items-center gap-3 sm:gap-4">
           <TokenIndicator />
+          <NotificationSettingsMenu />
           <NotificationBell />
           <OnlineUsersPanel />
         </div>
