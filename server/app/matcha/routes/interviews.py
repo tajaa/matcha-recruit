@@ -1050,7 +1050,8 @@ async def interview_websocket(
     async with get_connection() as conn:
         row = await conn.fetchrow(
             """
-            SELECT i.id, i.company_id, i.interviewer_name, i.interviewer_role, i.interview_type, c.name as company_name
+            SELECT i.id, i.company_id, i.interviewer_name, i.interviewer_role,
+                   i.interview_type, i.raw_culture_data, c.name as company_name
             FROM interviews i
             LEFT JOIN companies c ON i.company_id = c.id
             WHERE i.id = $1
@@ -1115,6 +1116,28 @@ async def interview_websocket(
             interviewer_role = "Tutor"
         elif interview_type == "tutor_interview":
             tutor_interview_role = interviewer_role  # The role being practiced for
+
+        # For screening/candidate interviews, pull the candidate's name and
+        # position title so they can be injected into the Gemini system prompt.
+        # Without this the model has no textual reference for the name and
+        # will hallucinate (e.g. "Mark" → "Marcia") when relying on voice
+        # transcription alone.
+        candidate_name_for_prompt: Optional[str] = None
+        position_title_for_prompt: Optional[str] = None
+        if interview_type in ("screening", "candidate"):
+            raw = row["raw_culture_data"]
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except json.JSONDecodeError:
+                    raw = {}
+            if isinstance(raw, dict):
+                candidate_name_for_prompt = raw.get("candidate_name")
+                position_title_for_prompt = raw.get("position_title")
+            if not candidate_name_for_prompt:
+                # For screening rows the candidate name is also stored in
+                # interviews.interviewer_name (see matcha_work.py create flow).
+                candidate_name_for_prompt = row["interviewer_name"]
 
         # For candidate interviews, fetch the company's culture profile
         culture_profile = None
@@ -1206,6 +1229,8 @@ async def interview_websocket(
             investigation_questions=investigation_questions_text,
             interviewee_name_for_prompt=interviewee_name_for_prompt,
             interviewee_role_for_prompt=interviewee_role_for_prompt,
+            candidate_name=candidate_name_for_prompt,
+            position_title=position_title_for_prompt,
             # Investigation interviews: don't let user interrupt the investigator
             no_interruption=(interview_type == "investigation"),
             enable_affective_dialog=False,
@@ -1227,7 +1252,10 @@ async def interview_websocket(
             else:
                 await gemini_session.send_text("Please start the practice session now. Greet them warmly and ask how you can help them practice English today.")
         elif interview_type in ("candidate", "screening"):
-            await gemini_session.send_text("Please start the interview now. Greet the candidate warmly and begin.")
+            name = candidate_name_for_prompt or "the candidate"
+            await gemini_session.send_text(
+                f"Please start the interview now. Greet {name} by name warmly in your very first sentence, then begin."
+            )
         else:
             await gemini_session.send_text(f"Please start the interview now. Say hello to {interviewer_name} and begin.")
 

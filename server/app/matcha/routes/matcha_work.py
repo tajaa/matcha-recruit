@@ -972,7 +972,7 @@ async def _inject_recruiting_project_context(ctx: str, thread: dict, current_sta
     from ..services import project_service as proj_svc
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT project_type, sections, project_data FROM mw_projects WHERE id = $1",
+            "SELECT title, project_type, sections, project_data FROM mw_projects WHERE id = $1",
             project_id,
         )
     if not row or row["project_type"] != "recruiting":
@@ -982,16 +982,49 @@ async def _inject_recruiting_project_context(ctx: str, thread: dict, current_sta
     project_data = json.loads(row["project_data"]) if isinstance(row["project_data"], str) else (row["project_data"] or {})
     posting = project_data.get("posting") or {}
     is_finalized = bool(posting.get("finalized"))
-    candidates_count = len(project_data.get("candidates") or [])
+    candidates = project_data.get("candidates") or []
+    candidates_count = len(candidates)
     section_count = len(sections)
+    position_title = row["title"] or "the open role"
+
+    # Build a compact candidate roster for the AI so it can auto-fill offer
+    # letters without asking the user to re-enter details that are already in
+    # the project. Include id so the AI can disambiguate by explicit id if
+    # the user says "the first candidate" etc.
+    shortlist_ids = set(project_data.get("shortlist_ids") or [])
+    dismissed_ids = set(project_data.get("dismissed_ids") or [])
+    roster_lines: list[str] = []
+    for c in candidates[:50]:
+        if c.get("id") in dismissed_ids:
+            status_tag = "dismissed"
+        elif c.get("id") in shortlist_ids:
+            status_tag = "shortlisted"
+        else:
+            status_tag = c.get("status") or "pending"
+        parts = [
+            f"id={c.get('id', '?')}",
+            f"name={c.get('name') or '(unknown)'}",
+            f"email={c.get('email') or '(no email)'}",
+        ]
+        if c.get("current_title"):
+            parts.append(f"current_title={c['current_title']}")
+        if c.get("location"):
+            parts.append(f"location={c['location']}")
+        parts.append(f"status={status_tag}")
+        roster_lines.append("- " + ", ".join(parts))
+    roster_block = "\n".join(roster_lines) if roster_lines else "(no candidates uploaded yet)"
 
     ctx += f"""
 
 === RECRUITING PROJECT CONTEXT ===
 This chat is part of a RECRUITING project. You are helping the user hire for a role.
+- Position title (use this for offer letters): {position_title}
 - Posting finalized: {is_finalized}
 - Existing posting sections: {section_count}
 - Candidates uploaded: {candidates_count}
+
+CANDIDATE ROSTER (authoritative — use these exact values, do NOT ask the user to re-enter them):
+{roster_block}
 
 CRITICAL RULES FOR RECRUITING PROJECTS:
 1. When the user describes a role or asks you to create a job posting, generate the posting content using the "project" skill.
@@ -1003,6 +1036,12 @@ CRITICAL RULES FOR RECRUITING PROJECTS:
 5. To upload resumes: tell the user to click the paperclip icon or drag-and-drop PDF resumes into the chat.
 6. To analyze candidates: tell the user to click "Analyze" in the Candidates tab of the pipeline panel.
 7. Keep responses concise and actionable — guide the user through the recruiting workflow step by step.
+
+OFFER LETTER AUTO-FILL (important):
+8. When the user asks to generate/draft/create an offer letter for a specific candidate — whether they name them ("draft an offer for Mark"), point at them ("offer to the shortlisted one", "to the first candidate", "to this one"), or say they've decided to hire someone — you MUST pull candidate_name, candidate_email, and position_title directly from the CANDIDATE ROSTER above. Do NOT ask the user to re-type these fields.
+9. If the user's reference is ambiguous (e.g. multiple shortlisted candidates), ask a single clarifying question naming the options from the roster — do not ask them to re-enter contact details.
+10. Only prompt the user for fields that are NOT in the roster: salary, start_date, employment_type, benefits, etc.
+11. When in doubt, prefer the shortlisted candidate. If there's exactly one candidate in the roster and the user says "generate the offer letter", use that candidate without asking who.
 """
     return ctx
 

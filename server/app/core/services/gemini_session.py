@@ -74,6 +74,12 @@ IMPORTANT:
 
 CANDIDATE_INTERVIEW_PROMPT = """You are an AI interviewer conducting a candidate assessment interview for Matcha Recruit.
 
+THE CANDIDATE:
+- Name: {candidate_name}
+- Applying for: {position_title}
+
+CRITICAL — Use the candidate's name EXACTLY as written above. Do NOT invent a different name or substitute a similar-sounding one. In your very first sentence, greet them BY NAME (e.g. "Hi {candidate_name}, thanks for taking the time today."). If you're unsure how to pronounce it, pronounce it the most natural way for the spelling shown — never change the name itself.
+
 You are interviewing a candidate for a position at {company_name}.
 
 YOUR GOAL:
@@ -136,6 +142,12 @@ IMPORTANT:
 
 
 SCREENING_INTERVIEW_PROMPT = """You are an AI interviewer conducting a screening interview for Matcha Recruit.
+
+THE CANDIDATE:
+- Name: {candidate_name}
+- Applying for: {position_title}
+
+CRITICAL — Use the candidate's name EXACTLY as written above. Do NOT invent a different name or substitute a similar-sounding one. In your very first sentence, greet them BY NAME (e.g. "Hi {candidate_name}, thanks for taking the time today."). If you're unsure how to pronounce it, pronounce it the most natural way for the spelling shown — never change the name itself.
 
 You are conducting a first-round vetting interview for a candidate applying at {company_name}. This is a meaningful conversation — about 2 minutes long — that gives the hiring team enough signal to decide whether to move the candidate forward.
 
@@ -619,6 +631,8 @@ class GeminiLiveSession:
         investigation_questions: Optional[str] = None,
         interviewee_name_for_prompt: Optional[str] = None,
         interviewee_role_for_prompt: Optional[str] = None,
+        candidate_name: Optional[str] = None,
+        position_title: Optional[str] = None,
         no_interruption: bool = False,
         enable_affective_dialog: bool = False,
         enable_proactive_audio: bool = False,
@@ -661,6 +675,8 @@ class GeminiLiveSession:
             # Screening interview - first-round candidate filtering
             system_prompt = SCREENING_INTERVIEW_PROMPT.format(
                 company_name=company_name,
+                candidate_name=candidate_name or "the candidate",
+                position_title=position_title or "this role",
             )
         elif interview_type == "candidate":
             # Build culture context for candidate interviews
@@ -682,6 +698,8 @@ class GeminiLiveSession:
             system_prompt = CANDIDATE_INTERVIEW_PROMPT.format(
                 company_name=company_name,
                 culture_context=culture_context,
+                candidate_name=candidate_name or "the candidate",
+                position_title=position_title or "this role",
             )
         else:
             # Culture interview (default)

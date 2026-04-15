@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ChannelsSidebarView: View {
     @Environment(AppState.self) private var appState
+    var showHeader: Bool = true
     @State private var channels: [ChannelSummary] = []
     @State private var isLoading = true
     @State private var showCreate = false
@@ -9,8 +10,10 @@ struct ChannelsSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider().opacity(0.3)
+            if showHeader {
+                header
+                Divider().opacity(0.3)
+            }
 
             if isLoading {
                 Spacer()

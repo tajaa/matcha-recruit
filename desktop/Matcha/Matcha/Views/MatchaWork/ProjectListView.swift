@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ProjectListView: View {
     @Environment(AppState.self) private var appState
+    var showHeader: Bool = true
     @State private var projects: [MWProject] = []
     @State private var isLoading = true
     @State private var isCreating = false
@@ -9,52 +10,54 @@ struct ProjectListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Projects")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Button { showTypePicker = true } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .medium))
+            if showHeader {
+                HStack {
+                    Text("Projects")
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.secondary)
-                        .frame(width: 24, height: 24)
-                        .background(Color.zinc800)
-                        .cornerRadius(6)
-                }
-                .buttonStyle(.plain)
-                .disabled(isCreating)
-                .popover(isPresented: $showTypePicker) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
-                            .padding(.bottom, 4)
-                        ForEach(["general", "presentation", "recruiting"], id: \.self) { type in
-                            Button {
-                                showTypePicker = false
-                                createProject(type: type)
-                            } label: {
-                                HStack {
-                                    Image(systemName: type == "general" ? "doc.text" : type == "presentation" ? "rectangle.on.rectangle" : "person.3")
-                                        .font(.system(size: 11))
-                                        .frame(width: 16)
-                                    Text(type.capitalized)
-                                        .font(.system(size: 12))
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundColor(.white)
-                        }
+                    Spacer()
+                    Button { showTypePicker = true } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .frame(width: 24, height: 24)
+                            .background(Color.zinc800)
+                            .cornerRadius(6)
                     }
-                    .padding(12)
-                    .frame(width: 180)
+                    .buttonStyle(.plain)
+                    .disabled(isCreating)
+                    .popover(isPresented: $showTypePicker) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+                                .padding(.bottom, 4)
+                            ForEach(["general", "presentation", "recruiting"], id: \.self) { type in
+                                Button {
+                                    showTypePicker = false
+                                    createProject(type: type)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: type == "general" ? "doc.text" : type == "presentation" ? "rectangle.on.rectangle" : "person.3")
+                                            .font(.system(size: 11))
+                                            .frame(width: 16)
+                                        Text(type.capitalized)
+                                            .font(.system(size: 12))
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.vertical, 4)
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundColor(.white)
+                            }
+                        }
+                        .padding(12)
+                        .frame(width: 180)
+                    }
                 }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
 
-            Divider().opacity(0.3)
+                Divider().opacity(0.3)
+            }
 
             if isLoading {
                 Spacer()

@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 private let resumeExtensions: Set<String> = ["pdf", "doc", "docx", "txt"]
 private let inventoryExtensions: Set<String> = ["csv", "xlsx", "xls"]
+private let imageExtensions: Set<String> = ["jpg", "jpeg", "png", "gif", "heic", "webp", "bmp", "tiff"]
 
 struct ChatPanelView: View {
     @Bindable var viewModel: ThreadDetailViewModel
@@ -41,10 +42,18 @@ struct ChatPanelView: View {
             provider.loadItem(forTypeIdentifier: "public.file-url") { item, _ in
                 guard let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
                 let ext = url.pathExtension.lowercased()
-                guard let fileData = try? Data(contentsOf: url) else { return }
+                guard let fileData = try? Data(contentsOf: url) else {
+                    Task { @MainActor in viewModel.errorMessage = "Could not read \(url.lastPathComponent)" }
+                    return
+                }
 
                 let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? "application/octet-stream"
                 let file = (data: fileData, filename: url.lastPathComponent, mimeType: mime)
+
+                if imageExtensions.contains(ext) {
+                    Task { await self.uploadDroppedImage(file) }
+                    return
+                }
 
                 let endpoint: String
                 if resumeExtensions.contains(ext) {
@@ -52,7 +61,10 @@ struct ChatPanelView: View {
                 } else if inventoryExtensions.contains(ext) {
                     endpoint = "inventory/upload"
                 } else {
-                    return // unsupported file type
+                    Task { @MainActor in
+                        viewModel.errorMessage = "Unsupported file type: .\(ext). Supported: images, PDF/DOC/TXT (resumes), CSV/XLSX (inventory)."
+                    }
+                    return
                 }
 
                 Task {
@@ -61,13 +73,11 @@ struct ChatPanelView: View {
                         let bytes = try await MatchaWorkService.shared.uploadFiles(
                             threadId: threadId, endpoint: endpoint, files: [file]
                         )
-                        // Consume SSE stream (refresh thread when done)
                         for try await line in bytes.lines {
                             if line.hasPrefix("data: "), line.contains("\"type\":\"complete\"") || line.contains("[DONE]") {
                                 break
                             }
                         }
-                        // Reload thread to pick up new state
                         await viewModel.loadThread(id: threadId)
                         await MainActor.run { uploadProgress = nil }
                     } catch {
@@ -79,6 +89,18 @@ struct ChatPanelView: View {
                 }
             }
         }
+    }
+
+    private func uploadDroppedImage(_ file: (data: Data, filename: String, mimeType: String)) async {
+        if viewModel.presentationImageURLs.count >= 4 {
+            await MainActor.run {
+                viewModel.errorMessage = "Maximum 4 images per thread — remove one before adding more."
+            }
+            return
+        }
+        await MainActor.run { uploadProgress = "Uploading \(file.filename)..." }
+        await viewModel.uploadImages([file])
+        await MainActor.run { uploadProgress = nil }
     }
 
     private func pickImages() {

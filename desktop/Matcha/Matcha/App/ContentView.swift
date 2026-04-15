@@ -8,7 +8,10 @@ struct ContentView: View {
     @State private var isOpeningCheckout = false
     @State private var upgradeError: String?
     @State private var showProfile = false
-    @State private var sidebarTab: SidebarTab = .threads
+    @AppStorage("mw-sidebar-channels-open") private var channelsSectionOpen = true
+    @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = true
+    @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = true
+    @State private var pendingConnectionsCount = 0
 
     private struct GlassWindowModifier: ViewModifier {
         func body(content: Content) -> some View {
@@ -20,65 +23,101 @@ struct ContentView: View {
         }
     }
 
-    enum SidebarTab: String, CaseIterable {
-        case threads = "Threads"
-        case projects = "Projects"
-        case channels = "Channels"
-        case people = "People"
-        case inbox = "Inbox"
-    }
-
     var body: some View {
         @Bindable var appState = appState
 
         NavigationSplitView {
             VStack(spacing: 0) {
-                // Tab picker
-                Picker("", selection: $sidebarTab) {
-                    ForEach(SidebarTab.allCases, id: \.self) { tab in
-                        HStack(spacing: 4) {
-                            Text(tab.rawValue)
-                            if tab == .inbox && appState.unreadInboxCount > 0 {
-                                Text("\(appState.unreadInboxCount)")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 4)
-                                    .background(Color.matcha500)
-                                    .clipShape(Capsule())
-                            }
+                ScrollView {
+                    VStack(spacing: 0) {
+                        sidebarSection(
+                            title: "Channels",
+                            icon: "number",
+                            isOpen: $channelsSectionOpen
+                        ) {
+                            ChannelsSidebarView(showHeader: false)
+                                .frame(height: 220)
                         }
-                        .tag(tab)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 6)
 
-                switch sidebarTab {
-                case .threads:
-                    ThreadListView(viewModel: threadListVM)
-                case .projects:
-                    ProjectListView()
-                case .channels:
-                    ChannelsSidebarView()
-                case .people:
-                    VStack {
-                        Spacer()
-                        Text("people")
-                            .font(.system(size: 11))
-                            .foregroundColor(.white.opacity(0.4))
-                        Text("connections & requests")
-                            .font(.system(size: 10))
-                            .foregroundColor(.white.opacity(0.3))
-                        Spacer()
+                        Divider().opacity(0.2)
+
+                        sidebarSection(
+                            title: "Projects",
+                            icon: "folder",
+                            isOpen: $projectsSectionOpen
+                        ) {
+                            ProjectListView(showHeader: false)
+                                .frame(height: 220)
+                        }
+
+                        Divider().opacity(0.2)
+
+                        sidebarSection(
+                            title: "Threads",
+                            icon: "bubble.left.and.bubble.right",
+                            isOpen: $threadsSectionOpen,
+                            trailing: {
+                                Button {
+                                    NotificationCenter.default.post(name: .mwCreateNewThread, object: nil)
+                                } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 18, height: 18)
+                                        .background(Color.zinc800)
+                                        .cornerRadius(4)
+                                }
+                                .buttonStyle(.plain)
+                                .help("New thread")
+                            }
+                        ) {
+                            ThreadListView(viewModel: threadListVM, showHeader: false)
+                                .frame(height: 280)
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .background(.ultraThinMaterial)
-                case .inbox:
-                    InboxSidebarView()
                 }
+
+                Divider().opacity(0.3)
+
+                // Footer — Inbox + People always-visible buttons with live badges
+                HStack(spacing: 6) {
+                    sidebarFooterButton(
+                        icon: "envelope",
+                        label: "Inbox",
+                        badge: appState.unreadInboxCount,
+                        isActive: appState.showInbox
+                    ) {
+                        appState.showInbox = true
+                        appState.showPeople = false
+                        appState.selectedThreadId = nil
+                        appState.selectedProjectId = nil
+                        appState.selectedChannelId = nil
+                        appState.showSkills = false
+                    }
+
+                    sidebarFooterButton(
+                        icon: "person.2",
+                        label: "People",
+                        badge: pendingConnectionsCount,
+                        isActive: appState.showPeople
+                    ) {
+                        appState.showPeople = true
+                        appState.showInbox = false
+                        appState.selectedThreadId = nil
+                        appState.selectedProjectId = nil
+                        appState.selectedChannelId = nil
+                        appState.showSkills = false
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 8)
+                .background(Color.appBackground.opacity(0.5))
             }
-            .navigationSplitViewColumnWidth(min: 240, ideal: 280, max: 360)
+            .background(Color.appBackground)
+            .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 380)
+            .task {
+                await refreshPendingConnections()
+            }
         } detail: {
             if let threadId = appState.selectedThreadId {
                 ThreadDetailView(threadId: threadId)
@@ -183,32 +222,95 @@ struct ContentView: View {
                 }
             }
         }
-        .onChange(of: sidebarTab) {
-            // Clear selections when switching tabs
-            appState.showSkills = false
-            switch sidebarTab {
-            case .inbox:
-                appState.selectedThreadId = nil
-                appState.selectedProjectId = nil
-                appState.selectedChannelId = nil
-                appState.showPeople = false
-                appState.showInbox = true
-            case .people:
-                appState.selectedThreadId = nil
-                appState.selectedProjectId = nil
-                appState.selectedChannelId = nil
-                appState.showInbox = false
-                appState.showPeople = true
-            case .channels:
-                appState.selectedThreadId = nil
-                appState.selectedProjectId = nil
-                appState.showInbox = false
-                appState.showPeople = false
-            case .threads, .projects:
-                appState.selectedChannelId = nil
-                appState.showInbox = false
-                appState.showPeople = false
+    }
+
+    // MARK: - Sidebar building blocks
+
+    @ViewBuilder
+    private func sidebarSection<Content: View, Trailing: View>(
+        title: String,
+        icon: String,
+        isOpen: Binding<Bool>,
+        @ViewBuilder trailing: () -> Trailing = { EmptyView() },
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Button {
+                    withAnimation(.easeOut(duration: 0.15)) { isOpen.wrappedValue.toggle() }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: isOpen.wrappedValue ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .frame(width: 10)
+                        Image(systemName: icon)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Text(title.uppercased())
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                            .tracking(0.5)
+                        Spacer()
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                trailing()
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            if isOpen.wrappedValue {
+                content()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func sidebarFooterButton(
+        icon: String,
+        label: String,
+        badge: Int,
+        isActive: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(isActive ? .white : .secondary)
+                Text(label)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+                    .foregroundColor(isActive ? .white : .primary.opacity(0.85))
+                if badge > 0 {
+                    Text("\(badge)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Color.matcha500)
+                        .clipShape(Capsule())
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isActive ? Color.matcha500.opacity(0.8) : Color.zinc800.opacity(0.5))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func refreshPendingConnections() async {
+        do {
+            let list = try await ChannelsService.shared.listPendingConnections()
+            await MainActor.run { pendingConnectionsCount = list.count }
+        } catch {
+            // Silent failure — badge just won't update
         }
     }
 
@@ -238,65 +340,3 @@ struct ContentView: View {
     }
 }
 
-// MARK: - Inbox Sidebar (lightweight conversation list for sidebar)
-
-private struct InboxSidebarView: View {
-    @Environment(AppState.self) private var appState
-    @State private var conversations: [MWInboxConversation] = []
-    @State private var isLoading = true
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if isLoading {
-                Spacer()
-                ProgressView().tint(.secondary)
-                Spacer()
-            } else if conversations.isEmpty {
-                Spacer()
-                VStack(spacing: 8) {
-                    Image(systemName: "envelope").font(.system(size: 28)).foregroundColor(.secondary)
-                    Text("No messages").font(.system(size: 13)).foregroundColor(.secondary)
-                }
-                Spacer()
-            } else {
-                List(conversations, id: \.id) { convo in
-                    Button {
-                        appState.showInbox = true
-                        appState.selectedThreadId = nil
-                        appState.selectedProjectId = nil
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(convo.title ?? convo.participants?.first?.name ?? "Conversation")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                if let preview = convo.lastMessagePreview {
-                                    Text(preview)
-                                        .font(.system(size: 10)).foregroundColor(.secondary).lineLimit(1)
-                                }
-                            }
-                            Spacer()
-                            if (convo.unreadCount ?? 0) > 0 {
-                                Circle().fill(Color.matcha500).frame(width: 8, height: 8)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.vertical, 2)
-                }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
-            }
-        }
-        .background(Color.appBackground)
-        .task {
-            do {
-                let list = try await InboxService.shared.listConversations()
-                await MainActor.run { conversations = list; isLoading = false }
-            } catch {
-                await MainActor.run { isLoading = false }
-            }
-        }
-    }
-}

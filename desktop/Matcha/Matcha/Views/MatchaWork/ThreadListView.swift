@@ -15,6 +15,7 @@ private func formatThreadDate(_ iso: String) -> String {
 struct ThreadListView: View {
     @Environment(AppState.self) private var appState
     @Bindable var viewModel: ThreadListViewModel
+    var showHeader: Bool = true
     @State private var isCreating = false
     @State private var threadToDelete: MWThread?
     @State private var showDeleteConfirm = false
@@ -30,83 +31,71 @@ struct ThreadListView: View {
         @Bindable var appState = appState
 
         VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Matcha Work")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.secondary)
+            if showHeader {
+                // Header
+                HStack {
+                    Text("Matcha Work")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.secondary)
 
-                // Online users
-                if !appState.onlineUsers.isEmpty {
-                    HStack(spacing: -4) {
-                        ForEach(appState.onlineUsers.prefix(5)) { user in
-                            Circle()
-                                .fill(Color.matcha500)
-                                .frame(width: 18, height: 18)
-                                .overlay(
-                                    Text(String(user.name.prefix(1)).uppercased())
-                                        .font(.system(size: 8, weight: .bold))
-                                        .foregroundColor(.white)
-                                )
-                                .overlay(
-                                    Circle().stroke(Color.appBackground, lineWidth: 1.5)
-                                )
-                                .help(user.name)
-                        }
-                        if appState.onlineUsers.count > 5 {
-                            Circle()
-                                .fill(Color.zinc800)
-                                .frame(width: 18, height: 18)
-                                .overlay(
-                                    Text("+\(appState.onlineUsers.count - 5)")
-                                        .font(.system(size: 7, weight: .bold))
-                                        .foregroundColor(.secondary)
-                                )
-                                .overlay(
-                                    Circle().stroke(Color.appBackground, lineWidth: 1.5)
-                                )
-                        }
-                    }
-                }
-
-                Spacer()
-                Button {
-                    guard !isCreating else { return }
-                    isCreating = true
-                    let dateStr = Date().formatted(date: .abbreviated, time: .omitted)
-                    Task {
-                        if let thread = await viewModel.createThread(
-                            title: "New Chat \(dateStr)",
-                            initialMessage: nil
-                        ) {
-                            await MainActor.run {
-                                appState.selectedThreadId = thread.id
-                                appState.showSkills = false
+                    // Online users
+                    if !appState.onlineUsers.isEmpty {
+                        HStack(spacing: -4) {
+                            ForEach(appState.onlineUsers.prefix(5)) { user in
+                                Circle()
+                                    .fill(Color.matcha500)
+                                    .frame(width: 18, height: 18)
+                                    .overlay(
+                                        Text(String(user.name.prefix(1)).uppercased())
+                                            .font(.system(size: 8, weight: .bold))
+                                            .foregroundColor(.white)
+                                    )
+                                    .overlay(
+                                        Circle().stroke(Color.appBackground, lineWidth: 1.5)
+                                    )
+                                    .help(user.name)
+                            }
+                            if appState.onlineUsers.count > 5 {
+                                Circle()
+                                    .fill(Color.zinc800)
+                                    .frame(width: 18, height: 18)
+                                    .overlay(
+                                        Text("+\(appState.onlineUsers.count - 5)")
+                                            .font(.system(size: 7, weight: .bold))
+                                            .foregroundColor(.secondary)
+                                    )
+                                    .overlay(
+                                        Circle().stroke(Color.appBackground, lineWidth: 1.5)
+                                    )
                             }
                         }
-                        isCreating = false
                     }
-                } label: {
-                    if isCreating {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .frame(width: 24, height: 24)
-                    } else {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .frame(width: 24, height: 24)
-                            .background(Color.zinc800)
-                            .cornerRadius(6)
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(isCreating)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
 
-            Divider().opacity(0.3)
+                    Spacer()
+                    Button {
+                        createNewThread()
+                    } label: {
+                        if isCreating {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .frame(width: 24, height: 24)
+                        } else {
+                            Image(systemName: "plus")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.secondary)
+                                .frame(width: 24, height: 24)
+                                .background(Color.zinc800)
+                                .cornerRadius(6)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isCreating)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+                Divider().opacity(0.3)
+            }
 
             // Filter
             ScrollView(.horizontal, showsIndicators: false) {
@@ -202,6 +191,9 @@ struct ThreadListView: View {
             }
         }
         .task { await viewModel.loadThreads() }
+        .onReceive(NotificationCenter.default.publisher(for: .mwCreateNewThread)) { _ in
+            createNewThread()
+        }
         .confirmationDialog("Delete thread?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
                 if let thread = threadToDelete {
@@ -215,6 +207,28 @@ struct ThreadListView: View {
             Text("This cannot be undone.")
         }
     }
+
+    private func createNewThread() {
+        guard !isCreating else { return }
+        isCreating = true
+        let dateStr = Date().formatted(date: .abbreviated, time: .omitted)
+        Task {
+            if let thread = await viewModel.createThread(
+                title: "New Chat \(dateStr)",
+                initialMessage: nil
+            ) {
+                await MainActor.run {
+                    appState.selectedThreadId = thread.id
+                    appState.showSkills = false
+                }
+            }
+            isCreating = false
+        }
+    }
+}
+
+extension Notification.Name {
+    static let mwCreateNewThread = Notification.Name("mwCreateNewThread")
 }
 
 struct ThreadRowView: View {
