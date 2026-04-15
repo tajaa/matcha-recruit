@@ -405,6 +405,39 @@ def _clean_json_text(text: str) -> str:
     return ''.join(fixed)
 
 
+def _extract_reply_field(raw_text: str) -> Optional[str]:
+    """Best-effort salvage of the `reply` value from a malformed Gemini JSON
+    response. Used when json.loads has already failed — we don't want the
+    client to see the full `{"mode":..., "reply":"...", ...}` envelope.
+
+    Strategy:
+    1. Try to locate `"reply":"..."` with a tolerant regex that handles
+       escaped quotes inside the string.
+    2. If found, unescape standard JSON escapes (\\n, \\", \\\\) and return.
+    3. Return None if nothing looks like a reply field.
+    """
+    if not raw_text:
+        return None
+    # Tolerant match: "reply" (with optional whitespace) : "value-with-escapes"
+    # (?:\\.|[^"\\])*  matches any char that isn't an unescaped quote, including
+    # escaped sequences. re.DOTALL lets the value span newlines.
+    match = re.search(
+        r'"reply"\s*:\s*"((?:\\.|[^"\\])*)"',
+        raw_text,
+        re.DOTALL,
+    )
+    if not match:
+        return None
+    value = match.group(1)
+    # Unescape common JSON escape sequences. json.loads handles this correctly
+    # if we wrap the value in quotes — safer than manual replacement.
+    try:
+        return json.loads('"' + value + '"')
+    except json.JSONDecodeError:
+        # Fall back to the raw captured value.
+        return value
+
+
 def _infer_skill_from_state(current_state: dict) -> str:
     """Infer the active skill from current_state contents."""
     if not current_state:
@@ -776,8 +809,11 @@ class GeminiProvider(MatchaWorkAIProvider):
                 e,
                 raw_text[:300],
             )
+            # Salvage: try to extract the `reply` field via regex so the user
+            # at least sees the AI's text instead of the raw JSON envelope.
+            salvaged_reply = _extract_reply_field(raw_text) or "I processed your request."
             return AIResponse(
-                assistant_reply=raw_text or "I processed your request.",
+                assistant_reply=salvaged_reply,
                 structured_update=None,
                 mode="general",
                 skill="none",
