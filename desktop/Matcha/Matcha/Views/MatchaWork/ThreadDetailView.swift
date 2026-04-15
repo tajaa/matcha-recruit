@@ -104,7 +104,7 @@ struct ThreadDetailView: View {
 
                         if let usageText = viewModel.tokenUsage?.displayText {
                             Text(usageText)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 10))
                                 .foregroundColor(.secondary)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)

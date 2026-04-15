@@ -39,7 +39,7 @@ struct VersionBadge: View {
 
     var body: some View {
         Text("v\(version)")
-            .font(.system(size: 11, design: .monospaced))
+            .font(.system(size: 11))
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Color.zinc800)

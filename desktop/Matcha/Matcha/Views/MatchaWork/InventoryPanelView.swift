@@ -65,7 +65,7 @@ struct InventoryPanelView: View {
                 Spacer()
                 if totalCost > 0 {
                     Text("$\(String(format: "%.2f", totalCost))")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.matcha500)
                 }
             }
@@ -197,7 +197,7 @@ private struct InventoryRow: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     if let total = item.totalCost {
                         Text("$\(String(format: "%.2f", total))")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.white)
                     }
                     if let qty = item.quantity, let unit = item.unit {

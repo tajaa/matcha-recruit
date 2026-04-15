@@ -77,7 +77,7 @@ struct UsageSummaryView: View {
                                     Spacer()
                                     if let cost = model.costDollars, cost > 0 {
                                         Text("$\(String(format: "%.4f", cost))")
-                                            .font(.system(size: 11, design: .monospaced))
+                                            .font(.system(size: 11))
                                             .foregroundColor(.matcha500)
                                     }
                                 }
@@ -124,7 +124,7 @@ private struct StatBox: View {
     var body: some View {
         VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 20, weight: .semibold, design: .monospaced))
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(.white)
             Text(label)
                 .font(.system(size: 10))

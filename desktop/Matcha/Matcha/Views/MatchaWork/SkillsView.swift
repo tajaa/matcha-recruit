@@ -186,7 +186,7 @@ private struct SkillCard: View {
                                 + Text("\"")
                                 .foregroundColor(.secondary)
                         }
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 12))
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
                         .background(Color.zinc950)

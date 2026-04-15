@@ -18,7 +18,7 @@ struct ProfileSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("profile")
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white.opacity(0.9))
 
             if isLoading {
@@ -32,10 +32,10 @@ struct ProfileSheet: View {
                         field(label: "phone", text: $phone, placeholder: "optional")
                         VStack(alignment: .leading, spacing: 4) {
                             Text("email")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 10))
                                 .foregroundColor(.white.opacity(0.4))
                             Text(appState.currentUser?.email ?? "")
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(.system(size: 12))
                                 .foregroundColor(.white.opacity(0.55))
                         }
                     }
@@ -44,14 +44,14 @@ struct ProfileSheet: View {
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10))
                     .foregroundColor(.red.opacity(0.8))
             }
 
             HStack {
                 Button { dismiss() } label: {
                     Text("cancel")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.5))
                 }
                 .buttonStyle(.plain)
@@ -60,7 +60,7 @@ struct ProfileSheet: View {
                     Task { await save() }
                 } label: {
                     Text(isSaving ? "saving…" : "save")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundColor(isSaving ? .white.opacity(0.35) : Color.matcha500)
                 }
                 .buttonStyle(.plain)
@@ -91,14 +91,14 @@ struct ProfileSheet: View {
                         image.resizable().scaledToFill()
                     } placeholder: {
                         Text(initials)
-                            .font(.system(size: 22, weight: .medium, design: .monospaced))
+                            .font(.system(size: 22, weight: .medium))
                             .foregroundColor(.white.opacity(0.55))
                     }
                     .frame(width: 88, height: 88)
                     .clipShape(Circle())
                 } else {
                     Text(initials)
-                        .font(.system(size: 22, weight: .medium, design: .monospaced))
+                        .font(.system(size: 22, weight: .medium))
                         .foregroundColor(.white.opacity(0.55))
                 }
                 if isUploadingAvatar {
@@ -110,7 +110,7 @@ struct ProfileSheet: View {
             }
             Button { pickAvatar() } label: {
                 Text(avatarUrl != nil || avatarImage != nil ? "change" : "add photo")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10))
                     .foregroundColor(Color.matcha500)
             }
             .buttonStyle(.plain)
@@ -121,11 +121,11 @@ struct ProfileSheet: View {
     private func field(label: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.4))
             TextField("", text: text, prompt: Text(placeholder).foregroundColor(.white.opacity(0.25)))
                 .textFieldStyle(.plain)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.9))
             Divider()
         }

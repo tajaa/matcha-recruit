@@ -83,15 +83,15 @@ struct RecruitingPipelineView: View {
                     VStack(spacing: 3) {
                         HStack(spacing: 4) {
                             Text(t.rawValue)
-                                .font(.system(size: 11, weight: tab == t ? .medium : .regular, design: .monospaced))
+                                .font(.system(size: 11, weight: tab == t ? .medium : .regular))
                                 .foregroundColor(tab == t ? Color.matcha500 : .white.opacity(0.5))
                             if t == .candidates {
                                 Text("(\(recruiting.candidates.count))")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(.system(size: 10))
                                     .foregroundColor(.white.opacity(0.35))
                             } else if t == .shortlist {
                                 Text("(\(recruiting.shortlistIds.count))")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(.system(size: 10))
                                     .foregroundColor(.white.opacity(0.35))
                             }
                         }
@@ -112,7 +112,7 @@ struct RecruitingPipelineView: View {
                     }
                 } label: {
                     Text(isSyncing ? "syncing…" : "sync")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.5))
                 }
                 .buttonStyle(.plain)
@@ -130,7 +130,7 @@ struct RecruitingPipelineView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text(recruiting.posting.finalized == true ? "● finalized" : "○ draft")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10))
                     .foregroundColor(recruiting.posting.finalized == true ? Color.matcha500 : .white.opacity(0.5))
                 Spacer()
                 Button {
@@ -143,7 +143,7 @@ struct RecruitingPipelineView: View {
                     }
                 } label: {
                     Text(recruiting.posting.finalized == true ? "unfinalize" : "finalize")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(Color.matcha500)
                 }
                 .buttonStyle(.plain)
@@ -151,7 +151,7 @@ struct RecruitingPipelineView: View {
                     pickResumes()
                 } label: {
                     Text(isUploading ? "uploading…" : "+ upload resumes")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(
                             recruiting.posting.finalized == true && !isUploading
                                 ? Color.matcha500
@@ -187,7 +187,7 @@ struct RecruitingPipelineView: View {
                     Task { await savePosting() }
                 } label: {
                     Text("save posting")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(Color.matcha500)
                 }
                 .buttonStyle(.plain)
@@ -218,20 +218,20 @@ struct RecruitingPipelineView: View {
             HStack(spacing: 10) {
                 HStack(spacing: 6) {
                     Text("›")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.35))
                     TextField("",
                               text: $searchText,
                               prompt: Text("search").foregroundColor(.white.opacity(0.25)))
                         .textFieldStyle(.plain)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.9))
                 }
                 Spacer()
                 ForEach(SortField.allCases) { field in
                     Button { sortField = field } label: {
                         Text(field.label)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 10))
                             .foregroundColor(sortField == field ? Color.matcha500 : .white.opacity(0.4))
                     }
                     .buttonStyle(.plain)
@@ -241,7 +241,7 @@ struct RecruitingPipelineView: View {
                         showSendSheet = true
                     } label: {
                         Text("send interviews (\(selectedCandidateIds.count))")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 10))
                             .foregroundColor(Color.matcha500)
                     }
                     .buttonStyle(.plain)
@@ -255,7 +255,7 @@ struct RecruitingPipelineView: View {
             if filtered.isEmpty {
                 Spacer()
                 Text(shortlistOnly ? "nothing shortlisted yet" : "no candidates yet")
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.4))
                 Spacer()
             } else {
@@ -286,7 +286,7 @@ struct RecruitingPipelineView: View {
                     }
                 } label: {
                     Text(selectedCandidateIds.contains(c.id) ? "[x]" : "[ ]")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.55))
                 }
                 .buttonStyle(.plain)
@@ -294,17 +294,17 @@ struct RecruitingPipelineView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Text(c.displayName.lowercased())
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.white.opacity(dismissed ? 0.35 : 0.9))
                             .strikethrough(dismissed)
                         if let score = c.matchScore {
                             Text(String(format: "%.0f%%", score))
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 10))
                                 .foregroundColor(Color.matcha500.opacity(0.8))
                         }
                         if let status = c.interviewStatus, !status.isEmpty {
                             Text(status)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(.system(size: 10))
                                 .foregroundColor(.white.opacity(0.4))
                         }
                     }
@@ -313,19 +313,19 @@ struct RecruitingPipelineView: View {
                         if let yrs = c.experienceYears { Text("· \(Int(yrs)) yrs") }
                         if let loc = c.location { Text("· \(loc)").lineLimit(1) }
                     }
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10))
                     .foregroundColor(.white.opacity(dismissed ? 0.3 : 0.5))
                 }
                 Spacer()
                 Button { Task { await viewModel.toggleShortlist(candidateId: c.id) } } label: {
                     Text(shortlisted ? "★" : "☆")
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 13))
                         .foregroundColor(shortlisted ? Color.matcha500 : .white.opacity(0.4))
                 }
                 .buttonStyle(.plain)
                 Button { Task { await viewModel.toggleDismiss(candidateId: c.id) } } label: {
                     Text(dismissed ? "↺" : "✕")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.45))
                 }
                 .buttonStyle(.plain)
@@ -333,7 +333,7 @@ struct RecruitingPipelineView: View {
                     expandedCandidateId = expanded ? nil : c.id
                 } label: {
                     Text(expanded ? "▾" : "▸")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.45))
                 }
                 .buttonStyle(.plain)
@@ -376,7 +376,7 @@ struct RecruitingPipelineView: View {
     private func detailRow(_ label: String, _ value: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Text(label)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10))
                 .foregroundColor(.white.opacity(0.35))
                 .frame(width: 80, alignment: .leading)
             Text(value)
@@ -446,30 +446,30 @@ private struct SendInterviewSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("send interviews")
-                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white.opacity(0.9))
             Text("\(candidateCount) candidate(s) selected")
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11))
                 .foregroundColor(.white.opacity(0.5))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("position title (optional)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.4))
                 TextField("", text: $positionTitle, prompt: Text("Senior Engineer").foregroundColor(.white.opacity(0.25)))
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.9))
                 Divider()
             }
 
             VStack(alignment: .leading, spacing: 4) {
                 Text("custom message (optional)")
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10))
                     .foregroundColor(.white.opacity(0.4))
                 TextField("", text: $message, prompt: Text("looking forward to chatting").foregroundColor(.white.opacity(0.25)), axis: .vertical)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 12, design: .monospaced))
+                    .font(.system(size: 12))
                     .foregroundColor(.white.opacity(0.9))
                     .lineLimit(2...4)
                 Divider()
@@ -478,7 +478,7 @@ private struct SendInterviewSheet: View {
             HStack {
                 Button { dismiss() } label: {
                     Text("cancel")
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.5))
                 }
                 .buttonStyle(.plain)
@@ -488,7 +488,7 @@ private struct SendInterviewSheet: View {
                     dismiss()
                 } label: {
                     Text("send")
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundColor(Color.matcha500)
                 }
                 .buttonStyle(.plain)

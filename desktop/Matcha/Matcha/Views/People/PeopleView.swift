@@ -17,24 +17,26 @@ struct PeopleView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            Divider().opacity(0.3)
+            tabBar
+            Divider().opacity(0.3)
             if isLoading {
                 Spacer()
-                Text("loading…")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.4))
+                Text("Loading…")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
                 Spacer()
             } else if let errorMessage {
                 Spacer()
                 Text(errorMessage)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.4))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
                 Spacer()
             } else {
                 content
             }
         }
-        .background(.ultraThinMaterial)
+        .background(Color.appBackground)
         .task {
             await loadAll()
         }
@@ -43,38 +45,53 @@ struct PeopleView: View {
     // MARK: - Header
 
     private var header: some View {
-        HStack(spacing: 20) {
-            ForEach(Tab.allCases) { t in
-                Button { tab = t } label: {
-                    VStack(spacing: 3) {
-                        HStack(spacing: 4) {
-                            Text(t.rawValue)
-                                .font(.system(size: 11, weight: tab == t ? .medium : .regular, design: .monospaced))
-                                .foregroundColor(tab == t ? Color.matcha500 : .white.opacity(0.5))
-                            Text("(\(countFor(t)))")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.35))
-                        }
-                        Rectangle()
-                            .fill(tab == t ? Color.matcha500 : Color.clear)
-                            .frame(height: 1)
-                    }
-                }
-                .buttonStyle(.plain)
-            }
+        HStack {
+            Text("People")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
             Spacer()
             Button {
                 Task { await loadAll() }
             } label: {
-                Text("refresh")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.4))
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
             }
             .buttonStyle(.plain)
+            .help("Refresh")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(.regularMaterial)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var tabBar: some View {
+        HStack(spacing: 4) {
+            ForEach(Tab.allCases) { t in
+                Button { tab = t } label: {
+                    HStack(spacing: 4) {
+                        Text(t.rawValue.capitalized)
+                            .font(.system(size: 11, weight: .medium))
+                        Text("\(countFor(t))")
+                            .font(.system(size: 10))
+                            .foregroundColor(tab == t ? .white.opacity(0.8) : .secondary)
+                    }
+                    .foregroundColor(tab == t ? .white : .secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(tab == t ? Color.matcha500.opacity(0.8) : Color.zinc800)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     @ViewBuilder
@@ -95,8 +112,8 @@ struct PeopleView: View {
                 VStack {
                     Spacer()
                     Text(emptyMessage)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.4))
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
                     Spacer()
                 }
             } else {
@@ -104,31 +121,32 @@ struct PeopleView: View {
                     LazyVStack(spacing: 0) {
                         ForEach(users) { user in
                             row(user, showActions: showActions)
-                            Divider().opacity(0.4)
+                            Divider().opacity(0.25)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
             }
         }
     }
 
     private func row(_ user: UserConnection, showActions: Bool) -> some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 10) {
             Text(initials(for: user))
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(.white.opacity(0.7))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.secondary)
                 .frame(width: 32, height: 32)
-                .background(Color.white.opacity(0.05))
+                .background(Color.zinc800)
                 .clipShape(Circle())
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(user.name.lowercased())
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.9))
+                Text(user.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.primary)
                     .lineLimit(1)
                 Text(user.email)
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.4))
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
                     .lineLimit(1)
             }
 
@@ -136,32 +154,38 @@ struct PeopleView: View {
 
             if showActions {
                 if acting.contains(user.userId) {
-                    Text("…")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.white.opacity(0.4))
+                    ProgressView().controlSize(.small)
                 } else {
                     Button {
                         Task { await accept(user) }
                     } label: {
-                        Text("accept")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(Color.matcha500)
+                        Text("Accept")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.matcha500)
+                            .cornerRadius(6)
                     }
                     .buttonStyle(.plain)
 
                     Button {
                         Task { await decline(user) }
                     } label: {
-                        Text("decline")
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.45))
+                        Text("Decline")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 4)
+                            .background(Color.zinc800)
+                            .cornerRadius(6)
                     }
                     .buttonStyle(.plain)
                 }
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 
     // MARK: - Data

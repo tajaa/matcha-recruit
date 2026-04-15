@@ -65,10 +65,10 @@ struct ContentView: View {
                     VStack {
                         Spacer()
                         Text("people")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(.system(size: 11))
                             .foregroundColor(.white.opacity(0.4))
                         Text("connections & requests")
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.3))
                         Spacer()
                     }
@@ -148,7 +148,7 @@ struct ContentView: View {
                             showProfile = true
                         } label: {
                             Text(user.email)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(.system(size: 12))
                                 .foregroundColor(.white.opacity(0.55))
                                 .underline(false)
                         }
@@ -159,7 +159,7 @@ struct ContentView: View {
                                 startUpgrade()
                             } label: {
                                 Text(isOpeningCheckout ? "opening…" : "upgrade")
-                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .font(.system(size: 12, weight: .medium))
                                     .foregroundColor(upgradeError == nil ? Color.matcha500 : .red.opacity(0.8))
                             }
                             .buttonStyle(.plain)
@@ -167,7 +167,7 @@ struct ContentView: View {
                             .help(upgradeError ?? "Upgrade to Matcha Plus")
                         } else {
                             Text("plus")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 11))
                                 .foregroundColor(Color.matcha500.opacity(0.8))
                         }
                         Button("logout") {
@@ -177,7 +177,7 @@ struct ContentView: View {
                             }
                         }
                         .buttonStyle(.plain)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.system(size: 12))
                         .foregroundColor(.white.opacity(0.5))
                     }
                 }

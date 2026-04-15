@@ -1,5 +1,11 @@
 import Foundation
 
+private extension Data {
+    mutating func append(_ string: String) {
+        if let data = string.data(using: .utf8) { append(data) }
+    }
+}
+
 class ChannelsService {
     static let shared = ChannelsService()
     private let client = APIClient.shared
@@ -93,4 +99,46 @@ class ChannelsService {
     }
 
     private struct EmptyBody: Encodable {}
+
+    // MARK: - Attachment upload
+
+    private struct UploadResponse: Codable {
+        let attachments: [ChannelAttachment]
+    }
+
+    func uploadAttachments(
+        channelId: String,
+        files: [(data: Data, filename: String, mimeType: String)]
+    ) async throws -> [ChannelAttachment] {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        for file in files {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(file.filename)\"\r\n")
+            body.append("Content-Type: \(file.mimeType)\r\n\r\n")
+            body.append(file.data)
+            body.append("\r\n")
+        }
+        body.append("--\(boundary)--\r\n")
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/\(channelId)/upload") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let detail = String(data: data, encoding: .utf8) ?? "Upload failed"
+            throw APIError.httpError(code, detail)
+        }
+        let decoded = try JSONDecoder().decode(UploadResponse.self, from: data)
+        return decoded.attachments
+    }
 }

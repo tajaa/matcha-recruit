@@ -10,25 +10,25 @@ struct ChannelsSidebarView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            Divider()
+            Divider().opacity(0.3)
 
             if isLoading {
                 Spacer()
-                Text("loading")
+                Text("Loading…")
                     .font(.system(size: 11))
-                    .foregroundColor(.white.opacity(0.4))
+                    .foregroundColor(.secondary)
                 Spacer()
             } else if channels.isEmpty {
                 Spacer()
                 VStack(spacing: 8) {
-                    Text("no channels")
+                    Text("No channels yet")
                         .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.4))
+                        .foregroundColor(.secondary)
                     Button {
                         showCreate = true
                     } label: {
-                        Text("create")
-                            .font(.system(size: 11))
+                        Text("Create one")
+                            .font(.system(size: 11, weight: .medium))
                             .foregroundColor(Color.matcha500)
                     }
                     .buttonStyle(.plain)
@@ -45,7 +45,7 @@ struct ChannelsSidebarView: View {
                 }
             }
         }
-        .background(.ultraThinMaterial)
+        .background(Color.appBackground)
         .task {
             await load()
         }
@@ -60,17 +60,20 @@ struct ChannelsSidebarView: View {
     }
 
     private var header: some View {
-        HStack(spacing: 0) {
-            Text("~/channels")
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(.white.opacity(0.4))
+        HStack {
+            Text("Channels")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
             Spacer()
             Button {
                 showCreate = true
             } label: {
-                Text("[+]")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.4))
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
             }
             .buttonStyle(.plain)
         }
@@ -87,39 +90,40 @@ struct ChannelsSidebarView: View {
             appState.showInbox = false
             appState.showSkills = false
         } label: {
-            HStack(alignment: .top, spacing: 0) {
-                Text(selected ? "│" : " ")
-                    .font(.system(size: 13, design: .monospaced))
-                    .foregroundColor(selected ? Color.matcha500 : .clear)
-                    .frame(width: 10)
-
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 0) {
-                        Text("# ")
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.4))
-                        Text(channel.name.lowercased())
-                            .font(.system(size: 12, weight: selected ? .medium : .regular, design: .monospaced))
-                            .foregroundColor(.white.opacity(selected ? 1.0 : 0.85))
+            HStack(alignment: .center, spacing: 8) {
+                Image(systemName: "number")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(selected ? Color.matcha500 : .secondary)
+                    .frame(width: 14)
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(channel.name)
+                            .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                            .foregroundColor(selected ? .primary : .primary.opacity(0.9))
                             .lineLimit(1)
                         Spacer(minLength: 4)
                         if channel.unreadCount > 0 {
-                            Text("●")
-                                .font(.system(size: 9))
-                                .foregroundColor(Color.matcha500)
+                            Circle()
+                                .fill(Color.matcha500)
+                                .frame(width: 7, height: 7)
                         }
                     }
                     if let preview = channel.lastMessagePreview, !preview.isEmpty {
                         Text(preview)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.3))
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
                             .lineLimit(1)
-                            .padding(.leading, 15)
                     }
                 }
-                .padding(.trailing, 12)
             }
-            .padding(.vertical, 5)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(selected ? Color.matcha500.opacity(0.15) : Color.clear)
+                    .padding(.horizontal, 6)
+            )
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

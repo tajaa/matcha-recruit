@@ -78,7 +78,7 @@ struct VersionRowView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
                     Text("v\(version.version)")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
                     if isCurrent {
                         Text("current")

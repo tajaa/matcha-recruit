@@ -501,7 +501,7 @@ struct PresentationPreview: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 HStack(spacing: 6) {
                                     Text("\(slide.index)")
-                                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                        .font(.system(size: 11, weight: .bold))
                                         .foregroundColor(isSelected ? theme.accentColor : theme.textColor.opacity(0.5))
                                         .frame(width: 20, alignment: .center)
                                     Text(slide.title)
@@ -727,7 +727,7 @@ struct HandbookPreview: View {
                             .foregroundColor(.secondary)
                         ForEach(states, id: \.self) { st in
                             Text(st)
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 11, weight: .semibold))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 3)
@@ -863,7 +863,7 @@ struct HandbookPreview: View {
                                 .frame(width: 44, height: 44)
                                 .rotationEffect(.degrees(-90))
                             Text("\(score)")
-                                .font(.system(size: 14, weight: .bold, design: .monospaced))
+                                .font(.system(size: 14, weight: .bold))
                                 .foregroundColor(scoreColor)
                         }
                         VStack(alignment: .leading, spacing: 2) {
@@ -1177,7 +1177,7 @@ struct OnboardingPreview: View {
                                             .font(.system(size: 10))
                                             .foregroundColor(.secondary)
                                         Text(employee.workEmail)
-                                            .font(.system(size: 11, design: .monospaced))
+                                            .font(.system(size: 11))
                                             .foregroundColor(.white.opacity(0.75))
                                     }
                                 }
