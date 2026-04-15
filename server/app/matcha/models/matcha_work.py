@@ -359,6 +359,7 @@ class ThreadListItem(BaseModel):
     node_mode: bool = False
     compliance_mode: bool = False
     payer_mode: bool = False
+    collaborator_count: int = 0
     created_at: datetime
     updated_at: datetime
 

@@ -477,44 +477,61 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               Threads
               <ChevronDown size={12} className={`transition-transform ${threadsOpen ? '' : '-rotate-90'}`} />
             </button>
-            {threadsOpen && (
-              <div className="space-y-0.5 mt-0.5">
-                {threads.length === 0 && (
-                  <p className="px-2.5 py-1 text-[11px] text-zinc-600">No threads</p>
-                )}
-                {threads.slice(0, 10).map((t) => (
-                  <div
-                    key={t.id}
-                    className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
-                      isActive(`/work/${t.id}`)
-                        ? 'bg-zinc-800/60 text-white font-medium'
-                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
-                    }`}
-                  >
-                    <MessageSquare size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
-                    {renaming?.type === 'thread' && renaming.id === t.id ? (
-                      renderRenameInput()
-                    ) : (
-                      <>
-                        <button
-                          onClick={() => navigate(`/work/${t.id}`)}
-                          className="flex-1 min-w-0 text-left truncate"
-                        >
-                          {t.title}
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); startRename('thread', t.id, t.title) }}
-                          className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
-                          title="Rename"
-                        >
-                          <Pencil size={11} />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
+            {threadsOpen && (() => {
+              const myThreads = threads.filter((t) => t.collaborator_count === 0)
+              const sharedThreads = threads.filter((t) => t.collaborator_count > 0)
+
+              const renderThread = (t: MWThread) => (
+                <div
+                  key={t.id}
+                  className={`group w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-[13px] transition-colors ${
+                    isActive(`/work/${t.id}`)
+                      ? 'bg-zinc-800/60 text-white font-medium'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/30'
+                  }`}
+                >
+                  <MessageSquare size={14} className="text-zinc-500 shrink-0" strokeWidth={1.6} />
+                  {renaming?.type === 'thread' && renaming.id === t.id ? (
+                    renderRenameInput()
+                  ) : (
+                    <>
+                      <button
+                        onClick={() => navigate(`/work/${t.id}`)}
+                        className="flex-1 min-w-0 text-left truncate"
+                      >
+                        {t.title}
+                      </button>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); startRename('thread', t.id, t.title) }}
+                        className="opacity-0 group-hover:opacity-100 shrink-0 p-0.5 text-zinc-500 hover:text-zinc-300 transition-all"
+                        title="Rename"
+                      >
+                        <Pencil size={11} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              )
+
+              if (threads.length === 0) {
+                return <p className="px-2.5 py-1 text-[11px] text-zinc-600">No threads</p>
+              }
+
+              return (
+                <div className="space-y-0.5 mt-0.5">
+                  {myThreads.slice(0, 10).map(renderThread)}
+                  {sharedThreads.length > 0 && (
+                    <>
+                      <p className="px-2.5 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-zinc-600 flex items-center gap-1">
+                        <Users size={10} />
+                        Shared
+                      </p>
+                      {sharedThreads.slice(0, 10).map(renderThread)}
+                    </>
+                  )}
+                </div>
+              )
+            })()}
           </div>
         </nav>
 

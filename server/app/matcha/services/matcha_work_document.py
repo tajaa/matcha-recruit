@@ -908,12 +908,15 @@ async def list_threads(
         else:
             access_clause = "company_id=$1"
 
+        collab_count_sql = "(SELECT COUNT(*) FROM mw_thread_collaborators WHERE thread_id = mw_threads.id) AS collaborator_count"
+
         if status:
             if user_id is not None:
                 rows = await conn.fetch(
                     f"""
                     SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
-                           {task_type_sql}
+                           {task_type_sql},
+                           {collab_count_sql}
                     FROM mw_threads
                     WHERE {access_clause} AND status=$3
                     ORDER BY is_pinned DESC, updated_at DESC
@@ -929,7 +932,8 @@ async def list_threads(
                 rows = await conn.fetch(
                     f"""
                     SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
-                           {task_type_sql}
+                           {task_type_sql},
+                           {collab_count_sql}
                     FROM mw_threads
                     WHERE company_id=$1 AND status=$2
                     ORDER BY is_pinned DESC, updated_at DESC
@@ -945,7 +949,8 @@ async def list_threads(
                 rows = await conn.fetch(
                     f"""
                     SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
-                           {task_type_sql}
+                           {task_type_sql},
+                           {collab_count_sql}
                     FROM mw_threads
                     WHERE {access_clause}
                     ORDER BY is_pinned DESC, updated_at DESC
@@ -960,7 +965,8 @@ async def list_threads(
                 rows = await conn.fetch(
                     f"""
                     SELECT id, title, status, version, is_pinned, node_mode, compliance_mode, created_at, updated_at,
-                           {task_type_sql}
+                           {task_type_sql},
+                           {collab_count_sql}
                     FROM mw_threads
                     WHERE company_id=$1
                     ORDER BY is_pinned DESC, updated_at DESC

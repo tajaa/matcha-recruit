@@ -190,6 +190,7 @@ export interface MWThread {
   node_mode: boolean
   compliance_mode: boolean
   payer_mode: boolean
+  collaborator_count: number
   version: number
   created_at: string
   updated_at: string
@@ -329,3 +330,4 @@ export type MWStreamEvent =
   | { type: 'status'; message: string }
   | { type: 'complete'; data: MWSendResponse }
   | { type: 'error'; message: string }
+  | { type: 'keepalive' }
