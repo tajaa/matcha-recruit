@@ -37,12 +37,21 @@ export default function MatchaWorkList() {
   const [showOnboarding, setShowOnboarding] = useState(false)
 
   useEffect(() => {
-    if (
-      me?.user?.role === 'individual' &&
-      !localStorage.getItem(ONBOARDING_STORAGE_KEY)
-    ) {
-      setShowOnboarding(true)
+    if (me?.user?.role !== 'individual') return
+    let seen = false
+    try {
+      seen = !!localStorage.getItem(ONBOARDING_STORAGE_KEY)
+    } catch {
+      /* localStorage may be blocked */
     }
+    if (!seen) {
+      try {
+        seen = !!sessionStorage.getItem(ONBOARDING_STORAGE_KEY)
+      } catch {
+        /* sessionStorage may be blocked too */
+      }
+    }
+    if (!seen) setShowOnboarding(true)
   }, [me])
 
   async function load() {

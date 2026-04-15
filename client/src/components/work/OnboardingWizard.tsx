@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   MessageSquare,
   FolderKanban,
@@ -92,13 +92,40 @@ const steps: Step[] = [
   },
 ]
 
+function markCompleted() {
+  // Write to both localStorage and sessionStorage. Some browsers (Safari in
+  // private mode, ITP in strict mode, some corporate profiles) block or wipe
+  // localStorage silently, which was causing the wizard to reappear on every
+  // load. Writing to both gives us a fallback, and the try/catch prevents a
+  // storage failure from breaking the dismiss flow.
+  try {
+    localStorage.setItem(STORAGE_KEY, '1')
+  } catch {
+    /* ignore — see sessionStorage fallback below */
+  }
+  try {
+    sessionStorage.setItem(STORAGE_KEY, '1')
+  } catch {
+    /* ignore */
+  }
+}
+
 export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {
   const [step, setStep] = useState(0)
   const current = steps[step]
   const isLast = step === steps.length - 1
 
+  // As soon as the wizard is shown, mark it as "seen". This prevents the
+  // most common repeat-popup case: user clicks Next a few times, closes the
+  // tab without reaching the final step, and then sees the wizard again next
+  // session because finish() was never called. If the user specifically wants
+  // to replay the tour later, we can add a "Reset tour" settings option.
+  useEffect(() => {
+    markCompleted()
+  }, [])
+
   function finish() {
-    localStorage.setItem(STORAGE_KEY, '1')
+    markCompleted()
     onDismiss()
   }
 
