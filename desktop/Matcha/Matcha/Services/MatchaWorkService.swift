@@ -480,6 +480,71 @@ class MatchaWorkService {
         try await client.requestData(method: "POST", path: "\(basePath)/projects/\(projectId)/shortlist/\(candidateId)")
     }
 
+    func toggleProjectDismiss(projectId: String, candidateId: String) async throws -> Data {
+        try await client.requestData(method: "POST", path: "\(basePath)/projects/\(projectId)/dismiss/\(candidateId)")
+    }
+
+    func sendProjectInterviews(
+        projectId: String,
+        candidateIds: [String],
+        positionTitle: String? = nil,
+        customMessage: String? = nil
+    ) async throws -> [String: Any] {
+        let body = MWSendInterviewsRequest(
+            candidateIds: candidateIds,
+            positionTitle: positionTitle,
+            customMessage: customMessage
+        )
+        let data = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/resume/send-interviews",
+            body: body
+        )
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        return json
+    }
+
+    func syncProjectInterviews(projectId: String) async throws {
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/resume/sync-interviews"
+        )
+    }
+
+    func uploadProjectResumes(
+        projectId: String,
+        files: [(data: Data, filename: String, mimeType: String)]
+    ) async throws -> URLSession.AsyncBytes {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        for file in files {
+            body.append("--\(boundary)\r\n")
+            body.append("Content-Disposition: form-data; name=\"files\"; filename=\"\(file.filename)\"\r\n")
+            body.append("Content-Type: \(file.mimeType)\r\n\r\n")
+            body.append(file.data)
+            body.append("\r\n")
+        }
+        body.append("--\(boundary)--\r\n")
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/resume/upload") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (bytes, response) = try await URLSession.shared.bytes(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, "Upload failed")
+        }
+        return bytes
+    }
+
     // MARK: - Email Agent
 
     func agentEmailStatus() async throws -> MWAgentEmailStatus {

@@ -666,6 +666,64 @@ struct MWProjectCollaborator: Codable, Identifiable {
     }
 }
 
+// MARK: - Recruiting Project Helpers
+
+struct MWJobPosting: Codable {
+    var title: String?
+    var content: String?
+    var finalized: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case title, content, finalized
+    }
+}
+
+/// View-model helper that decodes/encodes the recruiting slice of `project_data`.
+/// Round-trips via `JSONSerialization` over the `AnyCodable` blob stored on `MWProject`.
+struct MWRecruitingData {
+    var posting: MWJobPosting
+    var candidates: [MWResumeCandidate]
+    var shortlistIds: Set<String>
+    var dismissedIds: Set<String>
+
+    static func from(projectData: [String: AnyCodable]?) -> MWRecruitingData {
+        var posting = MWJobPosting(title: nil, content: nil, finalized: false)
+        var candidates: [MWResumeCandidate] = []
+        var shortlist: Set<String> = []
+        var dismissed: Set<String> = []
+
+        guard let data = projectData else {
+            return MWRecruitingData(posting: posting, candidates: candidates,
+                                    shortlistIds: shortlist, dismissedIds: dismissed)
+        }
+
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        func decode<T: Decodable>(_ key: String, as type: T.Type) -> T? {
+            guard let any = data[key] else { return nil }
+            guard let json = try? encoder.encode(any) else { return nil }
+            return try? decoder.decode(T.self, from: json)
+        }
+
+        if let decoded: MWJobPosting = decode("posting", as: MWJobPosting.self) {
+            posting = decoded
+        }
+        if let decoded: [MWResumeCandidate] = decode("candidates", as: [MWResumeCandidate].self) {
+            candidates = decoded
+        }
+        if let ids: [String] = decode("shortlist_ids", as: [String].self) {
+            shortlist = Set(ids)
+        }
+        if let ids: [String] = decode("dismissed_ids", as: [String].self) {
+            dismissed = Set(ids)
+        }
+
+        return MWRecruitingData(posting: posting, candidates: candidates,
+                                shortlistIds: shortlist, dismissedIds: dismissed)
+    }
+}
+
 struct MWAdminSearchUser: Codable, Identifiable {
     let id: String
     let email: String

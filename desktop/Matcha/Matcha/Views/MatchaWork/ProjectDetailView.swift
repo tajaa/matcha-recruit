@@ -17,6 +17,61 @@ struct ProjectDetailView: View {
     }
 
     var body: some View {
+        Group {
+            if viewModel.project?.projectType == "recruiting" {
+                recruitingLayout
+            } else {
+                standardLayout
+            }
+        }
+        .task(id: projectId) {
+            await viewModel.loadProject(id: projectId)
+            if let chatId = viewModel.activeChatId {
+                await chatVM.loadThread(id: chatId)
+            }
+        }
+        .onChange(of: viewModel.activeChatId) {
+            if let chatId = viewModel.activeChatId {
+                Task { await chatVM.loadThread(id: chatId) }
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                if let project = viewModel.project {
+                    Text(project.title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+            }
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button { showCollaborators = true } label: {
+                    Image(systemName: "person.2").font(.system(size: 13))
+                }
+                .help("Collaborators")
+                .popover(isPresented: $showCollaborators) {
+                    if let pid = viewModel.project?.id {
+                        CollaboratorPanelView(projectId: pid)
+                            .frame(width: 300, height: 360)
+                    }
+                }
+
+                Menu {
+                    Button("PDF") { export(format: "pdf") }
+                    Button("Markdown") { export(format: "md") }
+                    Button("DOCX") { export(format: "docx") }
+                } label: {
+                    Image(systemName: "square.and.arrow.up").font(.system(size: 13))
+                }
+                .help("Export project")
+            }
+        }
+    }
+
+    private var recruitingLayout: some View {
+        RecruitingPipelineView(viewModel: viewModel)
+    }
+
+    private var standardLayout: some View {
         HSplitView {
             // Sidebar: Sections + Chats
             VStack(spacing: 0) {
@@ -125,47 +180,6 @@ struct ProjectDetailView: View {
             }
         }
         .background(Color.appBackground)
-        .toolbar {
-            ToolbarItem(placement: .navigation) {
-                if let project = viewModel.project {
-                    Text(project.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-            }
-            ToolbarItemGroup(placement: .primaryAction) {
-                Button { showCollaborators = true } label: {
-                    Image(systemName: "person.2").font(.system(size: 13))
-                }
-                .help("Collaborators")
-                .popover(isPresented: $showCollaborators) {
-                    if let pid = viewModel.project?.id {
-                        CollaboratorPanelView(projectId: pid)
-                            .frame(width: 300, height: 360)
-                    }
-                }
-
-                Menu {
-                    Button("PDF") { export(format: "pdf") }
-                    Button("Markdown") { export(format: "md") }
-                    Button("DOCX") { export(format: "docx") }
-                } label: {
-                    Image(systemName: "square.and.arrow.up").font(.system(size: 13))
-                }
-                .help("Export project")
-            }
-        }
-        .task(id: projectId) {
-            await viewModel.loadProject(id: projectId)
-            if let chatId = viewModel.activeChatId {
-                await chatVM.loadThread(id: chatId)
-            }
-        }
-        .onChange(of: viewModel.activeChatId) {
-            if let chatId = viewModel.activeChatId {
-                Task { await chatVM.loadThread(id: chatId) }
-            }
-        }
     }
 
     private func export(format: String) {

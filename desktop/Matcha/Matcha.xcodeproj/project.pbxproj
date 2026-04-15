@@ -47,6 +47,7 @@
 		DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */; };
 		DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */; };
 		DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770005 /* ChannelDetailView.swift */; };
+		EE11FF2233445566AA000001 /* RecruitingPipelineView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE11FF2233445566BB000001 /* RecruitingPipelineView.swift */; };
 		59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD09F509367E88989F2B765 /* StatusBadge.swift */; };
 		208F703F48307B35717A911B /* LoadingDots.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13338371A8BC76142D4A946 /* LoadingDots.swift */; };
 		84947A5F80A1EC7B15C1B8E9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 043A0A515D971904874F82FA /* Assets.xcassets */; };
@@ -94,6 +95,7 @@
 		DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsWebSocket.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsSidebarView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770005 /* ChannelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDetailView.swift; sourceTree = "<group>"; };
+		EE11FF2233445566BB000001 /* RecruitingPipelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecruitingPipelineView.swift; sourceTree = "<group>"; };
 		FAD09F509367E88989F2B765 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		B13338371A8BC76142D4A946 /* LoadingDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingDots.swift; sourceTree = "<group>"; };
 		043A0A515D971904874F82FA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -232,6 +234,7 @@
 				AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */,
 				AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */,
 				AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */,
+				EE11FF2233445566BB000001 /* RecruitingPipelineView.swift */,
 			);
 			name = MatchaWork;
 			path = MatchaWork;
@@ -385,6 +388,7 @@
 				DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */,
 				DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */,
 				DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */,
+				EE11FF2233445566AA000001 /* RecruitingPipelineView.swift in Sources */,
 				59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */,
 				208F703F48307B35717A911B /* LoadingDots.swift in Sources */,
 			);
