@@ -6,6 +6,16 @@ struct ContentView: View {
     @State private var isCreating = false
     @State private var sidebarTab: SidebarTab = .threads
 
+    private struct GlassWindowModifier: ViewModifier {
+        func body(content: Content) -> some View {
+            if #available(macOS 15.0, *) {
+                content.containerBackground(.ultraThinMaterial, for: .window)
+            } else {
+                content
+            }
+        }
+    }
+
     enum SidebarTab: String, CaseIterable {
         case threads = "Threads"
         case projects = "Projects"
@@ -105,6 +115,7 @@ struct ContentView: View {
             }
         }
         .environment(appState)
+        .modifier(GlassWindowModifier())
         .toolbar {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {

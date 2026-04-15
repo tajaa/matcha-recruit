@@ -45,7 +45,7 @@ struct ChannelsSidebarView: View {
                 }
             }
         }
-        .background(Color.appBackground)
+        .background(.ultraThinMaterial)
         .task {
             await load()
         }
@@ -61,22 +61,21 @@ struct ChannelsSidebarView: View {
 
     private var header: some View {
         HStack(spacing: 0) {
-            Text("CHANNELS")
-                .font(.system(size: 10, weight: .medium))
-                .tracking(0.8)
+            Text("~/channels")
+                .font(.system(size: 10, design: .monospaced))
                 .foregroundColor(.white.opacity(0.4))
             Spacer()
             Button {
                 showCreate = true
             } label: {
-                Text("+")
-                    .font(.system(size: 14, weight: .regular))
+                Text("[+]")
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.white.opacity(0.4))
             }
             .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 10)
     }
 
     private func row(for channel: ChannelSummary) -> some View {
@@ -89,36 +88,38 @@ struct ChannelsSidebarView: View {
             appState.showSkills = false
         } label: {
             HStack(alignment: .top, spacing: 0) {
-                Rectangle()
-                    .fill(selected ? Color.matcha500 : Color.clear)
-                    .frame(width: 2)
-                HStack(alignment: .top, spacing: 6) {
-                    Text("#")
-                        .font(.system(size: 13))
-                        .foregroundColor(.white.opacity(0.4))
-                        .frame(width: 12, alignment: .leading)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(channel.name)
-                            .font(.system(size: 13))
+                Text(selected ? "│" : " ")
+                    .font(.system(size: 13, design: .monospaced))
+                    .foregroundColor(selected ? Color.matcha500 : .clear)
+                    .frame(width: 10)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 0) {
+                        Text("# ")
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.4))
+                        Text(channel.name.lowercased())
+                            .font(.system(size: 12, weight: selected ? .medium : .regular, design: .monospaced))
                             .foregroundColor(.white.opacity(selected ? 1.0 : 0.85))
                             .lineLimit(1)
-                        if let preview = channel.lastMessagePreview, !preview.isEmpty {
-                            Text(preview)
-                                .font(.system(size: 11))
-                                .foregroundColor(.white.opacity(0.4))
-                                .lineLimit(1)
+                        Spacer(minLength: 4)
+                        if channel.unreadCount > 0 {
+                            Text("●")
+                                .font(.system(size: 9))
+                                .foregroundColor(Color.matcha500)
                         }
                     }
-                    Spacer(minLength: 4)
-                    if channel.unreadCount > 0 {
-                        Text("•")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundColor(Color.matcha500)
+                    if let preview = channel.lastMessagePreview, !preview.isEmpty {
+                        Text(preview)
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.3))
+                            .lineLimit(1)
+                            .padding(.leading, 15)
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
+                .padding(.trailing, 12)
             }
+            .padding(.vertical, 5)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
