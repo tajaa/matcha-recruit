@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 
 import MarketingNav from './landing/MarketingNav'
 import MarketingFooter from './landing/MarketingFooter'
-import { ComplianceHeroAnimation } from './landing/ComplianceHeroAnimation'
+import { AgentReasoningAnimation } from './landing/AgentReasoningAnimation'
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
 import { ComplianceTicker } from '../components/landing/ComplianceTicker'
 import { PricingContactModal } from '../components/PricingContactModal'
@@ -222,7 +222,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
 
           {/* Right: compliance animation */}
           <div className="min-w-0 overflow-hidden flex justify-center lg:justify-end">
-            <ComplianceHeroAnimation />
+            <AgentReasoningAnimation />
           </div>
         </div>
 
