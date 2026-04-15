@@ -7,6 +7,7 @@ struct ContentView: View {
     @State private var isCreating = false
     @State private var isOpeningCheckout = false
     @State private var upgradeError: String?
+    @State private var showProfile = false
     @State private var sidebarTab: SidebarTab = .threads
 
     private struct GlassWindowModifier: ViewModifier {
@@ -135,13 +136,24 @@ struct ContentView: View {
         }
         .environment(appState)
         .modifier(GlassWindowModifier())
+        .sheet(isPresented: $showProfile) {
+            ProfileSheet()
+                .environment(appState)
+        }
         .toolbar {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {
                     HStack(spacing: 10) {
-                        Text(user.email)
-                            .font(.system(size: 12, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.5))
+                        Button {
+                            showProfile = true
+                        } label: {
+                            Text(user.email)
+                                .font(.system(size: 12, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.55))
+                                .underline(false)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Edit profile")
                         if !appState.isPlusActive {
                             Button {
                                 startUpgrade()
