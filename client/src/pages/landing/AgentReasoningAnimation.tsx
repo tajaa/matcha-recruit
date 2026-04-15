@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Shield } from 'lucide-react'
+import { GitBranch } from 'lucide-react'
 import * as THREE from 'three'
 
 type NodeState = 'dim' | 'processing' | 'resolved'
@@ -56,13 +56,13 @@ function makeLabelSprite(text: string) {
   canvas.height = 96
   const ctx = canvas.getContext('2d')!
   ctx.clearRect(0, 0, 512, 96)
-  ctx.font = '600 52px -apple-system, "Segoe UI", sans-serif'
+  ctx.font = '500 44px ui-monospace, "SF Mono", Menlo, monospace'
   ctx.textAlign = 'center'
   ctx.textBaseline = 'middle'
-  ctx.fillStyle = 'rgba(255,255,255,0.92)'
-  ctx.shadowColor = 'rgba(0,0,0,0.8)'
-  ctx.shadowBlur = 6
-  ctx.fillText(text, 256, 48)
+  ctx.fillStyle = '#9a8a70'
+  ctx.shadowColor = 'rgba(0,0,0,0.9)'
+  ctx.shadowBlur = 8
+  ctx.fillText(text.toUpperCase(), 256, 48)
   const tex = new THREE.CanvasTexture(canvas)
   tex.minFilter = THREE.LinearFilter
   tex.generateMipmaps = false
@@ -107,20 +107,55 @@ export function AgentReasoningAnimation() {
     const disposables: { dispose: () => void }[] = []
 
     // Nodes
-    type N = { mesh: THREE.Mesh; mat: THREE.MeshStandardMaterial; state: NodeState; pulsePhase: number }
+    type N = {
+      mesh: THREE.Mesh
+      mat: THREE.MeshStandardMaterial
+      wire: THREE.LineSegments
+      wireMat: THREE.LineBasicMaterial
+      ring: THREE.Mesh
+      ringMat: THREE.MeshBasicMaterial
+      state: NodeState
+      pulsePhase: number
+    }
     const nodes: N[] = NODES.map((def) => {
-      const geo = new THREE.SphereGeometry(RADII[def.level], 32, 32)
+      const r = RADII[def.level]
+      // Inner solid icosahedron
+      const geo = new THREE.IcosahedronGeometry(r * 0.78, 0)
       const mat = new THREE.MeshStandardMaterial({
         color: COLOR_DIM,
         emissive: COLOR_DIM,
         emissiveIntensity: 0.0,
-        roughness: 0.85,
-        metalness: 0.05,
+        roughness: 0.7,
+        metalness: 0.1,
+        flatShading: true,
       })
       const mesh = new THREE.Mesh(geo, mat)
       mesh.position.set(...def.pos)
       root.add(mesh)
       disposables.push(geo, mat)
+
+      // Wireframe shell
+      const wireGeo = new THREE.IcosahedronGeometry(r, 1)
+      const edgesGeo = new THREE.EdgesGeometry(wireGeo)
+      const wireMat = new THREE.LineBasicMaterial({ color: 0x9a8a70, transparent: true, opacity: 0.35 })
+      const wire = new THREE.LineSegments(edgesGeo, wireMat)
+      wire.position.set(...def.pos)
+      root.add(wire)
+      disposables.push(wireGeo, edgesGeo, wireMat)
+
+      // Outer ring (orbit)
+      const ringGeo = new THREE.RingGeometry(r * 1.35, r * 1.42, 48)
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: 0xd7ba7d,
+        transparent: true,
+        opacity: 0,
+        side: THREE.DoubleSide,
+      })
+      const ring = new THREE.Mesh(ringGeo, ringMat)
+      ring.position.set(...def.pos)
+      ring.lookAt(camera.position)
+      root.add(ring)
+      disposables.push(ringGeo, ringMat)
 
       const lbl = makeLabelSprite(def.label)
       const yOff = def.level === 0 ? 0.55 : def.level === 1 ? 0.45 : -0.38
@@ -130,7 +165,7 @@ export function AgentReasoningAnimation() {
       root.add(lbl.sprite)
       disposables.push(lbl.mat, lbl.tex)
 
-      return { mesh, mat, state: 'dim' as NodeState, pulsePhase: Math.random() * Math.PI * 2 }
+      return { mesh, mat, wire, wireMat, ring, ringMat, state: 'dim' as NodeState, pulsePhase: Math.random() * Math.PI * 2 }
     })
 
     // Edges (one per non-root node, indexed by child index)
@@ -179,12 +214,25 @@ export function AgentReasoningAnimation() {
 
     const api: TimelineApi = {
       setNode: (i, s) => {
-        nodes[i].state = s
-        const m = nodes[i].mat
+        const n = nodes[i]
+        n.state = s
+        const m = n.mat
         const idleC = NODES[i].level === 0 ? COLOR_BRANCH_IDLE : COLOR_DIM
-        if (s === 'dim') { m.color.copy(idleC); m.emissive.copy(idleC); m.emissiveIntensity = 0 }
-        if (s === 'processing') { m.color.copy(COLOR_PROC); m.emissive.copy(COLOR_PROC); m.emissiveIntensity = 0.35 }
-        if (s === 'resolved') { m.color.copy(COLOR_RESOLVED); m.emissive.copy(COLOR_RESOLVED); m.emissiveIntensity = 0.25 }
+        if (s === 'dim') {
+          m.color.copy(idleC); m.emissive.copy(idleC); m.emissiveIntensity = 0
+          n.wireMat.color.set(0x9a8a70); n.wireMat.opacity = 0.35
+          n.ringMat.opacity = 0
+        }
+        if (s === 'processing') {
+          m.color.copy(COLOR_PROC); m.emissive.copy(COLOR_PROC); m.emissiveIntensity = 0.4
+          n.wireMat.color.set(0xd7ba7d); n.wireMat.opacity = 0.85
+          n.ringMat.color.set(0xd7ba7d); n.ringMat.opacity = 0.7
+        }
+        if (s === 'resolved') {
+          m.color.copy(COLOR_RESOLVED); m.emissive.copy(COLOR_RESOLVED); m.emissiveIntensity = 0.25
+          n.wireMat.color.set(0x86efac); n.wireMat.opacity = 0.6
+          n.ringMat.color.set(0x86efac); n.ringMat.opacity = 0.4
+        }
       },
       activateEdge: (i) => {
         const e = edges[i]
@@ -239,8 +287,15 @@ export function AgentReasoningAnimation() {
       // Pulse processing nodes
       const tt = now * 0.005
       nodes.forEach((n, i) => {
+        // Counter-rotate wire shells so they spin independently of root
+        n.wire.rotation.y += 0.012
+        n.wire.rotation.x += 0.006
+        // Keep rings facing camera
+        n.ring.lookAt(camera.position)
         if (n.state === 'processing') {
-          n.mat.emissiveIntensity = 0.25 + Math.sin(tt + i) * 0.15
+          n.mat.emissiveIntensity = 0.3 + Math.sin(tt + i) * 0.18
+          const s = 1 + Math.sin(tt * 1.5 + i) * 0.08
+          n.ring.scale.setScalar(s)
         }
       })
 
@@ -285,63 +340,67 @@ export function AgentReasoningAnimation() {
 
   return (
     <div
-      className="relative w-full max-w-[720px] rounded-xl overflow-hidden mx-auto"
+      className="relative w-full max-w-[720px] rounded-xl overflow-hidden mx-auto flex flex-col"
       style={{
-        backgroundColor: '#151412',
+        backgroundColor: '#0e0d0b',
+        color: '#d4d4d4',
         border: '1px solid rgba(255,255,255,0.08)',
         boxShadow: '0 40px 80px -20px rgba(0,0,0,0.6), 0 0 0 1px rgba(255,255,255,0.04) inset',
       }}
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between px-5 py-4 border-b"
+        className="relative flex items-center justify-between px-4 py-2.5 border-b shrink-0"
         style={{ borderColor: 'rgba(255,255,255,0.08)' }}
       >
-        <div className="flex items-center gap-2.5">
-          <Shield className="w-4 h-4" style={{ color: '#9a8a70' }} />
+        <div className="flex items-center gap-2">
+          <GitBranch className="w-3.5 h-3.5" style={{ color: '#9a8a70' }} />
           <span
-            className="text-[13px] font-medium tracking-wide"
-            style={{ color: '#e4ded2', fontFamily: 'Inter, sans-serif' }}
+            className="text-[11px] font-medium tracking-wide font-mono uppercase"
+            style={{ color: '#e4ded2' }}
           >
-            Compliance Agent
+            Agent Reasoning
           </span>
           <span
-            className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded"
-            style={{ color: '#9a8a70', backgroundColor: 'rgba(154,138,112,0.12)' }}
+            className="text-[8.5px] uppercase tracking-wider px-1.5 py-[1px] rounded font-mono"
+            style={{ color: '#d7ba7d', border: '1px solid rgba(215,186,125,0.4)' }}
           >
-            Live
+            n=10
           </span>
         </div>
-        <div className="flex items-center gap-3">
-          <span className="text-[11px]" style={{ color: '#6a737d' }}>
-            reasoning
-          </span>
-          <div className="flex items-baseline gap-1">
-            <span
-              className="text-[22px] tabular-nums font-medium transition-colors duration-500"
-              style={{ color: scoreColor, fontFamily: 'Inter, sans-serif' }}
-            >
-              {score}
-            </span>
-            <span className="text-[11px]" style={{ color: '#6a737d' }}>/ 100</span>
-          </div>
+        <div className="flex items-center gap-3 font-mono text-[9.5px]">
+          <span style={{ color: '#6a737d' }}>3 levels</span>
+          <span style={{ color: '#3f3f46' }}>|</span>
+          <span className="tabular-nums" style={{ color: scoreColor }}>{score}/100</span>
         </div>
       </div>
 
-      {/* Canvas */}
-      <div ref={containerRef} className="w-full" style={{ height: 420 }} />
+      {/* Canvas + grid bg */}
+      <div className="relative flex-1">
+        <div
+          className="absolute inset-0 pointer-events-none opacity-[0.08]"
+          style={{
+            backgroundImage:
+              'linear-gradient(rgba(255,255,255,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.15) 1px, transparent 1px)',
+            backgroundSize: '20px 20px',
+          }}
+        />
+        <div ref={containerRef} className="relative w-full" style={{ height: 420 }} />
+      </div>
 
       {/* Footer */}
       <div
-        className="px-5 py-3 border-t flex items-center justify-between"
+        className="relative px-4 py-2 border-t flex items-center justify-between shrink-0 font-mono text-[8.5px]"
         style={{ borderColor: 'rgba(255,255,255,0.08)', backgroundColor: 'rgba(255,255,255,0.015)' }}
       >
-        <span className="text-[10.5px] tracking-wide" style={{ color: '#6a737d' }}>
-          {status}
-        </span>
-        <span className="text-[10.5px] tabular-nums" style={{ color: '#9a8a70' }}>
-          10 sub-agents
-        </span>
+        <div className="flex items-center gap-3">
+          <span style={{ color: '#6a737d' }}>Status</span>
+          <span style={{ color: '#d7ba7d' }}>{status}</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span style={{ color: '#6a737d' }}>Jurisdictions</span>
+          <span className="tabular-nums" style={{ color: '#9a8a70' }}>CA · NY · FED · IL</span>
+        </div>
       </div>
     </div>
   )
