@@ -42,6 +42,11 @@
 		AA11BB22CC33DD44EE550008 /* InboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660008 /* InboxService.swift */; };
 		AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660009 /* InboxView.swift */; };
 		AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */; };
+		DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770001 /* ChannelModels.swift */; };
+		DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770002 /* ChannelsService.swift */; };
+		DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */; };
+		DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */; };
+		DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770005 /* ChannelDetailView.swift */; };
 		59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAD09F509367E88989F2B765 /* StatusBadge.swift */; };
 		208F703F48307B35717A911B /* LoadingDots.swift in Sources */ = {isa = PBXBuildFile; fileRef = B13338371A8BC76142D4A946 /* LoadingDots.swift */; };
 		84947A5F80A1EC7B15C1B8E9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 043A0A515D971904874F82FA /* Assets.xcassets */; };
@@ -84,6 +89,11 @@
 		AA11BB22CC33DD44EE660008 /* InboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxService.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660009 /* InboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxComposeView.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770001 /* ChannelModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelModels.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770002 /* ChannelsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsService.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsWebSocket.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsSidebarView.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770005 /* ChannelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDetailView.swift; sourceTree = "<group>"; };
 		FAD09F509367E88989F2B765 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 		B13338371A8BC76142D4A946 /* LoadingDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingDots.swift; sourceTree = "<group>"; };
 		043A0A515D971904874F82FA /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -136,6 +146,7 @@
 				CB1861633F56B0B081A83870 /* Login */,
 				3F39F7E6D963F82CA7F10D0F /* MatchaWork */,
 				AA11BB22CC33DD44EE770001 /* Inbox */,
+				DD00EE11FF22334455880001 /* Channels */,
 				2A3B09DBB213E1E548F63A3D /* Components */,
 			);
 			name = Views;
@@ -159,6 +170,7 @@
 			children = (
 				210A398CCEA5FA1784C2C92D /* AuthModels.swift */,
 				50DADEBEA015DBB962E44A90 /* MatchaWorkModels.swift */,
+				DD00EE11FF22334455770001 /* ChannelModels.swift */,
 			);
 			name = Models;
 			path = Models;
@@ -172,6 +184,8 @@
 				696FF167B14C8BBD12958A10 /* AuthService.swift */,
 				4CDEE91D105D2B702A920ED3 /* MatchaWorkService.swift */,
 				AA11BB22CC33DD44EE660008 /* InboxService.swift */,
+				DD00EE11FF22334455770002 /* ChannelsService.swift */,
+				DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */,
 			);
 			name = Services;
 			path = Services;
@@ -250,6 +264,16 @@
 			);
 			name = Inbox;
 			path = Inbox;
+			sourceTree = "<group>";
+		};
+		DD00EE11FF22334455880001 /* Channels */ = {
+			isa = PBXGroup;
+			children = (
+				DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */,
+				DD00EE11FF22334455770005 /* ChannelDetailView.swift */,
+			);
+			name = Channels;
+			path = Channels;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -356,6 +380,11 @@
 				AA11BB22CC33DD44EE550008 /* InboxService.swift in Sources */,
 				AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */,
 				AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */,
+				DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */,
+				DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */,
+				DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */,
+				DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */,
+				DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */,
 				59E0948E7E02B420F0B7B103 /* StatusBadge.swift in Sources */,
 				208F703F48307B35717A911B /* LoadingDots.swift in Sources */,
 			);

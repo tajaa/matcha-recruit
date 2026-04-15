@@ -9,6 +9,7 @@ struct ContentView: View {
     enum SidebarTab: String, CaseIterable {
         case threads = "Threads"
         case projects = "Projects"
+        case channels = "Channels"
         case inbox = "Inbox"
     }
 
@@ -43,6 +44,8 @@ struct ContentView: View {
                     ThreadListView(viewModel: threadListVM)
                 case .projects:
                     ProjectListView()
+                case .channels:
+                    ChannelsSidebarView()
                 case .inbox:
                     InboxSidebarView()
                 }
@@ -54,6 +57,8 @@ struct ContentView: View {
                     .onChange(of: threadId) { appState.showSkills = false }
             } else if let projectId = appState.selectedProjectId {
                 ProjectDetailView(projectId: projectId)
+            } else if let channelId = appState.selectedChannelId {
+                ChannelDetailView(channelId: channelId)
             } else if appState.showInbox {
                 InboxView()
             } else if appState.showSkills {
@@ -125,9 +130,16 @@ struct ContentView: View {
             if sidebarTab == .inbox {
                 appState.selectedThreadId = nil
                 appState.selectedProjectId = nil
+                appState.selectedChannelId = nil
                 appState.showSkills = false
                 appState.showInbox = true
+            } else if sidebarTab == .channels {
+                appState.selectedThreadId = nil
+                appState.selectedProjectId = nil
+                appState.showSkills = false
+                appState.showInbox = false
             } else {
+                appState.selectedChannelId = nil
                 appState.showInbox = false
             }
         }
