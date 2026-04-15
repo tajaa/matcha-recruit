@@ -20,16 +20,19 @@ struct ChannelDetailView: View {
             Divider()
             if isLoading {
                 Spacer()
-                ProgressView().tint(.secondary)
+                Text("loading")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
                 Spacer()
             } else if let errorMessage {
                 Spacer()
                 Text(errorMessage)
-                    .foregroundColor(.secondary)
-                    .font(.system(size: 12))
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
                 Spacer()
             } else {
                 messagesList
+                Divider()
                 inputBar
             }
         }
@@ -46,57 +49,67 @@ struct ChannelDetailView: View {
         }
     }
 
+    // MARK: - Header
+
     private var header: some View {
-        HStack(spacing: 10) {
-            Image(systemName: channel?.isPaid == true ? "lock" : "number")
-                .foregroundColor(.secondary)
+        HStack(alignment: .top, spacing: 8) {
+            Text("#")
+                .font(.system(size: 14))
+                .foregroundColor(.white.opacity(0.4))
             VStack(alignment: .leading, spacing: 2) {
-                Text(channel?.name ?? "Channel")
+                Text(channel?.name ?? "")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(.white.opacity(0.95))
                 if let desc = channel?.description, !desc.isEmpty {
                     Text(desc)
                         .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.white.opacity(0.4))
                         .lineLimit(1)
                 }
             }
             Spacer()
-            if !onlineUsers.isEmpty {
-                HStack(spacing: 4) {
-                    Circle().fill(.green).frame(width: 6, height: 6)
-                    Text("\(onlineUsers.count) online")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                if !onlineUsers.isEmpty {
+                    HStack(spacing: 4) {
+                        Text("•")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(Color.matcha500)
+                        Text("\(onlineUsers.count) online")
+                            .font(.system(size: 11))
+                            .foregroundColor(.white.opacity(0.6))
+                    }
                 }
-            }
-            if let count = channel?.memberCount {
-                Text("\(count) members")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                if let count = channel?.memberCount {
+                    Text("·")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.3))
+                    Text("\(count) members")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
+                }
             }
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(Color.appBackground)
+        .padding(.vertical, 12)
     }
+
+    // MARK: - Messages
 
     private var messagesList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 12) {
                     ForEach(messages, id: \.id) { msg in
-                        messageRow(msg)
-                            .id(msg.id)
+                        messageRow(msg).id(msg.id)
                     }
                     if !typingUsers.isEmpty {
-                        Text(typingUsers.values.joined(separator: ", ") + " typing…")
+                        Text("\(typingUsers.values.sorted().joined(separator: ", ")) typing…")
                             .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                            .foregroundColor(.white.opacity(0.35))
                             .padding(.horizontal, 16)
                     }
                 }
-                .padding(.vertical, 12)
+                .padding(.vertical, 14)
             }
             .onChange(of: messages.count) {
                 if let last = messages.last {
@@ -110,45 +123,61 @@ struct ChannelDetailView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
                 Text(msg.senderName)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.white.opacity(0.9))
                 Text(formatTimestamp(msg.createdAt))
                     .font(.system(size: 10))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.white.opacity(0.35))
             }
             Text(msg.content)
                 .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.9))
+                .foregroundColor(.white.opacity(0.75))
                 .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, 16)
     }
 
+    // MARK: - Input
+
     private var inputBar: some View {
-        HStack(spacing: 8) {
-            TextField("Message", text: $inputText, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...4)
-                .onChange(of: inputText) {
-                    if !inputText.isEmpty {
-                        ws.sendTyping(channelId: channelId)
-                    }
+        HStack(alignment: .center, spacing: 8) {
+            Text("›")
+                .font(.system(size: 14))
+                .foregroundColor(.white.opacity(0.35))
+            TextField(
+                "",
+                text: $inputText,
+                prompt: Text("message").foregroundColor(.white.opacity(0.25)),
+                axis: .vertical
+            )
+            .textFieldStyle(.plain)
+            .font(.system(size: 13))
+            .foregroundColor(.white.opacity(0.9))
+            .lineLimit(1...4)
+            .onChange(of: inputText) {
+                if !inputText.isEmpty {
+                    ws.sendTyping(channelId: channelId)
                 }
-                .onSubmit(send)
-            Button {
-                send()
-            } label: {
-                Image(systemName: "arrow.up.circle.fill")
-                    .font(.system(size: 22))
-                    .foregroundColor(inputText.trimmingCharacters(in: .whitespaces).isEmpty ? .secondary : Color.matcha500)
+            }
+            .onSubmit(send)
+
+            let canSend = !inputText.trimmingCharacters(in: .whitespaces).isEmpty
+            Button(action: send) {
+                Text("↵")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(canSend ? Color.matcha500 : .white.opacity(0.25))
             }
             .buttonStyle(.plain)
-            .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty)
+            .disabled(!canSend)
+            .keyboardShortcut(.return, modifiers: .command)
         }
-        .padding(12)
-        .background(Color.appBackground)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
+
+    // MARK: - Actions
 
     private func send() {
         let trimmed = inputText.trimmingCharacters(in: .whitespaces)
@@ -210,6 +239,6 @@ struct ChannelDetailView: View {
         let display = DateFormatter()
         display.dateStyle = .none
         display.timeStyle = .short
-        return display.string(from: date)
+        return display.string(from: date).lowercased()
     }
 }

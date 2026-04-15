@@ -9,87 +9,40 @@ struct ChannelsSidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("Channels")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Button {
-                    showCreate = true
-                } label: {
-                    Image(systemName: "plus.circle")
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
+            header
+            Divider()
 
             if isLoading {
                 Spacer()
-                ProgressView().tint(.secondary)
+                Text("loading")
+                    .font(.system(size: 11))
+                    .foregroundColor(.white.opacity(0.4))
                 Spacer()
             } else if channels.isEmpty {
                 Spacer()
                 VStack(spacing: 8) {
-                    Image(systemName: "number")
-                        .font(.system(size: 28))
-                        .foregroundColor(.secondary)
-                    Text("No channels")
-                        .font(.system(size: 13))
-                        .foregroundColor(.secondary)
-                    Button("Create channel") { showCreate = true }
-                        .buttonStyle(.borderless)
-                        .font(.system(size: 12))
-                }
-                Spacer()
-            } else {
-                List(channels, id: \.id) { channel in
+                    Text("no channels")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.4))
                     Button {
-                        appState.selectedChannelId = channel.id
-                        appState.selectedThreadId = nil
-                        appState.selectedProjectId = nil
-                        appState.showInbox = false
-                        appState.showSkills = false
+                        showCreate = true
                     } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: channel.isPaid ? "lock" : "number")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(channel.name)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.white)
-                                    .lineLimit(1)
-                                if let preview = channel.lastMessagePreview {
-                                    Text(preview)
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            Spacer()
-                            if channel.unreadCount > 0 {
-                                Text("\(channel.unreadCount)")
-                                    .font(.system(size: 9, weight: .bold))
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
-                                    .background(Color.matcha500)
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        .padding(.vertical, 2)
-                        .background(
-                            appState.selectedChannelId == channel.id
-                                ? Color.matcha500.opacity(0.15)
-                                : Color.clear
-                        )
+                        Text("create")
+                            .font(.system(size: 11))
+                            .foregroundColor(Color.matcha500)
                     }
                     .buttonStyle(.plain)
                 }
-                .listStyle(.sidebar)
-                .scrollContentBackground(.hidden)
+                Spacer()
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(channels, id: \.id) { channel in
+                            row(for: channel)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
             }
         }
         .background(Color.appBackground)
@@ -104,6 +57,71 @@ struct ChannelsSidebarView: View {
                 }
             }
         }
+    }
+
+    private var header: some View {
+        HStack(spacing: 0) {
+            Text("CHANNELS")
+                .font(.system(size: 10, weight: .medium))
+                .tracking(0.8)
+                .foregroundColor(.white.opacity(0.4))
+            Spacer()
+            Button {
+                showCreate = true
+            } label: {
+                Text("+")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(.white.opacity(0.4))
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+
+    private func row(for channel: ChannelSummary) -> some View {
+        let selected = appState.selectedChannelId == channel.id
+        return Button {
+            appState.selectedChannelId = channel.id
+            appState.selectedThreadId = nil
+            appState.selectedProjectId = nil
+            appState.showInbox = false
+            appState.showSkills = false
+        } label: {
+            HStack(alignment: .top, spacing: 0) {
+                Rectangle()
+                    .fill(selected ? Color.matcha500 : Color.clear)
+                    .frame(width: 2)
+                HStack(alignment: .top, spacing: 6) {
+                    Text("#")
+                        .font(.system(size: 13))
+                        .foregroundColor(.white.opacity(0.4))
+                        .frame(width: 12, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(channel.name)
+                            .font(.system(size: 13))
+                            .foregroundColor(.white.opacity(selected ? 1.0 : 0.85))
+                            .lineLimit(1)
+                        if let preview = channel.lastMessagePreview, !preview.isEmpty {
+                            Text(preview)
+                                .font(.system(size: 11))
+                                .foregroundColor(.white.opacity(0.4))
+                                .lineLimit(1)
+                        }
+                    }
+                    Spacer(minLength: 4)
+                    if channel.unreadCount > 0 {
+                        Text("•")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(Color.matcha500)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func load() async {
@@ -131,47 +149,98 @@ private struct CreateChannelSheet: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Create channel")
-                .font(.system(size: 16, weight: .semibold))
+        VStack(alignment: .leading, spacing: 14) {
+            Text("create channel")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white.opacity(0.9))
 
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
-
-            TextField("Description (optional)", text: $description, axis: .vertical)
-                .lineLimit(2...4)
-                .textFieldStyle(.roundedBorder)
-
-            Picker("Visibility", selection: $visibility) {
-                Text("Public").tag("public")
-                Text("Private").tag("private")
+            VStack(alignment: .leading, spacing: 4) {
+                Text("name")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.4))
+                TextField("", text: $name, prompt: Text("general").foregroundColor(.white.opacity(0.25)))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.9))
+                Divider()
             }
-            .pickerStyle(.segmented)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("description")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.4))
+                TextField("", text: $description, prompt: Text("optional").foregroundColor(.white.opacity(0.25)), axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineLimit(1...3)
+                Divider()
+            }
+
+            HStack(spacing: 16) {
+                visibilityButton(label: "public")
+                visibilityButton(label: "private")
+                Spacer()
+            }
 
             if let errorMessage {
-                Text(errorMessage).font(.system(size: 11)).foregroundColor(.red)
+                Text(errorMessage)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red.opacity(0.8))
             }
 
             HStack {
-                Button("Cancel") { dismiss() }
-                    .buttonStyle(.bordered)
+                Button {
+                    dismiss()
+                } label: {
+                    Text("cancel")
+                        .font(.system(size: 12))
+                        .foregroundColor(.white.opacity(0.5))
+                }
+                .buttonStyle(.plain)
                 Spacer()
                 Button {
                     Task { await create() }
                 } label: {
                     if isSubmitting {
-                        ProgressView().controlSize(.small)
+                        Text("creating…")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.4))
                     } else {
-                        Text("Create")
+                        Text("create")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(
+                                name.trimmingCharacters(in: .whitespaces).isEmpty
+                                    ? .white.opacity(0.25)
+                                    : Color.matcha500
+                            )
                     }
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Color.matcha600)
+                .buttonStyle(.plain)
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || isSubmitting)
+                .keyboardShortcut(.return, modifiers: .command)
             }
         }
         .padding(20)
-        .frame(width: 380)
+        .frame(width: 360)
+        .background(Color.appBackground)
+    }
+
+    private func visibilityButton(label: String) -> some View {
+        let active = visibility == label
+        return Button {
+            visibility = label
+        } label: {
+            VStack(spacing: 2) {
+                Text(label)
+                    .font(.system(size: 11))
+                    .foregroundColor(active ? Color.matcha500 : .white.opacity(0.5))
+                Rectangle()
+                    .fill(active ? Color.matcha500 : Color.clear)
+                    .frame(height: 1)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     private func create() async {
