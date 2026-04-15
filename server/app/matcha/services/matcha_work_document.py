@@ -667,7 +667,8 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
             SELECT name, industry, size,
                    headquarters_state, headquarters_city, work_arrangement,
                    default_employment_type, benefits_summary, pto_policy_summary,
-                   compensation_notes, company_values, ai_guidance_notes
+                   compensation_notes, company_values, ai_guidance_notes,
+                   COALESCE(is_personal, false) AS is_personal
             FROM companies
             WHERE id = $1
             """,

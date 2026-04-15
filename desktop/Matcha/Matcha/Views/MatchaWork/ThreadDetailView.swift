@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ThreadDetailView: View {
     let threadId: String
+    @Environment(AppState.self) private var appState
     @State private var viewModel = ThreadDetailViewModel()
     @State private var showVersionHistory = false
     @State private var showFinalizeConfirm = false
@@ -11,27 +12,47 @@ struct ThreadDetailView: View {
     @State private var titleDraft = ""
     @AppStorage("mw-chat-theme") private var lightMode = false
     @AppStorage("mw-model") private var selectedModelId = "flash"
+    @AppStorage("mw-preview-collapsed") private var previewCollapsed = false
 
     private var selectedModelValue: String? {
         mwModelOptions.first { $0.id == selectedModelId }?.value
     }
 
-    var body: some View {
-        HSplitView {
-            ChatPanelView(viewModel: viewModel, lightMode: lightMode, selectedModel: selectedModelValue)
-                .frame(minWidth: 320)
+    private var isBusinessAccount: Bool {
+        guard let role = appState.currentUser?.role else { return false }
+        return ["client", "admin", "employee"].contains(role)
+    }
 
-            if viewModel.hasPreviewContent || viewModel.isLoadingPDF {
-                PreviewPanelView(
-                    currentState: viewModel.currentState,
-                    pdfData: viewModel.pdfData,
-                    isLoading: viewModel.isLoadingPDF,
-                    taskType: viewModel.thread?.taskType,
-                    threadId: viewModel.thread?.id,
-                    selectedSlideIndex: Bindable(viewModel).selectedSlideIndex
-                )
-                .frame(minWidth: 300)
+    var body: some View {
+        VStack(spacing: 0) {
+            LinearGradient(
+                colors: [Color.black.opacity(0.35), Color.clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 6)
+            .overlay(
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1),
+                alignment: .top
+            )
+
+            HSplitView {
+                ChatPanelView(viewModel: viewModel, lightMode: lightMode, selectedModel: selectedModelValue)
+                    .frame(minWidth: 280, idealWidth: 520)
+
+                if !previewCollapsed && (viewModel.hasPreviewContent || viewModel.isLoadingPDF) {
+                    PreviewPanelView(
+                        currentState: viewModel.currentState,
+                        pdfData: viewModel.pdfData,
+                        isLoading: viewModel.isLoadingPDF,
+                        taskType: viewModel.thread?.taskType,
+                        threadId: viewModel.thread?.id,
+                        selectedSlideIndex: Bindable(viewModel).selectedSlideIndex
+                    )
+                    .frame(minWidth: 320, idealWidth: 420, maxWidth: .infinity)
+                }
             }
+            .frame(minHeight: 500)
         }
         .background(Color.appBackground)
         .preferredColorScheme(lightMode ? .light : .dark)
@@ -96,37 +117,40 @@ struct ThreadDetailView: View {
 
             ToolbarItemGroup(placement: .primaryAction) {
                 // Mode toggles
-                ModeToggleButton(
-                    label: "Node",
-                    icon: "cylinder",
-                    isOn: viewModel.thread?.nodeMode ?? false,
-                    onColor: .purple,
-                    isLoading: viewModel.togglingMode == "node",
-                    tooltip: "Query employees, policies, handbooks"
-                ) {
-                    Task { await viewModel.toggleMode("node") }
-                }
+                if isBusinessAccount {
+                    ModeToggleButton(
+                        label: "Node",
+                        icon: "cylinder",
+                        isOn: viewModel.thread?.nodeMode ?? false,
+                        onColor: .purple,
+                        isLoading: viewModel.togglingMode == "node",
+                        tooltip: "Query employees, policies, handbooks"
+                    ) {
+                        Task { await viewModel.toggleMode("node") }
+                    }
 
-                ModeToggleButton(
-                    label: "Compliance",
-                    icon: "shield",
-                    isOn: viewModel.thread?.complianceMode ?? false,
-                    onColor: .cyan,
-                    isLoading: viewModel.togglingMode == "compliance",
-                    tooltip: "Jurisdiction requirements context"
-                ) {
-                    Task { await viewModel.toggleMode("compliance") }
-                }
 
-                ModeToggleButton(
-                    label: "Payer",
-                    icon: "stethoscope",
-                    isOn: viewModel.thread?.payerMode ?? false,
-                    onColor: Color.matcha500,
-                    isLoading: viewModel.togglingMode == "payer",
-                    tooltip: "Medicare NCD/LCD lookups"
-                ) {
-                    Task { await viewModel.toggleMode("payer") }
+                    ModeToggleButton(
+                        label: "Compliance",
+                        icon: "shield",
+                        isOn: viewModel.thread?.complianceMode ?? false,
+                        onColor: .cyan,
+                        isLoading: viewModel.togglingMode == "compliance",
+                        tooltip: "Jurisdiction requirements context"
+                    ) {
+                        Task { await viewModel.toggleMode("compliance") }
+                    }
+
+                    ModeToggleButton(
+                        label: "Payer",
+                        icon: "stethoscope",
+                        isOn: viewModel.thread?.payerMode ?? false,
+                        onColor: Color.matcha500,
+                        isLoading: viewModel.togglingMode == "payer",
+                        tooltip: "Medicare NCD/LCD lookups"
+                    ) {
+                        Task { await viewModel.toggleMode("payer") }
+                    }
                 }
 
                 Divider()
@@ -197,6 +221,20 @@ struct ThreadDetailView: View {
                         .font(.system(size: 13))
                 }
                 .help(lightMode ? "Switch to dark mode" : "Switch to light mode")
+
+                // Preview collapse toggle
+                if viewModel.hasPreviewContent || viewModel.isLoadingPDF {
+                    Button {
+                        previewCollapsed.toggle()
+                    } label: {
+                        Image(systemName: previewCollapsed
+                              ? "rectangle.righthalf.inset.filled"
+                              : "rectangle.righthalf.inset.filled.arrow.right")
+                            .font(.system(size: 13))
+                            .foregroundColor(previewCollapsed ? .secondary : .matcha500)
+                    }
+                    .help(previewCollapsed ? "Show preview panel" : "Hide preview panel")
+                }
 
                 if !viewModel.versions.isEmpty {
                     Button {

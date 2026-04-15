@@ -80,7 +80,7 @@ from ..services.matcha_work_handbook_upload import (
     derive_handbook_title,
     parse_handbook_sections,
 )
-from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation
+from ..services.matcha_work_ai import get_ai_provider, _infer_skill_from_state, _build_company_context, compact_conversation, needs_live_web_context, fetch_live_web_context
 from ..services.matcha_work_node import build_node_context, build_compliance_context, ComplianceContextResult
 from ..services.onboarding_orchestrator import (
     PROVIDER_GOOGLE_WORKSPACE,
@@ -5533,6 +5533,15 @@ async def send_message(
 
     # Inject recruiting project context so AI generates posting sections in the right project
     ctx = await _inject_recruiting_project_context(ctx, thread, thread["current_state"])
+
+    # Grounded web search pre-pass for time-sensitive questions
+    # (markets today, news, weather, scores, etc.) — fetches current facts via
+    # Gemini Google Search grounding and injects them into the context.
+    if needs_live_web_context(body.content):
+        from ...config import get_settings as _get_settings
+        live_ctx = await fetch_live_web_context(body.content, _get_settings())
+        if live_ctx:
+            ctx += live_ctx
 
     compliance_result: ComplianceContextResult | None = None
     if thread.get("node_mode"):

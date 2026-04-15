@@ -448,6 +448,10 @@ struct PresentationPreview: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .background(Color.zinc900)
+            .overlay(
+                Rectangle().fill(Color.white.opacity(0.08)).frame(height: 1),
+                alignment: .bottom
+            )
 
             Divider().opacity(0.3)
 
@@ -573,6 +577,7 @@ struct PresentationPreview: View {
             }
             .background(theme.backgroundColor)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onKeyPress(.downArrow) { navigateSlide(by: 1); return .handled }
         .onKeyPress(.upArrow) { navigateSlide(by: -1); return .handled }
         .onKeyPress(.rightArrow) { navigateSlide(by: 1); return .handled }

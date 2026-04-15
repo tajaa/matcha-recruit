@@ -88,15 +88,16 @@ Mission:
 """
 
 # Static portion of system prompt — instructions + company context (cacheable, changes slowly)
-MATCHA_WORK_STATIC_PROMPT_TEMPLATE = """You are Matcha Work, an HR copilot for US employers.
+MATCHA_WORK_STATIC_PROMPT_TEMPLATE = """You are Matcha Work, a versatile AI assistant inside the Matcha Work app.
 
 Today's date: {today}
 
 Mission:
-1) Provide high-quality general HR guidance for US teams.
-2) Detect and execute supported Matcha Work skills from natural language.
-3) Ask concise clarifying questions when required inputs are missing.
+1) Be a helpful general-purpose assistant — answer questions on any topic the user raises (current events framing, writing, research, analysis, coding, brainstorming, personal productivity, markets context, etc.) to the best of your knowledge, flagging when you lack live data.
+2) Detect and execute supported Matcha Work skills from natural language when the user clearly asks for one.
+3) Ask concise clarifying questions when required inputs for a skill are missing.
 4) Never block normal Q&A just because no skill is invoked.
+5) Do NOT frame yourself as an "HR copilot" or refuse non-HR questions. HR/employment and compliance guidance are specialized capabilities that activate only when (a) the user explicitly asks about HR / employment / compliance topics, (b) a business company profile is present in company_context below, or (c) Node Mode / Compliance Mode / Payer Mode is active in the thread context.
 {company_context}
 
 Supported skills:
@@ -228,7 +229,7 @@ Mode selection:
 - mode=clarify when action is requested but required details are missing.
 - mode=refuse only for unsafe/disallowed or unsupported actions.
 
-US HR policy:
+US HR policy (ONLY applies when the user asks about HR / employment / workplace compliance topics, or when a business company profile / compliance mode context is present — otherwise ignore this section and answer the user's actual question normally):
 - Default to US federal baseline.
 - For legal/compliance-sensitive guidance, ask for state before definitive recommendations.
 - For high-risk topics (termination, discrimination, wage-hour classification, leave, investigations):
@@ -284,9 +285,12 @@ Output constraints:
 - cover_image_url must NOT be set by AI — it is generated automatically.
 
 Data visualization:
-When your reply involves quantitative data, comparisons, trends, or breakdowns that would benefit
-from a visual representation, include an inline SVG chart directly in the "reply" field.
-Guidelines for charts:
+Only include an inline SVG chart when the user EXPLICITLY asks for a chart/graph/visualization,
+OR when the answer is fundamentally a comparison of specific numeric values that the user is asking you to analyze (e.g. "compare Q1 vs Q2 revenue", "break down headcount by department").
+Do NOT include SVG for: general news questions, market commentary, current events, explanations,
+how-tos, conversational replies, or any reply where the numbers aren't the central point.
+When in doubt: do NOT emit SVG. Raw SVG markup is ugly when the client can't render it.
+Guidelines for charts (when appropriate):
 - Use simple, clean SVG (bar charts, horizontal bars, pie/donut, line charts)
 - Dark theme: background transparent, text fill="#9ca3af", bars/slices use these colors: #22c55e, #3b82f6, #f59e0b, #ef4444, #8b5cf6, #ec4899
 - Max width 480px, max height 300px via viewBox
@@ -328,6 +332,10 @@ def _build_company_context(profile: dict) -> str:
     """Format non-null company profile fields into a labeled block for the system prompt."""
     if not profile:
         return ""
+    # Personal (individual) workspaces should NOT receive the HR/business framing.
+    # They are auto-created companies that exist for billing/ownership only.
+    if profile.get("is_personal"):
+        return "\n(Personal workspace — no business/HR context. Respond as a general-purpose assistant.)\n"
     lines = []
     label_map = {
         "name": "Company Name",
@@ -458,6 +466,80 @@ async def _get_model(
             pass
 
     return settings.analysis_model
+
+
+_LIVE_INFO_KEYWORDS = (
+    "today", "tonight", "now", "current", "currently", "latest", "this week",
+    "this morning", "yesterday", "right now", "market", "markets", "stock",
+    "stocks", "ticker", "price of", "share price", "news", "headline",
+    "headlines", "breaking", "score", "weather", "forecast", "election",
+    "polls", "exchange rate", "crypto", "bitcoin", "ethereum", "s&p",
+    "nasdaq", "dow", "fed", "interest rate", "economy", "inflation",
+    "happening", "going on", "update on", "what's up with",
+)
+
+
+def needs_live_web_context(user_message: str) -> bool:
+    """Quick heuristic: does this question need real-time web grounding?"""
+    if not user_message:
+        return False
+    lowered = user_message.lower()
+    return any(kw in lowered for kw in _LIVE_INFO_KEYWORDS)
+
+
+async def fetch_live_web_context(user_message: str, settings) -> Optional[str]:
+    """Run a grounded Gemini call to fetch current web info about the user's question.
+
+    Returns a text block to inject into company_context, or None on failure.
+    Grounded calls take 5-15s so this is gated by needs_live_web_context().
+    """
+    try:
+        from google import genai as _genai
+        api_key = settings.gemini_api_key
+        if not api_key:
+            return None
+        client = _genai.Client(api_key=api_key)
+        model = getattr(settings, "analysis_model", None) or "gemini-3-flash-preview"
+        today = date.today().isoformat()
+        logger.info("[grounding] Fetching live web context (model=%s) for: %r", model, user_message[:120])
+        prompt = (
+            f"Today is {today}. The user asked: {user_message!r}\n\n"
+            "Use Google Search to find the most relevant, current, factual information "
+            "needed to answer this. Return a concise factual briefing (no preamble, no "
+            "caveats about being an AI) with the key facts, numbers, quotes, and source "
+            "names. If the question isn't actually time-sensitive, return an empty string."
+        )
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                lambda: client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0.2,
+                        tools=[_GOOGLE_SEARCH_TOOL],
+                    ),
+                )
+            ),
+            timeout=20,
+        )
+        text = (response.text or "").strip()
+        logger.info("[grounding] Got %d chars of live web context", len(text))
+        if not text:
+            return None
+        return (
+            "\n\n=== LIVE WEB CONTEXT (fetched via Google Search grounding just now) ===\n"
+            f"{text}\n"
+            "=== END LIVE WEB CONTEXT ===\n"
+            "CRITICAL INSTRUCTIONS for using the block above:\n"
+            "1. The block above IS your real-time data for this question. It was just fetched from Google Search.\n"
+            "2. DO NOT say 'I don't have access to live data', 'I can't access real-time information', or any similar disclaimer. That would be a lie — you have the data right here.\n"
+            "3. Answer the user's question directly using the specific facts, numbers, and quotes above.\n"
+            "4. You may cite the source names mentioned in the block.\n"
+            "5. Do NOT output an SVG chart for this reply — it is a news/current-events answer.\n"
+        )
+    except Exception as e:
+        logger.warning("fetch_live_web_context failed: %s", e)
+        return None
 
 
 @dataclass
