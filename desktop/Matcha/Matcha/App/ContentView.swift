@@ -20,6 +20,7 @@ struct ContentView: View {
         case threads = "Threads"
         case projects = "Projects"
         case channels = "Channels"
+        case people = "People"
         case inbox = "Inbox"
     }
 
@@ -56,6 +57,19 @@ struct ContentView: View {
                     ProjectListView()
                 case .channels:
                     ChannelsSidebarView()
+                case .people:
+                    VStack {
+                        Spacer()
+                        Text("people")
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.4))
+                        Text("connections & requests")
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.3))
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity)
+                    .background(.ultraThinMaterial)
                 case .inbox:
                     InboxSidebarView()
                 }
@@ -71,6 +85,8 @@ struct ContentView: View {
                 ChannelDetailView(channelId: channelId)
             } else if appState.showInbox {
                 InboxView()
+            } else if appState.showPeople {
+                PeopleView()
             } else if appState.showSkills {
                 SkillsView()
             } else {
@@ -138,20 +154,29 @@ struct ContentView: View {
         }
         .onChange(of: sidebarTab) {
             // Clear selections when switching tabs
-            if sidebarTab == .inbox {
+            appState.showSkills = false
+            switch sidebarTab {
+            case .inbox:
                 appState.selectedThreadId = nil
                 appState.selectedProjectId = nil
                 appState.selectedChannelId = nil
-                appState.showSkills = false
+                appState.showPeople = false
                 appState.showInbox = true
-            } else if sidebarTab == .channels {
+            case .people:
                 appState.selectedThreadId = nil
                 appState.selectedProjectId = nil
-                appState.showSkills = false
-                appState.showInbox = false
-            } else {
                 appState.selectedChannelId = nil
                 appState.showInbox = false
+                appState.showPeople = true
+            case .channels:
+                appState.selectedThreadId = nil
+                appState.selectedProjectId = nil
+                appState.showInbox = false
+                appState.showPeople = false
+            case .threads, .projects:
+                appState.selectedChannelId = nil
+                appState.showInbox = false
+                appState.showPeople = false
             }
         }
     }

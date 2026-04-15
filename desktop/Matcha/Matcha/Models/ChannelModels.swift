@@ -136,6 +136,23 @@ struct ChannelDetail: Codable, Identifiable, Hashable {
     }
 }
 
+struct UserConnection: Codable, Identifiable, Hashable {
+    let userId: String
+    let name: String
+    let email: String
+    let avatarUrl: String?
+    let createdAt: String
+
+    var id: String { userId }
+
+    enum CodingKeys: String, CodingKey {
+        case name, email
+        case userId = "user_id"
+        case avatarUrl = "avatar_url"
+        case createdAt = "created_at"
+    }
+}
+
 struct ChannelOnlineUser: Codable, Identifiable, Hashable {
     let id: String
     let name: String

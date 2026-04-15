@@ -44,5 +44,53 @@ class ChannelsService {
         return try await client.request(method: "POST", path: basePath, body: body)
     }
 
+    // MARK: - Connections
+
+    func listConnections() async throws -> [UserConnection] {
+        try await client.request(method: "GET", path: "\(basePath)/connections")
+    }
+
+    func listPendingConnections() async throws -> [UserConnection] {
+        try await client.request(method: "GET", path: "\(basePath)/connections/pending")
+    }
+
+    func listSentConnections() async throws -> [UserConnection] {
+        try await client.request(method: "GET", path: "\(basePath)/connections/sent")
+    }
+
+    private struct ConnectionBody: Encodable {
+        let userId: String
+        enum CodingKeys: String, CodingKey { case userId = "user_id" }
+    }
+
+    private struct ConnectionAck: Codable {
+        let ok: Bool?
+        let status: String?
+    }
+
+    func sendConnectionRequest(userId: String) async throws {
+        let _: ConnectionAck = try await client.request(
+            method: "POST",
+            path: "\(basePath)/connections/request",
+            body: ConnectionBody(userId: userId)
+        )
+    }
+
+    func acceptConnection(userId: String) async throws {
+        let _: ConnectionAck = try await client.request(
+            method: "POST",
+            path: "\(basePath)/connections/accept",
+            body: ConnectionBody(userId: userId)
+        )
+    }
+
+    func declineConnection(userId: String) async throws {
+        let _: ConnectionAck = try await client.request(
+            method: "POST",
+            path: "\(basePath)/connections/decline",
+            body: ConnectionBody(userId: userId)
+        )
+    }
+
     private struct EmptyBody: Encodable {}
 }
