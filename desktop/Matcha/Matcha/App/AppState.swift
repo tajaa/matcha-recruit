@@ -12,6 +12,7 @@ class AppState {
     var showPeople: Bool = false
     var onlineUsers: [MWOnlineUser] = []
     var unreadInboxCount: Int = 0
+    var isPlusActive: Bool = false
     private var heartbeatTask: Task<Void, Never>?
     private var inboxPollTask: Task<Void, Never>?
 
@@ -34,6 +35,17 @@ class AppState {
         MatchaWorkService.shared.updateCacheScope(user.id)
         startPresenceHeartbeat()
         startInboxPolling()
+        Task { await refreshSubscription() }
+    }
+
+    @MainActor
+    func refreshSubscription() async {
+        do {
+            let sub = try await MatchaWorkService.shared.getPersonalSubscription()
+            isPlusActive = sub.isPersonalPlus
+        } catch {
+            isPlusActive = false
+        }
     }
 
     @MainActor

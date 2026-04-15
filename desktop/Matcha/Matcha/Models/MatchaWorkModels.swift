@@ -666,6 +666,39 @@ struct MWProjectCollaborator: Codable, Identifiable {
     }
 }
 
+// MARK: - Billing
+
+struct MWSubscription: Codable {
+    let active: Bool
+    let packId: String?
+    let tokensPerCycle: Int?
+    let amountCents: Int?
+    let status: String?
+    let currentPeriodEnd: String?
+
+    var isPersonalPlus: Bool {
+        active && packId == "matcha_work_personal"
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case active, status
+        case packId = "pack_id"
+        case tokensPerCycle = "tokens_per_cycle"
+        case amountCents = "amount_cents"
+        case currentPeriodEnd = "current_period_end"
+    }
+}
+
+struct MWCheckoutResponse: Codable {
+    let checkoutUrl: String
+    let stripeSessionId: String?
+
+    enum CodingKeys: String, CodingKey {
+        case checkoutUrl = "checkout_url"
+        case stripeSessionId = "stripe_session_id"
+    }
+}
+
 // MARK: - Recruiting Project Helpers
 
 struct MWJobPosting: Codable {

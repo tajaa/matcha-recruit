@@ -1,9 +1,11 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @Environment(AppState.self) private var appState
     @State private var threadListVM = ThreadListViewModel()
     @State private var isCreating = false
+    @State private var isOpeningCheckout = false
     @State private var sidebarTab: SidebarTab = .threads
 
     private struct GlassWindowModifier: ViewModifier {
@@ -135,19 +137,35 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         Text(user.email)
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                        Button("Logout") {
+                            .font(.system(size: 12, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+                        if !appState.isPlusActive {
+                            Button {
+                                startUpgrade()
+                            } label: {
+                                Text(isOpeningCheckout ? "opening…" : "upgrade")
+                                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                                    .foregroundColor(Color.matcha500)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isOpeningCheckout)
+                            .help("Upgrade to Matcha Plus")
+                        } else {
+                            Text("plus")
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(Color.matcha500.opacity(0.8))
+                        }
+                        Button("logout") {
                             Task {
                                 try? await AuthService.shared.logout()
                                 await MainActor.run { appState.didLogout() }
                             }
                         }
                         .buttonStyle(.plain)
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.5))
                     }
                 }
             }
@@ -177,6 +195,32 @@ struct ContentView: View {
                 appState.selectedChannelId = nil
                 appState.showInbox = false
                 appState.showPeople = false
+            }
+        }
+    }
+
+    private func startUpgrade() {
+        guard !isOpeningCheckout else { return }
+        isOpeningCheckout = true
+        Task {
+            defer { Task { @MainActor in isOpeningCheckout = false } }
+            do {
+                let url = try await MatchaWorkService.shared.startPersonalCheckout(
+                    successUrl: "https://hey-matcha.com/work?upgraded=1",
+                    cancelUrl: "https://hey-matcha.com/work?canceled=1"
+                )
+                if let checkoutURL = URL(string: url) {
+                    await MainActor.run {
+                        NSWorkspace.shared.open(checkoutURL)
+                    }
+                    // Refresh after a short delay — the webhook won't fire before
+                    // the user completes checkout, but this picks up any races.
+                    try? await Task.sleep(for: .seconds(2))
+                    await appState.refreshSubscription()
+                }
+            } catch {
+                // Silent failure for MVP; errors surface in the console during dev.
+                print("upgrade checkout failed: \(error)")
             }
         }
     }

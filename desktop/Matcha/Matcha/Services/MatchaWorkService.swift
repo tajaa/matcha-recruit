@@ -462,6 +462,29 @@ class MatchaWorkService {
         return try await client.request(method: "GET", path: "\(basePath)/admin-users/search?q=\(encoded)")
     }
 
+    // MARK: - Billing
+
+    func getPersonalSubscription() async throws -> MWSubscription {
+        try await client.request(method: "GET", path: "\(basePath)/billing/subscription")
+    }
+
+    func startPersonalCheckout(successUrl: String, cancelUrl: String) async throws -> String {
+        struct Body: Codable {
+            let successUrl: String
+            let cancelUrl: String
+            enum CodingKeys: String, CodingKey {
+                case successUrl = "success_url"
+                case cancelUrl = "cancel_url"
+            }
+        }
+        let resp: MWCheckoutResponse = try await client.request(
+            method: "POST",
+            path: "\(basePath)/billing/checkout/personal",
+            body: Body(successUrl: successUrl, cancelUrl: cancelUrl)
+        )
+        return resp.checkoutUrl
+    }
+
     // MARK: - Recruiting Pipeline
 
     func updateProjectPosting(projectId: String, posting: [String: Any]) async throws -> Data {
