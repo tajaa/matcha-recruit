@@ -180,13 +180,6 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     } catch {}
   }
 
-  async function handleToggleDismiss(candidateId: string) {
-    try {
-      const updated = await toggleProjectDismiss(projectId, candidateId) as unknown as MWProject
-      onUpdate(updated)
-    } catch {}
-  }
-
   async function handleRejectConfirm(opts: { reason?: string; customMessage?: string; sendEmail: boolean }) {
     if (!rejectTarget) return
     const resp = await rejectProjectCandidate(projectId, rejectTarget.id, {
