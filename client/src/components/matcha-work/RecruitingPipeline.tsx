@@ -1,10 +1,13 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
-import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video, Send, Square, CheckSquare, RefreshCw, GripVertical, Plus, Trash2, FileText, XCircle, Eye, EyeOff } from 'lucide-react'
+import { Search, Star, MapPin, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertTriangle, Video, Send, Square, CheckSquare, RefreshCw, GripVertical, Plus, Trash2, FileText, XCircle, Eye, EyeOff, RotateCcw } from 'lucide-react'
 import type { MWProject, RecruitingData } from '../../types/matcha-work'
-import { toggleProjectShortlist, toggleProjectDismiss, getProjectDetail, addProjectSectionNew, updateProjectSectionNew, deleteProjectSectionNew, updateProjectPosting } from '../../api/matchaWork'
+import { toggleProjectShortlist, toggleProjectDismiss, rejectProjectCandidate, getProjectDetail, addProjectSectionNew, updateProjectSectionNew, deleteProjectSectionNew, updateProjectPosting } from '../../api/matchaWork'
+import { useToast } from '../ui/Toast'
 import SectionEditor from './SectionEditor'
 import { sectionToHtml } from './markdownToHtml'
 import InterviewReviewModal from './InterviewReviewModal'
+import RejectCandidateModal from './RejectCandidateModal'
+import PipelineProgressStrip from './PipelineProgressStrip'
 
 type Tab = 'status' | 'posting' | 'candidates' | 'interviews' | 'shortlist'
 type SortKey = 'name' | 'experience_years' | 'location' | 'match_score'
@@ -76,6 +79,8 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
   const [positionInput, setPositionInput] = useState('')
   const [showPositionPrompt, setShowPositionPrompt] = useState(false)
   const [reviewInterview, setReviewInterview] = useState<{ id: string; name: string } | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<{ id: string; name: string; email: string | null } | null>(null)
+  const { toast } = useToast()
 
   // Section title editing + save feedback
   const [sectionTitleEditing, setSectionTitleEditing] = useState<string | null>(null)
@@ -180,6 +185,37 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
       const updated = await toggleProjectDismiss(projectId, candidateId) as unknown as MWProject
       onUpdate(updated)
     } catch {}
+  }
+
+  async function handleRejectConfirm(opts: { reason?: string; customMessage?: string; sendEmail: boolean }) {
+    if (!rejectTarget) return
+    const resp = await rejectProjectCandidate(projectId, rejectTarget.id, {
+      rejectionReason: opts.reason,
+      customMessage: opts.customMessage,
+      sendEmail: opts.sendEmail,
+    })
+    onUpdate(resp.project)
+
+    // Distinguish three outcomes: sent ok / silently hidden / email delivery failed
+    if (opts.sendEmail && resp.email_sent) {
+      toast(`Rejected ${rejectTarget.name} and sent email`, 'success')
+    } else if (opts.sendEmail && !resp.email_sent) {
+      toast(`Rejected ${rejectTarget.name} — email delivery failed`, 'error')
+    } else {
+      toast(`Rejected ${rejectTarget.name}`, 'success')
+    }
+    setRejectTarget(null)
+  }
+
+  async function handleRestoreCandidate(candidateId: string) {
+    // Restore = remove from dismissed_ids via the existing toggle endpoint.
+    try {
+      const updated = await toggleProjectDismiss(projectId, candidateId) as unknown as MWProject
+      onUpdate(updated)
+      toast('Candidate restored', 'info')
+    } catch {
+      toast('Restore failed', 'error')
+    }
   }
 
   const selectableIds = useMemo(() =>
@@ -295,6 +331,19 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
 
   return (
     <div className="flex flex-col w-full" style={{ background: c.bg }}>
+      {/* Persistent pipeline progress strip */}
+      <PipelineProgressStrip
+        sectionCount={sections.length}
+        isFinalized={isFinalized}
+        candidateCount={candidates.length}
+        analyzedCount={analyzedCount}
+        interviewsSentCount={interviewSentCount}
+        interviewedCount={interviewedCount}
+        onJumpTo={(t) => {
+          const target = t as Tab
+          if (tabUnlocked[target]) setTab(target)
+        }}
+      />
       {/* Guidance banner */}
       {guidance && (
         <div
@@ -602,10 +651,10 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                   onClick={() => setShowDismissed(!showDismissed)}
                   className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded"
                   style={{ color: showDismissed ? c.accent : c.muted }}
-                  title={showDismissed ? 'Hide dismissed' : `Show ${dismissedIds.size} dismissed`}
+                  title={showDismissed ? 'Hide rejected' : `Show ${dismissedIds.size} rejected`}
                 >
                   {showDismissed ? <EyeOff size={10} /> : <Eye size={10} />}
-                  {dismissedIds.size}
+                  {showDismissed ? 'Hide rejected' : `Show rejected (${dismissedIds.size})`}
                 </button>
               )}
               {(hasMatchScores ? ['match_score', 'experience_years', 'name', 'location'] : ['experience_years', 'name', 'location']).map((key) => {
@@ -640,78 +689,68 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                 const expanded = expandedId === cand.id
                 const isShortlisted = shortlistIds.has(cand.id)
                 const isDismissed = dismissedIds.has(cand.id)
+                // `status === 'rejected'` is historical; once the candidate is
+                // restored (removed from dismissed_ids) we treat them as active
+                // again even though the status string sticks as a record.
+                const wasRejected = cand.status === 'rejected'
                 const isLowMatch = cand.match_score != null && cand.match_score < 50
+                const isSelectable = tab === 'candidates' && !!cand.email && cand.status === 'analyzed' && !!onSendInterviews
+                const isSelected = selectedIds.has(cand.id)
+                const hasInterviewEntry = !!cand.interview_id && (cand.status === 'interview_in_progress' || cand.status === 'interview_completed')
                 return (
                   <div
                     key={cand.id}
-                    onClick={() => setExpandedId(expanded ? null : cand.id)}
-                    className="rounded-lg border px-4 py-3.5 cursor-pointer transition-colors hover:bg-white/[0.02]"
+                    className="rounded-lg border transition-colors"
                     style={{
                       background: c.cardBg,
-                      borderColor: isDismissed ? `${c.border}80` : c.border,
-                      opacity: isDismissed ? 0.4 : isLowMatch ? 0.6 : 1,
+                      borderColor: isSelected ? c.green : isDismissed ? `${c.border}80` : c.border,
+                      boxShadow: isSelected ? `0 0 0 1px ${c.green}` : 'none',
+                      opacity: isDismissed ? 0.5 : isLowMatch ? 0.8 : 1,
                     }}
                   >
-                    <div className="flex items-start gap-2.5">
-                      {tab === 'candidates' && cand.email && cand.status === 'analyzed' && onSendInterviews && (
+                    {/* Identity row */}
+                    <div className="flex items-start gap-3 px-4 pt-3.5">
+                      {isSelectable && (
                         <button
                           onClick={(e) => toggleSelect(cand.id, e)}
-                          className="shrink-0 mt-0.5"
-                          style={{ color: selectedIds.has(cand.id) ? c.green : c.muted }}
+                          className="shrink-0 mt-0.5 rounded p-0.5 hover:bg-white/5"
+                          style={{ color: isSelected ? c.green : c.muted }}
+                          title={isSelected ? 'Deselect' : 'Select for interview'}
                         >
-                          {selectedIds.has(cand.id) ? <CheckSquare size={14} /> : <Square size={14} />}
+                          {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
                         </button>
                       )}
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleToggleShortlist(cand.id) }}
-                        className="shrink-0 mt-0.5"
-                        style={{ color: isShortlisted ? c.amber : c.muted }}
-                        title={isShortlisted ? 'Remove from shortlist' : 'Add to shortlist'}
-                      >
-                        <Star size={14} fill={isShortlisted ? c.amber : 'none'} />
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); handleToggleDismiss(cand.id) }}
-                        className="shrink-0 mt-0.5"
-                        style={{ color: isDismissed ? '#ef4444' : c.muted }}
-                        title={isDismissed ? 'Restore candidate' : 'Dismiss candidate'}
-                      >
-                        <XCircle size={14} />
-                      </button>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <p className="text-[15px] font-semibold truncate tracking-tight" style={{ color: c.heading, textDecoration: isDismissed ? 'line-through' : 'none' }}>{cand.name ?? cand.filename}</p>
-                          {cand.status === 'interview_sent' && (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#3b82f620', color: '#60a5fa', border: '1px solid #3b82f640' }}>Interviewing</span>
-                          )}
-                          {cand.status === 'interview_in_progress' && cand.interview_id ? (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setReviewInterview({ id: cand.interview_id!, name: cand.name ?? 'Candidate' }) }}
-                              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full transition-all hover:opacity-80 hover:underline cursor-pointer"
-                              style={{ background: '#f59e0b20', color: c.amber, border: `1px solid ${c.amber}40` }}
-                              title="Review interview"
+                          <p
+                            className="text-[15px] font-semibold truncate tracking-tight"
+                            style={{ color: c.heading, textDecoration: isDismissed ? 'line-through' : 'none' }}
+                          >
+                            {cand.name ?? cand.filename}
+                          </p>
+                          {isDismissed && wasRejected && (
+                            <span
+                              className="text-[9px] font-medium px-1.5 py-0.5 rounded-full"
+                              style={{ background: '#ef444420', color: '#ef4444', border: '1px solid #ef444440' }}
                             >
-                              <Video size={9} />
-                              In progress
-                            </button>
-                          ) : cand.status === 'interview_in_progress' ? (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b20', color: c.amber, border: `1px solid ${c.amber}40` }}>In progress</span>
-                          ) : null}
-                          {cand.status === 'interview_completed' && cand.interview_id ? (
-                            <button
-                              onClick={(e) => { e.stopPropagation(); setReviewInterview({ id: cand.interview_id!, name: cand.name ?? 'Candidate' }) }}
-                              className="flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded-full transition-all hover:opacity-80 hover:underline cursor-pointer"
-                              style={{ background: '#22c55e20', color: c.green, border: `1px solid ${c.green}40` }}
-                              title="Review interview"
-                            >
-                              <Video size={9} />
-                              Done{cand.interview_score != null ? ` · ${cand.interview_score}%` : ''}
-                            </button>
-                          ) : cand.status === 'interview_completed' ? (
-                            <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#22c55e20', color: c.green, border: `1px solid ${c.green}40` }}>
-                              Done{cand.interview_score != null ? ` · ${cand.interview_score}%` : ''}
+                              Rejected
                             </span>
-                          ) : null}
+                          )}
+                          {cand.status === 'interview_sent' && !isDismissed && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#3b82f620', color: '#60a5fa', border: '1px solid #3b82f640' }}>
+                              Interview sent
+                            </span>
+                          )}
+                          {cand.status === 'interview_in_progress' && !isDismissed && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#f59e0b20', color: c.amber, border: `1px solid ${c.amber}40` }}>
+                              In progress
+                            </span>
+                          )}
+                          {cand.status === 'interview_completed' && !isDismissed && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: '#22c55e20', color: c.green, border: `1px solid ${c.green}40` }}>
+                              Interview done{cand.interview_score != null ? ` · ${cand.interview_score}%` : ''}
+                            </span>
+                          )}
                           {cand.match_score != null && (
                             <span
                               className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full"
@@ -735,72 +774,123 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
                           <MapPin size={11} />{cand.location}
                         </span>
                       )}
+                    </div>
+
+                    {/* Action bar */}
+                    <div className="flex items-center flex-wrap gap-1.5 px-4 py-2.5 mt-2 border-t" style={{ borderColor: `${c.border}80` }}>
                       <button
-                        onClick={(e) => { e.stopPropagation(); setExpandedId(expanded ? null : cand.id) }}
-                        className="shrink-0 mt-0.5 p-0.5 transition-transform"
-                        style={{ color: c.muted, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
-                        title={expanded ? 'Collapse' : 'Expand'}
+                        onClick={() => handleToggleShortlist(cand.id)}
+                        disabled={isDismissed}
+                        className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-all disabled:opacity-40 hover:bg-white/[0.04]"
+                        style={{
+                          borderColor: isShortlisted ? `${c.amber}80` : c.border,
+                          background: isShortlisted ? `${c.amber}15` : 'transparent',
+                          color: isShortlisted ? c.amber : c.subMuted,
+                        }}
+                        title={isShortlisted ? 'Remove from shortlist' : 'Add to shortlist'}
                       >
-                        <ChevronDown size={14} />
+                        <Star size={12} fill={isShortlisted ? c.amber : 'none'} />
+                        {isShortlisted ? 'Shortlisted' : 'Shortlist'}
+                      </button>
+
+                      {!isDismissed ? (
+                        <button
+                          onClick={() => setRejectTarget({ id: cand.id, name: cand.name ?? cand.filename, email: cand.email })}
+                          className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-all hover:bg-red-500/10"
+                          style={{ borderColor: c.border, color: c.subMuted }}
+                          title="Reject candidate (with optional email)"
+                        >
+                          <XCircle size={12} />
+                          Reject
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleRestoreCandidate(cand.id)}
+                          className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-all hover:bg-white/[0.04]"
+                          style={{ borderColor: c.border, color: c.subMuted }}
+                          title="Restore candidate to the main list"
+                        >
+                          <RotateCcw size={12} />
+                          Restore
+                        </button>
+                      )}
+
+                      {hasInterviewEntry && (
+                        <button
+                          onClick={() => setReviewInterview({ id: cand.interview_id!, name: cand.name ?? 'Candidate' })}
+                          className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-all hover:bg-white/[0.04]"
+                          style={{
+                            borderColor: cand.status === 'interview_completed' ? `${c.green}60` : `${c.amber}60`,
+                            background: cand.status === 'interview_completed' ? `${c.green}10` : `${c.amber}10`,
+                            color: cand.status === 'interview_completed' ? c.green : c.amber,
+                          }}
+                          title="Open interview review"
+                        >
+                          <Video size={12} />
+                          Review interview
+                        </button>
+                      )}
+
+                      <button
+                        onClick={() => setExpandedId(expanded ? null : cand.id)}
+                        className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-all hover:bg-white/[0.04] ml-auto"
+                        style={{ borderColor: c.border, color: c.subMuted }}
+                      >
+                        {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        {expanded ? 'Hide details' : 'Details'}
                       </button>
                     </div>
 
-                    {expanded && cand.summary && (
-                      <p className="text-[13px] mt-3 leading-[1.55]" style={{ color: c.text }}>{cand.summary}</p>
-                    )}
-
-                    {expanded && cand.skills && cand.skills.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mt-3">
-                        {cand.skills.map((s, i) => (
-                          <span
-                            key={i}
-                            className="text-[11px] font-medium px-2 py-0.5 rounded-md"
-                            style={{ background: '#1a1a1a', color: c.text, border: `1px solid ${c.border}` }}
-                          >
-                            {s}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-
                     {expanded && (
-                      <div className="mt-2 pt-2 space-y-1" style={{ borderTop: `1px dashed ${c.border}` }}>
-                        {cand.education && <p className="text-xs" style={{ color: c.muted }}>{cand.education}</p>}
-                        {cand.email && <p className="text-xs" style={{ color: c.muted }}>{cand.email}</p>}
-                        {cand.strengths?.map((s, i) => (
-                          <p key={i} className="text-xs" style={{ color: c.green }}><CheckCircle2 size={10} className="inline mr-1" />{s}</p>
-                        ))}
-                        {cand.flags?.map((f, i) => (
-                          <p key={i} className="text-xs" style={{ color: c.amber }}><AlertTriangle size={10} className="inline mr-1" />{f}</p>
-                        ))}
+                      <div className="px-4 pb-4 pt-1 space-y-3" style={{ borderTop: `1px solid ${c.border}80` }}>
+                        {cand.summary && (
+                          <p className="text-[13px] leading-[1.55] mt-3" style={{ color: c.text }}>{cand.summary}</p>
+                        )}
+                        {cand.skills && cand.skills.length > 0 && (
+                          <div className="flex flex-wrap gap-1.5">
+                            {cand.skills.map((s, i) => (
+                              <span
+                                key={i}
+                                className="text-[11px] font-medium px-2 py-0.5 rounded-md"
+                                style={{ background: '#1a1a1a', color: c.text, border: `1px solid ${c.border}` }}
+                              >
+                                {s}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="space-y-1">
+                          {cand.education && <p className="text-xs" style={{ color: c.muted }}>{cand.education}</p>}
+                          {cand.email && <p className="text-xs" style={{ color: c.muted }}>{cand.email}</p>}
+                          {cand.strengths?.map((s, i) => (
+                            <p key={i} className="text-xs" style={{ color: c.green }}><CheckCircle2 size={10} className="inline mr-1" />{s}</p>
+                          ))}
+                          {cand.flags?.map((f, i) => (
+                            <p key={i} className="text-xs" style={{ color: c.amber }}><AlertTriangle size={10} className="inline mr-1" />{f}</p>
+                          ))}
+                        </div>
                         {cand.match_summary && (
-                          <div className="mt-1 pt-1" style={{ borderTop: `1px dashed ${c.border}` }}>
+                          <div className="pt-2" style={{ borderTop: `1px dashed ${c.border}` }}>
                             <p className="text-[10px] font-medium" style={{ color: c.accent }}>
                               Match Analysis{cand.match_score != null ? ` — ${cand.match_score}%` : ''}
                             </p>
-                            <p className="text-xs" style={{ color: c.muted }}>{cand.match_summary}</p>
+                            <p className="text-xs mt-0.5" style={{ color: c.muted }}>{cand.match_summary}</p>
                           </div>
                         )}
                         {cand.interview_summary && (
-                          <div className="mt-1 pt-1" style={{ borderTop: `1px dashed ${c.border}` }}>
-                            <div className="flex items-center justify-between gap-2">
-                              <p className="text-[10px] font-medium" style={{ color: '#60a5fa' }}>
-                                <Video size={10} className="inline mr-1" />Interview{cand.interview_score != null ? ` — ${cand.interview_score}%` : ''}
-                              </p>
-                              {cand.interview_id && (
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    setReviewInterview({ id: cand.interview_id!, name: cand.name ?? 'Candidate' })
-                                  }}
-                                  className="rounded px-2 py-0.5 text-[10px] font-medium hover:underline"
-                                  style={{ color: '#60a5fa', background: 'rgba(96,165,250,0.1)' }}
-                                >
-                                  Review
-                                </button>
-                              )}
-                            </div>
-                            <p className="text-xs" style={{ color: c.muted }}>{cand.interview_summary}</p>
+                          <div className="pt-2" style={{ borderTop: `1px dashed ${c.border}` }}>
+                            <p className="text-[10px] font-medium" style={{ color: '#60a5fa' }}>
+                              <Video size={10} className="inline mr-1" />Interview{cand.interview_score != null ? ` — ${cand.interview_score}%` : ''}
+                            </p>
+                            <p className="text-xs mt-0.5" style={{ color: c.muted }}>{cand.interview_summary}</p>
+                          </div>
+                        )}
+                        {wasRejected && cand.rejection_reason && (
+                          <div className="pt-2" style={{ borderTop: `1px dashed ${c.border}` }}>
+                            <p className="text-[10px] font-medium" style={{ color: '#ef4444' }}>
+                              Rejection note (internal)
+                            </p>
+                            <p className="text-xs mt-0.5" style={{ color: c.muted }}>{cand.rejection_reason}</p>
                           </div>
                         )}
                       </div>
@@ -817,6 +907,15 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
           interviewId={reviewInterview.id}
           candidateName={reviewInterview.name}
           onClose={() => setReviewInterview(null)}
+        />
+      )}
+      {rejectTarget && (
+        <RejectCandidateModal
+          candidateName={rejectTarget.name}
+          candidateEmail={rejectTarget.email}
+          positionTitle={project.title}
+          onConfirm={handleRejectConfirm}
+          onClose={() => setRejectTarget(null)}
         />
       )}
     </div>

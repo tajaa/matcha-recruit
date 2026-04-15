@@ -61,6 +61,7 @@ from ..models.matcha_work import (
     InventoryDocument,
     ProjectDocument,
     SendInterviewsRequest,
+    RejectCandidateRequest,
     WorkbookDocument,
 )
 from ..services import matcha_work_document as doc_svc
@@ -3904,6 +3905,91 @@ async def toggle_project_dismiss(
     from ..services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.toggle_dismiss(project_id, candidate_id)
+
+
+@router.post("/projects/{project_id}/reject/{candidate_id}")
+async def reject_project_candidate(
+    project_id: UUID,
+    candidate_id: str,
+    body: RejectCandidateRequest,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Reject a candidate, optionally sending a polite rejection email.
+
+    When `send_email=false` this is equivalent to dismissing the candidate
+    with a `status='rejected'` marker — no email goes out.
+    """
+    from ..services import project_service as proj_svc
+    from app.core.services.email import EmailService
+
+    project, _role = await _verify_project_access(project_id, current_user)
+    data = project.get("project_data") or {}
+    candidates = list(data.get("candidates") or [])
+
+    candidate_idx = next(
+        (i for i, c in enumerate(candidates) if c.get("id") == candidate_id),
+        None,
+    )
+    if candidate_idx is None:
+        raise HTTPException(status_code=404, detail="Candidate not found in project")
+
+    candidate = candidates[candidate_idx]
+    name = candidate.get("name") or candidate.get("filename", "Candidate")
+    email = candidate.get("email")
+
+    # Idempotency guard: if the candidate was already rejected + hidden, don't
+    # re-send the email. Return the current project so the caller's state stays
+    # in sync but the `email_sent` flag is honest.
+    dismissed_ids = list(data.get("dismissed_ids") or [])
+    already_rejected = (
+        candidate.get("status") == "rejected" and candidate_id in dismissed_ids
+    )
+    if already_rejected:
+        return {"project": project, "email_sent": False, "already_rejected": True}
+
+    email_sent = False
+    if body.send_email and email:
+        company_id = project.get("company_id")
+        async with get_connection() as conn:
+            company_row = await conn.fetchrow(
+                "SELECT name FROM companies WHERE id = $1", company_id
+            )
+        company_name = company_row["name"] if company_row else "the company"
+        position_title = project.get("title") or "Open Position"
+
+        email_svc = EmailService()
+        try:
+            email_sent = await email_svc.send_candidate_rejection_email(
+                to_email=email,
+                to_name=name,
+                company_name=company_name,
+                position_title=position_title,
+                custom_message=body.custom_message,
+            )
+        except Exception as e:
+            logger.error("Rejection email failed for %s: %s", email, e, exc_info=True)
+            email_sent = False
+
+    # Mutate candidate: mark rejected, store internal reason
+    candidates[candidate_idx] = {
+        **candidate,
+        "status": "rejected",
+        "rejection_reason": body.rejection_reason,
+    }
+
+    # Add to dismissed_ids so existing filters hide the candidate by default
+    if candidate_id not in dismissed_ids:
+        dismissed_ids.append(candidate_id)
+
+    updated_project = await proj_svc.update_project_data(
+        project_id,
+        {"candidates": candidates, "dismissed_ids": dismissed_ids},
+    )
+
+    return {
+        "project": updated_project,
+        "email_sent": email_sent,
+    }
 
 
 @router.post("/projects/{project_id}/resume/upload")

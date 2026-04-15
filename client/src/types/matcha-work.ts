@@ -35,6 +35,7 @@ export interface ResumeCandidate {
   interview_summary?: string | null
   match_score?: number | null
   match_summary?: string | null
+  rejection_reason?: string | null
 }
 
 export interface RecruitingPosting {

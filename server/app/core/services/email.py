@@ -561,6 +561,83 @@ Sent on behalf of {company_name} via Matcha
         _subject = f"Interview Invitation: {position_title} at {company_name}"
         return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
+    async def send_candidate_rejection_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        position_title: str,
+        custom_message: Optional[str] = None,
+    ) -> bool:
+        """Send a polite rejection email to a candidate."""
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping candidate rejection email")
+            return False
+
+        custom_section = ""
+        if custom_message:
+            custom_section = (
+                f'<div class="highlight">{custom_message}</div>'
+            )
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+        .highlight {{ background: #ecfdf5; border-left: 4px solid #22c55e; padding: 15px; margin: 20px 0; color: #374151; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>Thank you for your interest in the <strong>{position_title}</strong> position at <strong>{company_name}</strong> and for taking the time to apply.</p>
+
+            <p>After careful consideration we've decided to move forward with other candidates whose experience more closely matches what we're looking for at this time. This was a tough call — we received many strong applications.</p>
+
+            {custom_section}
+
+            <p>We're grateful you considered joining us. We'll keep your details on file and encourage you to apply again if another role feels like a fit down the road.</p>
+
+            <p>Wishing you the very best in your search,<br>The {company_name} team</p>
+        </div>
+        <div class="footer">
+            <p>Sent on behalf of {company_name} via Matcha</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Thank you for your interest in the {position_title} position at {company_name} and for taking the time to apply.
+
+After careful consideration we've decided to move forward with other candidates whose experience more closely matches what we're looking for at this time. This was a tough call — we received many strong applications.
+
+{(custom_message + chr(10) + chr(10)) if custom_message else ''}We're grateful you considered joining us. We'll keep your details on file and encourage you to apply again if another role feels like a fit down the road.
+
+Wishing you the very best in your search,
+The {company_name} team
+
+Sent on behalf of {company_name} via Matcha
+"""
+
+        _subject = f"Update on your {position_title} application at {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
+
     async def send_contact_form_email(
         self,
         sender_name: str,

@@ -320,6 +320,12 @@ class SendInterviewsRequest(BaseModel):
     custom_message: Optional[str] = None
 
 
+class RejectCandidateRequest(BaseModel):
+    rejection_reason: Optional[str] = None  # internal note saved on candidate
+    custom_message: Optional[str] = None     # appears in rejection email body
+    send_email: bool = True                  # False = silent dismiss semantics
+
+
 class MWMessageOut(BaseModel):
     id: UUID
     thread_id: UUID

@@ -565,6 +565,21 @@ export function toggleProjectDismiss(projectId: string, candidateId: string) {
   return api.post(`/matcha-work/projects/${projectId}/dismiss/${candidateId}`)
 }
 
+export function rejectProjectCandidate(
+  projectId: string,
+  candidateId: string,
+  opts: { rejectionReason?: string; customMessage?: string; sendEmail?: boolean } = {},
+) {
+  return api.post<{ project: import('../types/matcha-work').MWProject; email_sent: boolean }>(
+    `/matcha-work/projects/${projectId}/reject/${candidateId}`,
+    {
+      rejection_reason: opts.rejectionReason,
+      custom_message: opts.customMessage,
+      send_email: opts.sendEmail ?? true,
+    },
+  )
+}
+
 export function updateProjectPosting(projectId: string, posting: Record<string, unknown>) {
   return api.put(`/matcha-work/projects/${projectId}/posting`, posting)
 }
