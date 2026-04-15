@@ -6,6 +6,7 @@ struct ContentView: View {
     @State private var threadListVM = ThreadListViewModel()
     @State private var isCreating = false
     @State private var isOpeningCheckout = false
+    @State private var upgradeError: String?
     @State private var sidebarTab: SidebarTab = .threads
 
     private struct GlassWindowModifier: ViewModifier {
@@ -147,11 +148,11 @@ struct ContentView: View {
                             } label: {
                                 Text(isOpeningCheckout ? "opening…" : "upgrade")
                                     .font(.system(size: 12, weight: .medium, design: .monospaced))
-                                    .foregroundColor(Color.matcha500)
+                                    .foregroundColor(upgradeError == nil ? Color.matcha500 : .red.opacity(0.8))
                             }
                             .buttonStyle(.plain)
                             .disabled(isOpeningCheckout)
-                            .help("Upgrade to Matcha Plus")
+                            .help(upgradeError ?? "Upgrade to Matcha Plus")
                         } else {
                             Text("plus")
                                 .font(.system(size: 11, design: .monospaced))
@@ -199,28 +200,27 @@ struct ContentView: View {
         }
     }
 
+    @MainActor
     private func startUpgrade() {
         guard !isOpeningCheckout else { return }
         isOpeningCheckout = true
-        Task {
-            defer { Task { @MainActor in isOpeningCheckout = false } }
+        upgradeError = nil
+        Task { @MainActor in
+            defer { isOpeningCheckout = false }
             do {
-                let url = try await MatchaWorkService.shared.startPersonalCheckout(
+                let urlString = try await MatchaWorkService.shared.startPersonalCheckout(
                     successUrl: "https://hey-matcha.com/work?upgraded=1",
                     cancelUrl: "https://hey-matcha.com/work?canceled=1"
                 )
-                if let checkoutURL = URL(string: url) {
-                    await MainActor.run {
-                        NSWorkspace.shared.open(checkoutURL)
-                    }
-                    // Refresh after a short delay — the webhook won't fire before
-                    // the user completes checkout, but this picks up any races.
-                    try? await Task.sleep(for: .seconds(2))
-                    await appState.refreshSubscription()
+                guard let checkoutURL = URL(string: urlString) else {
+                    upgradeError = "invalid checkout URL from server"
+                    return
                 }
+                NSWorkspace.shared.open(checkoutURL)
+                // Subscription refresh happens when the user returns to the app
+                // via the scenePhase .active observer in MatchaApp.
             } catch {
-                // Silent failure for MVP; errors surface in the console during dev.
-                print("upgrade checkout failed: \(error)")
+                upgradeError = error.localizedDescription
             }
         }
     }

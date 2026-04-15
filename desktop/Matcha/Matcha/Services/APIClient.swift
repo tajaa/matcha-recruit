@@ -25,7 +25,22 @@ enum APIError: Error, LocalizedError {
 
 class APIClient {
     static let shared = APIClient()
-    let baseURL = "http://127.0.0.1:8001/api"
+
+    /// Base API URL. Debug builds hit the local dev server; release builds
+    /// (including notarized builds shipped to the team) hit production on EC2.
+    /// Override via `MATCHA_API_URL` env var for local testing against staging
+    /// or a remote dev box.
+    let baseURL: String = {
+        if let override = ProcessInfo.processInfo.environment["MATCHA_API_URL"],
+           !override.isEmpty {
+            return override
+        }
+        #if DEBUG
+        return "http://127.0.0.1:8001/api"
+        #else
+        return "https://hey-matcha.com/api"
+        #endif
+    }()
     var accessToken: String?
 
     // Will be set by AppState to handle logout on 401
