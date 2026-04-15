@@ -1,9 +1,11 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { Link } from 'react-router-dom'
 
 import MarketingNav from './landing/MarketingNav'
 import MarketingFooter from './landing/MarketingFooter'
-import { AgentReasoningAnimation } from './landing/AgentReasoningAnimation'
+import { LazyMount } from './landing/LazyMount'
+
+const AgentReasoningAnimation = lazy(() => import('./landing/AgentReasoningAnimation'))
 import { ANIMATION_BY_SIZZLE_ID } from './landing/animations'
 import { ComplianceTicker } from '../components/landing/ComplianceTicker'
 import { PricingContactModal } from '../components/PricingContactModal'
@@ -182,7 +184,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
           </div>
         </div>
 
-        <div className="flex-1 grid lg:grid-cols-[1.05fr_1fr] gap-8 lg:gap-16 items-center">
+        <div className="flex-1 grid lg:grid-cols-[0.85fr_1.15fr] gap-8 lg:gap-12 items-center">
           {/* Left: text */}
           <div className="min-w-0 max-w-xl">
             <h1
@@ -222,7 +224,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
 
           {/* Right: compliance animation */}
           <div className="min-w-0 overflow-hidden flex justify-center lg:justify-end">
-            <AgentReasoningAnimation />
+            <LazyMount minHeight={480} fallback={<div className="w-full max-w-[860px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0e0d0b', border: '1px solid rgba(255,255,255,0.08)' }} />}><Suspense fallback={<div className="w-full max-w-[860px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0e0d0b', border: '1px solid rgba(255,255,255,0.08)' }} />}><AgentReasoningAnimation /></Suspense></LazyMount>
           </div>
         </div>
 
@@ -319,7 +321,11 @@ function SizzleVisual({ sizzle }: { sizzle: LandingSizzleVideo }) {
             playsInline
           />
         ) : Animation ? (
-          <Animation />
+          <LazyMount fallback={<div className="w-full h-full" style={{ backgroundColor: '#0e0d0b' }} />}>
+            <Suspense fallback={<div className="w-full h-full" style={{ backgroundColor: '#0e0d0b' }} />}>
+              <Animation />
+            </Suspense>
+          </LazyMount>
         ) : (
           <div
             className="w-full h-full flex items-center justify-center"

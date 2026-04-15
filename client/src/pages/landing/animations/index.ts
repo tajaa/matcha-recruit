@@ -1,12 +1,21 @@
-import type { ComponentType } from 'react'
-import { CompensationAnimation } from './CompensationAnimation'
-import { RiskAssessmentAnimation } from './RiskAssessmentAnimation'
-import { InvestigationTimelineAnimation } from './InvestigationTimelineAnimation'
-import { AIEvaluationAnimation } from './AIEvaluationAnimation'
+import { lazy, type ComponentType, type LazyExoticComponent } from 'react'
+
+const CompensationAnimation = lazy(() =>
+  import('./CompensationAnimation').then((m) => ({ default: m.CompensationAnimation })),
+)
+const RiskAssessmentAnimation = lazy(() =>
+  import('./RiskAssessmentAnimation').then((m) => ({ default: m.RiskAssessmentAnimation })),
+)
+const InvestigationTimelineAnimation = lazy(() =>
+  import('./InvestigationTimelineAnimation').then((m) => ({ default: m.InvestigationTimelineAnimation })),
+)
+const AIEvaluationAnimation = lazy(() =>
+  import('./AIEvaluationAnimation').then((m) => ({ default: m.AIEvaluationAnimation })),
+)
 
 export { CompensationAnimation, RiskAssessmentAnimation, InvestigationTimelineAnimation, AIEvaluationAnimation }
 
-export const ANIMATION_BY_SIZZLE_ID: Record<string, ComponentType> = {
+export const ANIMATION_BY_SIZZLE_ID: Record<string, LazyExoticComponent<ComponentType>> = {
   hr: CompensationAnimation,
   grc: RiskAssessmentAnimation,
   er: InvestigationTimelineAnimation,

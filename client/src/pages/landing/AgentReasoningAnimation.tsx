@@ -72,7 +72,7 @@ function makeLabelSprite(text: string) {
   return { sprite, mat, tex }
 }
 
-export function AgentReasoningAnimation() {
+export default function AgentReasoningAnimation() {
   const containerRef = useRef<HTMLDivElement>(null)
   const frameRef = useRef(0)
   const [score, setScore] = useState(42)
@@ -340,7 +340,7 @@ export function AgentReasoningAnimation() {
 
   return (
     <div
-      className="relative w-full max-w-[720px] rounded-xl overflow-hidden mx-auto flex flex-col"
+      className="relative w-full max-w-[860px] rounded-xl overflow-hidden mx-auto flex flex-col"
       style={{
         backgroundColor: '#0e0d0b',
         color: '#d4d4d4',
