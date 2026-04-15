@@ -3,6 +3,7 @@ import { Camera, Loader2, Check } from 'lucide-react'
 import { useMe } from '../../hooks/useMe'
 import { uploadAvatar } from '../../api/client'
 import Avatar from '../../components/Avatar'
+import ProfileResumeSection from '../../components/profile/ProfileResumeSection'
 
 export default function UserSettings() {
   const { me, refresh } = useMe()
@@ -97,6 +98,10 @@ export default function UserSettings() {
         )}
 
         <p className="mt-4 text-xs text-zinc-600">JPEG, PNG, or WebP. Max 5 MB.</p>
+      </div>
+
+      <div className="mt-6">
+        <ProfileResumeSection />
       </div>
     </div>
   )

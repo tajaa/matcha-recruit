@@ -1,5 +1,9 @@
 import { useState, useEffect } from 'react'
-import { X, Loader2, MapPin, DollarSign, Calendar, Send, XCircle, ChevronDown } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import {
+  X, Loader2, MapPin, DollarSign, Calendar, Send, XCircle, ChevronDown,
+  FileText, Users, UserCheck, ExternalLink,
+} from 'lucide-react'
 import {
   getJobPosting,
   listApplicants,
@@ -11,6 +15,8 @@ import {
   closeJobPosting,
 } from '../../api/channelJobPostings'
 import type { JobPostingDetail as JobPostingDetailData, ApplicationSummary } from '../../api/channelJobPostings'
+import { getMyResume, getApplicantResume } from '../../api/profileResume'
+import type { ProfileResume, ParsedResume } from '../../api/profileResume'
 
 interface Props {
   channelId: string
@@ -50,6 +56,16 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
   // Action state
   const [actionLoading, setActionLoading] = useState(false)
 
+  // Applicant snapshot expansion (recruiter view)
+  const [expandedSnapshot, setExpandedSnapshot] = useState<string | null>(null)
+  const [liveResumes, setLiveResumes] = useState<Record<string, ProfileResume | null>>({})
+  const [liveLoading, setLiveLoading] = useState<string | null>(null)
+
+  // Subscriber's own profile resume — required to apply
+  const [myResume, setMyResume] = useState<ProfileResume | null>(null)
+  const [myResumeLoaded, setMyResumeLoaded] = useState(false)
+  const [showNoResumeModal, setShowNoResumeModal] = useState(false)
+
   const isManager = myRole === 'owner' || myRole === 'moderator'
 
   useEffect(() => {
@@ -59,6 +75,13 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
     ]
     if (isManager) {
       promises.push(listApplicants(channelId, postingId).then(setApplicants))
+    } else {
+      promises.push(
+        getMyResume()
+          .then((r) => setMyResume(r))
+          .catch(() => {})
+          .finally(() => setMyResumeLoaded(true))
+      )
     }
     Promise.all(promises)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load posting'))
@@ -84,6 +107,11 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
   }
 
   async function handleApply() {
+    // Client-side guardrail: require a profile resume before submitting.
+    if (!myResume) {
+      setShowNoResumeModal(true)
+      return
+    }
     setApplying(true)
     setApplyMsg('')
     try {
@@ -93,9 +121,28 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
       const updated = await getJobPosting(channelId, postingId)
       setPosting(updated)
     } catch (err) {
-      setApplyMsg(err instanceof Error ? err.message : 'Failed to apply')
+      // Server-side guardrail: 409 no_resume. Wrap with the same modal.
+      const msg = err instanceof Error ? err.message : 'Failed to apply'
+      if (msg.toLowerCase().includes('no_resume') || msg.toLowerCase().includes('upload your resume')) {
+        setShowNoResumeModal(true)
+      } else {
+        setApplyMsg(msg)
+      }
     }
     setApplying(false)
+  }
+
+  async function loadLiveResume(applicantId: string) {
+    if (liveResumes[applicantId] !== undefined) return
+    setLiveLoading(applicantId)
+    try {
+      const r = await getApplicantResume(applicantId)
+      setLiveResumes((prev) => ({ ...prev, [applicantId]: r }))
+    } catch {
+      setLiveResumes((prev) => ({ ...prev, [applicantId]: null }))
+    } finally {
+      setLiveLoading(null)
+    }
   }
 
   async function handleWithdraw() {
@@ -190,6 +237,14 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
               }`}>
                 {posting.status}
               </span>
+              <span className={`text-xs font-medium inline-flex items-center gap-1 px-2 py-1 rounded border ${
+                posting.open_to_all
+                  ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800/40'
+                  : 'bg-blue-950/40 text-blue-400 border-blue-800/40'
+              }`}>
+                {posting.open_to_all ? <Users size={11} /> : <UserCheck size={11} />}
+                {posting.open_to_all ? 'Open to all members' : 'Invite only'}
+              </span>
               {posting.subscription_status && (
                 <span className="text-xs text-zinc-500">
                   Subscription: {posting.subscription_status}
@@ -273,10 +328,13 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
                     <p className="text-xs text-zinc-600">No applications yet</p>
                   ) : (
                     <div className="space-y-2">
-                      {applicants.map((app) => (
+                      {applicants.map((app) => {
+                        const expanded = expandedSnapshot === app.id
+                        const live = liveResumes[app.applicant_id]
+                        return (
                         <div key={app.id} className="bg-zinc-800/50 border border-zinc-800 rounded-lg px-4 py-3">
                           <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
+                            <div className="min-w-0 flex-1">
                               <p className="text-sm font-medium text-zinc-200">{app.applicant_name}</p>
                               <p className="text-xs text-zinc-500">{app.applicant_email}</p>
                               {app.cover_letter && (
@@ -286,6 +344,15 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
                                 Applied {new Date(app.submitted_at).toLocaleDateString()}
                                 {app.reviewed_at && ` \u00b7 Reviewed ${new Date(app.reviewed_at).toLocaleDateString()}`}
                               </p>
+                              {app.resume_snapshot && (
+                                <button
+                                  onClick={() => setExpandedSnapshot(expanded ? null : app.id)}
+                                  className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-emerald-400 hover:text-emerald-300"
+                                >
+                                  <FileText size={11} />
+                                  {expanded ? 'Hide parsed resume' : 'View parsed resume'}
+                                </button>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${APP_STATUS_BADGE[app.status] ?? 'bg-zinc-700 text-zinc-400'}`}>
@@ -324,8 +391,38 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
                               </div>
                             </div>
                           </div>
+                          {expanded && app.resume_snapshot && (
+                            <div className="mt-3 pt-3 border-t border-zinc-800 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] uppercase tracking-wider text-zinc-500">Submitted snapshot</span>
+                                <button
+                                  onClick={() => loadLiveResume(app.applicant_id)}
+                                  disabled={liveLoading === app.applicant_id}
+                                  className="inline-flex items-center gap-1.5 text-[10px] text-zinc-400 hover:text-zinc-200"
+                                >
+                                  {liveLoading === app.applicant_id ? (
+                                    <Loader2 size={10} className="animate-spin" />
+                                  ) : (
+                                    <ExternalLink size={10} />
+                                  )}
+                                  {live !== undefined ? 'Compare live' : 'Load live profile'}
+                                </button>
+                              </div>
+                              <ParsedResumeCard data={app.resume_snapshot} />
+                              {live && (
+                                <>
+                                  <div className="text-[10px] uppercase tracking-wider text-zinc-500">Current profile</div>
+                                  <ParsedResumeCard data={live.parsed_data} />
+                                </>
+                              )}
+                              {live === null && (
+                                <p className="text-[11px] text-zinc-500 italic">Applicant has no live profile resume.</p>
+                              )}
+                            </div>
+                          )}
                         </div>
-                      ))}
+                        )
+                      })}
                     </div>
                   )}
                 </div>
@@ -380,9 +477,31 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
                       </button>
                     </div>
                   </div>
-                ) : posting.status === 'active' ? (
+                ) : posting.status === 'active' && posting.i_can_apply !== false ? (
                   <div className="border-t border-zinc-800 pt-4">
                     <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">Apply</h3>
+                    {myResumeLoaded && myResume && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-950/20 border border-emerald-800/30 mb-3">
+                        <FileText size={13} className="text-emerald-400 shrink-0" />
+                        <span className="text-xs text-emerald-300">
+                          Applying with resume: <span className="font-medium">{myResume.filename}</span>
+                        </span>
+                      </div>
+                    )}
+                    {myResumeLoaded && !myResume && (
+                      <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-amber-950/20 border border-amber-800/30 mb-3">
+                        <FileText size={13} className="text-amber-400 shrink-0 mt-0.5" />
+                        <div className="flex-1">
+                          <p className="text-xs text-amber-300">You need a profile resume to apply.</p>
+                          <Link
+                            to="/settings"
+                            className="text-[11px] text-amber-200 underline hover:text-white"
+                          >
+                            Upload one in Settings →
+                          </Link>
+                        </div>
+                      </div>
+                    )}
                     <textarea
                       value={coverLetter}
                       onChange={(e) => setCoverLetter(e.target.value)}
@@ -392,7 +511,7 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
                     />
                     <button
                       onClick={handleApply}
-                      disabled={applying}
+                      disabled={applying || !myResumeLoaded}
                       className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
                     >
                       {applying && <Loader2 size={14} className="animate-spin" />}
@@ -408,6 +527,97 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
           </div>
         )}
       </div>
+
+      {/* No-resume guardrail modal */}
+      {showNoResumeModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/70" onClick={() => setShowNoResumeModal(false)} />
+          <div className="relative w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-xl shadow-2xl p-6">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-lg bg-amber-950 border border-amber-900 flex items-center justify-center shrink-0">
+                <FileText size={18} className="text-amber-400" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-zinc-100">Upload your resume to apply</h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Matcha Work uses your parsed profile resume to auto-fill job applications.
+                  Upload one once and reuse it for every role you apply to.
+                </p>
+                <div className="mt-4 flex items-center gap-2">
+                  <Link
+                    to="/settings"
+                    onClick={() => setShowNoResumeModal(false)}
+                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
+                  >
+                    Go to Settings
+                  </Link>
+                  <button
+                    onClick={() => setShowNoResumeModal(false)}
+                    className="px-3 py-1.5 text-xs text-zinc-400 hover:text-white transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ParsedResumeCard({ data }: { data: ParsedResume }) {
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 p-3 space-y-2">
+      {data.name && (
+        <div className="flex items-baseline gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-16 shrink-0">Name</span>
+          <span className="text-xs text-zinc-200">{data.name}</span>
+        </div>
+      )}
+      {data.current_title && (
+        <div className="flex items-baseline gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-16 shrink-0">Title</span>
+          <span className="text-xs text-zinc-200">
+            {data.current_title}
+            {typeof data.experience_years === 'number' && ` · ${data.experience_years} yrs`}
+          </span>
+        </div>
+      )}
+      {data.location && (
+        <div className="flex items-baseline gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-16 shrink-0">Location</span>
+          <span className="text-xs text-zinc-200">{data.location}</span>
+        </div>
+      )}
+      {data.skills && data.skills.length > 0 && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-16 shrink-0 mt-0.5">Skills</span>
+          <div className="flex flex-wrap gap-1">
+            {data.skills.slice(0, 14).map((s) => (
+              <span
+                key={s}
+                className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-300"
+              >
+                {s}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {data.summary && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-16 shrink-0 mt-0.5">Summary</span>
+          <span className="text-[11px] text-zinc-400 leading-relaxed">{data.summary}</span>
+        </div>
+      )}
+      {data.strengths && data.strengths.length > 0 && (
+        <div className="flex items-start gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500 w-16 shrink-0 mt-0.5">Strengths</span>
+          <span className="text-[11px] text-zinc-400">{data.strengths.join(', ')}</span>
+        </div>
+      )}
     </div>
   )
 }

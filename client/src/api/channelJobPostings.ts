@@ -1,4 +1,5 @@
 import { api } from './client'
+import type { ParsedResume } from './profileResume'
 
 export interface JobPostingSummary {
   id: string
@@ -8,6 +9,7 @@ export interface JobPostingSummary {
   subscription_status: string | null
   applicant_count: number
   invited_count: number
+  open_to_all?: boolean
   created_at: string
 }
 
@@ -18,6 +20,8 @@ export interface JobPostingDetail extends JobPostingSummary {
   location: string | null
   paid_through: string | null
   posted_by: string
+  open_to_all: boolean
+  i_can_apply?: boolean
   my_invitation: { invited_at: string; viewed_at: string | null } | null
   my_application: { id: string; status: string; submitted_at: string } | null
 }
@@ -29,8 +33,23 @@ export interface ApplicationSummary {
   applicant_email: string
   status: string
   cover_letter: string | null
+  resume_snapshot?: ParsedResume | null
   submitted_at: string
   reviewed_at: string | null
+}
+
+export interface OpenPostingSummary {
+  id: string
+  title: string
+  location: string | null
+  compensation_summary: string | null
+  created_at: string
+  already_applied: boolean
+}
+
+export interface JobPostingFee {
+  fee_cents: number | null
+  default_used: boolean
 }
 
 export interface MyJobInvitation {
@@ -54,6 +73,7 @@ export const createJobPosting = (channelId: string, data: {
   requirements?: string
   compensation_summary?: string
   location?: string
+  open_to_all?: boolean
 }) => api.post<JobPostingSummary>(`/channels/${channelId}/job-postings`, data)
 
 export const updateJobPosting = (channelId: string, postingId: string, data: {
@@ -101,3 +121,9 @@ export const updateApplicationStatus = (
 
 export const getMyJobInvitations = () =>
   api.get<MyJobInvitation[]>('/channels/job-postings/my-invitations')
+
+export const listOpenPostings = (channelId: string) =>
+  api.get<OpenPostingSummary[]>(`/channels/${channelId}/open-postings`)
+
+export const getJobPostingFee = (channelId: string) =>
+  api.get<JobPostingFee>(`/channels/${channelId}/job-posting-fee`)

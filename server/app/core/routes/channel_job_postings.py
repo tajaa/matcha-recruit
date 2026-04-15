@@ -36,6 +36,7 @@ class CreateJobPostingRequest(BaseModel):
     requirements: Optional[str] = None
     compensation_summary: Optional[str] = None
     location: Optional[str] = None
+    open_to_all: bool = False
 
 
 class UpdateJobPostingRequest(BaseModel):
@@ -111,16 +112,16 @@ async def create_job_posting(
             INSERT INTO channel_job_postings
                 (channel_id, posted_by, title, description, requirements,
                  compensation_summary, location, status,
-                 stripe_product_id, stripe_price_id)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9)
+                 stripe_product_id, stripe_price_id, open_to_all)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9, $10)
             RETURNING id, channel_id, posted_by, title, description, requirements,
                       compensation_summary, location, status,
-                      stripe_product_id, stripe_price_id,
+                      stripe_product_id, stripe_price_id, open_to_all,
                       created_at, updated_at
             """,
             channel_id, current_user.id, body.title, body.description,
             body.requirements, body.compensation_summary, body.location,
-            product_id, price_id,
+            product_id, price_id, body.open_to_all,
         )
 
     return dict(row)
@@ -144,7 +145,8 @@ async def list_job_postings(
         if role in ("owner", "moderator"):
             rows = await conn.fetch(
                 """
-                SELECT jp.id, jp.title, jp.status, jp.location, jp.created_at, jp.updated_at,
+                SELECT jp.id, jp.title, jp.status, jp.location, jp.open_to_all,
+                       jp.created_at, jp.updated_at,
                        (SELECT COUNT(*) FROM channel_job_applications a WHERE a.posting_id = jp.id) AS applicant_count,
                        (SELECT COUNT(*) FROM channel_job_invitations i WHERE i.posting_id = jp.id) AS invited_count
                 FROM channel_job_postings jp
@@ -154,17 +156,22 @@ async def list_job_postings(
                 channel_id,
             )
         else:
-            # Members only see active postings where they have an invitation
+            # Members see active postings that are either open-to-all or
+            # where they have an explicit invitation.
             rows = await conn.fetch(
                 """
-                SELECT jp.id, jp.title, jp.status, jp.location, jp.created_at, jp.updated_at,
+                SELECT jp.id, jp.title, jp.status, jp.location, jp.open_to_all,
+                       jp.created_at, jp.updated_at,
                        (SELECT COUNT(*) FROM channel_job_applications a WHERE a.posting_id = jp.id) AS applicant_count,
                        (SELECT COUNT(*) FROM channel_job_invitations i WHERE i.posting_id = jp.id) AS invited_count
                 FROM channel_job_postings jp
                 WHERE jp.channel_id = $1 AND jp.status = 'active'
-                  AND EXISTS (
-                      SELECT 1 FROM channel_job_invitations inv
-                      WHERE inv.posting_id = jp.id AND inv.user_id = $2
+                  AND (
+                      jp.open_to_all = true
+                      OR EXISTS (
+                          SELECT 1 FROM channel_job_invitations inv
+                          WHERE inv.posting_id = jp.id AND inv.user_id = $2
+                      )
                   )
                 ORDER BY jp.created_at DESC
                 """,
@@ -203,16 +210,17 @@ async def get_job_posting(
             raise HTTPException(status_code=404, detail="Job posting not found")
 
         is_owner_mod = role in ("owner", "moderator")
+        is_open_to_all = bool(posting["open_to_all"])
 
         # Check invitation for non-owner/mod
         invitation = await conn.fetchrow(
             "SELECT * FROM channel_job_invitations WHERE posting_id = $1 AND user_id = $2",
             posting_id, current_user.id,
         )
-        if not is_owner_mod and not invitation:
+        if not is_owner_mod and not invitation and not is_open_to_all:
             raise HTTPException(status_code=403, detail="You do not have access to this posting")
 
-        # Mark invitation as viewed
+        # Mark invitation as viewed (only applies to explicit targeted invites)
         if invitation and invitation["viewed_at"] is None:
             await conn.execute(
                 "UPDATE channel_job_invitations SET viewed_at = NOW() WHERE id = $1",
@@ -228,6 +236,12 @@ async def get_job_posting(
         result = dict(posting)
         result["my_invitation"] = dict(invitation) if invitation else None
         result["my_application"] = dict(application) if application else None
+        result["i_can_apply"] = bool(
+            posting["status"] == "active"
+            and not is_owner_mod
+            and (invitation is not None or is_open_to_all)
+            and application is None
+        )
 
     return result
 
@@ -468,6 +482,7 @@ async def list_applicants(
             f"""
             SELECT app.id, app.applicant_id, app.status, app.cover_letter,
                    app.reviewer_notes, app.submitted_at, app.reviewed_at,
+                   app.resume_snapshot,
                    u.email AS applicant_email,
                    {_USER_NAME_EXPR} AS applicant_name
             FROM channel_job_applications app
@@ -476,12 +491,23 @@ async def list_applicants(
             LEFT JOIN employees e ON e.user_id = u.id
             LEFT JOIN admins a ON a.user_id = u.id
             WHERE app.posting_id = $1
-            ORDER BY app.created_at DESC
+            ORDER BY app.submitted_at DESC
             """,
             posting_id,
         )
 
-    return [dict(r) for r in rows]
+    out = []
+    for r in rows:
+        d = dict(r)
+        # Normalize snapshot JSONB into a dict for the client
+        snap = d.get("resume_snapshot")
+        if isinstance(snap, str):
+            try:
+                d["resume_snapshot"] = json.loads(snap)
+            except json.JSONDecodeError:
+                d["resume_snapshot"] = None
+        out.append(d)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -495,14 +521,17 @@ async def apply_to_posting(
     body: SubmitApplicationRequest,
     current_user: CurrentUser = Depends(get_current_user),
 ):
-    """Apply to a job posting. Must have an invitation and posting must be active."""
+    """Apply to a job posting. Allowed if explicitly invited OR the posting
+    is open to all members. The applicant must have a profile resume —
+    we snapshot it into channel_job_applications.resume_snapshot.
+    """
     async with get_connection() as conn:
         role = await _get_member_role(conn, channel_id, current_user.id)
         if role is None:
             raise HTTPException(status_code=403, detail="You are not a member of this channel")
 
         posting = await conn.fetchrow(
-            "SELECT id, status, posted_by, title FROM channel_job_postings WHERE id = $1 AND channel_id = $2",
+            "SELECT id, status, posted_by, title, open_to_all FROM channel_job_postings WHERE id = $1 AND channel_id = $2",
             posting_id, channel_id,
         )
         if not posting:
@@ -510,12 +539,12 @@ async def apply_to_posting(
         if posting["status"] != "active":
             raise HTTPException(status_code=400, detail="This job posting is not currently accepting applications")
 
-        # Verify invitation exists
+        # Verify invitation exists OR posting is open to all
         invitation = await conn.fetchval(
             "SELECT id FROM channel_job_invitations WHERE posting_id = $1 AND user_id = $2",
             posting_id, current_user.id,
         )
-        if not invitation:
+        if not invitation and not posting["open_to_all"]:
             raise HTTPException(status_code=403, detail="You have not been invited to this posting")
 
         # Check for existing application
@@ -526,13 +555,34 @@ async def apply_to_posting(
         if existing:
             raise HTTPException(status_code=409, detail="You have already applied to this posting")
 
+        # Pull the applicant's profile resume — this is required to apply.
+        resume_row = await conn.fetchrow(
+            "SELECT parsed_data FROM user_resumes WHERE user_id = $1",
+            current_user.id,
+        )
+        if not resume_row:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "no_resume",
+                    "message": "Upload your resume to your profile to apply.",
+                },
+            )
+        snapshot = resume_row["parsed_data"]
+        if isinstance(snapshot, str):
+            try:
+                snapshot = json.loads(snapshot)
+            except json.JSONDecodeError:
+                snapshot = {}
+
         row = await conn.fetchrow(
             """
-            INSERT INTO channel_job_applications (posting_id, applicant_id, cover_letter, status)
-            VALUES ($1, $2, $3, 'submitted')
+            INSERT INTO channel_job_applications
+                (posting_id, applicant_id, cover_letter, status, resume_snapshot)
+            VALUES ($1, $2, $3, 'submitted', $4::jsonb)
             RETURNING *
             """,
-            posting_id, current_user.id, body.cover_letter,
+            posting_id, current_user.id, body.cover_letter, json.dumps(snapshot),
         )
 
         # Send notification to the posting creator
@@ -658,6 +708,75 @@ async def update_application(
             pass
 
     return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# NEW: GET /{channel_id}/open-postings — channel-wide postings for banner
+# ---------------------------------------------------------------------------
+
+@router.get("/{channel_id}/open-postings")
+async def list_open_postings(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Return active postings in this channel that are open to all members.
+
+    Used by the channel view to render a 'open role' banner without needing
+    a URL parameter. Only members of the channel see anything.
+    """
+    async with get_connection() as conn:
+        role = await _get_member_role(conn, channel_id, current_user.id)
+        if role is None:
+            raise HTTPException(status_code=403, detail="You are not a member of this channel")
+
+        rows = await conn.fetch(
+            """
+            SELECT jp.id, jp.title, jp.location, jp.compensation_summary,
+                   jp.created_at,
+                   EXISTS(
+                       SELECT 1 FROM channel_job_applications app
+                       WHERE app.posting_id = jp.id AND app.applicant_id = $2
+                   ) AS already_applied
+            FROM channel_job_postings jp
+            WHERE jp.channel_id = $1
+              AND jp.status = 'active'
+              AND jp.open_to_all = true
+              AND (jp.paid_through IS NULL OR jp.paid_through > NOW())
+            ORDER BY jp.created_at DESC
+            """,
+            channel_id, current_user.id,
+        )
+
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# NEW: GET /{channel_id}/job-posting-fee — channel-owned posting fee
+# ---------------------------------------------------------------------------
+
+@router.get("/{channel_id}/job-posting-fee")
+async def get_job_posting_fee(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Return the channel's job posting fee so the create modal can show
+    recruiters what a new posting will cost. NULL means the platform
+    default is used.
+    """
+    async with get_connection() as conn:
+        role = await _get_member_role(conn, channel_id, current_user.id)
+        if role not in ("owner", "moderator"):
+            raise HTTPException(status_code=403, detail="Only channel owners and moderators can view the job posting fee")
+
+        fee_cents = await conn.fetchval(
+            "SELECT job_posting_fee_cents FROM channels WHERE id = $1",
+            channel_id,
+        )
+
+    return {
+        "fee_cents": fee_cents,
+        "default_used": fee_cents is None,
+    }
 
 
 # ---------------------------------------------------------------------------

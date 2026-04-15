@@ -14,6 +14,9 @@ import TipModal from '../../components/channels/TipModal'
 import JobPostingsPanel from '../../components/channels/JobPostingsPanel'
 import JobPostingDetail from '../../components/channels/JobPostingDetail'
 import JobInviteBanner from '../../components/channels/JobInviteBanner'
+import ChannelOpenRoleBanner from '../../components/channels/ChannelOpenRoleBanner'
+import { listOpenPostings } from '../../api/channelJobPostings'
+import type { OpenPostingSummary } from '../../api/channelJobPostings'
 import VoiceCallBar from '../../components/channels/VoiceCallBar'
 import { useVoiceCall } from '../../hooks/useVoiceCall'
 
@@ -43,6 +46,7 @@ export default function ChannelView() {
   const [showTip, setShowTip] = useState(false)
   const [showJobPostings, setShowJobPostings] = useState(false)
   const [activePostingId, setActivePostingId] = useState<string | null>(null)
+  const [openPostings, setOpenPostings] = useState<OpenPostingSummary[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -152,6 +156,20 @@ export default function ChannelView() {
       // Do NOT call disconnect() or leaveRoom() — the shared socket persists.
     }
   }, [channelId, isMember, userId, scrollToBottom])
+
+  // Fetch channel-wide (open-to-all) job postings so the banner can render
+  // without a URL param. Refetches whenever the user opens / comes back to
+  // the channel, and when they dismiss the detail view (in case they just
+  // applied).
+  useEffect(() => {
+    if (!channelId || !isMember) {
+      setOpenPostings([])
+      return
+    }
+    listOpenPostings(channelId)
+      .then(setOpenPostings)
+      .catch(() => setOpenPostings([]))
+  }, [channelId, isMember, activePostingId])
 
   async function handleSend() {
     const content = input.trim()
@@ -443,6 +461,13 @@ export default function ChannelView() {
           channelId={channelId}
           postingId={postingParam}
           onView={() => setActivePostingId(postingParam)}
+        />
+      )}
+
+      {openPostings.length > 0 && !activePostingId && (
+        <ChannelOpenRoleBanner
+          postings={openPostings}
+          onView={(id) => setActivePostingId(id)}
         />
       )}
 

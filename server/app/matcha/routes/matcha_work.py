@@ -2098,14 +2098,12 @@ async def upload_thread_resume(
 
     async def event_stream():
         try:
-            from google import genai as _genai
-            from google.genai import types as _types
+            from ..services.resume_parser import (
+                extract_resume_text,
+                parse_resume_text,
+                ResumeParseError,
+            )
 
-            api_key = os.getenv("GEMINI_API_KEY") or get_settings().gemini_api_key
-            client = _genai.Client(api_key=api_key)
-            extract_model = "gemini-3.1-flash-lite-preview"
-
-            parser = ERDocumentParser()
             existing_candidates = list((thread.get("current_state") or {}).get("candidates") or [])
             new_candidates = []
             errors = []
@@ -2113,17 +2111,14 @@ async def upload_thread_resume(
             for idx, (fname, raw, ct) in enumerate(parsed_files, 1):
                 yield _sse_data({"type": "status", "message": f"Extracting text from {fname} ({idx}/{file_count})..."})
 
-                # Extract text
+                # Extract text via the shared helper
                 try:
-                    text, _ = parser.extract_text_from_bytes(raw, fname)
+                    text = await extract_resume_text(raw, fname)
                 except Exception:
                     errors.append(fname)
                     continue
-                if not text or len(text.strip()) < 50:
-                    errors.append(fname)
-                    continue
 
-                # Upload to S3
+                # Upload raw file to S3 (best-effort)
                 resume_url = None
                 try:
                     resume_url = await get_storage().upload_file(
@@ -2134,27 +2129,11 @@ async def upload_thread_resume(
                 except Exception:
                     pass
 
-                # Structured extraction via lightweight model
+                # Structured extraction via shared helper
                 yield _sse_data({"type": "status", "message": f"Analyzing {fname} ({idx}/{file_count})..."})
-                capped = text[:RESUME_TEXT_CAP]
                 candidate_id = os.urandom(8).hex()
-
                 try:
-                    resp = await asyncio.wait_for(
-                        asyncio.to_thread(
-                            lambda t=capped: client.models.generate_content(
-                                model=extract_model,
-                                contents=[_types.Content(role="user", parts=[_types.Part.from_text(text=RESUME_EXTRACT_PROMPT % t)])],
-                                config=_types.GenerateContentConfig(temperature=0.1),
-                            )
-                        ),
-                        timeout=60,
-                    )
-                    raw_json = (resp.text or "").strip()
-                    # Strip markdown code fences if present
-                    if raw_json.startswith("```"):
-                        raw_json = raw_json.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-                    data = json.loads(raw_json)
+                    data = await parse_resume_text(text)
                     candidate = {
                         "id": candidate_id,
                         "filename": fname,
@@ -2173,7 +2152,7 @@ async def upload_thread_resume(
                         "flags": data.get("flags"),
                         "status": "analyzed",
                     }
-                except Exception as e:
+                except ResumeParseError as e:
                     logger.warning("AI extraction failed for %s: %s", fname, e)
                     candidate = {
                         "id": candidate_id,

@@ -1,6 +1,6 @@
-import { useState } from 'react'
-import { X, Loader2 } from 'lucide-react'
-import { createJobPosting, createJobPostingCheckout } from '../../api/channelJobPostings'
+import { useEffect, useState } from 'react'
+import { X, Loader2, Users, UserCheck } from 'lucide-react'
+import { createJobPosting, createJobPostingCheckout, getJobPostingFee } from '../../api/channelJobPostings'
 import type { JobPostingSummary } from '../../api/channelJobPostings'
 
 interface Props {
@@ -10,14 +10,29 @@ interface Props {
   onCreated: (posting: JobPostingSummary) => void
 }
 
+type Targeting = 'open_to_all' | 'targeted'
+
 export default function CreateJobPostingModal({ channelId, isOpen, onClose, onCreated }: Props) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [requirements, setRequirements] = useState('')
   const [compensationSummary, setCompensationSummary] = useState('')
   const [location, setLocation] = useState('')
+  const [targeting, setTargeting] = useState<Targeting>('open_to_all')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+  const [feeCents, setFeeCents] = useState<number | null>(null)
+  const [feeIsDefault, setFeeIsDefault] = useState(true)
+
+  useEffect(() => {
+    if (!isOpen) return
+    getJobPostingFee(channelId)
+      .then((res) => {
+        setFeeCents(res.fee_cents)
+        setFeeIsDefault(res.default_used)
+      })
+      .catch(() => {})
+  }, [isOpen, channelId])
 
   if (!isOpen) return null
 
@@ -33,6 +48,7 @@ export default function CreateJobPostingModal({ channelId, isOpen, onClose, onCr
         requirements: requirements.trim() || undefined,
         compensation_summary: compensationSummary.trim() || undefined,
         location: location.trim() || undefined,
+        open_to_all: targeting === 'open_to_all',
       })
       onCreated(posting)
       const { checkout_url } = await createJobPostingCheckout(channelId, posting.id)
@@ -42,6 +58,13 @@ export default function CreateJobPostingModal({ channelId, isOpen, onClose, onCr
       setSubmitting(false)
     }
   }
+
+  const feeLabel =
+    feeCents == null
+      ? feeIsDefault
+        ? 'Standard monthly subscription'
+        : 'Channel fee not set'
+      : `$${(feeCents / 100).toFixed(2)} / month`
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
@@ -117,6 +140,46 @@ export default function CreateJobPostingModal({ channelId, isOpen, onClose, onCr
                 className="w-full px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-white placeholder:text-zinc-500 focus:outline-none focus:border-emerald-600"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-zinc-400 mb-1.5">Who can apply?</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setTargeting('open_to_all')}
+                className={`flex items-start gap-2 rounded-lg border p-3 text-left transition-colors ${
+                  targeting === 'open_to_all'
+                    ? 'border-emerald-600 bg-emerald-950/30'
+                    : 'border-zinc-700 hover:border-zinc-600 bg-zinc-800/50'
+                }`}
+              >
+                <Users size={16} className={targeting === 'open_to_all' ? 'text-emerald-400 mt-0.5' : 'text-zinc-500 mt-0.5'} />
+                <div>
+                  <div className="text-xs font-medium text-zinc-100">Open to all</div>
+                  <div className="text-[11px] text-zinc-500 mt-0.5">Every member sees a banner and can apply.</div>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => setTargeting('targeted')}
+                className={`flex items-start gap-2 rounded-lg border p-3 text-left transition-colors ${
+                  targeting === 'targeted'
+                    ? 'border-emerald-600 bg-emerald-950/30'
+                    : 'border-zinc-700 hover:border-zinc-600 bg-zinc-800/50'
+                }`}
+              >
+                <UserCheck size={16} className={targeting === 'targeted' ? 'text-emerald-400 mt-0.5' : 'text-zinc-500 mt-0.5'} />
+                <div>
+                  <div className="text-xs font-medium text-zinc-100">Invite specific</div>
+                  <div className="text-[11px] text-zinc-500 mt-0.5">Pick members on the detail page after creating.</div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/50 px-3 py-2 text-[11px] text-zinc-400">
+            Posting fee: <span className="text-zinc-200 font-medium">{feeLabel}</span>
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-2">
