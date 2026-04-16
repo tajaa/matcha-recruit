@@ -194,6 +194,76 @@ def _normalize_json_list(raw_value: Any) -> list:
     return []
 
 
+async def _collect_raw_evidence_context(conn, case_id: UUID) -> str:
+    """Pull uploaded document text + investigation notes + intake guidance
+    rationale so the outcome analyzer has the raw source material even when
+    prior analysis phases (timeline / discrepancies / policy_check) haven't
+    been run.
+
+    Without this, a case with 5 completed documents and detailed guidance
+    notes shows up to the LLM as "no evidence" because the analysis
+    summaries are empty. The LLM then refuses to recommend action.
+    """
+    parts: list[str] = []
+
+    # Uploaded evidence documents (PII-scrubbed if available, else original)
+    doc_rows = await conn.fetch(
+        """
+        SELECT filename, document_type,
+               COALESCE(scrubbed_text, original_text) AS text
+        FROM er_case_documents
+        WHERE case_id = $1
+          AND processing_status = 'completed'
+          AND COALESCE(scrubbed_text, original_text) IS NOT NULL
+        ORDER BY created_at
+        """,
+        case_id,
+    )
+    if doc_rows:
+        parts.append("UPLOADED EVIDENCE DOCUMENTS (raw extracted text):")
+        total_chars = 0
+        per_doc_cap = 3000
+        total_cap = 15000
+        for d in doc_rows:
+            text = (d["text"] or "").strip()
+            if not text:
+                continue
+            excerpt = text[:per_doc_cap]
+            remaining = max(0, total_cap - total_chars)
+            if remaining <= 0:
+                parts.append(f"- {d['filename']}: [omitted, prompt size cap reached]")
+                continue
+            if len(excerpt) > remaining:
+                excerpt = excerpt[:remaining]
+            total_chars += len(excerpt)
+            parts.append(
+                f"--- {d['filename']} ({d['document_type'] or 'other'}) ---\n{excerpt}"
+            )
+
+    # Investigation guidance notes (auto_guidance + user-authored) — these
+    # often contain the narrative of what happened when the description
+    # field is empty.
+    note_rows = await conn.fetch(
+        """
+        SELECT note_type, content
+        FROM er_case_notes
+        WHERE case_id = $1 AND content IS NOT NULL
+        ORDER BY created_at
+        LIMIT 20
+        """,
+        case_id,
+    )
+    if note_rows:
+        parts.append("\nINVESTIGATION / GUIDANCE NOTES:")
+        for n in note_rows:
+            text = (n["content"] or "").strip()
+            if not text:
+                continue
+            parts.append(f"- [{n['note_type']}] {text[:1500]}")
+
+    return "\n".join(parts)
+
+
 async def _fetch_company_policy_context(conn, company_id: UUID) -> str:
     """Fetch active policies + handbook sections as fallback policy context for outcome analysis."""
     parts: list[str] = []
@@ -3001,7 +3071,18 @@ async def generate_outcome_analysis_stream(
             analysis_summary_parts.append(f"Timeline: {timeline_data['timeline_summary']}")
         if disc_data.get("summary"):
             analysis_summary_parts.append(f"Discrepancies: {disc_data['summary']}")
-        analysis_summary = "\n".join(analysis_summary_parts) or "No analysis summaries available."
+
+        # Always pull the raw evidence (uploaded documents + investigation
+        # notes) and fold it into the analysis summary. Without this the
+        # outcome analyzer only sees pre-computed summaries; a case that
+        # has documents and notes but no timeline/discrepancies analysis
+        # yet looks empty to the LLM and gets a "no action" recommendation.
+        async with get_connection() as ev_conn:
+            raw_evidence_ctx = await _collect_raw_evidence_context(ev_conn, case_id)
+        if raw_evidence_ctx:
+            analysis_summary_parts.append(raw_evidence_ctx)
+
+        analysis_summary = "\n\n".join(analysis_summary_parts) or "No analysis summaries available."
 
         policy_findings = policy_data.get("summary", "")
 
@@ -3235,7 +3316,16 @@ async def generate_outcome_analysis(
         summary_parts.append(f"Timeline: {timeline_data['timeline_summary']}")
     if disc_data.get("summary"):
         summary_parts.append(f"Discrepancies: {disc_data['summary']}")
-    analysis_summary = "\n".join(summary_parts) or "No analysis summaries available."
+
+    # Same rationale as the streaming handler: always feed raw documents
+    # and investigation notes into the outcome analysis so the LLM has the
+    # actual source material even when timeline/policy_check haven't run.
+    async with get_connection() as ev_conn:
+        raw_evidence_ctx = await _collect_raw_evidence_context(ev_conn, case_id)
+    if raw_evidence_ctx:
+        summary_parts.append(raw_evidence_ctx)
+
+    analysis_summary = "\n\n".join(summary_parts) or "No analysis summaries available."
 
     policy_findings = policy_data.get("summary", "")
 
