@@ -3072,15 +3072,22 @@ async def generate_outcome_analysis_stream(
         if disc_data.get("summary"):
             analysis_summary_parts.append(f"Discrepancies: {disc_data['summary']}")
 
-        # Always pull the raw evidence (uploaded documents + investigation
-        # notes) and fold it into the analysis summary. Without this the
-        # outcome analyzer only sees pre-computed summaries; a case that
-        # has documents and notes but no timeline/discrepancies analysis
-        # yet looks empty to the LLM and gets a "no action" recommendation.
-        async with get_connection() as ev_conn:
-            raw_evidence_ctx = await _collect_raw_evidence_context(ev_conn, case_id)
-        if raw_evidence_ctx:
-            analysis_summary_parts.append(raw_evidence_ctx)
+        # Fallback: when no pre-computed analysis exists, pull raw documents
+        # and investigation notes directly so the LLM still has source
+        # material. Mature cases with timeline/discrepancy summaries don't
+        # need this — the summaries already distill the docs.
+        if not analysis_summary_parts:
+            try:
+                async with get_connection() as ev_conn:
+                    raw_evidence_ctx = await _collect_raw_evidence_context(ev_conn, case_id)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to collect raw evidence context for case %s: %s",
+                    case_id, exc,
+                )
+                raw_evidence_ctx = ""
+            if raw_evidence_ctx:
+                analysis_summary_parts.append(raw_evidence_ctx)
 
         analysis_summary = "\n\n".join(analysis_summary_parts) or "No analysis summaries available."
 
@@ -3317,13 +3324,22 @@ async def generate_outcome_analysis(
     if disc_data.get("summary"):
         summary_parts.append(f"Discrepancies: {disc_data['summary']}")
 
-    # Same rationale as the streaming handler: always feed raw documents
-    # and investigation notes into the outcome analysis so the LLM has the
-    # actual source material even when timeline/policy_check haven't run.
-    async with get_connection() as ev_conn:
-        raw_evidence_ctx = await _collect_raw_evidence_context(ev_conn, case_id)
-    if raw_evidence_ctx:
-        summary_parts.append(raw_evidence_ctx)
+    # Fallback: when no pre-computed analysis exists, pull raw documents
+    # and investigation notes directly so the LLM still has source
+    # material. Mature cases with timeline/discrepancy summaries don't
+    # need this — the summaries already distill the docs.
+    if not summary_parts:
+        try:
+            async with get_connection() as ev_conn:
+                raw_evidence_ctx = await _collect_raw_evidence_context(ev_conn, case_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to collect raw evidence context for case %s: %s",
+                case_id, exc,
+            )
+            raw_evidence_ctx = ""
+        if raw_evidence_ctx:
+            summary_parts.append(raw_evidence_ctx)
 
     analysis_summary = "\n\n".join(summary_parts) or "No analysis summaries available."
 
