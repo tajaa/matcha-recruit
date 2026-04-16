@@ -5,18 +5,21 @@ import UniformTypeIdentifiers
 struct RecruitingPipelineView: View {
     @Bindable var viewModel: ProjectDetailViewModel
 
-    @State private var tab: Tab = .posting
+    @State private var tab: Tab = .status
     @State private var searchText = ""
     @State private var sortField: SortField = .match
     @State private var selectedCandidateIds: Set<String> = []
     @State private var showSendSheet = false
     @State private var isUploading = false
     @State private var isSyncing = false
+    @State private var isAnalyzing = false
     @State private var postingDraft: String = ""
     @State private var expandedCandidateId: String?
+    @State private var rejectTarget: MWResumeCandidate?
+    @State private var autoSyncTask: Task<Void, Never>?
 
     enum Tab: String, CaseIterable, Identifiable {
-        case posting, candidates, shortlist
+        case status, posting, candidates, interviews, shortlist
         var id: String { rawValue }
     }
 
@@ -33,27 +36,39 @@ struct RecruitingPipelineView: View {
     }
 
     private var recruiting: MWRecruitingData { viewModel.recruitingData }
+    private var isFinalized: Bool { recruiting.posting.finalized ?? false }
+    private var analyzedCount: Int { recruiting.candidates.filter { $0.matchScore != nil }.count }
+    private var interviewSentCount: Int { recruiting.candidates.filter { $0.interviewId != nil }.count }
+    private var interviewedCount: Int { recruiting.candidates.filter { $0.interviewStatus == "completed" || $0.interviewStatus == "interview_completed" }.count }
 
     var body: some View {
         VStack(spacing: 0) {
+            progressStrip
+            guidanceBanner
             tabBar
             Divider()
             switch tab {
+            case .status:
+                statusTab
             case .posting:
                 postingTab
             case .candidates:
-                candidatesTab(shortlistOnly: false)
+                candidatesTab(filter: .all)
+            case .interviews:
+                candidatesTab(filter: .interviews)
             case .shortlist:
-                candidatesTab(shortlistOnly: true)
+                candidatesTab(filter: .shortlist)
             }
         }
         .background(.ultraThinMaterial)
         .onAppear {
             postingDraft = recruiting.posting.content ?? ""
+            startAutoSync()
         }
         .onChange(of: viewModel.project?.id) {
             postingDraft = recruiting.posting.content ?? ""
         }
+        .onDisappear { autoSyncTask?.cancel() }
         .sheet(isPresented: $showSendSheet) {
             SendInterviewSheet(
                 candidateCount: selectedCandidateIds.count,
@@ -70,29 +85,152 @@ struct RecruitingPipelineView: View {
                 }
             )
         }
+        .sheet(item: $rejectTarget) { candidate in
+            RejectCandidateSheet(candidate: candidate) { reason, sendEmail in
+                Task {
+                    await viewModel.rejectCandidate(candidateId: candidate.id, reason: reason, sendEmail: sendEmail)
+                }
+            }
+        }
+    }
+
+    // MARK: - Auto-sync
+
+    private func startAutoSync() {
+        let hasPending = recruiting.candidates.contains { $0.interviewId != nil && $0.interviewStatus != "completed" && $0.interviewStatus != "interview_completed" }
+        guard hasPending else { return }
+        autoSyncTask = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                await viewModel.syncProjectInterviews()
+            }
+        }
+    }
+
+    // MARK: - Progress Strip
+
+    private var progressStrip: some View {
+        let stages: [(label: String, count: Int?, done: Bool, tab: Tab)] = [
+            ("Posting", (viewModel.project?.sections?.count ?? 0) > 0 ? viewModel.project?.sections?.count : nil, isFinalized, .posting),
+            ("Candidates", recruiting.candidates.isEmpty ? nil : recruiting.candidates.count, !recruiting.candidates.isEmpty, .candidates),
+            ("Analyzed", analyzedCount == 0 ? nil : analyzedCount, analyzedCount > 0, .candidates),
+            ("Interviews", interviewSentCount == 0 ? nil : interviewSentCount, interviewSentCount > 0, .interviews),
+            ("Completed", interviewedCount == 0 ? nil : interviewedCount, interviewedCount > 0, .interviews),
+        ]
+        let activeIdx = stages.firstIndex { !$0.done } ?? stages.count
+
+        return HStack(spacing: 0) {
+            ForEach(Array(stages.enumerated()), id: \.offset) { i, stage in
+                HStack(spacing: 0) {
+                    Button { tab = stage.tab } label: {
+                        HStack(spacing: 5) {
+                            ZStack {
+                                Circle()
+                                    .fill(stage.done ? Color.matcha500 : i == activeIdx ? Color.matcha500 : Color.clear)
+                                    .frame(width: 18, height: 18)
+                                Circle()
+                                    .stroke(stage.done ? Color.matcha500 : i == activeIdx ? Color.matcha500 : Color.white.opacity(0.25), lineWidth: 1.5)
+                                    .frame(width: 18, height: 18)
+                                if stage.done {
+                                    Image(systemName: "checkmark")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(.white)
+                                } else {
+                                    Text("\(i + 1)")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundColor(i == activeIdx ? .white : .white.opacity(0.35))
+                                }
+                            }
+                            VStack(alignment: .leading, spacing: 0) {
+                                Text(stage.label)
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(stage.done ? Color.matcha500 : i == activeIdx ? .white : .white.opacity(0.45))
+                                if let count = stage.count {
+                                    Text("(\(count))")
+                                        .font(.system(size: 9))
+                                        .foregroundColor(.white.opacity(0.3))
+                                }
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    if i < stages.count - 1 {
+                        Rectangle()
+                            .fill(stage.done ? Color.matcha500.opacity(0.5) : Color.white.opacity(0.1))
+                            .frame(height: 1)
+                            .frame(maxWidth: .infinity)
+                            .padding(.horizontal, 4)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.2))
+    }
+
+    // MARK: - Guidance Banner
+
+    @ViewBuilder
+    private var guidanceBanner: some View {
+        let text: String? = {
+            if !isFinalized && (viewModel.project?.sections ?? []).isEmpty {
+                return "Describe the role in the chat to generate a job posting."
+            } else if !isFinalized && !(viewModel.project?.sections ?? []).isEmpty {
+                return "Review your posting, then finalize it."
+            } else if isFinalized && recruiting.candidates.isEmpty {
+                return "Posting finalized. Upload resumes to add candidates."
+            } else if !recruiting.candidates.isEmpty && analyzedCount == 0 {
+                return "Candidates uploaded. Click \"Analyze\" to rank them by match score."
+            } else if analyzedCount > 0 && interviewSentCount == 0 {
+                return "Candidates ranked. Select candidates and send voice interviews."
+            } else if interviewSentCount > 0 && interviewedCount == 0 {
+                return "Interviews sent. Waiting for candidates to complete their sessions."
+            } else if interviewedCount > 0 && recruiting.shortlistIds.isEmpty {
+                return "Interviews complete. Review scores and star your top picks."
+            } else if !recruiting.shortlistIds.isEmpty {
+                return "Shortlist ready. Generate offer letters for your top candidates."
+            }
+            return nil
+        }()
+
+        if let text {
+            HStack(spacing: 6) {
+                Text("→").font(.system(size: 12)).foregroundColor(Color.matcha500)
+                Text(text).font(.system(size: 10, weight: .medium)).foregroundColor(Color.matcha500)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.matcha500.opacity(0.08))
+        }
     }
 
     // MARK: - Tab bar
 
     private var tabBar: some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 12) {
             ForEach(Tab.allCases) { t in
-                Button {
-                    tab = t
-                } label: {
-                    VStack(spacing: 3) {
-                        HStack(spacing: 4) {
-                            Text(t.rawValue)
+                let count: Int? = {
+                    switch t {
+                    case .status: return nil
+                    case .posting: return viewModel.project?.sections?.count
+                    case .candidates: return recruiting.candidates.count
+                    case .interviews: return interviewSentCount
+                    case .shortlist: return recruiting.shortlistIds.count
+                    }
+                }()
+                Button { tab = t } label: {
+                    VStack(spacing: 2) {
+                        HStack(spacing: 3) {
+                            Text(t.rawValue.capitalized)
                                 .font(.system(size: 11, weight: tab == t ? .medium : .regular))
                                 .foregroundColor(tab == t ? Color.matcha500 : .white.opacity(0.5))
-                            if t == .candidates {
-                                Text("(\(recruiting.candidates.count))")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.white.opacity(0.35))
-                            } else if t == .shortlist {
-                                Text("(\(recruiting.shortlistIds.count))")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.white.opacity(0.35))
+                            if let count, count > 0 {
+                                Text("(\(count))")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.white.opacity(0.3))
                             }
                         }
                         Rectangle()
@@ -103,25 +241,102 @@ struct RecruitingPipelineView: View {
                 .buttonStyle(.plain)
             }
             Spacer()
-            if tab != .posting {
-                Button {
-                    Task {
-                        isSyncing = true
-                        await viewModel.syncProjectInterviews()
-                        isSyncing = false
+            if tab != .posting && tab != .status {
+                HStack(spacing: 6) {
+                    if !recruiting.candidates.isEmpty && analyzedCount < recruiting.candidates.count {
+                        Button {
+                            Task {
+                                isAnalyzing = true
+                                await viewModel.analyzeProjectCandidates()
+                                isAnalyzing = false
+                            }
+                        } label: {
+                            Text(isAnalyzing ? "analyzing…" : "analyze")
+                                .font(.system(size: 10))
+                                .foregroundColor(Color.matcha500)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isAnalyzing)
                     }
-                } label: {
-                    Text(isSyncing ? "syncing…" : "sync")
-                        .font(.system(size: 10))
-                        .foregroundColor(.white.opacity(0.5))
+                    Button {
+                        Task {
+                            isSyncing = true
+                            await viewModel.syncProjectInterviews()
+                            isSyncing = false
+                        }
+                    } label: {
+                        Text(isSyncing ? "syncing…" : "sync")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.5))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSyncing)
                 }
-                .buttonStyle(.plain)
-                .disabled(isSyncing)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
         .background(.regularMaterial)
+    }
+
+    // MARK: - Status tab
+
+    private var statusTab: some View {
+        let created = viewModel.project?.createdAt.flatMap { ISO8601DateFormatter().date(from: $0) } ?? Date()
+        let daysOpen = max(1, Calendar.current.dateComponents([.day], from: created, to: Date()).day ?? 1)
+
+        return ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                // Overview
+                HStack(spacing: 20) {
+                    statusStat("Days open", "\(daysOpen)")
+                    statusStat("Candidates", "\(recruiting.candidates.count)")
+                    statusStat("Analyzed", "\(analyzedCount)")
+                    statusStat("Interviewed", "\(interviewedCount)")
+                    statusStat("Shortlisted", "\(recruiting.shortlistIds.count)")
+                }
+
+                Divider().opacity(0.3)
+
+                // Milestones
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("MILESTONES")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.35))
+                    milestone("Job posting created", done: !(viewModel.project?.sections ?? []).isEmpty)
+                    milestone("Posting finalized", done: isFinalized)
+                    milestone("Resumes uploaded", done: !recruiting.candidates.isEmpty)
+                    milestone("Candidates analyzed", done: analyzedCount > 0)
+                    milestone("Interviews sent", done: interviewSentCount > 0)
+                    milestone("Interviews completed", done: interviewedCount > 0)
+                    milestone("Shortlist created", done: !recruiting.shortlistIds.isEmpty)
+                    milestone("Offer sent", done: false)
+                }
+            }
+            .padding(16)
+        }
+    }
+
+    private func statusStat(_ label: String, _ value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(.white)
+            Text(label)
+                .font(.system(size: 10))
+                .foregroundColor(.white.opacity(0.45))
+        }
+    }
+
+    private func milestone(_ label: String, done: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 12))
+                .foregroundColor(done ? Color.matcha500 : .white.opacity(0.2))
+            Text(label)
+                .font(.system(size: 12))
+                .foregroundColor(done ? .white.opacity(0.8) : .white.opacity(0.4))
+        }
     }
 
     // MARK: - Posting tab
@@ -129,37 +344,31 @@ struct RecruitingPipelineView: View {
     private var postingTab: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
-                Text(recruiting.posting.finalized == true ? "● finalized" : "○ draft")
+                Text(isFinalized ? "● finalized" : "○ draft")
                     .font(.system(size: 10))
-                    .foregroundColor(recruiting.posting.finalized == true ? Color.matcha500 : .white.opacity(0.5))
+                    .foregroundColor(isFinalized ? Color.matcha500 : .white.opacity(0.5))
                 Spacer()
                 Button {
                     Task {
                         await viewModel.savePosting(
                             title: recruiting.posting.title,
                             content: postingDraft,
-                            finalized: !(recruiting.posting.finalized ?? false)
+                            finalized: !isFinalized
                         )
                     }
                 } label: {
-                    Text(recruiting.posting.finalized == true ? "unfinalize" : "finalize")
+                    Text(isFinalized ? "unfinalize" : "finalize")
                         .font(.system(size: 11))
                         .foregroundColor(Color.matcha500)
                 }
                 .buttonStyle(.plain)
-                Button {
-                    pickResumes()
-                } label: {
+                Button { pickResumes() } label: {
                     Text(isUploading ? "uploading…" : "+ upload resumes")
                         .font(.system(size: 11))
-                        .foregroundColor(
-                            recruiting.posting.finalized == true && !isUploading
-                                ? Color.matcha500
-                                : .white.opacity(0.25)
-                        )
+                        .foregroundColor(isFinalized && !isUploading ? Color.matcha500 : .white.opacity(0.25))
                 }
                 .buttonStyle(.plain)
-                .disabled(recruiting.posting.finalized != true || isUploading)
+                .disabled(!isFinalized || isUploading)
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
@@ -172,20 +381,13 @@ struct RecruitingPipelineView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(Color.black.opacity(0.15))
-                    .onChange(of: postingDraft) {
-                        // Debounced save could go here; for MVP push immediately
-                    }
-                    .onSubmit {
-                        Task { await savePosting() }
-                    }
+                    .onSubmit { Task { await savePosting() } }
             }
             .padding(.horizontal, 16)
 
             HStack {
                 Spacer()
-                Button {
-                    Task { await savePosting() }
-                } label: {
+                Button { Task { await savePosting() } } label: {
                     Text("save posting")
                         .font(.system(size: 11))
                         .foregroundColor(Color.matcha500)
@@ -201,27 +403,29 @@ struct RecruitingPipelineView: View {
         await viewModel.savePosting(
             title: recruiting.posting.title,
             content: postingDraft,
-            finalized: recruiting.posting.finalized ?? false
+            finalized: isFinalized
         )
     }
 
-    // MARK: - Candidates / shortlist tabs
+    // MARK: - Candidates / Interviews / Shortlist
 
-    private func candidatesTab(shortlistOnly: Bool) -> some View {
-        let base = shortlistOnly
-            ? recruiting.candidates.filter { recruiting.shortlistIds.contains($0.id) }
-            : recruiting.candidates
+    enum CandidateFilter { case all, interviews, shortlist }
+
+    private func candidatesTab(filter: CandidateFilter) -> some View {
+        let base: [MWResumeCandidate] = {
+            switch filter {
+            case .all: return recruiting.candidates
+            case .interviews: return recruiting.candidates.filter { $0.interviewId != nil }
+            case .shortlist: return recruiting.candidates.filter { recruiting.shortlistIds.contains($0.id) }
+            }
+        }()
         let filtered = filterAndSort(candidates: base)
 
         return VStack(spacing: 0) {
-            // Search + sort bar
             HStack(spacing: 10) {
                 HStack(spacing: 6) {
-                    Text("›")
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.35))
-                    TextField("",
-                              text: $searchText,
+                    Text("›").font(.system(size: 11)).foregroundColor(.white.opacity(0.35))
+                    TextField("", text: $searchText,
                               prompt: Text("search").foregroundColor(.white.opacity(0.25)))
                         .textFieldStyle(.plain)
                         .font(.system(size: 11))
@@ -237,9 +441,7 @@ struct RecruitingPipelineView: View {
                     .buttonStyle(.plain)
                 }
                 if !selectedCandidateIds.isEmpty {
-                    Button {
-                        showSendSheet = true
-                    } label: {
+                    Button { showSendSheet = true } label: {
                         Text("send interviews (\(selectedCandidateIds.count))")
                             .font(.system(size: 10))
                             .foregroundColor(Color.matcha500)
@@ -249,12 +451,11 @@ struct RecruitingPipelineView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
-
             Divider()
 
             if filtered.isEmpty {
                 Spacer()
-                Text(shortlistOnly ? "nothing shortlisted yet" : "no candidates yet")
+                Text(filter == .shortlist ? "nothing shortlisted yet" : filter == .interviews ? "no interviews yet" : "no candidates yet")
                     .font(.system(size: 11))
                     .foregroundColor(.white.opacity(0.4))
                 Spacer()
@@ -279,15 +480,11 @@ struct RecruitingPipelineView: View {
         return VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 10) {
                 Button {
-                    if selectedCandidateIds.contains(c.id) {
-                        selectedCandidateIds.remove(c.id)
-                    } else {
-                        selectedCandidateIds.insert(c.id)
-                    }
+                    if selectedCandidateIds.contains(c.id) { selectedCandidateIds.remove(c.id) }
+                    else { selectedCandidateIds.insert(c.id) }
                 } label: {
                     Text(selectedCandidateIds.contains(c.id) ? "[x]" : "[ ]")
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.55))
+                        .font(.system(size: 11)).foregroundColor(.white.opacity(0.55))
                 }
                 .buttonStyle(.plain)
 
@@ -297,15 +494,36 @@ struct RecruitingPipelineView: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.white.opacity(dismissed ? 0.35 : 0.9))
                             .strikethrough(dismissed)
+
+                        // Match score badge
                         if let score = c.matchScore {
                             Text(String(format: "%.0f%%", score))
-                                .font(.system(size: 10))
-                                .foregroundColor(Color.matcha500.opacity(0.8))
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(score >= 80 ? Color.matcha500 : score >= 60 ? .orange : .white.opacity(0.5))
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(
+                                    (score >= 80 ? Color.matcha500 : score >= 60 ? .orange : .white)
+                                        .opacity(0.12)
+                                )
+                                .cornerRadius(4)
                         }
+
+                        // Interview status + score
                         if let status = c.interviewStatus, !status.isEmpty {
-                            Text(status)
-                                .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.4))
+                            HStack(spacing: 3) {
+                                Circle()
+                                    .fill(status.contains("completed") ? Color.matcha500 : status.contains("sent") ? .orange : .white.opacity(0.3))
+                                    .frame(width: 5, height: 5)
+                                Text(status.replacingOccurrences(of: "_", with: " "))
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.white.opacity(0.4))
+                                if let score = c.interviewScore {
+                                    Text("· \(Int(score))%")
+                                        .font(.system(size: 10, weight: .medium))
+                                        .foregroundColor(Color.matcha500)
+                                }
+                            }
                         }
                     }
                     HStack(spacing: 8) {
@@ -323,15 +541,26 @@ struct RecruitingPipelineView: View {
                         .foregroundColor(shortlisted ? Color.matcha500 : .white.opacity(0.4))
                 }
                 .buttonStyle(.plain)
+                .help(shortlisted ? "Remove from shortlist" : "Add to shortlist")
+
                 Button { Task { await viewModel.toggleDismiss(candidateId: c.id) } } label: {
                     Text(dismissed ? "↺" : "✕")
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.45))
                 }
                 .buttonStyle(.plain)
-                Button {
-                    expandedCandidateId = expanded ? nil : c.id
-                } label: {
+                .help(dismissed ? "Restore" : "Dismiss")
+
+                if c.status != "rejected" {
+                    Button { rejectTarget = c } label: {
+                        Text("reject")
+                            .font(.system(size: 10))
+                            .foregroundColor(.red.opacity(0.6))
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                Button { expandedCandidateId = expanded ? nil : c.id } label: {
                     Text(expanded ? "▾" : "▸")
                         .font(.system(size: 10))
                         .foregroundColor(.white.opacity(0.45))
@@ -341,9 +570,7 @@ struct RecruitingPipelineView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
 
-            if expanded {
-                candidateDetail(c)
-            }
+            if expanded { candidateDetail(c) }
         }
     }
 
@@ -352,22 +579,46 @@ struct RecruitingPipelineView: View {
             if let email = c.email { detailRow("email", email) }
             if let phone = c.phone { detailRow("phone", phone) }
             if let edu = c.education { detailRow("education", edu) }
-            if let skills = c.skills, !skills.isEmpty {
-                detailRow("skills", skills.joined(separator: ", "))
-            }
+            if let skills = c.skills, !skills.isEmpty { detailRow("skills", skills.joined(separator: ", ")) }
             if let summary = c.summary { detailRow("summary", summary) }
             if let strengths = c.strengths, !strengths.isEmpty {
-                detailRow("strengths", strengths.joined(separator: ", "))
+                HStack(alignment: .top, spacing: 8) {
+                    Text("strengths")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.35))
+                        .frame(width: 80, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(strengths, id: \.self) { s in
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(Color.matcha500)
+                                Text(s).font(.system(size: 11)).foregroundColor(.white.opacity(0.75))
+                            }
+                        }
+                    }
+                }
             }
             if let flags = c.flags, !flags.isEmpty {
-                detailRow("flags", flags.joined(separator: ", "))
+                HStack(alignment: .top, spacing: 8) {
+                    Text("flags")
+                        .font(.system(size: 10))
+                        .foregroundColor(.white.opacity(0.35))
+                        .frame(width: 80, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 2) {
+                        ForEach(flags, id: \.self) { f in
+                            HStack(spacing: 4) {
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.orange)
+                                Text(f).font(.system(size: 11)).foregroundColor(.white.opacity(0.75))
+                            }
+                        }
+                    }
+                }
             }
-            if let matchSummary = c.matchSummary {
-                detailRow("match", matchSummary)
-            }
-            if let interviewSummary = c.interviewSummary {
-                detailRow("interview", interviewSummary)
-            }
+            if let matchSummary = c.matchSummary { detailRow("match", matchSummary) }
+            if let interviewSummary = c.interviewSummary { detailRow("interview", interviewSummary) }
         }
         .padding(.horizontal, 32)
         .padding(.bottom, 12)
@@ -401,12 +652,9 @@ struct RecruitingPipelineView: View {
             }
         }
         switch sortField {
-        case .name:
-            list.sort { ($0.name ?? "") < ($1.name ?? "") }
-        case .experience:
-            list.sort { ($0.experienceYears ?? 0) > ($1.experienceYears ?? 0) }
-        case .match:
-            list.sort { ($0.matchScore ?? 0) > ($1.matchScore ?? 0) }
+        case .name: list.sort { ($0.name ?? "") < ($1.name ?? "") }
+        case .experience: list.sort { ($0.experienceYears ?? 0) > ($1.experienceYears ?? 0) }
+        case .match: list.sort { ($0.matchScore ?? 0) > ($1.matchScore ?? 0) }
         }
         return list
     }
@@ -434,6 +682,8 @@ struct RecruitingPipelineView: View {
         }
     }
 }
+
+// MARK: - Send Interview Sheet
 
 private struct SendInterviewSheet: View {
     @Environment(\.dismiss) private var dismiss
@@ -477,19 +727,67 @@ private struct SendInterviewSheet: View {
 
             HStack {
                 Button { dismiss() } label: {
-                    Text("cancel")
-                        .font(.system(size: 11))
-                        .foregroundColor(.white.opacity(0.5))
+                    Text("cancel").font(.system(size: 11)).foregroundColor(.white.opacity(0.5))
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Button { onSend(positionTitle, message); dismiss() } label: {
+                    Text("send").font(.system(size: 11, weight: .medium)).foregroundColor(Color.matcha500)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.return, modifiers: .command)
+            }
+        }
+        .padding(20)
+        .frame(width: 380)
+        .background(.ultraThinMaterial)
+    }
+}
+
+// MARK: - Reject Candidate Sheet
+
+private struct RejectCandidateSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let candidate: MWResumeCandidate
+    let onReject: (String?, Bool) -> Void
+
+    @State private var reason = ""
+    @State private var sendEmail = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("reject \(candidate.displayName.lowercased())")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.white.opacity(0.9))
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("reason (optional)")
+                    .font(.system(size: 10))
+                    .foregroundColor(.white.opacity(0.4))
+                TextField("", text: $reason, prompt: Text("not the right fit").foregroundColor(.white.opacity(0.25)), axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                    .foregroundColor(.white.opacity(0.9))
+                    .lineLimit(2...4)
+                Divider()
+            }
+
+            Toggle("Send rejection email", isOn: $sendEmail)
+                .toggleStyle(.switch)
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.7))
+
+            HStack {
+                Button { dismiss() } label: {
+                    Text("cancel").font(.system(size: 11)).foregroundColor(.white.opacity(0.5))
                 }
                 .buttonStyle(.plain)
                 Spacer()
                 Button {
-                    onSend(positionTitle, message)
+                    onReject(reason.isEmpty ? nil : reason, sendEmail)
                     dismiss()
                 } label: {
-                    Text("send")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Color.matcha500)
+                    Text("reject").font(.system(size: 11, weight: .medium)).foregroundColor(.red.opacity(0.8))
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.return, modifiers: .command)

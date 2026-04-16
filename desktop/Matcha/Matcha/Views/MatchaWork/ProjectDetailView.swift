@@ -68,7 +68,36 @@ struct ProjectDetailView: View {
     }
 
     private var recruitingLayout: some View {
-        RecruitingPipelineView(viewModel: viewModel)
+        HSplitView {
+            // Left: Chat panel — drives the recruiting workflow
+            if viewModel.activeChatId != nil {
+                ChatPanelView(viewModel: chatVM, lightMode: lightMode, selectedModel: selectedModelValue)
+                    .frame(minWidth: 320)
+            } else {
+                VStack(spacing: 12) {
+                    Spacer()
+                    Image(systemName: "bubble.left.and.bubble.right")
+                        .font(.system(size: 28))
+                        .foregroundColor(.secondary)
+                    Text("Starting chat…")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    Spacer()
+                }
+                .frame(minWidth: 320)
+                .background(Color.appBackground)
+                .task {
+                    if viewModel.activeChatId == nil {
+                        await viewModel.createChat(title: nil)
+                    }
+                }
+            }
+
+            // Right: Pipeline panel
+            RecruitingPipelineView(viewModel: viewModel)
+                .frame(minWidth: 300)
+        }
+        .background(Color.appBackground)
     }
 
     private var standardLayout: some View {

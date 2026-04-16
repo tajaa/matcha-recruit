@@ -534,6 +534,26 @@ class MatchaWorkService {
         )
     }
 
+    func analyzeProjectCandidates(projectId: String) async throws {
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/resume/analyze"
+        )
+    }
+
+    func rejectProjectCandidate(projectId: String, candidateId: String, reason: String?, sendEmail: Bool) async throws {
+        struct Body: Encodable {
+            let reason: String?
+            let sendEmail: Bool
+            enum CodingKeys: String, CodingKey { case reason; case sendEmail = "send_email" }
+        }
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/candidates/\(candidateId)/reject",
+            body: Body(reason: reason, sendEmail: sendEmail)
+        )
+    }
+
     func uploadProjectResumes(
         projectId: String,
         files: [(data: Data, filename: String, mimeType: String)]

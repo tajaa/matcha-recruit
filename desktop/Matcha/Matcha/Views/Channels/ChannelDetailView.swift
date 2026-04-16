@@ -176,11 +176,11 @@ struct ChannelDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             // Reply preview — shows the original message this is replying to
             if let rp = msg.replyPreview {
-                HStack(spacing: 6) {
+                HStack(alignment: .top, spacing: 6) {
                     RoundedRectangle(cornerRadius: 1)
                         .fill(Color.matcha500.opacity(0.5))
-                        .frame(width: 2, height: 28)
-                    VStack(alignment: .leading, spacing: 1) {
+                        .frame(width: 2)
+                    VStack(alignment: .leading, spacing: 3) {
                         Text(rp.senderName)
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(Color.matcha500)
@@ -188,17 +188,49 @@ struct ChannelDetailView: View {
                             Text(rp.content)
                                 .font(.system(size: 10))
                                 .foregroundColor(.white.opacity(0.5))
-                                .lineLimit(1)
-                        } else if !rp.attachments.isEmpty {
-                            Text("📎 \(rp.attachments.first?.filename ?? "attachment")")
-                                .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.5))
-                                .lineLimit(1)
+                                .lineLimit(2)
+                        }
+                        // Show attachment thumbnails in reply preview
+                        if !rp.attachments.isEmpty {
+                            HStack(spacing: 4) {
+                                ForEach(rp.attachments.prefix(3), id: \.self) { att in
+                                    if att.contentType.hasPrefix("image/"), let url = URL(string: att.url) {
+                                        AsyncImage(url: url) { phase in
+                                            switch phase {
+                                            case .success(let image):
+                                                image.resizable()
+                                                    .aspectRatio(contentMode: .fill)
+                                                    .frame(width: 48, height: 48)
+                                                    .clipped()
+                                                    .cornerRadius(4)
+                                            default:
+                                                RoundedRectangle(cornerRadius: 4)
+                                                    .fill(Color.white.opacity(0.05))
+                                                    .frame(width: 48, height: 48)
+                                            }
+                                        }
+                                    } else {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "paperclip")
+                                                .font(.system(size: 9))
+                                                .foregroundColor(.white.opacity(0.4))
+                                            Text(att.filename)
+                                                .font(.system(size: 9))
+                                                .foregroundColor(.white.opacity(0.4))
+                                                .lineLimit(1)
+                                        }
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 3)
+                                        .background(Color.white.opacity(0.05))
+                                        .cornerRadius(4)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
                 .padding(.leading, 46)
-                .padding(.bottom, 2)
+                .padding(.bottom, 4)
             }
 
             HStack(alignment: .top, spacing: 10) {

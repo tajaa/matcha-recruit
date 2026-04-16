@@ -147,6 +147,26 @@ class ProjectDetailViewModel {
         }
     }
 
+    func analyzeProjectCandidates() async {
+        guard let pid = project?.id else { return }
+        do {
+            try await service.analyzeProjectCandidates(projectId: pid)
+            await loadProject(id: pid)
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func rejectCandidate(candidateId: String, reason: String?, sendEmail: Bool) async {
+        guard let pid = project?.id else { return }
+        do {
+            try await service.rejectProjectCandidate(projectId: pid, candidateId: candidateId, reason: reason, sendEmail: sendEmail)
+            await loadProject(id: pid)
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
     func exportProject(format: String) async -> Data? {
         guard let pid = project?.id else { return nil }
         do {
