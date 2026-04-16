@@ -46,6 +46,19 @@ class ChannelAttachment(BaseModel):
     size: int
 
 
+class ChannelReaction(BaseModel):
+    emoji: str
+    user_ids: list[UUID] = []
+    count: int = 0
+
+
+class ReplyPreview(BaseModel):
+    id: UUID
+    sender_name: str
+    content: str
+    attachments: list[ChannelAttachment] = []
+
+
 class ChannelMessage(BaseModel):
     id: UUID
     channel_id: UUID
@@ -54,13 +67,16 @@ class ChannelMessage(BaseModel):
     sender_avatar_url: Optional[str] = None
     content: str
     attachments: list[ChannelAttachment] = []
+    reply_to_id: Optional[UUID] = None
+    reply_preview: Optional[ReplyPreview] = None
+    reactions: list[ChannelReaction] = []
     created_at: datetime
     edited_at: Optional[datetime] = None
     deleted_at: Optional[datetime] = None
     deleted_by: Optional[UUID] = None
 
 
-def _row_to_message(m) -> "ChannelMessage":
+def _row_to_message(m, reactions_map: dict | None = None) -> "ChannelMessage":
     """Shared row → ChannelMessage transform that tombstones deleted rows.
 
     Deleted messages return with empty content + attachments and the
@@ -77,6 +93,27 @@ def _row_to_message(m) -> "ChannelMessage":
             else (m["attachments"] or [])
         )
     )
+    # Build reply preview if this message is a reply
+    reply_preview = None
+    reply_to_id = m.get("reply_to_id")
+    if reply_to_id and m.get("reply_sender_name"):
+        reply_atts = []
+        if not m.get("reply_deleted"):
+            raw = m.get("reply_attachments")
+            if raw:
+                reply_atts = json.loads(raw) if isinstance(raw, str) else (raw or [])
+        reply_preview = ReplyPreview(
+            id=reply_to_id,
+            sender_name=m["reply_sender_name"],
+            content="" if m.get("reply_deleted") else (m.get("reply_content") or ""),
+            attachments=reply_atts,
+        )
+
+    # Build reactions list
+    msg_reactions = []
+    if reactions_map and m["id"] in reactions_map:
+        msg_reactions = reactions_map[m["id"]]
+
     return ChannelMessage(
         id=m["id"],
         channel_id=m["channel_id"],
@@ -85,11 +122,67 @@ def _row_to_message(m) -> "ChannelMessage":
         sender_avatar_url=m["sender_avatar_url"],
         content="" if is_deleted else m["content"],
         attachments=attachments,
+        reply_to_id=reply_to_id,
+        reply_preview=reply_preview,
+        reactions=msg_reactions,
         created_at=m["created_at"],
         edited_at=m["edited_at"],
         deleted_at=m["deleted_at"],
         deleted_by=m["deleted_by"],
     )
+
+
+async def _fetch_reactions_map(conn, message_ids: list[UUID]) -> dict[UUID, list[ChannelReaction]]:
+    """Fetch reactions for a batch of messages, grouped by message → emoji → user_ids."""
+    if not message_ids:
+        return {}
+    rows = await conn.fetch(
+        "SELECT message_id, emoji, user_id FROM channel_reactions WHERE message_id = ANY($1) ORDER BY created_at",
+        message_ids,
+    )
+    from collections import defaultdict
+    grouped: dict[UUID, dict[str, list[UUID]]] = defaultdict(lambda: defaultdict(list))
+    for r in rows:
+        grouped[r["message_id"]][r["emoji"]].append(r["user_id"])
+    result: dict[UUID, list[ChannelReaction]] = {}
+    for mid, emojis in grouped.items():
+        result[mid] = [
+            ChannelReaction(emoji=e, user_ids=uids, count=len(uids))
+            for e, uids in emojis.items()
+        ]
+    return result
+
+
+# SQL fragment for message queries — includes reply LEFT JOIN
+_MSG_SELECT = f"""
+    SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
+           m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
+           {{name_expr}} AS sender_name, u.avatar_url AS sender_avatar_url,
+           rm.content AS reply_content, rm.attachments AS reply_attachments,
+           rm.deleted_at IS NOT NULL AS reply_deleted,
+           {{reply_name_expr}} AS reply_sender_name
+    FROM channel_messages m
+    JOIN users u ON u.id = m.sender_id
+    LEFT JOIN clients c ON c.user_id = u.id
+    LEFT JOIN employees e ON e.user_id = u.id
+    LEFT JOIN admins a ON a.user_id = u.id
+    LEFT JOIN channel_messages rm ON rm.id = m.reply_to_id
+    LEFT JOIN users ru ON ru.id = rm.sender_id
+    LEFT JOIN clients rc ON rc.user_id = ru.id
+    LEFT JOIN employees re ON re.user_id = ru.id
+    LEFT JOIN admins ra ON ra.user_id = ru.id
+"""
+
+def _msg_query(where: str, order: str = "m.created_at DESC", limit_param: str | None = None) -> str:
+    """Build a channel messages query with reply joins."""
+    q = _MSG_SELECT.format(
+        name_expr=_USER_NAME_EXPR,
+        reply_name_expr=_USER_NAME_EXPR.replace("c.", "rc.").replace("e.", "re.").replace("a.", "ra.").replace("u.", "ru."),
+    )
+    q += f" WHERE {where} ORDER BY {order}"
+    if limit_param:
+        q += f" LIMIT {limit_param}"
+    return q
 
 
 class ChannelSummary(BaseModel):
@@ -896,23 +989,13 @@ async def get_channel(
             channel_id,
         )
 
-        # Recent messages
+        # Recent messages (with reply joins)
         messages = await conn.fetch(
-            f"""
-            SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
-                   m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
-                   {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
-            FROM channel_messages m
-            JOIN users u ON u.id = m.sender_id
-            LEFT JOIN clients c ON c.user_id = u.id
-            LEFT JOIN employees e ON e.user_id = u.id
-            LEFT JOIN admins a ON a.user_id = u.id
-            WHERE m.channel_id = $1
-            ORDER BY m.created_at DESC
-            LIMIT 50
-            """,
+            _msg_query("m.channel_id = $1", limit_param="50"),
             channel_id,
         )
+        msg_ids = [m["id"] for m in messages]
+        reactions_map = await _fetch_reactions_map(conn, msg_ids)
 
         # Mark as read (only if member)
         if is_member:
@@ -945,7 +1028,7 @@ async def get_channel(
                 for m in members
             ],
             messages=[
-                _row_to_message(m)
+                _row_to_message(m, reactions_map)
                 for m in reversed(messages)  # Return chronological order
             ],
         )
@@ -981,40 +1064,18 @@ async def get_channel_messages(
             except (ValueError, TypeError):
                 raise HTTPException(status_code=400, detail="Invalid 'before' cursor format")
             rows = await conn.fetch(
-                f"""
-                SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
-                       m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
-                       {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
-                FROM channel_messages m
-                JOIN users u ON u.id = m.sender_id
-                LEFT JOIN clients c ON c.user_id = u.id
-                LEFT JOIN employees e ON e.user_id = u.id
-                LEFT JOIN admins a ON a.user_id = u.id
-                WHERE m.channel_id = $1 AND m.created_at < $2
-                ORDER BY m.created_at DESC
-                LIMIT $3
-                """,
+                _msg_query("m.channel_id = $1 AND m.created_at < $2", limit_param="$3"),
                 channel_id, before_dt, limit,
             )
         else:
             rows = await conn.fetch(
-                f"""
-                SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
-                       m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
-                       {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
-                FROM channel_messages m
-                JOIN users u ON u.id = m.sender_id
-                LEFT JOIN clients c ON c.user_id = u.id
-                LEFT JOIN employees e ON e.user_id = u.id
-                LEFT JOIN admins a ON a.user_id = u.id
-                WHERE m.channel_id = $1
-                ORDER BY m.created_at DESC
-                LIMIT $2
-                """,
+                _msg_query("m.channel_id = $1", limit_param="$2"),
                 channel_id, limit,
             )
 
-        return [_row_to_message(r) for r in reversed(rows)]
+        msg_ids = [r["id"] for r in rows]
+        reactions_map = await _fetch_reactions_map(conn, msg_ids)
+        return [_row_to_message(r, reactions_map) for r in reversed(rows)]
 
 
 @router.delete("/{channel_id}/messages/{message_id}", status_code=status.HTTP_200_OK)
@@ -1070,6 +1131,85 @@ async def delete_channel_message(
         logger.warning("Failed to broadcast channel message deletion: %s", exc)
 
     return {"ok": True, "deleted_by": str(current_user.id)}
+
+
+class ReactionToggleRequest(BaseModel):
+    emoji: str
+
+
+@router.post("/{channel_id}/messages/{message_id}/react")
+async def toggle_reaction(
+    channel_id: UUID,
+    message_id: UUID,
+    body: ReactionToggleRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Toggle a reaction on a message. If the user already reacted with the
+    same emoji, remove it; otherwise add it."""
+    emoji = body.emoji.strip()
+    if not emoji or len(emoji) > 10:
+        raise HTTPException(status_code=400, detail="Invalid emoji")
+
+    async with get_connection() as conn:
+        # Verify membership
+        is_member = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channel_members WHERE channel_id = $1 AND user_id = $2)",
+            channel_id, current_user.id,
+        )
+        if not is_member:
+            raise HTTPException(status_code=403, detail="Not a member")
+
+        # Verify message exists in this channel
+        msg_exists = await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM channel_messages WHERE id = $1 AND channel_id = $2)",
+            message_id, channel_id,
+        )
+        if not msg_exists:
+            raise HTTPException(status_code=404, detail="Message not found")
+
+        # Toggle: try insert, if conflict delete
+        existing = await conn.fetchval(
+            "SELECT id FROM channel_reactions WHERE message_id = $1 AND user_id = $2 AND emoji = $3",
+            message_id, current_user.id, emoji,
+        )
+        if existing:
+            await conn.execute("DELETE FROM channel_reactions WHERE id = $1", existing)
+            action = "removed"
+        else:
+            await conn.execute(
+                "INSERT INTO channel_reactions (message_id, user_id, emoji) VALUES ($1, $2, $3)",
+                message_id, current_user.id, emoji,
+            )
+            action = "added"
+
+        # Fetch updated reactions for this message
+        reaction_rows = await conn.fetch(
+            "SELECT emoji, user_id FROM channel_reactions WHERE message_id = $1 ORDER BY created_at",
+            message_id,
+        )
+
+    # Build reaction list
+    from collections import defaultdict
+    grouped: dict[str, list[UUID]] = defaultdict(list)
+    for r in reaction_rows:
+        grouped[r["emoji"]].append(r["user_id"])
+    reactions = [
+        ChannelReaction(emoji=e, user_ids=uids, count=len(uids))
+        for e, uids in grouped.items()
+    ]
+
+    # Broadcast via WS
+    try:
+        from .channels_ws import broadcast_reaction_update
+        await broadcast_reaction_update(
+            channel_id=str(channel_id),
+            message_id=str(message_id),
+            reactions=[r.model_dump(mode="json") for r in reactions],
+        )
+    except Exception as exc:
+        logger.warning("Failed to broadcast reaction update: %s", exc)
+
+    return {"action": action, "reactions": reactions}
 
 
 @router.post("/{channel_id}/join", status_code=status.HTTP_200_OK)

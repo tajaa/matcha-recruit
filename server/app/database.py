@@ -5221,6 +5221,7 @@ async def init_db():
                 sender_id UUID NOT NULL REFERENCES users(id),
                 content TEXT NOT NULL,
                 attachments JSONB DEFAULT '[]'::jsonb,
+                reply_to_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL,
                 created_at TIMESTAMPTZ DEFAULT NOW(),
                 edited_at TIMESTAMPTZ
             )
@@ -5232,6 +5233,25 @@ async def init_db():
         # Add attachments column if missing (for existing tables)
         await conn.execute("""
             ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS attachments JSONB DEFAULT '[]'::jsonb
+        """)
+        # Reply threading
+        await conn.execute("""
+            ALTER TABLE channel_messages ADD COLUMN IF NOT EXISTS reply_to_id UUID REFERENCES channel_messages(id) ON DELETE SET NULL
+        """)
+        # Reactions
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS channel_reactions (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                message_id UUID NOT NULL REFERENCES channel_messages(id) ON DELETE CASCADE,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                emoji TEXT NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (message_id, user_id, emoji)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_channel_reactions_message
+            ON channel_reactions(message_id)
         """)
         # Channel permissions columns (for existing tables)
         await conn.execute("ALTER TABLE channels ADD COLUMN IF NOT EXISTS visibility VARCHAR(20) DEFAULT 'public'")

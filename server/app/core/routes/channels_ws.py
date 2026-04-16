@@ -207,6 +207,25 @@ async def broadcast_message_deleted(
     )
 
 
+async def broadcast_reaction_update(
+    channel_id: str,
+    message_id: str,
+    reactions: list[dict],
+) -> None:
+    """Fan out a reaction_update event to all members currently connected
+    to a channel room. Called by the REST react handler in channels.py.
+    """
+    await manager._broadcast_to_room(
+        channel_id,
+        {
+            "type": "reaction_update",
+            "room": channel_id,
+            "message_id": message_id,
+            "reactions": reactions,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Auth helper
 # ---------------------------------------------------------------------------
@@ -323,11 +342,18 @@ async def channel_websocket(
                 channel_id = data.get("channel_id")
                 content = (data.get("content") or "").strip()
                 attachments = data.get("attachments") or []
+                reply_to_id = data.get("reply_to_id")
                 if channel_id and (content or attachments) and len(content) <= 4000:
                     try:
                         ch_uuid = UUID(channel_id)
                     except (ValueError, TypeError):
                         continue
+                    reply_uuid = None
+                    if reply_to_id:
+                        try:
+                            reply_uuid = UUID(reply_to_id)
+                        except (ValueError, TypeError):
+                            pass
                     room_key = str(channel_id)
                     import json as _json
                     attachments_json = _json.dumps(attachments) if attachments else "[]"
@@ -340,11 +366,11 @@ async def channel_websocket(
                         if is_member:
                             row = await conn.fetchrow(
                                 """
-                                INSERT INTO channel_messages (channel_id, sender_id, content, attachments)
-                                VALUES ($1, $2, $3, $4::jsonb)
-                                RETURNING id, channel_id, sender_id, content, attachments, created_at, edited_at
+                                INSERT INTO channel_messages (channel_id, sender_id, content, attachments, reply_to_id)
+                                VALUES ($1, $2, $3, $4::jsonb, $5)
+                                RETURNING id, channel_id, sender_id, content, attachments, reply_to_id, created_at, edited_at
                                 """,
-                                ch_uuid, user.id, content or "", attachments_json,
+                                ch_uuid, user.id, content or "", attachments_json, reply_uuid,
                             )
                             # Update channel + member activity timestamps
                             await conn.execute(
@@ -357,6 +383,34 @@ async def channel_websocket(
                             )
 
                             broadcast_attachments = _json.loads(row["attachments"]) if row["attachments"] else []
+                            # Build reply preview for broadcast
+                            reply_preview = None
+                            if reply_uuid:
+                                rp = await conn.fetchrow(
+                                    """
+                                    SELECT m.content, m.attachments, m.deleted_at,
+                                           COALESCE(c.name, CONCAT(e.first_name, ' ', e.last_name), a.name, u.email) AS sender_name
+                                    FROM channel_messages m
+                                    JOIN users u ON u.id = m.sender_id
+                                    LEFT JOIN clients c ON c.user_id = u.id
+                                    LEFT JOIN employees e ON e.user_id = u.id
+                                    LEFT JOIN admins a ON a.user_id = u.id
+                                    WHERE m.id = $1
+                                    """,
+                                    reply_uuid,
+                                )
+                                if rp:
+                                    rp_atts = []
+                                    if not rp["deleted_at"]:
+                                        raw = rp["attachments"]
+                                        rp_atts = _json.loads(raw) if isinstance(raw, str) else (raw or [])
+                                    reply_preview = {
+                                        "id": str(reply_uuid),
+                                        "sender_name": rp["sender_name"],
+                                        "content": "" if rp["deleted_at"] else rp["content"],
+                                        "attachments": rp_atts,
+                                    }
+
                             await manager.broadcast_message(room_key, {
                                 "id": str(row["id"]),
                                 "channel_id": str(row["channel_id"]),
@@ -365,6 +419,9 @@ async def channel_websocket(
                                 "sender_avatar_url": user.avatar_url,
                                 "content": row["content"],
                                 "attachments": broadcast_attachments,
+                                "reply_to_id": str(reply_uuid) if reply_uuid else None,
+                                "reply_preview": reply_preview,
+                                "reactions": [],
                                 "created_at": row["created_at"].isoformat(),
                                 "edited_at": None,
                             })

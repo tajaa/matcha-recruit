@@ -141,4 +141,14 @@ class ChannelsService {
         let decoded = try JSONDecoder().decode(UploadResponse.self, from: data)
         return decoded.attachments
     }
+
+    func toggleReaction(channelId: String, messageId: String, emoji: String) async throws -> [String: Any] {
+        struct Body: Encodable { let emoji: String }
+        let data = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/\(channelId)/messages/\(messageId)/react",
+            body: Body(emoji: emoji)
+        )
+        return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
+    }
 }

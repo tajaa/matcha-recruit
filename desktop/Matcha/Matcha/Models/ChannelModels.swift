@@ -32,6 +32,41 @@ struct ChannelMember: Codable, Identifiable, Hashable {
     }
 }
 
+struct ChannelReaction: Codable, Hashable {
+    let emoji: String
+    let userIds: [String]
+    let count: Int
+
+    enum CodingKeys: String, CodingKey {
+        case emoji, count
+        case userIds = "user_ids"
+    }
+}
+
+struct ReplyPreview: Codable, Hashable {
+    let id: String
+    let senderName: String
+    let content: String
+    let attachments: [ChannelAttachment]
+
+    enum CodingKeys: String, CodingKey {
+        case id, content, attachments
+        case senderName = "sender_name"
+    }
+
+    init(id: String, senderName: String, content: String, attachments: [ChannelAttachment] = []) {
+        self.id = id; self.senderName = senderName; self.content = content; self.attachments = attachments
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try c.decode(String.self, forKey: .id)
+        self.senderName = try c.decode(String.self, forKey: .senderName)
+        self.content = try c.decode(String.self, forKey: .content)
+        self.attachments = (try? c.decode([ChannelAttachment].self, forKey: .attachments)) ?? []
+    }
+}
+
 struct ChannelMessage: Codable, Identifiable, Hashable {
     let id: String
     let channelId: String
@@ -40,21 +75,28 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
     let senderAvatarUrl: String?
     let content: String
     let attachments: [ChannelAttachment]
+    let replyToId: String?
+    let replyPreview: ReplyPreview?
+    var reactions: [ChannelReaction]
     let createdAt: String
     let editedAt: String?
 
     enum CodingKeys: String, CodingKey {
-        case id, content, attachments
+        case id, content, attachments, reactions
         case channelId = "channel_id"
         case senderId = "sender_id"
         case senderName = "sender_name"
         case senderAvatarUrl = "sender_avatar_url"
+        case replyToId = "reply_to_id"
+        case replyPreview = "reply_preview"
         case createdAt = "created_at"
         case editedAt = "edited_at"
     }
 
     init(id: String, channelId: String, senderId: String, senderName: String,
          senderAvatarUrl: String?, content: String, attachments: [ChannelAttachment],
+         replyToId: String? = nil, replyPreview: ReplyPreview? = nil,
+         reactions: [ChannelReaction] = [],
          createdAt: String, editedAt: String?) {
         self.id = id
         self.channelId = channelId
@@ -63,6 +105,9 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         self.senderAvatarUrl = senderAvatarUrl
         self.content = content
         self.attachments = attachments
+        self.replyToId = replyToId
+        self.replyPreview = replyPreview
+        self.reactions = reactions
         self.createdAt = createdAt
         self.editedAt = editedAt
     }
@@ -76,6 +121,9 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         self.senderAvatarUrl = try c.decodeIfPresent(String.self, forKey: .senderAvatarUrl)
         self.content = try c.decode(String.self, forKey: .content)
         self.attachments = (try? c.decode([ChannelAttachment].self, forKey: .attachments)) ?? []
+        self.replyToId = try c.decodeIfPresent(String.self, forKey: .replyToId)
+        self.replyPreview = try c.decodeIfPresent(ReplyPreview.self, forKey: .replyPreview)
+        self.reactions = (try? c.decode([ChannelReaction].self, forKey: .reactions)) ?? []
         self.createdAt = try c.decode(String.self, forKey: .createdAt)
         self.editedAt = try c.decodeIfPresent(String.self, forKey: .editedAt)
     }

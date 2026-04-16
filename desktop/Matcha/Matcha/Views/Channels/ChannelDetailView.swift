@@ -26,6 +26,8 @@ struct ChannelDetailView: View {
     @State private var pendingAttachments: [PendingAttachment] = []
     @State private var isUploading = false
     @State private var isDragOver = false
+    @State private var replyingTo: ChannelMessage? = nil
+    @State private var hoveredMessageId: String? = nil
 
     private let ws = ChannelsWebSocket.shared
     private let senderColumnWidth: CGFloat = 160
@@ -171,34 +173,128 @@ struct ChannelDetailView: View {
     }
 
     private func messageRow(_ msg: ChannelMessage) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            senderAvatar(msg)
-                .frame(width: 36, height: 36)
-
-            VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 0) {
+            // Reply preview — shows the original message this is replying to
+            if let rp = msg.replyPreview {
                 HStack(spacing: 6) {
-                    Text(msg.senderName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Text(formatTimestamp(msg.createdAt))
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.matcha500.opacity(0.5))
+                        .frame(width: 2, height: 28)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(rp.senderName)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Color.matcha500)
+                        if !rp.content.isEmpty {
+                            Text(rp.content)
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.5))
+                                .lineLimit(1)
+                        } else if !rp.attachments.isEmpty {
+                            Text("📎 \(rp.attachments.first?.filename ?? "attachment")")
+                                .font(.system(size: 10))
+                                .foregroundColor(.white.opacity(0.5))
+                                .lineLimit(1)
+                        }
+                    }
                 }
-                if !msg.content.isEmpty {
-                    Text(msg.content)
-                        .font(.system(size: 13))
-                        .foregroundColor(.primary.opacity(0.9))
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                if !msg.attachments.isEmpty {
-                    attachmentList(msg.attachments)
-                }
+                .padding(.leading, 46)
+                .padding(.bottom, 2)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            HStack(alignment: .top, spacing: 10) {
+                senderAvatar(msg)
+                    .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(msg.senderName)
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text(formatTimestamp(msg.createdAt))
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    if !msg.content.isEmpty {
+                        Text(msg.content)
+                            .font(.system(size: 13))
+                            .foregroundColor(.primary.opacity(0.9))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    if !msg.attachments.isEmpty {
+                        attachmentList(msg.attachments)
+                    }
+
+                    // Reaction pills
+                    if !msg.reactions.isEmpty {
+                        HStack(spacing: 4) {
+                            ForEach(msg.reactions, id: \.emoji) { reaction in
+                                let isMine = reaction.userIds.contains(appState.currentUser?.id ?? "")
+                                Button {
+                                    toggleReaction(messageId: msg.id, emoji: reaction.emoji)
+                                } label: {
+                                    HStack(spacing: 3) {
+                                        Text(reaction.emoji).font(.system(size: 12))
+                                        if reaction.count > 1 {
+                                            Text("\(reaction.count)")
+                                                .font(.system(size: 10, weight: .medium))
+                                                .foregroundColor(isMine ? Color.matcha500 : .white.opacity(0.6))
+                                        }
+                                    }
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(isMine ? Color.matcha500.opacity(0.2) : Color.white.opacity(0.08))
+                                    .cornerRadius(10)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(isMine ? Color.matcha500.opacity(0.4) : Color.clear, lineWidth: 1)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.vertical, 4)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(hoveredMessageId == msg.id ? Color.white.opacity(0.04) : Color.clear)
+        )
+        .onHover { hovering in hoveredMessageId = hovering ? msg.id : nil }
+        .overlay(alignment: .topTrailing) {
+            if hoveredMessageId == msg.id {
+                HStack(spacing: 2) {
+                    Button { replyingTo = msg } label: {
+                        Image(systemName: "arrowshape.turn.up.left")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.7))
+                            .frame(width: 24, height: 22)
+                            .background(Color.zinc800)
+                            .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Reply")
+
+                    ForEach(["👍", "❤️", "😂"], id: \.self) { emoji in
+                        Button { toggleReaction(messageId: msg.id, emoji: emoji) } label: {
+                            Text(emoji)
+                                .font(.system(size: 11))
+                                .frame(width: 24, height: 22)
+                                .background(Color.zinc800)
+                                .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(4)
+            }
+        }
         .contentShape(Rectangle())
         .contextMenu {
             Button {
@@ -209,9 +305,7 @@ struct ChannelDetailView: View {
             }
             .disabled(msg.content.isEmpty)
 
-            Button {
-                inputText = "> \(msg.senderName): \(msg.content.prefix(200))\n"
-            } label: {
+            Button { replyingTo = msg } label: {
                 Label("Reply", systemImage: "arrowshape.turn.up.left")
             }
 
@@ -220,14 +314,23 @@ struct ChannelDetailView: View {
             Menu {
                 ForEach(["👍", "❤️", "🎉", "😂", "🤔", "👀"], id: \.self) { emoji in
                     Button(emoji) {
-                        // Placeholder — backend reaction endpoint not yet wired.
-                        // For now, append the emoji as a visible reply so the
-                        // interaction still feels responsive.
-                        ws.sendMessage(channelId: channelId, content: emoji)
+                        toggleReaction(messageId: msg.id, emoji: emoji)
                     }
                 }
             } label: {
                 Label("React", systemImage: "face.smiling")
+            }
+        }
+    }
+
+    private func toggleReaction(messageId: String, emoji: String) {
+        Task {
+            do {
+                _ = try await ChannelsService.shared.toggleReaction(
+                    channelId: channelId, messageId: messageId, emoji: emoji
+                )
+            } catch {
+                errorMessage = "Reaction failed: \(error.localizedDescription)"
             }
         }
     }
@@ -345,6 +448,32 @@ struct ChannelDetailView: View {
 
     private var inputBar: some View {
         VStack(spacing: 8) {
+            // Reply banner
+            if let reply = replyingTo {
+                HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 1)
+                        .fill(Color.matcha500)
+                        .frame(width: 3, height: 24)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Replying to \(reply.senderName)")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(Color.matcha500)
+                        Text(reply.content.isEmpty ? (reply.attachments.isEmpty ? "" : "📎 attachment") : String(reply.content.prefix(80)))
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.5))
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button { replyingTo = nil } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal, 4)
+            }
+
             if !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
@@ -465,9 +594,12 @@ struct ChannelDetailView: View {
         guard !trimmed.isEmpty || !attachmentsToSend.isEmpty else { return }
         guard !isUploading else { return }
 
+        let replyId = replyingTo?.id
+
         if attachmentsToSend.isEmpty {
-            ws.sendMessage(channelId: channelId, content: trimmed)
+            ws.sendMessage(channelId: channelId, content: trimmed, replyToId: replyId)
             inputText = ""
+            replyingTo = nil
             return
         }
 
@@ -480,8 +612,9 @@ struct ChannelDetailView: View {
                     channelId: channelId, files: files
                 )
                 await MainActor.run {
-                    ws.sendMessage(channelId: channelId, content: content, attachments: uploaded)
+                    ws.sendMessage(channelId: channelId, content: content, attachments: uploaded, replyToId: replyId)
                     inputText = ""
+                    replyingTo = nil
                     pendingAttachments.removeAll()
                     isUploading = false
                 }
@@ -581,6 +714,11 @@ struct ChannelDetailView: View {
             typingClearTask = Task { @MainActor in
                 try? await Task.sleep(for: .seconds(3))
                 typingUsers.removeValue(forKey: userId)
+            }
+        }
+        ws.onReactionUpdate = { messageId, reactions in
+            if let idx = messages.firstIndex(where: { $0.id == messageId }) {
+                messages[idx].reactions = reactions
             }
         }
         ws.onError = { msg in

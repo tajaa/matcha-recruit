@@ -71,6 +71,7 @@ final class ChannelsWebSocket: NSObject {
         onUserJoined = nil
         onUserLeft = nil
         onTyping = nil
+        onReactionUpdate = nil
         onError = nil
     }
 
@@ -79,12 +80,15 @@ final class ChannelsWebSocket: NSObject {
         send(["type": "leave_room", "channel_id": channelId])
     }
 
-    func sendMessage(channelId: String, content: String, attachments: [ChannelAttachment] = []) {
+    var onReactionUpdate: ((_ messageId: String, _ reactions: [ChannelReaction]) -> Void)?
+
+    func sendMessage(channelId: String, content: String, attachments: [ChannelAttachment] = [], replyToId: String? = nil) {
         var payload: [String: Any] = [
             "type": "message",
             "channel_id": channelId,
             "content": content,
         ]
+        if let replyToId { payload["reply_to_id"] = replyToId }
         if !attachments.isEmpty {
             payload["attachments"] = attachments.map { att in
                 [
@@ -173,6 +177,13 @@ final class ChannelsWebSocket: NSObject {
             if let user = obj["user"] as? [String: Any],
                let id = user["id"] as? String, let name = user["name"] as? String {
                 onTyping?(id, name)
+            }
+        case "reaction_update":
+            if let messageId = obj["message_id"] as? String,
+               let reactionsArr = obj["reactions"] as? [[String: Any]],
+               let reactionsData = try? JSONSerialization.data(withJSONObject: reactionsArr),
+               let reactions = try? JSONDecoder().decode([ChannelReaction].self, from: reactionsData) {
+                onReactionUpdate?(messageId, reactions)
             }
         case "error":
             if let msg = obj["message"] as? String { onError?(msg) }
