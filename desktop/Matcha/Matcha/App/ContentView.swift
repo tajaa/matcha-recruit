@@ -12,6 +12,9 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = true
     @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = true
     @State private var pendingConnectionsCount = 0
+    @State private var showCreateChannel = false
+    @State private var showProjectTypePicker = false
+    @State private var isCreatingProject = false
 
     private struct GlassWindowModifier: ViewModifier {
         func body(content: Content) -> some View {
@@ -33,7 +36,19 @@ struct ContentView: View {
                         sidebarSection(
                             title: "Channels",
                             icon: "number",
-                            isOpen: $channelsSectionOpen
+                            isOpen: $channelsSectionOpen,
+                            trailing: {
+                                Button { showCreateChannel = true } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 18, height: 18)
+                                        .background(Color.zinc800)
+                                        .cornerRadius(4)
+                                }
+                                .buttonStyle(.plain)
+                                .help("New channel")
+                            }
                         ) {
                             ChannelsSidebarView(showHeader: false)
                                 .frame(height: 220)
@@ -44,7 +59,46 @@ struct ContentView: View {
                         sidebarSection(
                             title: "Projects",
                             icon: "folder",
-                            isOpen: $projectsSectionOpen
+                            isOpen: $projectsSectionOpen,
+                            trailing: {
+                                Button { showProjectTypePicker = true } label: {
+                                    Image(systemName: "plus")
+                                        .font(.system(size: 10, weight: .semibold))
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 18, height: 18)
+                                        .background(Color.zinc800)
+                                        .cornerRadius(4)
+                                }
+                                .buttonStyle(.plain)
+                                .help("New project")
+                                .disabled(isCreatingProject)
+                                .popover(isPresented: $showProjectTypePicker) {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
+                                            .padding(.bottom, 4)
+                                        ForEach(["general", "presentation", "recruiting"], id: \.self) { type in
+                                            Button {
+                                                showProjectTypePicker = false
+                                                createProject(type: type)
+                                            } label: {
+                                                HStack {
+                                                    Image(systemName: type == "general" ? "doc.text" : type == "presentation" ? "rectangle.on.rectangle" : "person.3")
+                                                        .font(.system(size: 11))
+                                                        .frame(width: 16)
+                                                    Text(type.capitalized)
+                                                        .font(.system(size: 12))
+                                                }
+                                                .frame(maxWidth: .infinity, alignment: .leading)
+                                                .padding(.vertical, 4)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .foregroundColor(.white)
+                                        }
+                                    }
+                                    .padding(12)
+                                    .frame(width: 180)
+                                }
+                            }
                         ) {
                             ProjectListView(showHeader: false)
                                 .frame(height: 220)
@@ -179,6 +233,13 @@ struct ContentView: View {
             ProfileSheet()
                 .environment(appState)
         }
+        .sheet(isPresented: $showCreateChannel) {
+            CreateChannelSheet { newChannel in
+                appState.selectedChannelId = newChannel.id
+                appState.selectedThreadId = nil
+                appState.selectedProjectId = nil
+            }
+        }
         .toolbar {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {
@@ -311,6 +372,23 @@ struct ContentView: View {
             await MainActor.run { pendingConnectionsCount = list.count }
         } catch {
             // Silent failure — badge just won't update
+        }
+    }
+
+    private func createProject(type: String) {
+        isCreatingProject = true
+        Task {
+            do {
+                let proj = try await MatchaWorkService.shared.createProject(title: "New Project", projectType: type)
+                await MainActor.run {
+                    appState.selectedProjectId = proj.id
+                    appState.selectedThreadId = nil
+                    appState.selectedChannelId = nil
+                    isCreatingProject = false
+                }
+            } catch {
+                await MainActor.run { isCreatingProject = false }
+            }
         }
     }
 

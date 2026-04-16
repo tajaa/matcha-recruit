@@ -146,7 +146,7 @@ struct ChannelsSidebarView: View {
     }
 }
 
-private struct CreateChannelSheet: View {
+struct CreateChannelSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onCreated: (ChannelDetail) -> Void
 
