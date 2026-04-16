@@ -87,7 +87,7 @@ export default function MarketingNav({ onPricingClick }: Props) {
               Login
             </Link>
             <Link
-              to="/login"
+              to="/contact"
               className="hidden sm:inline-flex items-center px-5 h-9 rounded-full text-sm font-medium transition-opacity hover:opacity-90"
               style={{
                 backgroundColor: overHero ? '#F5F2ED' : 'var(--color-ivory-ink)',
@@ -153,7 +153,7 @@ export default function MarketingNav({ onPricingClick }: Props) {
               Login
             </Link>
             <Link
-              to="/login"
+              to="/contact"
               onClick={() => setMenuOpen(false)}
               className="mt-6 inline-flex items-center justify-center px-6 h-12 rounded-full text-base font-medium"
               style={{
