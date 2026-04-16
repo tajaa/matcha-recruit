@@ -166,6 +166,36 @@ async def stripe_webhook(request: Request):
             stripe_sub_id = str(event_object.get("subscription") or "")
             stripe_customer_id = str(event_object.get("customer") or "")
 
+            # Recruiter tier: extend user's recruiter_until by one month.
+            # Stored on users, not mw_subscriptions, because tier is
+            # per-user not per-company.
+            if pack_id == "matcha_recruiter" and billing_type == "recruiter_tier":
+                recruiter_user_id_str = meta.get("user_id") or ""
+                if recruiter_user_id_str:
+                    try:
+                        from ...database import get_connection as _get_conn
+                        async with _get_conn() as _conn:
+                            await _conn.execute(
+                                """
+                                UPDATE users
+                                SET recruiter_until = GREATEST(
+                                    COALESCE(recruiter_until, NOW()),
+                                    NOW()
+                                ) + INTERVAL '1 month'
+                                WHERE id = $1
+                                """,
+                                UUID(recruiter_user_id_str),
+                            )
+                        logger.info(
+                            "Recruiter tier activated for user %s (sub %s)",
+                            recruiter_user_id_str, stripe_sub_id,
+                        )
+                    except Exception as exc:
+                        logger.error("Failed to activate recruiter tier: %s", exc)
+                # No further processing — recruiter tier doesn't touch
+                # mw_subscriptions / token budgets.
+                return {"received": True}
+
             if company_id_str and pack_id and stripe_sub_id:
                 try:
                     company_id = UUID(company_id_str)

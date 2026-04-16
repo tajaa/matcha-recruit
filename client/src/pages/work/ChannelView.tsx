@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2, Briefcase } from 'lucide-react'
-import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout } from '../../api/channels'
+import { ArrowLeft, Hash, Users, Send, Loader2, LogIn, LogOut, UserPlus, Paperclip, X, FileText, Image as ImageIcon, Crown, Shield, Settings, Heart, Phone, BarChart2, Briefcase, Trash2 } from 'lucide-react'
+import { getChannel, joinChannel, leaveChannel, uploadChannelFiles, kickMember, setMemberRole, getChannelPaymentInfo, createChannelCheckout, deleteChannelMessage } from '../../api/channels'
 import type { ChannelDetail, ChannelMessage, ChannelMember, ChannelAttachment, ChannelPaymentInfo } from '../../api/channels'
 import { ChannelSocket, getSharedChannelSocket } from '../../api/channelSocket'
 import { useMe } from '../../hooks/useMe'
@@ -61,6 +61,27 @@ export default function ChannelView() {
   })
 
   const postingParam = new URLSearchParams(window.location.search).get('posting')
+
+  const myChannelRole = channel?.my_role ?? 'member'
+  const canModerate = myChannelRole === 'owner' || myChannelRole === 'moderator'
+
+  async function handleDeleteMessage(msg: ChannelMessage) {
+    if (!channelId) return
+    if (!window.confirm('Delete this message? This cannot be undone.')) return
+    try {
+      await deleteChannelMessage(channelId, msg.id)
+      // Optimistic — the WebSocket event also arrives, but we don't wait.
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === msg.id
+            ? { ...m, content: '', attachments: [], deleted_at: new Date().toISOString(), deleted_by: userId ?? null }
+            : m
+        )
+      )
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete message')
+    }
+  }
 
   useEffect(() => {
     if (postingParam) setActivePostingId(postingParam)
@@ -139,6 +160,16 @@ export default function ChannelView() {
     socket.onUserLeft = (user) => {
       setOnlineUsers((prev) => prev.filter((u) => u.id !== user.id))
     }
+    socket.onMessageDeleted = (data) => {
+      if (data.channel_id !== channelId) return
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === data.message_id
+            ? { ...m, content: '', attachments: [], deleted_at: new Date().toISOString(), deleted_by: data.deleted_by }
+            : m
+        )
+      )
+    }
 
     // Global hook should already have joined this room, but joinRoom is
     // idempotent on the client and the server allows duplicate joins.
@@ -152,6 +183,7 @@ export default function ChannelView() {
       socket.onOnlineUsers = null
       socket.onUserJoined = null
       socket.onUserLeft = null
+      socket.onMessageDeleted = null
       socketRef.current = null
       // Do NOT call disconnect() or leaveRoom() — the shared socket persists.
     }
@@ -483,8 +515,10 @@ export default function ChannelView() {
             {messages.map((msg, i) => {
               const showAuthor = i === 0 || messages[i - 1].sender_id !== msg.sender_id
               const isOwn = msg.sender_id === userId
+              const isDeleted = !!msg.deleted_at
+              const canDelete = !isDeleted && (isOwn || canModerate)
               return (
-                <div key={msg.id} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5`}>
+                <div key={msg.id} className={`${showAuthor && i > 0 ? 'mt-3' : ''} flex gap-2.5 group`}>
                   {showAuthor ? (
                     msg.sender_avatar_url ? (
                       <img src={msg.sender_avatar_url} alt="" className="w-8 h-8 rounded-full object-cover shrink-0 mt-0.5" />
@@ -507,12 +541,18 @@ export default function ChannelView() {
                         </span>
                       </div>
                     )}
-                    {msg.content && (
+                    {isDeleted ? (
+                      <p className="text-xs italic text-zinc-500">
+                        {msg.deleted_by === msg.sender_id
+                          ? '[message deleted by author]'
+                          : '[message removed by a moderator]'}
+                      </p>
+                    ) : msg.content ? (
                       <p className="text-sm text-zinc-200 whitespace-pre-wrap break-words">
                         {msg.content}
                       </p>
-                    )}
-                  {msg.attachments && msg.attachments.length > 0 && (
+                    ) : null}
+                  {!isDeleted && msg.attachments && msg.attachments.length > 0 && (
                     <div className="flex flex-wrap gap-2 mt-1">
                       {msg.attachments.map((att, ai) =>
                         att.content_type.startsWith('image/') ? (
@@ -538,6 +578,15 @@ export default function ChannelView() {
                     </div>
                   )}
                   </div>
+                  {canDelete && (
+                    <button
+                      onClick={() => handleDeleteMessage(msg)}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-zinc-500 hover:text-red-400 shrink-0 self-start mt-0.5"
+                      title={isOwn ? 'Delete message' : 'Delete as moderator'}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  )}
                 </div>
               )
             })}

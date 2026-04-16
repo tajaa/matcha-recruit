@@ -12,9 +12,15 @@ interface Props {
 }
 
 const STATUS_BADGE: Record<string, string> = {
+  pending_approval: 'bg-amber-900/40 text-amber-400 border border-amber-800/40',
   draft: 'bg-zinc-700 text-zinc-300',
   active: 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/40',
   closed: 'bg-red-900/40 text-red-400 border border-red-800/40',
+  rejected: 'bg-red-900/40 text-red-400 border border-red-800/40',
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  pending_approval: 'pending',
 }
 
 export default function JobPostingsPanel({ channelId, myRole, onClose, onOpenDetail }: Props) {
@@ -95,7 +101,7 @@ export default function JobPostingsPanel({ channelId, myRole, onClose, onOpenDet
                       <div className="flex items-center gap-2 mb-1">
                         <span className="text-sm font-medium text-zinc-200 truncate">{posting.title}</span>
                         <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${STATUS_BADGE[posting.status] ?? STATUS_BADGE.draft}`}>
-                          {posting.status}
+                          {STATUS_LABEL[posting.status] ?? posting.status}
                         </span>
                       </div>
                       <div className="flex items-center gap-3 text-xs text-zinc-500">
@@ -122,6 +128,7 @@ export default function JobPostingsPanel({ channelId, myRole, onClose, onOpenDet
 
       <CreateJobPostingModal
         channelId={channelId}
+        myRole={myRole}
         isOpen={showCreate}
         onClose={() => setShowCreate(false)}
         onCreated={(posting) => {

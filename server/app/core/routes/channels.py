@@ -56,6 +56,40 @@ class ChannelMessage(BaseModel):
     attachments: list[ChannelAttachment] = []
     created_at: datetime
     edited_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None
+    deleted_by: Optional[UUID] = None
+
+
+def _row_to_message(m) -> "ChannelMessage":
+    """Shared row → ChannelMessage transform that tombstones deleted rows.
+
+    Deleted messages return with empty content + attachments and the
+    deleted_at/deleted_by fields set so the client can render a tombstone
+    instead of the original text.
+    """
+    is_deleted = m["deleted_at"] is not None
+    attachments = (
+        []
+        if is_deleted
+        else (
+            json.loads(m["attachments"])
+            if isinstance(m["attachments"], str)
+            else (m["attachments"] or [])
+        )
+    )
+    return ChannelMessage(
+        id=m["id"],
+        channel_id=m["channel_id"],
+        sender_id=m["sender_id"],
+        sender_name=m["sender_name"],
+        sender_avatar_url=m["sender_avatar_url"],
+        content="" if is_deleted else m["content"],
+        attachments=attachments,
+        created_at=m["created_at"],
+        edited_at=m["edited_at"],
+        deleted_at=m["deleted_at"],
+        deleted_by=m["deleted_by"],
+    )
 
 
 class ChannelSummary(BaseModel):
@@ -865,7 +899,8 @@ async def get_channel(
         # Recent messages
         messages = await conn.fetch(
             f"""
-            SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
+            SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
+                   m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
                    {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
             FROM channel_messages m
             JOIN users u ON u.id = m.sender_id
@@ -910,13 +945,7 @@ async def get_channel(
                 for m in members
             ],
             messages=[
-                ChannelMessage(
-                    id=m["id"], channel_id=m["channel_id"], sender_id=m["sender_id"],
-                    sender_name=m["sender_name"], sender_avatar_url=m["sender_avatar_url"],
-                    content=m["content"],
-                    attachments=json.loads(m["attachments"]) if isinstance(m["attachments"], str) else (m["attachments"] or []),
-                    created_at=m["created_at"], edited_at=m["edited_at"],
-                )
+                _row_to_message(m)
                 for m in reversed(messages)  # Return chronological order
             ],
         )
@@ -953,7 +982,8 @@ async def get_channel_messages(
                 raise HTTPException(status_code=400, detail="Invalid 'before' cursor format")
             rows = await conn.fetch(
                 f"""
-                SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
+                SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
+                       m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
                        {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
                 FROM channel_messages m
                 JOIN users u ON u.id = m.sender_id
@@ -969,7 +999,8 @@ async def get_channel_messages(
         else:
             rows = await conn.fetch(
                 f"""
-                SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments, m.created_at, m.edited_at,
+                SELECT m.id, m.channel_id, m.sender_id, m.content, m.attachments,
+                       m.created_at, m.edited_at, m.deleted_at, m.deleted_by,
                        {_USER_NAME_EXPR} AS sender_name, u.avatar_url AS sender_avatar_url
                 FROM channel_messages m
                 JOIN users u ON u.id = m.sender_id
@@ -983,16 +1014,62 @@ async def get_channel_messages(
                 channel_id, limit,
             )
 
-        return [
-            ChannelMessage(
-                id=r["id"], channel_id=r["channel_id"], sender_id=r["sender_id"],
-                sender_name=r["sender_name"], sender_avatar_url=r["sender_avatar_url"],
-                content=r["content"],
-                attachments=json.loads(r["attachments"]) if isinstance(r["attachments"], str) else (r["attachments"] or []),
-                created_at=r["created_at"], edited_at=r["edited_at"],
-            )
-            for r in reversed(rows)
-        ]
+        return [_row_to_message(r) for r in reversed(rows)]
+
+
+@router.delete("/{channel_id}/messages/{message_id}", status_code=status.HTTP_200_OK)
+async def delete_channel_message(
+    channel_id: UUID,
+    message_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Soft-delete a channel message. Allowed for the message author, the
+    channel owner, or any channel moderator. Deleted messages remain in
+    the DB with deleted_at/deleted_by set so we can audit and render a
+    tombstone on the client.
+    """
+    async with get_connection() as conn:
+        msg = await conn.fetchrow(
+            "SELECT id, sender_id, deleted_at FROM channel_messages WHERE id = $1 AND channel_id = $2",
+            message_id, channel_id,
+        )
+        if not msg:
+            raise HTTPException(status_code=404, detail="Message not found")
+        if msg["deleted_at"] is not None:
+            return {"ok": True, "already_deleted": True}
+
+        member_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        is_author = msg["sender_id"] == current_user.id
+        is_mod = member_role in ("owner", "moderator")
+        if not is_author and not is_mod:
+            raise HTTPException(status_code=403, detail="You can only delete your own messages")
+
+        await conn.execute(
+            """
+            UPDATE channel_messages
+            SET deleted_at = NOW(),
+                deleted_by = $2
+            WHERE id = $1
+            """,
+            message_id, current_user.id,
+        )
+
+    # Fan out deletion over the channel WebSocket so every connected
+    # member updates their view without needing to refetch.
+    try:
+        from .channels_ws import broadcast_message_deleted
+        await broadcast_message_deleted(
+            channel_id=str(channel_id),
+            message_id=str(message_id),
+            deleted_by=str(current_user.id),
+        )
+    except Exception as exc:
+        logger.warning("Failed to broadcast channel message deletion: %s", exc)
+
+    return {"ok": True, "deleted_by": str(current_user.id)}
 
 
 @router.post("/{channel_id}/join", status_code=status.HTTP_200_OK)

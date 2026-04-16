@@ -236,6 +236,59 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Personal subscription session: {exc}") from exc
 
+    async def create_recruiter_tier_checkout(
+        self,
+        user_id: UUID,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Create a $30/month Matcha Recruiter subscription checkout.
+
+        Recruiter tier grants the user access to parsed applicant resumes
+        on channel job postings. Webhook handler reads pack_id = matcha_recruiter
+        and bumps users.recruiter_until by one month.
+        """
+        self._ensure_secret_key()
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        metadata = {
+            "user_id": str(user_id),
+            "pack_id": "matcha_recruiter",
+            "billing_type": "recruiter_tier",
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": 3000,
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": "Matcha Recruiter",
+                                "description": "Unlock parsed applicant resumes on channel job postings",
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Recruiter tier session: {exc}") from exc
+
     async def create_token_subscription_checkout(
         self,
         company_id: UUID,

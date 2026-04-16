@@ -52,6 +52,7 @@ export class ChannelSocket {
   onOnlineUsers: OnlineHandler | null = null
   onUserJoined: UserEventHandler | null = null
   onUserLeft: UserEventHandler | null = null
+  onMessageDeleted: ((data: { channel_id: string; message_id: string; deleted_by: string }) => void) | null = null
   onConnected: (() => void) | null = null
   onDisconnected: (() => void) | null = null
 
@@ -98,6 +99,13 @@ export class ChannelSocket {
         switch (data.type) {
           case 'message':
             this._dispatchMessage(data.message)
+            break
+          case 'message_deleted':
+            this.onMessageDeleted?.({
+              channel_id: data.room,
+              message_id: data.message_id,
+              deleted_by: data.deleted_by,
+            })
             break
           case 'typing':
             this.onTyping?.(data.user)

@@ -13,10 +13,13 @@ import {
   updateApplicationStatus,
   cancelJobPosting,
   closeJobPosting,
+  approveJobPosting,
+  rejectJobPosting,
+  createJobPostingCheckout,
 } from '../../api/channelJobPostings'
 import type { JobPostingDetail as JobPostingDetailData, ApplicationSummary } from '../../api/channelJobPostings'
-import { getMyResume, getApplicantResume } from '../../api/profileResume'
-import type { ProfileResume, ParsedResume } from '../../api/profileResume'
+import { getMyResume, getApplicantResume, getMyTier, startRecruiterCheckout } from '../../api/profileResume'
+import type { ProfileResume, ParsedResume, TierInfo } from '../../api/profileResume'
 
 interface Props {
   channelId: string
@@ -66,6 +69,10 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
   const [myResumeLoaded, setMyResumeLoaded] = useState(false)
   const [showNoResumeModal, setShowNoResumeModal] = useState(false)
 
+  // Recruiter tier state (for managers viewing the applicants list)
+  const [tier, setTier] = useState<TierInfo | null>(null)
+  const [upgrading, setUpgrading] = useState(false)
+
   const isManager = myRole === 'owner' || myRole === 'moderator'
 
   useEffect(() => {
@@ -75,6 +82,9 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
     ]
     if (isManager) {
       promises.push(listApplicants(channelId, postingId).then(setApplicants))
+      promises.push(
+        getMyTier().then(setTier).catch(() => {})
+      )
     } else {
       promises.push(
         getMyResume()
@@ -190,6 +200,56 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
     setActionLoading(false)
   }
 
+  async function handleApprove() {
+    setActionLoading(true)
+    try {
+      await approveJobPosting(channelId, postingId)
+      const updated = await getJobPosting(channelId, postingId)
+      setPosting(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to approve')
+    }
+    setActionLoading(false)
+  }
+
+  async function handleReject() {
+    const reason = window.prompt('Reason for rejection (optional)') ?? undefined
+    setActionLoading(true)
+    try {
+      await rejectJobPosting(channelId, postingId, reason)
+      const updated = await getJobPosting(channelId, postingId)
+      setPosting(updated)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reject')
+    }
+    setActionLoading(false)
+  }
+
+  async function handleStartCheckout() {
+    setActionLoading(true)
+    try {
+      const { checkout_url } = await createJobPostingCheckout(channelId, postingId)
+      window.location.href = checkout_url
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Checkout failed')
+      setActionLoading(false)
+    }
+  }
+
+  async function handleUpgradeRecruiter() {
+    setUpgrading(true)
+    try {
+      const { checkout_url } = await startRecruiterCheckout(
+        window.location.href,
+        window.location.href,
+      )
+      window.location.href = checkout_url
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Upgrade checkout failed')
+      setUpgrading(false)
+    }
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center">
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
@@ -226,16 +286,75 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
               </div>
             )}
 
+            {/* Approval state banner */}
+            {posting.status === 'pending_approval' && (
+              <div className="rounded-lg border border-amber-800/40 bg-amber-950/30 px-4 py-3">
+                <p className="text-sm text-amber-300 font-medium">Awaiting owner approval</p>
+                <p className="text-xs text-amber-400/80 mt-1">
+                  {myRole === 'owner'
+                    ? 'Approve to let the recruiter complete checkout, or reject to block it.'
+                    : 'The channel owner has to approve this posting before it goes live.'}
+                </p>
+                {myRole === 'owner' && (
+                  <div className="flex items-center gap-2 mt-3">
+                    <button
+                      onClick={handleApprove}
+                      disabled={actionLoading}
+                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded transition-colors disabled:opacity-50"
+                    >
+                      {actionLoading ? 'Working…' : 'Approve'}
+                    </button>
+                    <button
+                      onClick={handleReject}
+                      disabled={actionLoading}
+                      className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium rounded transition-colors disabled:opacity-50"
+                    >
+                      Reject
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {posting.status === 'rejected' && (
+              <div className="rounded-lg border border-red-800/40 bg-red-950/30 px-4 py-3">
+                <p className="text-sm text-red-300 font-medium">Rejected</p>
+                {posting.rejected_reason && (
+                  <p className="text-xs text-red-400/80 mt-1">{posting.rejected_reason}</p>
+                )}
+              </div>
+            )}
+
+            {posting.status === 'draft' && posting.posted_by && isManager && (
+              <div className="rounded-lg border border-blue-800/40 bg-blue-950/30 px-4 py-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-blue-300 font-medium">Approved — ready for checkout</p>
+                  <p className="text-xs text-blue-400/80 mt-1">
+                    Complete the monthly subscription to activate this posting.
+                  </p>
+                </div>
+                <button
+                  onClick={handleStartCheckout}
+                  disabled={actionLoading}
+                  className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded transition-colors shrink-0 disabled:opacity-50"
+                >
+                  {actionLoading ? 'Opening…' : 'Pay now'}
+                </button>
+              </div>
+            )}
+
             {/* Status + meta */}
             <div className="flex flex-wrap items-center gap-3">
               <span className={`text-xs font-bold uppercase px-2 py-1 rounded ${
                 posting.status === 'active'
                   ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/40'
-                  : posting.status === 'closed'
+                  : posting.status === 'closed' || posting.status === 'rejected'
                     ? 'bg-red-900/40 text-red-400 border border-red-800/40'
-                    : 'bg-zinc-700 text-zinc-300'
+                    : posting.status === 'pending_approval'
+                      ? 'bg-amber-900/40 text-amber-400 border border-amber-800/40'
+                      : 'bg-zinc-700 text-zinc-300'
               }`}>
-                {posting.status}
+                {posting.status === 'pending_approval' ? 'pending' : posting.status}
               </span>
               <span className={`text-xs font-medium inline-flex items-center gap-1 px-2 py-1 rounded border ${
                 posting.open_to_all
@@ -324,6 +443,25 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
                   <h3 className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2">
                     Applicants ({applicants.length})
                   </h3>
+                  {applicants.length > 0 && tier && !tier.is_recruiter && (
+                    <div className="mb-3 rounded-lg border border-emerald-800/40 bg-emerald-950/30 px-4 py-3 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium text-emerald-300">
+                          Upgrade to Matcha Recruiter to read parsed resumes
+                        </p>
+                        <p className="text-xs text-emerald-400/80 mt-1 leading-relaxed">
+                          $30/month. Unlocks skills, experience, strengths, and live profile fetch for every applicant on every posting. Cover letters and applicant contact info stay visible without upgrading.
+                        </p>
+                      </div>
+                      <button
+                        onClick={handleUpgradeRecruiter}
+                        disabled={upgrading}
+                        className="shrink-0 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded transition-colors disabled:opacity-50"
+                      >
+                        {upgrading ? 'Opening…' : 'Upgrade'}
+                      </button>
+                    </div>
+                  )}
                   {applicants.length === 0 ? (
                     <p className="text-xs text-zinc-600">No applications yet</p>
                   ) : (
@@ -351,6 +489,16 @@ export default function JobPostingDetail({ channelId, postingId, myRole, onClose
                                 >
                                   <FileText size={11} />
                                   {expanded ? 'Hide parsed resume' : 'View parsed resume'}
+                                </button>
+                              )}
+                              {!app.resume_snapshot && app.resume_locked && (
+                                <button
+                                  onClick={handleUpgradeRecruiter}
+                                  disabled={upgrading}
+                                  className="mt-2 inline-flex items-center gap-1.5 text-[11px] text-amber-400 hover:text-amber-300 disabled:opacity-50"
+                                >
+                                  <FileText size={11} />
+                                  Parsed resume locked — upgrade to view
                                 </button>
                               )}
                             </div>

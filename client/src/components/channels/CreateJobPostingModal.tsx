@@ -6,13 +6,14 @@ import type { JobPostingSummary } from '../../api/channelJobPostings'
 interface Props {
   channelId: string
   isOpen: boolean
+  myRole: string
   onClose: () => void
   onCreated: (posting: JobPostingSummary) => void
 }
 
 type Targeting = 'open_to_all' | 'targeted'
 
-export default function CreateJobPostingModal({ channelId, isOpen, onClose, onCreated }: Props) {
+export default function CreateJobPostingModal({ channelId, isOpen, myRole, onClose, onCreated }: Props) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [requirements, setRequirements] = useState('')
@@ -23,6 +24,8 @@ export default function CreateJobPostingModal({ channelId, isOpen, onClose, onCr
   const [error, setError] = useState('')
   const [feeCents, setFeeCents] = useState<number | null>(null)
   const [feeIsDefault, setFeeIsDefault] = useState(true)
+
+  const isOwner = myRole === 'owner'
 
   useEffect(() => {
     if (!isOpen) return
@@ -51,6 +54,14 @@ export default function CreateJobPostingModal({ channelId, isOpen, onClose, onCr
         open_to_all: targeting === 'open_to_all',
       })
       onCreated(posting)
+      // Owner posts go straight to Stripe checkout since they don't need
+      // approval. Mod posts land in pending_approval — the recruiter can
+      // only pay after the owner approves, so we close the modal and the
+      // JobPostingDetail view shows a "waiting for approval" badge.
+      if (posting.status === 'pending_approval') {
+        onClose()
+        return
+      }
       const { checkout_url } = await createJobPostingCheckout(channelId, posting.id)
       window.location.href = checkout_url
     } catch (err) {
@@ -82,6 +93,14 @@ export default function CreateJobPostingModal({ channelId, isOpen, onClose, onCr
           {error && (
             <div className="text-sm text-red-400 bg-red-900/20 border border-red-800/40 rounded-lg px-3 py-2">
               {error}
+            </div>
+          )}
+
+          {!isOwner && (
+            <div className="text-xs text-amber-300 bg-amber-900/20 border border-amber-800/40 rounded-lg px-3 py-2 leading-relaxed">
+              This posting will be submitted for the channel owner's approval.
+              It won't appear in the feed or accept applications until approved.
+              You'll pay the monthly fee after approval.
             </div>
           )}
 

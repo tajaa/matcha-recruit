@@ -60,6 +60,10 @@ class UpdateApplicationRequest(BaseModel):
     reviewer_notes: Optional[str] = None
 
 
+class RejectPostingRequest(BaseModel):
+    reason: Optional[str] = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -100,7 +104,13 @@ async def create_job_posting(
         if not merged.get("channel_job_postings") and current_user.role != "admin":
             raise HTTPException(status_code=403, detail="Job postings feature is not enabled for this company")
 
-        # Create Stripe product and price for this posting
+        # Owner posts skip approval and go straight to draft (then checkout).
+        # Mod posts in someone else's channel land in pending_approval so the
+        # channel owner can vet them before they hit the feed.
+        initial_status = "draft" if role == "owner" else "pending_approval"
+
+        # Stripe product/price are created up-front for both paths so the
+        # recruiter can complete checkout as soon as the posting is approved.
         product_id, price_id = await create_job_posting_product_and_price(
             channel_id=channel_id,
             channel_name=ch["name"],
@@ -112,17 +122,41 @@ async def create_job_posting(
             INSERT INTO channel_job_postings
                 (channel_id, posted_by, title, description, requirements,
                  compensation_summary, location, status,
-                 stripe_product_id, stripe_price_id, open_to_all)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, 'draft', $8, $9, $10)
+                 stripe_product_id, stripe_price_id, open_to_all,
+                 approved_by, approved_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+                    CASE WHEN $8 = 'draft' THEN $2 END,
+                    CASE WHEN $8 = 'draft' THEN NOW() END)
             RETURNING id, channel_id, posted_by, title, description, requirements,
                       compensation_summary, location, status,
                       stripe_product_id, stripe_price_id, open_to_all,
+                      approved_by, approved_at,
                       created_at, updated_at
             """,
             channel_id, current_user.id, body.title, body.description,
             body.requirements, body.compensation_summary, body.location,
-            product_id, price_id, body.open_to_all,
+            initial_status, product_id, price_id, body.open_to_all,
         )
+
+        # Notify the channel owner when a mod post needs approval.
+        if initial_status == "pending_approval":
+            try:
+                from ...matcha.services import notification_service as notif_svc
+                owner_id = await conn.fetchval(
+                    "SELECT user_id FROM channel_members WHERE channel_id = $1 AND role = 'owner' LIMIT 1",
+                    channel_id,
+                )
+                if owner_id and owner_id != current_user.id:
+                    await notif_svc.create_notification(
+                        user_id=owner_id,
+                        company_id=company_id,
+                        type="channel_job_posting_pending",
+                        title=f"Job posting needs approval: {body.title}",
+                        body=f"{ch['name']} moderator created a new posting awaiting your approval",
+                        link=f"/work/channels/{channel_id}/job-postings/{row['id']}",
+                    )
+            except Exception:
+                pass
 
     return dict(row)
 
@@ -142,10 +176,12 @@ async def list_job_postings(
         if role is None:
             raise HTTPException(status_code=403, detail="You are not a member of this channel")
 
-        if role in ("owner", "moderator"):
+        if role == "owner":
+            # Owner sees everything including mod posts awaiting their approval.
             rows = await conn.fetch(
                 """
                 SELECT jp.id, jp.title, jp.status, jp.location, jp.open_to_all,
+                       jp.posted_by, jp.approved_by, jp.approved_at,
                        jp.created_at, jp.updated_at,
                        (SELECT COUNT(*) FROM channel_job_applications a WHERE a.posting_id = jp.id) AS applicant_count,
                        (SELECT COUNT(*) FROM channel_job_invitations i WHERE i.posting_id = jp.id) AS invited_count
@@ -154,6 +190,23 @@ async def list_job_postings(
                 ORDER BY jp.created_at DESC
                 """,
                 channel_id,
+            )
+        elif role == "moderator":
+            # Mods see everything EXCEPT other mods' pending_approval posts.
+            # They still see their own pending posts so they can track status.
+            rows = await conn.fetch(
+                """
+                SELECT jp.id, jp.title, jp.status, jp.location, jp.open_to_all,
+                       jp.posted_by, jp.approved_by, jp.approved_at,
+                       jp.created_at, jp.updated_at,
+                       (SELECT COUNT(*) FROM channel_job_applications a WHERE a.posting_id = jp.id) AS applicant_count,
+                       (SELECT COUNT(*) FROM channel_job_invitations i WHERE i.posting_id = jp.id) AS invited_count
+                FROM channel_job_postings jp
+                WHERE jp.channel_id = $1
+                  AND (jp.status != 'pending_approval' OR jp.posted_by = $2)
+                ORDER BY jp.created_at DESC
+                """,
+                channel_id, current_user.id,
             )
         else:
             # Members see active postings that are either open-to-all or
@@ -211,6 +264,16 @@ async def get_job_posting(
 
         is_owner_mod = role in ("owner", "moderator")
         is_open_to_all = bool(posting["open_to_all"])
+        is_poster = posting["posted_by"] == current_user.id
+
+        # Mods who didn't post a pending_approval posting can't see it — the
+        # owner needs to gate approval without another mod front-running them.
+        if (
+            posting["status"] == "pending_approval"
+            and role != "owner"
+            and not is_poster
+        ):
+            raise HTTPException(status_code=404, detail="Job posting not found")
 
         # Check invitation for non-owner/mod
         invitation = await conn.fetchrow(
@@ -314,11 +377,23 @@ async def checkout_job_posting(
             raise HTTPException(status_code=403, detail="Only channel owners and moderators can manage billing")
 
         posting = await conn.fetchrow(
-            "SELECT id, stripe_price_id FROM channel_job_postings WHERE id = $1 AND channel_id = $2",
+            "SELECT id, status, posted_by, stripe_price_id FROM channel_job_postings WHERE id = $1 AND channel_id = $2",
             posting_id, channel_id,
         )
         if not posting:
             raise HTTPException(status_code=404, detail="Job posting not found")
+        # Only the recruiter who created the posting can run checkout, and
+        # only once the post has been approved (status moved past
+        # pending_approval / rejected into draft).
+        if posting["posted_by"] != current_user.id and role != "owner":
+            raise HTTPException(status_code=403, detail="Only the recruiter who created the posting can pay for it")
+        if posting["status"] == "pending_approval":
+            raise HTTPException(
+                status_code=400,
+                detail="This posting is awaiting owner approval — you can't pay for it yet",
+            )
+        if posting["status"] == "rejected":
+            raise HTTPException(status_code=400, detail="This posting was rejected")
 
     url = await create_job_posting_checkout(
         posting_id=posting_id,
@@ -496,16 +571,32 @@ async def list_applicants(
             posting_id,
         )
 
+        # Gate parsed resume payload behind the Matcha Recruiter tier.
+        # Non-recruiter owners/mods still see that applications exist +
+        # the cover letter, but the parsed resume is stripped.
+        is_recruiter_tier = bool(
+            await conn.fetchval(
+                "SELECT recruiter_until > NOW() FROM users WHERE id = $1",
+                current_user.id,
+            )
+        )
+
     out = []
     for r in rows:
         d = dict(r)
-        # Normalize snapshot JSONB into a dict for the client
         snap = d.get("resume_snapshot")
-        if isinstance(snap, str):
-            try:
-                d["resume_snapshot"] = json.loads(snap)
-            except json.JSONDecodeError:
-                d["resume_snapshot"] = None
+        if not is_recruiter_tier:
+            # Drop the parsed payload — keep a flag so the client knows
+            # a snapshot exists and can prompt the upgrade.
+            d["resume_snapshot"] = None
+            d["resume_locked"] = snap is not None
+        else:
+            d["resume_locked"] = False
+            if isinstance(snap, str):
+                try:
+                    d["resume_snapshot"] = json.loads(snap)
+                except json.JSONDecodeError:
+                    d["resume_snapshot"] = None
         out.append(d)
     return out
 
@@ -708,6 +799,156 @@ async def update_application(
             pass
 
     return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# NEW: POST /{channel_id}/job-postings/{posting_id}/approve — owner approves
+# ---------------------------------------------------------------------------
+
+@router.post("/{channel_id}/job-postings/{posting_id}/approve")
+async def approve_job_posting(
+    channel_id: UUID,
+    posting_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Channel owner approves a mod-created pending posting. Transitions
+    status pending_approval → draft so the recruiter can run checkout."""
+    async with get_connection() as conn:
+        role = await _get_member_role(conn, channel_id, current_user.id)
+        if role != "owner":
+            raise HTTPException(status_code=403, detail="Only the channel owner can approve job postings")
+
+        posting = await conn.fetchrow(
+            "SELECT id, status, posted_by, title FROM channel_job_postings WHERE id = $1 AND channel_id = $2",
+            posting_id, channel_id,
+        )
+        if not posting:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        if posting["status"] != "pending_approval":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot approve a posting in status '{posting['status']}'",
+            )
+
+        row = await conn.fetchrow(
+            """
+            UPDATE channel_job_postings
+            SET status = 'draft', approved_by = $2, approved_at = NOW(), updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+            """,
+            posting_id, current_user.id,
+        )
+
+        # Tell the recruiter their post is approved and ready for checkout.
+        try:
+            from ...matcha.services import notification_service as notif_svc
+            company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
+            if company_id:
+                await notif_svc.create_notification(
+                    user_id=posting["posted_by"],
+                    company_id=company_id,
+                    type="channel_job_posting_approved",
+                    title=f"Job posting approved: {posting['title']}",
+                    body="The channel owner approved your posting. Complete checkout to activate it.",
+                    link=f"/work/channels/{channel_id}/job-postings/{posting_id}",
+                )
+        except Exception:
+            pass
+
+    return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# NEW: POST /{channel_id}/job-postings/{posting_id}/reject — owner rejects
+# ---------------------------------------------------------------------------
+
+@router.post("/{channel_id}/job-postings/{posting_id}/reject")
+async def reject_job_posting(
+    channel_id: UUID,
+    posting_id: UUID,
+    body: RejectPostingRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Channel owner rejects a pending posting. Status becomes 'rejected'
+    and the posting is hidden from the feed."""
+    async with get_connection() as conn:
+        role = await _get_member_role(conn, channel_id, current_user.id)
+        if role != "owner":
+            raise HTTPException(status_code=403, detail="Only the channel owner can reject job postings")
+
+        posting = await conn.fetchrow(
+            "SELECT id, status, posted_by, title FROM channel_job_postings WHERE id = $1 AND channel_id = $2",
+            posting_id, channel_id,
+        )
+        if not posting:
+            raise HTTPException(status_code=404, detail="Job posting not found")
+        if posting["status"] != "pending_approval":
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot reject a posting in status '{posting['status']}'",
+            )
+
+        row = await conn.fetchrow(
+            """
+            UPDATE channel_job_postings
+            SET status = 'rejected', rejected_reason = $2, updated_at = NOW()
+            WHERE id = $1
+            RETURNING *
+            """,
+            posting_id, body.reason,
+        )
+
+        try:
+            from ...matcha.services import notification_service as notif_svc
+            company_id = await conn.fetchval("SELECT company_id FROM channels WHERE id = $1", channel_id)
+            if company_id:
+                await notif_svc.create_notification(
+                    user_id=posting["posted_by"],
+                    company_id=company_id,
+                    type="channel_job_posting_rejected",
+                    title=f"Job posting rejected: {posting['title']}",
+                    body=body.reason or "The channel owner rejected your posting.",
+                    link=f"/work/channels/{channel_id}/job-postings/{posting_id}",
+                )
+        except Exception:
+            pass
+
+    return dict(row)
+
+
+# ---------------------------------------------------------------------------
+# NEW: GET /job-postings/my-pending-approvals — owner's approval queue
+# ---------------------------------------------------------------------------
+
+@router.get("/job-postings/my-pending-approvals")
+async def my_pending_approvals(
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Return all pending_approval postings across channels the current
+    user owns, so a creator can review the queue in one place."""
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            f"""
+            SELECT jp.id, jp.title, jp.description, jp.location,
+                   jp.compensation_summary, jp.created_at,
+                   ch.id AS channel_id, ch.name AS channel_name,
+                   jp.posted_by,
+                   {_USER_NAME_EXPR} AS posted_by_name
+            FROM channel_job_postings jp
+            JOIN channels ch ON ch.id = jp.channel_id
+            JOIN channel_members cm ON cm.channel_id = ch.id
+            JOIN users u ON u.id = jp.posted_by
+            LEFT JOIN clients c ON c.user_id = u.id
+            LEFT JOIN employees e ON e.user_id = u.id
+            LEFT JOIN admins a ON a.user_id = u.id
+            WHERE jp.status = 'pending_approval'
+              AND cm.user_id = $1 AND cm.role = 'owner'
+            ORDER BY jp.created_at DESC
+            """,
+            current_user.id,
+        )
+    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------

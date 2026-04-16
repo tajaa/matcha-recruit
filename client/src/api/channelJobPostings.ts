@@ -1,15 +1,25 @@
 import { api } from './client'
 import type { ParsedResume } from './profileResume'
 
+export type JobPostingStatus =
+  | 'pending_approval'
+  | 'draft'
+  | 'active'
+  | 'closed'
+  | 'rejected'
+
 export interface JobPostingSummary {
   id: string
   channel_id: string
   title: string
-  status: 'draft' | 'active' | 'closed'
+  status: JobPostingStatus
   subscription_status: string | null
   applicant_count: number
   invited_count: number
   open_to_all?: boolean
+  posted_by?: string
+  approved_by?: string | null
+  approved_at?: string | null
   created_at: string
 }
 
@@ -22,8 +32,24 @@ export interface JobPostingDetail extends JobPostingSummary {
   posted_by: string
   open_to_all: boolean
   i_can_apply?: boolean
+  approved_by: string | null
+  approved_at: string | null
+  rejected_reason: string | null
   my_invitation: { invited_at: string; viewed_at: string | null } | null
   my_application: { id: string; status: string; submitted_at: string } | null
+}
+
+export interface PendingApprovalSummary {
+  id: string
+  title: string
+  description: string | null
+  location: string | null
+  compensation_summary: string | null
+  created_at: string
+  channel_id: string
+  channel_name: string
+  posted_by: string
+  posted_by_name: string
 }
 
 export interface ApplicationSummary {
@@ -34,6 +60,7 @@ export interface ApplicationSummary {
   status: string
   cover_letter: string | null
   resume_snapshot?: ParsedResume | null
+  resume_locked?: boolean
   submitted_at: string
   reviewed_at: string | null
 }
@@ -121,6 +148,17 @@ export const updateApplicationStatus = (
 
 export const getMyJobInvitations = () =>
   api.get<MyJobInvitation[]>('/channels/job-postings/my-invitations')
+
+export const getMyPendingApprovals = () =>
+  api.get<PendingApprovalSummary[]>('/channels/job-postings/my-pending-approvals')
+
+export const approveJobPosting = (channelId: string, postingId: string) =>
+  api.post<JobPostingDetail>(`/channels/${channelId}/job-postings/${postingId}/approve`)
+
+export const rejectJobPosting = (channelId: string, postingId: string, reason?: string) =>
+  api.post<JobPostingDetail>(`/channels/${channelId}/job-postings/${postingId}/reject`, {
+    reason: reason ?? null,
+  })
 
 export const listOpenPostings = (channelId: string) =>
   api.get<OpenPostingSummary[]>(`/channels/${channelId}/open-postings`)

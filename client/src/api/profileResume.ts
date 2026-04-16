@@ -38,3 +38,16 @@ export const deleteMyResume = () => api.delete<void>('/users/me/resume')
  */
 export const getApplicantResume = (userId: string) =>
   api.get<ProfileResume | null>(`/users/${userId}/resume`)
+
+export interface TierInfo {
+  is_recruiter: boolean
+  recruiter_until: string | null
+}
+
+export const getMyTier = () => api.get<TierInfo>('/users/me/tier')
+
+export const startRecruiterCheckout = (successUrl?: string, cancelUrl?: string) =>
+  api.post<{ checkout_url: string }>('/users/me/recruiter-checkout', {
+    success_url: successUrl ?? null,
+    cancel_url: cancelUrl ?? null,
+  })

@@ -43,6 +43,8 @@ export interface ChannelMessage {
   attachments?: ChannelAttachment[]
   created_at: string
   edited_at: string | null
+  deleted_at?: string | null
+  deleted_by?: string | null
 }
 
 export interface ChannelDetail {
@@ -115,6 +117,9 @@ export const getChannel = (id: string) =>
 
 export const getChannelMessages = (id: string, before?: string) =>
   api.get<ChannelMessage[]>(`/channels/${id}/messages${before ? `?before=${before}` : ''}`)
+
+export const deleteChannelMessage = (channelId: string, messageId: string) =>
+  api.delete<{ ok: boolean }>(`/channels/${channelId}/messages/${messageId}`)
 
 export const joinChannel = (id: string) =>
   api.post(`/channels/${id}/join`)

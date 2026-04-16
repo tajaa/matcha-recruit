@@ -188,6 +188,25 @@ class ChannelConnectionManager:
 manager = ChannelConnectionManager()
 
 
+async def broadcast_message_deleted(
+    channel_id: str,
+    message_id: str,
+    deleted_by: str,
+) -> None:
+    """Fan out a message_deleted event to all members currently connected
+    to a channel room. Called by the REST DELETE handler in channels.py.
+    """
+    await manager._broadcast_to_room(
+        channel_id,
+        {
+            "type": "message_deleted",
+            "room": channel_id,
+            "message_id": message_id,
+            "deleted_by": deleted_by,
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Auth helper
 # ---------------------------------------------------------------------------
