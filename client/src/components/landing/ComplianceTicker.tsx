@@ -22,9 +22,10 @@ const ITEMS = [...HEADLINES, ...HEADLINES]
 export function ComplianceTicker() {
   return (
     <div
-      className="fixed top-0 left-0 right-0 z-[60] overflow-hidden"
+      className="relative w-full overflow-hidden"
       style={{
         backgroundColor: 'var(--color-ivory-ink)',
+        borderTop: '1px solid rgba(255,255,255,0.06)',
         borderBottom: '1px solid rgba(255,255,255,0.06)',
         height: '44px',
       }}

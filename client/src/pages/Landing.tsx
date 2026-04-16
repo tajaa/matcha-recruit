@@ -62,10 +62,10 @@ export default function Landing() {
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
-      <ComplianceTicker />
       <MarketingNav onPricingClick={() => setIsPricingOpen(true)} />
 
       <Hero data={data} />
+      <ComplianceTicker />
 
       <main>
         {sizzles.map((s, i) => (
@@ -164,67 +164,46 @@ function AnimationHero({ data }: { data: LandingMedia }) {
         }}
       />
 
-      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-20 lg:pt-28 pb-16 min-h-[100svh] flex flex-col">
-        {/* Centered product label */}
-        <div className="flex justify-center pt-4 pb-2">
-          <div
-            className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full"
+      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-24 lg:pt-28 pb-16 min-h-[100svh] flex flex-col">
+        {/* Stacked layout — headline + CTAs centered up top, full-width animation card below */}
+        <div className="flex-1 flex flex-col items-center text-center">
+          <h1
+            className="leading-[0.95] tracking-tight max-w-4xl"
             style={{
-              backgroundColor: 'rgba(31,29,26,0.05)',
-              border: '1px solid rgba(31,29,26,0.08)',
+              fontFamily: DISPLAY,
+              fontWeight: 400,
+              color: INK,
+              fontSize: 'clamp(2.25rem, 5vw, 4.5rem)',
             }}
           >
-            <span className="w-1 h-1 rounded-full" style={{ backgroundColor: '#86efac' }} />
-            <span
-              className="text-[11px] uppercase tracking-[0.2em] font-medium"
-              style={{ color: INK, fontFamily: 'ui-monospace, monospace' }}
+            {HERO_HEADLINE}
+          </h1>
+          <p
+            className="mt-5 max-w-2xl"
+            style={{ color: MUTED, fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.55 }}
+          >
+            {HERO_SUBCOPY}
+          </p>
+          <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+            <Link
+              to="/login"
+              className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
+              style={{ backgroundColor: INK, color: BG }}
             >
-              Matcha Platform
-            </span>
-          </div>
-        </div>
-
-        <div className="flex-1 grid lg:grid-cols-[0.85fr_1.15fr] gap-8 lg:gap-12 items-center">
-          {/* Left: text */}
-          <div className="min-w-0 max-w-xl">
-            <h1
-              className="leading-[0.95] tracking-tight"
-              style={{
-                fontFamily: DISPLAY,
-                fontWeight: 400,
-                color: INK,
-                fontSize: 'clamp(2.75rem, 6vw, 5.25rem)',
-              }}
+              Book a Consultation
+            </Link>
+            <Link
+              to="/services"
+              className="inline-flex items-center h-12 text-[15px] transition-opacity hover:opacity-60"
+              style={{ color: INK }}
             >
-              {HERO_HEADLINE}
-            </h1>
-            <p
-              className="mt-6 max-w-lg"
-              style={{ color: MUTED, fontSize: 'clamp(1rem, 1.15vw, 1.125rem)', lineHeight: 1.55 }}
-            >
-              {HERO_SUBCOPY}
-            </p>
-            <div className="mt-10 flex flex-wrap items-center gap-4">
-              <Link
-                to="/login"
-                className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
-                style={{ backgroundColor: INK, color: BG }}
-              >
-                Book a Consultation
-              </Link>
-              <Link
-                to="/services"
-                className="inline-flex items-center h-12 text-[15px] transition-opacity hover:opacity-60"
-                style={{ color: INK }}
-              >
-                Explore services →
-              </Link>
-            </div>
+              Explore services →
+            </Link>
           </div>
 
-          {/* Right: compliance animation */}
-          <div className="min-w-0 overflow-hidden flex justify-center lg:justify-end">
-            <LazyMount minHeight={540} fallback={<div className="w-full max-w-[1040px] mx-auto rounded-xl" style={{ height: 540, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><Suspense fallback={<div className="w-full max-w-[1040px] mx-auto rounded-xl" style={{ height: 540, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><AgentReasoningAnimation /></Suspense></LazyMount>
+          {/* Wide animation card — no longer competing with side text for width */}
+          <div className="mt-8 w-full overflow-hidden flex justify-center">
+            <LazyMount minHeight={540} fallback={<div className="w-full max-w-[1280px] mx-auto rounded-xl" style={{ height: 540, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><Suspense fallback={<div className="w-full max-w-[1280px] mx-auto rounded-xl" style={{ height: 540, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><AgentReasoningAnimation /></Suspense></LazyMount>
           </div>
         </div>
 

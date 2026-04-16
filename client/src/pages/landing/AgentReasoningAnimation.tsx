@@ -221,7 +221,7 @@ export default function AgentReasoningAnimation() {
   return (
     <div
       ref={containerRef}
-      className="relative w-full max-w-[1040px] rounded-xl overflow-hidden mx-auto flex flex-col"
+      className="relative w-full max-w-[1280px] rounded-xl overflow-hidden mx-auto flex flex-col"
       style={{
         backgroundColor: '#0a0a08',
         color: '#d4d4d4',
