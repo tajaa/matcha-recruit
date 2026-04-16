@@ -1207,13 +1207,22 @@ async def interview_websocket(
     await send_message(MessageType.SYSTEM, f"Connected to interview for {company_name}")
 
     try:
-        # Create Gemini session (use alpha API for affective dialog + proactive audio)
+        # Screening + candidate interviews (the recruiting-project flow) get the
+        # human-fluidity Live API features: affective dialog (model adapts to
+        # emotional tone) and proactive audio (model holds back when the user
+        # is mumbling, thinking aloud, or there's background noise).
+        # These features are documented as v1alpha — route through the alpha
+        # endpoint when they're on, so the server doesn't silently drop them.
+        wants_human_features = interview_type in ("screening", "candidate")
+
+        # Create Gemini session.
         # Use Google AI API (not Vertex) for live sessions — 3.1 models
         # only available on Google AI, and 2.5 is being discontinued on Vertex.
         gemini_session = GeminiLiveSession(
             model=settings.live_model,
             voice=settings.voice,
             api_key=settings.gemini_api_key,
+            use_alpha_api=wants_human_features,
         )
 
         # Connect with appropriate interview prompt + new Live API features
@@ -1233,8 +1242,8 @@ async def interview_websocket(
             position_title=position_title_for_prompt,
             # Investigation interviews: don't let user interrupt the investigator
             no_interruption=(interview_type == "investigation"),
-            enable_affective_dialog=False,
-            enable_proactive_audio=False,
+            enable_affective_dialog=wants_human_features,
+            enable_proactive_audio=wants_human_features,
         )
 
         await send_message(MessageType.STATUS, "Session started")

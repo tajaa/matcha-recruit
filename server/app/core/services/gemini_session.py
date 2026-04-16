@@ -739,6 +739,18 @@ class GeminiLiveSession:
             },
         }
 
+        # Affective dialog — model recognizes emotional cues in the user's voice
+        # (warmth, hesitation, frustration) and adapts tone in response. Makes
+        # screening / candidate interviews feel substantially more human.
+        if enable_affective_dialog:
+            config["enable_affective_dialog"] = True
+
+        # Proactive audio — model decides when NOT to respond (background noise,
+        # user thinking aloud, side conversations). Cuts down on the "AI talks
+        # over me / replies to my mumbles" failure mode.
+        if enable_proactive_audio:
+            config["proactivity"] = {"proactive_audio": True}
+
         # Investigation interviews: disable interruptions so investigator finishes questions
         if no_interruption:
             config["realtime_input_config"]["activity_handling"] = "NO_INTERRUPTION"
