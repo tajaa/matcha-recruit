@@ -13,6 +13,7 @@ class AppState {
     var onlineUsers: [MWOnlineUser] = []
     var unreadInboxCount: Int = 0
     var isPlusActive: Bool = false
+    var isSceneActive: Bool = true
     private var heartbeatTask: Task<Void, Never>?
     private var inboxPollTask: Task<Void, Never>?
 
@@ -97,12 +98,15 @@ class AppState {
 
     private func startInboxPolling() {
         inboxPollTask?.cancel()
-        inboxPollTask = Task {
+        inboxPollTask = Task { [weak self] in
             while !Task.isCancelled {
-                do {
-                    let count = try await InboxService.shared.getUnreadCount()
-                    await MainActor.run { unreadInboxCount = count }
-                } catch { }
+                let active = await MainActor.run { self?.isSceneActive ?? false }
+                if active {
+                    do {
+                        let count = try await InboxService.shared.getUnreadCount()
+                        await MainActor.run { self?.unreadInboxCount = count }
+                    } catch { }
+                }
                 try? await Task.sleep(for: .seconds(60))
             }
         }
@@ -110,14 +114,17 @@ class AppState {
 
     private func startPresenceHeartbeat() {
         heartbeatTask?.cancel()
-        heartbeatTask = Task {
+        heartbeatTask = Task { [weak self] in
             while !Task.isCancelled {
-                do {
-                    try await MatchaWorkService.shared.sendHeartbeat()
-                    let users = try await MatchaWorkService.shared.fetchOnlineUsers()
-                    await MainActor.run { onlineUsers = users }
-                } catch {
-                    // Non-critical — silently continue
+                let active = await MainActor.run { self?.isSceneActive ?? false }
+                if active {
+                    do {
+                        try await MatchaWorkService.shared.sendHeartbeat()
+                        let users = try await MatchaWorkService.shared.fetchOnlineUsers()
+                        await MainActor.run { self?.onlineUsers = users }
+                    } catch {
+                        // Non-critical — silently continue
+                    }
                 }
                 try? await Task.sleep(for: .seconds(30))
             }

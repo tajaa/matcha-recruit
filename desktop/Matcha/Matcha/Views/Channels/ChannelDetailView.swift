@@ -28,6 +28,7 @@ struct ChannelDetailView: View {
     @State private var isDragOver = false
     @State private var replyingTo: ChannelMessage? = nil
     @State private var hoveredMessageId: String? = nil
+    @State private var lastTypingSentAt: Date = .distantPast
 
     private let ws = ChannelsWebSocket.shared
     private let senderColumnWidth: CGFloat = 160
@@ -75,7 +76,7 @@ struct ChannelDetailView: View {
         }
         .onDisappear {
             ws.leaveRoom(channelId: channelId)
-            ws.clearCallbacks()
+            ws.clearCallbacksIfRoomMatches(channelId)
         }
     }
 
@@ -543,7 +544,10 @@ struct ChannelDetailView: View {
                 .foregroundColor(.white.opacity(0.9))
                 .lineLimit(1...4)
                 .onChange(of: inputText) {
-                    if !inputText.isEmpty {
+                    guard !inputText.isEmpty else { return }
+                    let now = Date()
+                    if now.timeIntervalSince(lastTypingSentAt) >= 2.5 {
+                        lastTypingSentAt = now
                         ws.sendTyping(channelId: channelId)
                     }
                 }

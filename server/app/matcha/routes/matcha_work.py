@@ -5609,6 +5609,9 @@ async def send_message(
         msg_dicts, thread["current_state"], company_context=ctx,
         slide_index=body.slide_index, context_summary=context_summary,
         payer_mode_prompt=payer_prompt,
+        compliance_mode=bool(thread.get("compliance_mode")),
+        payer_mode=bool(thread.get("payer_mode")),
+        node_mode=bool(thread.get("node_mode")),
     )
     _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
     final_usage = ai_resp.token_usage
@@ -5911,6 +5914,9 @@ async def send_message_stream(
                 payer_mode_prompt=stream_payer_prompt,
                 model_override=body.model,
                 company_id=str(company_id),
+                compliance_mode=bool(thread.get("compliance_mode")),
+                payer_mode=bool(thread.get("payer_mode")),
+                node_mode=bool(thread.get("node_mode")),
             ))
             while True:
                 done, _ = await asyncio.wait({_ai_task}, timeout=15.0)

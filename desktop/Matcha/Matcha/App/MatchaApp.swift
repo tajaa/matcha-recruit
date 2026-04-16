@@ -18,10 +18,11 @@ struct MatchaApp: App {
             }
             .preferredColorScheme(.dark)
             .onChange(of: scenePhase) { _, phase in
-                // When the app scene becomes active, retry session restore
-                // (fixes the case where the dev server wasn't running at
-                // launch) and nudge the channels WebSocket back to life.
+                appState.isSceneActive = (phase == .active)
                 if phase == .active {
+                    // When the app scene becomes active, retry session restore
+                    // (fixes the case where the dev server wasn't running at
+                    // launch) and nudge the channels WebSocket back to life.
                     Task { await appState.onSceneActive() }
                 }
             }

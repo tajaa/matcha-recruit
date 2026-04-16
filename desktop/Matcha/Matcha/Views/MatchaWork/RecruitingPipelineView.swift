@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct RecruitingPipelineView: View {
     @Bindable var viewModel: ProjectDetailViewModel
+    @Environment(AppState.self) private var appState
 
     @State private var tab: Tab = .status
     @State private var searchText = ""
@@ -99,10 +100,16 @@ struct RecruitingPipelineView: View {
     private func startAutoSync() {
         let hasPending = recruiting.candidates.contains { $0.interviewId != nil && $0.interviewStatus != "completed" && $0.interviewStatus != "interview_completed" }
         guard hasPending else { return }
-        autoSyncTask = Task {
+        // Capture the AppState reference so the loop sees live scene-phase
+        // updates. Reading `scenePhase` directly here would freeze it at task
+        // creation since `self` is a value-type View struct.
+        let state = appState
+        autoSyncTask = Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
-                await viewModel.syncProjectInterviews()
+                if state.isSceneActive {
+                    await viewModel.syncProjectInterviews()
+                }
             }
         }
     }

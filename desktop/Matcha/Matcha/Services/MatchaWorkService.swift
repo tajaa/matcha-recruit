@@ -58,6 +58,15 @@ class MatchaWorkService {
         threadDetailCache.removeValue(forKey: threadId)
         versionsCache.removeValue(forKey: threadId)
         pdfCache = pdfCache.filter { !$0.key.hasPrefix("\(threadId):") }
+        // Don't wipe threadListCache here — sidebar still has accurate data in
+        // its own ViewModel state. Stale cache entries expire on TTL (60s).
+        // Listings only need a hard refresh on create/delete/archive/pin/title,
+        // which call into the dedicated invalidators below.
+    }
+
+    /// Drop the cached thread lists. Call when thread membership in any
+    /// status bucket changes (create, delete, archive, pin, title rename).
+    func invalidateThreadLists() {
         threadListCache.removeAll()
     }
 
@@ -93,13 +102,14 @@ class MatchaWorkService {
     func createThread(title: String?, initialMessage: String?) async throws -> MWThread {
         let body = MWCreateThreadRequest(title: title, initialMessage: initialMessage)
         let response: MWCreateThreadResponse = try await client.request(method: "POST", path: "\(basePath)/threads", body: body)
-        threadListCache.removeAll()
+        invalidateThreadLists()
         return response.toThread()
     }
 
     func deleteThread(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/threads/\(id)")
         invalidateThread(threadId: id)
+        invalidateThreadLists()
     }
 
     func setPinned(id: String, pinned: Bool) async throws -> MWThread {
@@ -110,6 +120,7 @@ class MatchaWorkService {
             body: body
         )
         invalidateThread(threadId: id)
+        invalidateThreadLists()
         return thread
     }
 
@@ -146,6 +157,7 @@ class MatchaWorkService {
             path: "\(basePath)/threads/\(id)/finalize"
         )
         invalidateThread(threadId: id)
+        invalidateThreadLists()
         return response
     }
 
@@ -264,12 +276,14 @@ class MatchaWorkService {
             body: body
         )
         invalidateThread(threadId: threadId)
+        invalidateThreadLists()
         return thread
     }
 
     func archiveThread(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/threads/\(id)")
         invalidateThread(threadId: id)
+        invalidateThreadLists()
     }
 
     // MARK: - Resume / Inventory File Upload (multipart)

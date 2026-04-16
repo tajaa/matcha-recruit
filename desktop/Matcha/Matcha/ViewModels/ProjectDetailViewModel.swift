@@ -71,22 +71,42 @@ class ProjectDetailViewModel {
         MWRecruitingData.from(projectData: project?.projectData)
     }
 
+    /// Replace one array key inside the live `project.projectData` blob.
+    /// Triggers a reactive re-render via @Observable since `MWRecruitingData`
+    /// is recomputed from `projectData` on every access.
+    @MainActor
+    private func setProjectDataIds(_ key: String, _ ids: [String]) {
+        guard var data = project?.projectData else { return }
+        data[key] = AnyCodable(ids.map { AnyCodable($0) })
+        project?.projectData = data
+    }
+
     func toggleShortlist(candidateId: String) async {
         guard let pid = project?.id else { return }
+        let priorIds = recruitingData.shortlistIds
+        let wasIn = priorIds.contains(candidateId)
+        var next = priorIds
+        if wasIn { next.remove(candidateId) } else { next.insert(candidateId) }
+        await setProjectDataIds("shortlist_ids", Array(next).sorted())
         do {
             _ = try await service.toggleShortlist(projectId: pid, candidateId: candidateId)
-            await loadProject(id: pid)
         } catch {
+            await setProjectDataIds("shortlist_ids", Array(priorIds).sorted())
             await MainActor.run { errorMessage = error.localizedDescription }
         }
     }
 
     func toggleDismiss(candidateId: String) async {
         guard let pid = project?.id else { return }
+        let priorIds = recruitingData.dismissedIds
+        let wasIn = priorIds.contains(candidateId)
+        var next = priorIds
+        if wasIn { next.remove(candidateId) } else { next.insert(candidateId) }
+        await setProjectDataIds("dismissed_ids", Array(next).sorted())
         do {
             _ = try await service.toggleProjectDismiss(projectId: pid, candidateId: candidateId)
-            await loadProject(id: pid)
         } catch {
+            await setProjectDataIds("dismissed_ids", Array(priorIds).sorted())
             await MainActor.run { errorMessage = error.localizedDescription }
         }
     }

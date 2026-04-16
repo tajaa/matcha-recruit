@@ -98,6 +98,13 @@ Mission:
 3) Ask concise clarifying questions when required inputs for a skill are missing.
 4) Never block normal Q&A just because no skill is invoked.
 5) Do NOT frame yourself as an "HR copilot" or refuse non-HR questions. HR/employment and compliance guidance are specialized capabilities that activate only when (a) the user explicitly asks about HR / employment / compliance topics, (b) a business company profile is present in company_context below, or (c) Node Mode / Compliance Mode / Payer Mode is active in the thread context.
+
+Response style (READ FIRST — applies to every reply):
+- Match length to question complexity. Trivial questions ("hi", "what's 2+2", "thanks", small talk, single-fact lookups, simple coding one-liners, definition questions) get a SHORT direct answer in `reply` — one sentence to one short paragraph. No preamble, no headers, no caveats, no compliance framing, no SVG.
+- Reserve long structured replies (multi-section markdown, bullet lists, tables, charts) for genuinely complex/analytical questions, or when the user explicitly asks for depth.
+- For simple chat: `mode="general"`, `skill="none"`, `operation="none"`, `updates={{}}`, `compliance_reasoning=[]`, `referenced_categories=[]`, `referenced_locations=[]`. Do not pad those arrays with empty entries.
+- Compliance/HR framing, decision paths, and "this is not legal advice" disclaimers ONLY appear when the user is actually asking about employment law, workplace policy, or compliance — not for general questions that happen to be sent in a business-account thread.
+- If the question is a greeting or thanks, just respond naturally in 1 line. Don't restate what you can do.
 {company_context}
 
 Supported skills:
@@ -502,22 +509,99 @@ async def _get_model(
 
 
 _LIVE_INFO_KEYWORDS = (
-    "today", "tonight", "now", "current", "currently", "latest", "this week",
-    "this morning", "yesterday", "right now", "market", "markets", "stock",
-    "stocks", "ticker", "price of", "share price", "news", "headline",
-    "headlines", "breaking", "score", "weather", "forecast", "election",
-    "polls", "exchange rate", "crypto", "bitcoin", "ethereum", "s&p",
-    "nasdaq", "dow", "fed", "interest rate", "economy", "inflation",
+    # Time-anchored
+    "today", "tonight", "now", "current", "currently", "latest", "recent",
+    "recently", "this week", "this month", "this year", "this morning",
+    "yesterday", "last week", "last month", "right now", "as of",
+    # Markets / finance
+    "market", "markets", "stock", "stocks", "ticker", "price of",
+    "share price", "exchange rate", "crypto", "bitcoin", "ethereum",
+    "s&p", "nasdaq", "dow", "fed", "interest rate", "yield", "earnings",
+    "inflation", "cpi", "ppi", "jobs report", "unemployment rate",
+    # News / events
+    "news", "headline", "headlines", "breaking", "press release",
+    "announced", "announcement", "launch", "launched", "release date",
+    "released", "ship date", "shipped", "ipo", "acquisition",
     "happening", "going on", "update on", "what's up with",
+    # Sports / weather
+    "score", "scores", "game", "weather", "forecast", "temperature",
+    # Politics
+    "election", "polls", "primary", "vote", "voted", "supreme court",
+    # Lookup-shaped wh- queries that usually need fresh web data
+    "who is the", "who's the", "who won", "who founded", "who created",
+    "when did", "when was", "when is", "when will",
+    "where is", "where's the headquarters",
+    "how much does", "how many users", "how big is",
+    "ceo of", "founder of", "valuation of", "revenue of", "owner of",
 )
 
 
 def needs_live_web_context(user_message: str) -> bool:
-    """Quick heuristic: does this question need real-time web grounding?"""
+    """Quick heuristic: does this question need real-time web grounding?
+
+    Conservative — false positives cost 5–15s of latency, so we only return True
+    on clear time-sensitive or fresh-fact patterns. Trivial chit-chat, math,
+    coding, and timeless explainers should return False.
+    """
     if not user_message:
         return False
     lowered = user_message.lower()
+    if len(lowered) < 8:
+        return False  # "hi", "thanks", etc.
     return any(kw in lowered for kw in _LIVE_INFO_KEYWORDS)
+
+
+# ── Auto-thinking heuristic ──
+# Trivial chat → no thinking (fastest). Most general questions → low. Compliance,
+# payer, multi-step skills, analytical asks → high.
+_HIGH_THINK_KEYWORDS = (
+    "compare", "trade-off", "tradeoff", "analyze", "analysis",
+    "evaluate", "design", "architect", "architecture", "strategy",
+    "strategize", "diagnose", "debug", "root cause", "why does",
+    "why is", "explain why", "step by step", "step-by-step", "plan",
+    "outline a", "implement", "refactor", "optimi", "calculate",
+    "derive", "prove", "what if", "tradeoffs", "pros and cons",
+)
+_TRIVIAL_PATTERNS = (
+    "hi", "hey", "hello", "yo", "sup", "thanks", "thank you", "ty",
+    "ok", "okay", "cool", "nice", "got it", "great",
+)
+
+
+def classify_thinking_level(
+    user_message: str,
+    current_skill: str,
+    compliance_mode: bool,
+    payer_mode: bool,
+    node_mode: bool,
+) -> str:
+    """Return Gemini thinking level: "none", "low", or "high".
+
+    Used to keep latency low on trivial chat while letting complex / compliance /
+    multi-step skill calls actually reason. Falls back to "low" when uncertain.
+    """
+    if compliance_mode or payer_mode:
+        return "high"
+    msg = (user_message or "").strip().lower()
+    if not msg:
+        return "low"
+    # Trivial single-token replies
+    if len(msg) < 12:
+        stripped = msg.rstrip("!.?")
+        if stripped in _TRIVIAL_PATTERNS:
+            return "none"
+    # Skill threads doing real document work benefit from thinking
+    if current_skill in {"offer_letter", "review", "workbook", "handbook",
+                         "policy", "presentation", "project", "onboarding"}:
+        return "high"
+    if node_mode:
+        return "high"
+    if any(kw in msg for kw in _HIGH_THINK_KEYWORDS):
+        return "high"
+    # Long, structured questions → likely worth thinking
+    if len(msg) > 280 or msg.count("\n") > 2:
+        return "high"
+    return "low"
 
 
 async def fetch_live_web_context(user_message: str, settings) -> Optional[str]:
@@ -676,6 +760,9 @@ class GeminiProvider(MatchaWorkAIProvider):
         payer_mode_prompt: Optional[str] = None,
         model_override: Optional[str] = None,
         company_id: str = "",
+        compliance_mode: bool = False,
+        payer_mode: bool = False,
+        node_mode: bool = False,
     ) -> AIResponse:
         if payer_mode_prompt:
             # Payer mode: dedicated medical policy prompt, plain text response (no JSON)
@@ -724,6 +811,19 @@ class GeminiProvider(MatchaWorkAIProvider):
         )
         model = await _get_model(self.settings, model_override, company_id=company_id)
 
+        # Auto-pick thinking level based on the latest user message + thread mode.
+        latest_user_msg = next(
+            (m["content"] for m in reversed(messages) if m.get("role") == "user"),
+            "",
+        )
+        thinking_level = classify_thinking_level(
+            latest_user_msg,
+            inferred_skill,
+            compliance_mode=compliance_mode,
+            payer_mode=payer_mode,
+            node_mode=node_mode,
+        )
+
         try:
             response = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -735,6 +835,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     model,
                     inferred_skill,
                     company_id,
+                    thinking_level,
                 ),
                 timeout=GEMINI_CALL_TIMEOUT,
             )
@@ -761,12 +862,21 @@ class GeminiProvider(MatchaWorkAIProvider):
         model: str,
         inferred_skill: str,
         company_id: str = "",
+        thinking_level: str = "low",
     ) -> AIResponse:
         import time as _time
         # Try to cache the static prompt (instructions + company context)
         _tc0 = _time.monotonic()
         cache_name = self._get_or_create_cache(model, static_prompt, company_id)
         logger.info("[TIMING] cache lookup/create %.2fs (cache_name=%s)", _time.monotonic() - _tc0, cache_name)
+
+        # Build thinking_config — "none" → budget=0 (disabled, fastest path);
+        # "low"/"high" → use named level so the model picks an appropriate budget.
+        if thinking_level == "none":
+            thinking_cfg = types.ThinkingConfig(thinking_budget=0)
+        else:
+            thinking_cfg = types.ThinkingConfig(thinking_level=thinking_level)
+        logger.info("[TIMING] thinking_level=%s skill=%s", thinking_level, inferred_skill)
 
         _tg0 = _time.monotonic()
         if cache_name:
@@ -784,6 +894,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     cached_content=cache_name,
                     temperature=0.2,
                     response_mime_type="application/json",
+                    thinking_config=thinking_cfg,
                 ),
             )
         else:
@@ -795,6 +906,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                     system_instruction=static_prompt + "\n\n" + dynamic_prompt,
                     temperature=0.2,
                     response_mime_type="application/json",
+                    thinking_config=thinking_cfg,
                 ),
             )
         logger.info("[TIMING] generate_content %.2fs", _time.monotonic() - _tg0)

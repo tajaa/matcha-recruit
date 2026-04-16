@@ -1,5 +1,27 @@
 import SwiftUI
 
+// Process-wide cache so re-renders (or scrolling past the same message twice)
+// don't re-parse the markdown. Keyed by raw content; bounded to keep memory in
+// check on long threads.
+private final class MarkdownCache {
+    static let shared = MarkdownCache()
+    private let cache = NSCache<NSString, NSAttributedString>()
+    private init() { cache.countLimit = 500 }
+
+    func attributed(for content: String) -> AttributedString {
+        let key = content as NSString
+        if let cached = cache.object(forKey: key) {
+            return AttributedString(cached)
+        }
+        let parsed = (try? AttributedString(
+            markdown: content,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(content)
+        cache.setObject(NSAttributedString(parsed), forKey: key)
+        return parsed
+    }
+}
+
 struct MessageBubbleView: View {
     let message: MWMessage
     var lightMode: Bool = false
@@ -55,19 +77,11 @@ struct MessageBubbleView: View {
         return lightMode ? Color(white: 0.96) : Color.zinc800
     }
 
-    @ViewBuilder
     private var markdownContent: some View {
-        if let attributed = try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
-            Text(attributed)
-                .font(.system(size: 14))
-                .foregroundColor(lightMode ? .primary : .white)
-                .textSelection(.enabled)
-        } else {
-            Text(message.content)
-                .font(.system(size: 14))
-                .foregroundColor(lightMode ? .primary : .white)
-                .textSelection(.enabled)
-        }
+        Text(MarkdownCache.shared.attributed(for: message.content))
+            .font(.system(size: 14))
+            .foregroundColor(lightMode ? .primary : .white)
+            .textSelection(.enabled)
     }
 
     @ViewBuilder

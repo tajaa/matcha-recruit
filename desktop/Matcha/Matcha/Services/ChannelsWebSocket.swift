@@ -75,6 +75,14 @@ final class ChannelsWebSocket: NSObject {
         onError = nil
     }
 
+    /// Clear callbacks only if no other view has joined a different room since
+    /// the caller wired them up. Avoids the SwiftUI teardown race where a
+    /// disappearing channel view wipes the callbacks just set by the next one.
+    func clearCallbacksIfRoomMatches(_ channelId: String) {
+        guard currentRoom == nil || currentRoom == channelId else { return }
+        clearCallbacks()
+    }
+
     func leaveRoom(channelId: String) {
         if currentRoom == channelId { currentRoom = nil }
         send(["type": "leave_room", "channel_id": channelId])
