@@ -8,7 +8,7 @@ import { MessageThread } from '../../components/inbox/MessageThread'
 import { ComposeModal } from '../../components/inbox/ComposeModal'
 import { useMe } from '../../hooks/useMe'
 import type { MWMessage, MWThreadDetail, MWSendResponse, MWStreamEvent, MWProject } from '../../types/matcha-work'
-import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions, fetchUsageSummary, fetchUsageSummary24h, updateTitle, pinThread } from '../../api/matchaWork'
+import { getProjectDetail, getThread, sendMessageStream, createProjectChat, addProjectSectionNew, updateProjectSectionNew, uploadProjectResumes, sendProjectInterviews, syncProjectInterviews, analyzeProjectCandidates, extractPlaceholderValue, generatePlaceholderQuestions, fetchUsageSummary, fetchUsageSummary24h, updateTitle, pinThread, getPdfProxyUrl } from '../../api/matchaWork'
 import type { UsageSummary } from '../../api/matchaWork'
 import MessageBubble from '../../components/matcha-work/MessageBubble'
 import ProjectPanel from '../../components/matcha-work/ProjectPanel'
@@ -98,6 +98,9 @@ export default function ProjectView() {
     } catch {}
   }
 
+  // Offer letter PDF panel (for recruiting projects)
+  const [offerPdfUrl, setOfferPdfUrl] = useState<string | null>(null)
+
   // Recruiting wizard + drag-and-drop
   const [showWizard, setShowWizard] = useState(false)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -181,6 +184,9 @@ export default function ProjectView() {
       .then((t) => {
         setActiveThread(t)
         setMessages(t.messages)
+        if (t.task_type === 'offer_letter' || t.linked_offer_letter_id) {
+          setOfferPdfUrl(getPdfProxyUrl(activeChatId, t.version))
+        }
       })
       .catch(() => {})
   }, [activeChatId])
@@ -278,6 +284,9 @@ export default function ProjectView() {
           const withoutTemp = prev.filter((m) => m.id !== tempMsg.id)
           return [...withoutTemp, data.user_message, data.assistant_message]
         })
+        if (data.task_type === 'offer_letter' || data.pdf_url) {
+          setOfferPdfUrl(getPdfProxyUrl(activeChatId, data.version))
+        }
         setStreaming(false)
         refreshUsage()
         // Refresh project data so side panel picks up AI-generated updates (posting, sections, etc.)
@@ -776,6 +785,7 @@ export default function ProjectView() {
             projectId={projectId!}
             onUpdate={(updated) => setProject(updated)}
             streaming={streaming}
+            offerPdfUrl={offerPdfUrl}
             onSendInterviews={async (ids, positionTitle) => {
               try {
                 const result = await sendProjectInterviews(projectId!, ids, positionTitle)

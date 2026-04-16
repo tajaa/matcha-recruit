@@ -9,7 +9,7 @@ import InterviewReviewModal from './InterviewReviewModal'
 import RejectCandidateModal from './RejectCandidateModal'
 import PipelineProgressStrip from './PipelineProgressStrip'
 
-type Tab = 'status' | 'posting' | 'candidates' | 'interviews' | 'shortlist'
+type Tab = 'status' | 'posting' | 'candidates' | 'interviews' | 'shortlist' | 'offer'
 type SortKey = 'name' | 'experience_years' | 'location' | 'match_score'
 
 interface RecruitingPipelineProps {
@@ -21,6 +21,7 @@ interface RecruitingPipelineProps {
   onSyncInterviews?: () => Promise<void>
   onAnalyzeCandidates?: () => Promise<void>
   onPromptChat?: (placeholders: PlaceholderInfo[]) => void
+  offerPdfUrl?: string | null
 }
 
 interface PlaceholderInfo {
@@ -58,7 +59,7 @@ const c = {
   green: '#22c55e', amber: '#f59e0b',
 }
 
-export default function RecruitingPipeline({ project, projectId, onUpdate, onSendInterviews, onSyncInterviews, onAnalyzeCandidates, onPromptChat }: RecruitingPipelineProps) {
+export default function RecruitingPipeline({ project, projectId, onUpdate, onSendInterviews, onSyncInterviews, onAnalyzeCandidates, onPromptChat, offerPdfUrl }: RecruitingPipelineProps) {
   const data = (project.project_data || {}) as RecruitingData
   const posting = data.posting || {}
   const candidates = data.candidates || []
@@ -288,6 +289,7 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     candidates: isFinalized, // need finalized posting first
     interviews: candidates.length > 0, // need candidates first
     shortlist: interviewedCount > 0, // need completed interviews
+    offer: !!offerPdfUrl,
   }
 
   const tabs: { key: Tab; label: string; count?: number }[] = [
@@ -296,12 +298,20 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
     { key: 'candidates', label: 'Candidates', count: candidates.length },
     { key: 'interviews', label: 'Interviews', count: interviewSentCount },
     { key: 'shortlist', label: 'Shortlist', count: shortlistIds.size },
+    ...(offerPdfUrl ? [{ key: 'offer' as Tab, label: 'Offer' }] : []),
   ]
 
   // Auto-reset to an unlocked tab if current tab becomes locked
   useEffect(() => {
     if (!tabUnlocked[tab]) setTab('status')
   }, [tabUnlocked[tab]]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-switch to offer tab when a draft first appears
+  const prevOfferUrl = useRef(offerPdfUrl)
+  useEffect(() => {
+    if (offerPdfUrl && !prevOfferUrl.current) setTab('offer')
+    prevOfferUrl.current = offerPdfUrl
+  }, [offerPdfUrl])
 
   // Contextual guidance based on current state
   const guidance = !isFinalized && sections.length === 0
@@ -893,6 +903,16 @@ export default function RecruitingPipeline({ project, projectId, onUpdate, onSen
               })}
             </div>
           </div>
+        )}
+
+        {/* ── Offer Tab ── */}
+        {tab === 'offer' && offerPdfUrl && (
+          <iframe
+            src={offerPdfUrl}
+            className="w-full border-0"
+            style={{ height: 'calc(100vh - 160px)' }}
+            title="Offer letter preview"
+          />
         )}
       </div>
       {reviewInterview && (
