@@ -127,15 +127,17 @@ struct LoginView: View {
                         .frame(height: 40)
                     }
                     .buttonStyle(.plain)
+                    .foregroundColor(.white)
                     .background(
                         LinearGradient(
                             colors: [Color.matcha500, Color.matcha600],
                             startPoint: .top,
                             endPoint: .bottom
                         )
+                        .cornerRadius(10)
                     )
-                    .foregroundColor(.white)
                     .cornerRadius(10)
+                    .contentShape(Rectangle())
                     .shadow(color: Color.matcha500.opacity(0.25), radius: 10, x: 0, y: 4)
                     .disabled(viewModel.isLoading)
                 }

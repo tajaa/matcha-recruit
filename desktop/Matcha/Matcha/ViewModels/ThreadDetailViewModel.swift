@@ -109,7 +109,20 @@ class ThreadDetailViewModel {
         // Capture and clear slide selection before send
         let capturedSlideIndex = selectedSlideIndex
 
+        // Optimistic local message so the user sees their input immediately
+        let tempId = UUID().uuidString
+        let localMsg = MWMessage(
+            id: tempId,
+            threadId: threadId,
+            role: "user",
+            content: content,
+            versionCreated: nil,
+            metadata: nil,
+            createdAt: ISO8601DateFormatter().string(from: Date())
+        )
+
         await MainActor.run {
+            messages.append(localMsg)
             isStreaming = true
             streamingContent = ""
             selectedSlideIndex = nil
@@ -145,6 +158,7 @@ class ThreadDetailViewModel {
             SendBody(content: content, slideIndex: capturedSlideIndex, model: model)
         )
 
+        var receivedComplete = false
         let task = Task {
             do {
                 let (bytes, response) = try await URLSession.shared.bytes(for: request)
@@ -170,8 +184,9 @@ class ThreadDetailViewModel {
                     guard let data = jsonStr.data(using: .utf8) else { continue }
 
                     if let event = try? JSONDecoder().decode(SSEEvent.self, from: data) {
+                        if event.type == "complete" { receivedComplete = true }
                         await MainActor.run {
-                            handleSSEEvent(event)
+                            handleSSEEvent(event, tempMessageId: tempId)
                         }
                     }
                 }
@@ -186,6 +201,12 @@ class ThreadDetailViewModel {
             await MainActor.run {
                 isStreaming = false
             }
+
+            // If stream ended without a complete event, reload from server
+            // to recover the user message (already saved server-side).
+            if !receivedComplete && !Task.isCancelled {
+                await reloadThreadData(id: threadId, forceRefresh: true)
+            }
         }
         streamingTask = task
         await task.value
@@ -197,7 +218,7 @@ class ThreadDetailViewModel {
     }
 
     @MainActor
-    private func handleSSEEvent(_ event: SSEEvent) {
+    private func handleSSEEvent(_ event: SSEEvent, tempMessageId: String? = nil) {
         switch event.type {
         case "complete":
             guard let data = event.data, let userMessage = data.userMessage else {
@@ -205,6 +226,10 @@ class ThreadDetailViewModel {
                 return
             }
 
+            // Replace optimistic local message with the real server message
+            if let tempId = tempMessageId {
+                messages.removeAll { $0.id == tempId }
+            }
             messages.append(userMessage)
             if let msg = data.assistantMessage {
                 messages.append(msg)
