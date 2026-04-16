@@ -224,7 +224,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
 
           {/* Right: compliance animation */}
           <div className="min-w-0 overflow-hidden flex justify-center lg:justify-end">
-            <LazyMount minHeight={480} fallback={<div className="w-full max-w-[860px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0e0d0b', border: '1px solid rgba(255,255,255,0.08)' }} />}><Suspense fallback={<div className="w-full max-w-[860px] mx-auto rounded-xl" style={{ height: 480, backgroundColor: '#0e0d0b', border: '1px solid rgba(255,255,255,0.08)' }} />}><AgentReasoningAnimation /></Suspense></LazyMount>
+            <LazyMount minHeight={540} fallback={<div className="w-full max-w-[1040px] mx-auto rounded-xl" style={{ height: 540, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><Suspense fallback={<div className="w-full max-w-[1040px] mx-auto rounded-xl" style={{ height: 540, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><AgentReasoningAnimation /></Suspense></LazyMount>
           </div>
         </div>
 

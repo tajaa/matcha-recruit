@@ -221,7 +221,7 @@ export default function AgentReasoningAnimation() {
   return (
     <div
       ref={containerRef}
-      className="relative w-full max-w-[860px] rounded-xl overflow-hidden mx-auto flex flex-col"
+      className="relative w-full max-w-[1040px] rounded-xl overflow-hidden mx-auto flex flex-col"
       style={{
         backgroundColor: '#0a0a08',
         color: '#d4d4d4',
@@ -370,22 +370,24 @@ export default function AgentReasoningAnimation() {
             </div>
           )}
 
-          {/* SYNTHESIS CARD */}
-          <AnimatePresence>
-            {synthesisVisible && (
-              <motion.div
-                key="synthesis"
-                initial={{ opacity: 0, y: 30, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.5, ease: 'easeOut' }}
-                className="absolute inset-x-0 mx-auto"
-                style={{ bottom: 16, left: 0, right: 0, width: 600, marginLeft: 'auto', marginRight: 'auto' }}
-              >
-                <SynthesisCard />
-              </motion.div>
-            )}
-          </AnimatePresence>
+          {/* SYNTHESIS CARD — centered both axes when shown alone */}
+          <div className="absolute inset-0 flex items-center justify-center px-4 pointer-events-none">
+            <AnimatePresence>
+              {synthesisVisible && (
+                <motion.div
+                  key="synthesis"
+                  initial={{ opacity: 0, y: 30, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.5, ease: 'easeOut' }}
+                  className="pointer-events-auto"
+                  style={{ width: 720, maxWidth: '100%' }}
+                >
+                  <SynthesisCard />
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
