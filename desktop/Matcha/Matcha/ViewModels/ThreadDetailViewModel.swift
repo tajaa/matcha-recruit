@@ -144,6 +144,11 @@ class ThreadDetailViewModel {
         if let token = APIClient.shared.accessToken {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
+        // Explicit idle-byte timeout. Server sends keepalives every 15s during
+        // generation, so 90s of silence means something is genuinely wrong
+        // (network drop, server crash). Default URLRequest is 60s — too tight
+        // to absorb a slow keepalive cycle, too generous to recover quickly.
+        request.timeoutInterval = 90
 
         struct SendBody: Codable {
             let content: String
@@ -191,7 +196,12 @@ class ThreadDetailViewModel {
                     }
                 }
             } catch is CancellationError {
-                // Task was cancelled, no error needed
+                // Task was cancelled — fall through to reload so the user
+                // sees the server-saved state on return (cache may be stale).
+            } catch let urlError as URLError where urlError.code == .timedOut {
+                await MainActor.run {
+                    errorMessage = "The AI didn't respond in time. Your message was saved — please try again."
+                }
             } catch {
                 await MainActor.run {
                     errorMessage = "Streaming failed: \(error.localizedDescription)"
@@ -202,10 +212,22 @@ class ThreadDetailViewModel {
                 isStreaming = false
             }
 
-            // If stream ended without a complete event, reload from server
-            // to recover the user message (already saved server-side).
-            if !receivedComplete && !Task.isCancelled {
+            // Always invalidate cache so the next view fetches fresh state.
+            // The server saves the user message BEFORE generating, so even on
+            // total failure the server has it. Without this, a stale 60s-TTL
+            // cache hides the message until TTL expires.
+            self.service.invalidateThread(threadId: threadId)
+
+            // If stream ended without a complete event, reload now to recover
+            // the saved user message + any partial assistant reply. Preserve
+            // the original streaming error if reload also fails — the stream
+            // error is the actionable one for the user.
+            if !receivedComplete {
+                let priorError = await MainActor.run { self.errorMessage }
                 await reloadThreadData(id: threadId, forceRefresh: true)
+                if priorError != nil {
+                    await MainActor.run { self.errorMessage = priorError }
+                }
             }
         }
         streamingTask = task

@@ -114,11 +114,22 @@ class APIClient {
         do {
             return try decoder.decode(T.self, from: data)
         } catch {
+            // Surface a snippet of the actual payload so "decoding error" is
+            // actionable instead of opaque. Without this we get the generic
+            // "data couldn't be read" Foundation message and have no idea
+            // which field/shape mismatched.
+            let snippet = String(data: data.prefix(500), encoding: .utf8) ?? "<binary>"
+            print("[APIClient] decode failed for \(T.self) at \(path): \(error.localizedDescription)\nresponse snippet: \(snippet)")
             throw APIError.decodingError(error)
         }
     }
 
-    func requestData(method: String, path: String, body: (any Encodable)? = nil) async throws -> Data {
+    func requestData(
+        method: String,
+        path: String,
+        body: (any Encodable)? = nil,
+        retryOnUnauthorized: Bool = true
+    ) async throws -> Data {
         guard let url = URL(string: baseURL + path) else {
             throw APIError.invalidURL
         }
@@ -132,10 +143,46 @@ class APIClient {
             urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         }
         let (data, response) = try await URLSession.shared.data(for: urlRequest)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
+        guard let httpResponse = response as? HTTPURLResponse else {
             throw APIError.noData
         }
+
+        // Mirror request<T> 401 refresh logic — without this, channel
+        // reactions and any other requestData-backed call silently fail
+        // when the access token expires instead of refreshing + retrying.
+        if httpResponse.statusCode == 401 {
+            if retryOnUnauthorized {
+                do {
+                    _ = try await AuthService.shared.refresh()
+                    return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: false)
+                } catch {
+                    await MainActor.run { onUnauthorized?() }
+                    throw APIError.unauthorized
+                }
+            } else {
+                await MainActor.run { onUnauthorized?() }
+                throw APIError.unauthorized
+            }
+        }
+
+        // Don't collapse non-2xx into "noData" — throw the real status +
+        // body so callers display actionable errors ("403 Not a member"
+        // instead of "No data received").
+        guard (200...299).contains(httpResponse.statusCode) else {
+            let message = _extractErrorMessage(from: data) ?? "HTTP \(httpResponse.statusCode)"
+            throw APIError.httpError(httpResponse.statusCode, message)
+        }
         return data
+    }
+
+    /// Extract a human-readable error from a typical FastAPI error response
+    /// (`{"detail": "..."}`) or fall back to the raw body.
+    private func _extractErrorMessage(from data: Data) -> String? {
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let detail = json["detail"] as? String {
+            return detail
+        }
+        let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw?.isEmpty == false ? raw : nil
     }
 }
