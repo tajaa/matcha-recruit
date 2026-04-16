@@ -1,0 +1,50 @@
+{
+  "_comment": "Free-text job-title → BLS SOC code mapping for wage benchmarking. Rules are matched in order; first hit wins. Loaded into memory at service init by wage_benchmark_service.py — no DB hit per classify call.",
+  "rules": [
+    {
+      "keywords": ["barista", "espresso", "coffee maker", "coffee bar"],
+      "soc_code": "35-3023",
+      "label": "Fast Food and Counter Workers (Barista)"
+    },
+    {
+      "keywords": ["smoothie", "juicer", "blender operator"],
+      "soc_code": "35-3023",
+      "label": "Fast Food and Counter Workers (Smoothie)"
+    },
+    {
+      "keywords": ["counter attendant", "counter worker", "front of house", "foh", "service worker"],
+      "soc_code": "35-3023",
+      "label": "Fast Food and Counter Workers"
+    },
+    {
+      "keywords": ["fast food", "qsr crew", "team member", "crew member", "crew lead"],
+      "soc_code": "35-3023",
+      "label": "Fast Food and Counter Workers"
+    },
+    {
+      "keywords": ["shift lead", "shift supervisor", "shift manager", "store manager", "assistant manager", "general manager", "gm "],
+      "soc_code": "35-1012",
+      "label": "First-Line Supervisors of Food Prep & Serving Workers"
+    },
+    {
+      "keywords": ["food prep", "prep cook", "prep worker", "kitchen prep"],
+      "soc_code": "35-2021",
+      "label": "Food Preparation Workers"
+    },
+    {
+      "keywords": ["line cook", "grill cook", "short order", "cook"],
+      "soc_code": "35-2014",
+      "label": "Cooks, Restaurant"
+    },
+    {
+      "keywords": ["cashier", "register", "checkout", "front-end"],
+      "soc_code": "41-2011",
+      "label": "Cashiers"
+    },
+    {
+      "keywords": ["chef", "head cook", "executive chef", "sous chef"],
+      "soc_code": "35-1011",
+      "label": "Chefs and Head Cooks"
+    }
+  ]
+}

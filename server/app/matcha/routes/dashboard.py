@@ -67,6 +67,24 @@ class StalePolicySummary(BaseModel):
     oldest_days: int
 
 
+class WageGapSummary(BaseModel):
+    """Hourly-wage market-gap stats (§3.1, QSR_RETENTION_PLAN.md).
+
+    Frames retention as a P&L bet: closing the comp gap costs $X/yr,
+    `max_replacement_cost_exposure` is the worst-case if every below-market
+    employee actually quits — an upper bound, not an expected loss.
+    """
+    hourly_employees_count: int
+    employees_evaluated: int
+    employees_below_market: int
+    employees_at_or_above_market: int
+    employees_unclassified: int
+    median_delta_percent: Optional[float] = None
+    dollars_per_hour_to_close_gap: float
+    annual_cost_to_lift: int
+    max_replacement_cost_exposure: int
+
+
 class DashboardStats(BaseModel):
     active_policies: int
     pending_signatures: int
@@ -76,6 +94,7 @@ class DashboardStats(BaseModel):
     recent_activity: List[ActivityItem]
     incident_summary: Optional[IncidentSummary] = None
     wage_alerts: Optional[WageAlertSummary] = None
+    wage_gap_summary: Optional[WageGapSummary] = None
     # New HR-admin focused fields
     critical_compliance_alerts: int = 0
     warning_compliance_alerts: int = 0
@@ -313,6 +332,30 @@ async def get_dashboard_stats(
     except Exception:
         logger.exception("Failed to compute wage alerts for dashboard")
 
+    # Hourly wage gap vs. BLS market (§3.1, QSR_RETENTION_PLAN.md)
+    wage_gap_summary = None
+    try:
+        from ..services.wage_benchmark_service import compute_company_wage_gap
+        gap = await compute_company_wage_gap(company_id)
+        # Only surface when there's an hourly population to talk about — the
+        # widget is noise on companies with 0 hourly employees.
+        if gap.hourly_employees_count > 0:
+            wage_gap_summary = WageGapSummary(
+                hourly_employees_count=gap.hourly_employees_count,
+                employees_evaluated=gap.employees_evaluated,
+                employees_below_market=gap.employees_below_market,
+                employees_at_or_above_market=gap.employees_at_or_above_market,
+                employees_unclassified=gap.employees_unclassified,
+                median_delta_percent=gap.median_delta_percent,
+                dollars_per_hour_to_close_gap=gap.dollars_per_hour_to_close_gap,
+                annual_cost_to_lift=gap.annual_cost_to_lift,
+                max_replacement_cost_exposure=gap.max_replacement_cost_exposure,
+            )
+    except asyncpg.UndefinedTableError:
+        pass  # wage_benchmarks table not yet migrated — silent
+    except Exception:
+        logger.exception("Failed to compute wage gap summary for dashboard")
+
     # Escalated Matcha Work queries
     escalated_queries_open = 0
     escalated_queries_high = 0
@@ -343,6 +386,7 @@ async def get_dashboard_stats(
         recent_activity=recent_activity,
         incident_summary=incident_summary,
         wage_alerts=wage_alerts,
+        wage_gap_summary=wage_gap_summary,
         critical_compliance_alerts=critical_compliance_alerts,
         warning_compliance_alerts=warning_compliance_alerts,
         er_case_summary=er_case_summary,

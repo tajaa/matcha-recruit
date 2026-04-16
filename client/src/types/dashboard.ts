@@ -42,6 +42,18 @@ export interface StalePolicySummary {
   oldest_days: number
 }
 
+export interface WageGapSummary {
+  hourly_employees_count: number
+  employees_evaluated: number
+  employees_below_market: number
+  employees_at_or_above_market: number
+  employees_unclassified: number
+  median_delta_percent: number | null
+  dollars_per_hour_to_close_gap: number
+  annual_cost_to_lift: number
+  max_replacement_cost_exposure: number
+}
+
 export interface DashboardStats {
   active_policies: number
   pending_signatures: number
@@ -51,6 +63,7 @@ export interface DashboardStats {
   recent_activity: ActivityItem[]
   incident_summary: IncidentSummary | null
   wage_alerts: WageAlertSummary | null
+  wage_gap_summary: WageGapSummary | null
   critical_compliance_alerts: number
   warning_compliance_alerts: number
   er_case_summary: ERCaseSummary | null

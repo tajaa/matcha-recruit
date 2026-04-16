@@ -10,6 +10,7 @@ import {
   ProfileBanner,
   GettingStarted,
   FlagsTable,
+  WageGapCard,
 } from '../../components/dashboard'
 
 import type { DashboardStats, DashboardFlagsResponse } from '../../types/dashboard'
@@ -95,6 +96,13 @@ export default function Dashboard() {
               Create Policy
             </Button>
           </div>
+        </div>
+      )}
+
+      {/* Wage gap vs. market — surfaced when the backend has data to show */}
+      {stats?.wage_gap_summary && (
+        <div className="mb-6">
+          <WageGapCard data={stats.wage_gap_summary} />
         </div>
       )}
 
