@@ -4,6 +4,7 @@ import { Menu, X } from 'lucide-react'
 
 interface Props {
   onPricingClick: () => void
+  onDemoClick: () => void
 }
 
 const NAV_LINKS = [
@@ -11,7 +12,7 @@ const NAV_LINKS = [
   { to: '/services', label: 'Consulting' },
 ]
 
-export default function MarketingNav({ onPricingClick }: Props) {
+export default function MarketingNav({ onPricingClick, onDemoClick }: Props) {
   const [scrolled, setScrolled] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -22,10 +23,7 @@ export default function MarketingNav({ onPricingClick }: Props) {
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  // Always show "over-hero" styling until scrolled OR menu is open
-  const overHero = !scrolled && !menuOpen
-
-  const textColor = overHero ? '#F5F2ED' : 'var(--color-ivory-ink)'
+  const textColor = '#F5F2ED'
 
   const handleLinkClick = (action?: () => void) => {
     setMenuOpen(false)
@@ -37,14 +35,12 @@ export default function MarketingNav({ onPricingClick }: Props) {
       <nav
         className="fixed left-0 right-0 z-50 transition-colors duration-300"
         style={{
-          top: '44px',
-          backgroundColor: overHero ? 'transparent' : 'rgba(245, 242, 237, 0.92)',
-          backdropFilter: overHero ? 'none' : 'blur(10px)',
-          WebkitBackdropFilter: overHero ? 'none' : 'blur(10px)',
-          borderBottom: overHero ? '1px solid transparent' : '1px solid var(--color-ivory-line)',
+          top: 0,
+          backgroundColor: '#0F0F0F',
+          borderBottom: '1px solid rgba(245, 242, 237, 0.12)',
         }}
       >
-        <div className="max-w-[1440px] mx-auto flex items-center justify-between px-6 sm:px-10 h-16">
+        <div className="max-w-[1440px] mx-auto flex items-center justify-between px-6 sm:px-10 h-12">
           <Link to="/" onClick={() => setMenuOpen(false)} className="flex items-center gap-2">
             <span
               className="text-2xl tracking-tight"
@@ -54,7 +50,7 @@ export default function MarketingNav({ onPricingClick }: Props) {
                 color: textColor,
               }}
             >
-              Matcha
+              MATCHA
             </span>
           </Link>
 
@@ -86,16 +82,16 @@ export default function MarketingNav({ onPricingClick }: Props) {
             >
               Login
             </Link>
-            <Link
-              to="/contact"
-              className="hidden sm:inline-flex items-center px-5 h-9 rounded-full text-sm font-medium transition-opacity hover:opacity-90"
+            <button
+              onClick={onDemoClick}
+              className="hidden sm:inline-flex items-center px-5 h-9 rounded-full text-sm font-medium transition-opacity hover:opacity-90 cursor-pointer"
               style={{
-                backgroundColor: overHero ? '#F5F2ED' : 'var(--color-ivory-ink)',
-                color: overHero ? 'var(--color-ivory-ink)' : '#F5F2ED',
+                backgroundColor: '#F5F2ED',
+                color: '#0F0F0F',
               }}
             >
               Request a Demo
-            </Link>
+            </button>
             <button
               onClick={() => setMenuOpen(!menuOpen)}
               className="md:hidden inline-flex items-center justify-center w-10 h-10 -mr-2"
@@ -111,7 +107,7 @@ export default function MarketingNav({ onPricingClick }: Props) {
       {menuOpen && (
         <div
           className="fixed inset-0 z-40 md:hidden"
-          style={{ backgroundColor: 'var(--color-ivory-bg)' }}
+          style={{ backgroundColor: '#0F0F0F' }}
         >
           <div className="pt-32 px-6 flex flex-col gap-1">
             {NAV_LINKS.map(link => (
@@ -122,8 +118,8 @@ export default function MarketingNav({ onPricingClick }: Props) {
                 className="py-4 text-2xl border-b"
                 style={{
                   fontFamily: 'var(--font-display)',
-                  color: 'var(--color-ivory-ink)',
-                  borderColor: 'var(--color-ivory-line)',
+                  color: '#F5F2ED',
+                  borderColor: 'rgba(245, 242, 237, 0.15)',
                 }}
               >
                 {link.label}
@@ -134,8 +130,8 @@ export default function MarketingNav({ onPricingClick }: Props) {
               className="py-4 text-2xl text-left border-b"
               style={{
                 fontFamily: 'var(--font-display)',
-                color: 'var(--color-ivory-ink)',
-                borderColor: 'var(--color-ivory-line)',
+                color: '#F5F2ED',
+                borderColor: 'rgba(245, 242, 237, 0.15)',
               }}
             >
               Pricing
@@ -146,23 +142,22 @@ export default function MarketingNav({ onPricingClick }: Props) {
               className="py-4 text-2xl border-b"
               style={{
                 fontFamily: 'var(--font-display)',
-                color: 'var(--color-ivory-ink)',
-                borderColor: 'var(--color-ivory-line)',
+                color: '#F5F2ED',
+                borderColor: 'rgba(245, 242, 237, 0.15)',
               }}
             >
               Login
             </Link>
-            <Link
-              to="/contact"
-              onClick={() => setMenuOpen(false)}
-              className="mt-6 inline-flex items-center justify-center px-6 h-12 rounded-full text-base font-medium"
+            <button
+              onClick={() => { setMenuOpen(false); onDemoClick() }}
+              className="mt-6 inline-flex items-center justify-center px-6 h-12 rounded-full text-base font-medium cursor-pointer"
               style={{
-                backgroundColor: 'var(--color-ivory-ink)',
-                color: '#F5F2ED',
+                backgroundColor: '#F5F2ED',
+                color: '#0F0F0F',
               }}
             >
               Request a Demo
-            </Link>
+            </button>
           </div>
         </div>
       )}

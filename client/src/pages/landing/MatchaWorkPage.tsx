@@ -57,7 +57,7 @@ export default function MatchaWorkPage() {
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
       <ComplianceTicker />
-      <MarketingNav onPricingClick={() => setIsPricingOpen(true)} />
+      <MarketingNav onPricingClick={() => setIsPricingOpen(true)} onDemoClick={() => setIsPricingOpen(true)} />
 
       <Hero />
 
@@ -66,7 +66,7 @@ export default function MatchaWorkPage() {
           <ProductPillar key={pillar.id} pillar={pillar} reverse={i % 2 === 1} />
         ))}
         <BetaWaitlistCta />
-        <ClosingCta onPricingClick={() => setIsPricingOpen(true)} />
+        <ClosingCta onPricingClick={() => setIsPricingOpen(true)} onDemoClick={() => setIsPricingOpen(true)} />
       </main>
 
       <MarketingFooter />

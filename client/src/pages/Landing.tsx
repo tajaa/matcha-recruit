@@ -62,10 +62,10 @@ export default function Landing() {
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen overflow-x-hidden">
       <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
-      <MarketingNav onPricingClick={() => setIsPricingOpen(true)} />
-
-      <Hero data={data} />
+      <MarketingNav onPricingClick={() => setIsPricingOpen(true)} onDemoClick={() => setIsPricingOpen(true)} />
       <ComplianceTicker />
+
+      <Hero data={data} onContactClick={() => setIsPricingOpen(true)} />
 
       <main>
         {sizzles.map((s, i) => (
@@ -84,13 +84,13 @@ export default function Landing() {
 // Hero
 // ---------------------------------------------------------------------------
 
-function Hero({ data }: { data: LandingMedia }) {
-  if (data.hero_video_url) return <VideoHero data={data} />
-  return <AnimationHero data={data} />
+function Hero({ data, onContactClick }: { data: LandingMedia; onContactClick: () => void }) {
+  if (data.hero_video_url) return <VideoHero data={data} onContactClick={onContactClick} />
+  return <AnimationHero data={data} onContactClick={onContactClick} />
 }
 
 // Full-bleed cinematic video with overlaid text
-function VideoHero({ data }: { data: LandingMedia }) {
+function VideoHero({ data, onContactClick }: { data: LandingMedia; onContactClick: () => void }) {
   return (
     <section className="relative w-full h-[100svh] min-h-[640px] overflow-hidden" style={{ backgroundColor: '#1a1a1a' }}>
       <video
@@ -111,10 +111,10 @@ function VideoHero({ data }: { data: LandingMedia }) {
       />
       <div className="relative z-10 h-full max-w-[1440px] mx-auto px-6 sm:px-10 flex flex-col">
         <div className="flex-1 flex items-center">
-          <div className="max-w-2xl pt-24">
+          <div className="max-w-2xl pt-28">
             <h1
               className="text-white leading-[0.95] tracking-tight"
-              style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: 'clamp(3rem, 7vw, 6rem)' }}
+              style={{ fontFamily: DISPLAY, fontWeight: 400, fontSize: 'clamp(2.5rem, 6vw, 5rem)' }}
             >
               {HERO_HEADLINE}
             </h1>
@@ -122,13 +122,13 @@ function VideoHero({ data }: { data: LandingMedia }) {
               {HERO_SUBCOPY}
             </p>
             <div className="mt-10 flex items-center gap-4">
-              <Link
-                to="/login"
-                className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium bg-white hover:bg-white/90 transition-colors"
+              <button
+                onClick={onContactClick}
+                className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium bg-white hover:bg-white/90 transition-colors cursor-pointer"
                 style={{ color: INK }}
               >
                 Book a Consultation
-              </Link>
+              </button>
               <Link
                 to="/services"
                 className="inline-flex items-center h-12 text-[15px] text-white/80 hover:text-white transition-colors"
@@ -149,7 +149,7 @@ function VideoHero({ data }: { data: LandingMedia }) {
 }
 
 // Ivory hero with compliance dashboard animation on the right
-function AnimationHero({ data }: { data: LandingMedia }) {
+function AnimationHero({ data, onContactClick }: { data: LandingMedia; onContactClick: () => void }) {
   return (
     <section
       className="relative w-full min-h-[100svh] overflow-hidden"
@@ -164,7 +164,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
         }}
       />
 
-      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-24 lg:pt-28 pb-16 min-h-[100svh] flex flex-col">
+      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-28 sm:pt-36 lg:pt-44 pb-16 min-h-[100svh] flex flex-col">
         {/* Stacked layout — headline + CTAs centered up top, full-width animation card below */}
         <div className="flex-1 flex flex-col items-center text-center">
           <h1
@@ -173,7 +173,7 @@ function AnimationHero({ data }: { data: LandingMedia }) {
               fontFamily: DISPLAY,
               fontWeight: 400,
               color: INK,
-              fontSize: 'clamp(2.25rem, 5vw, 4.5rem)',
+              fontSize: 'clamp(2.25rem, 4.2vw, 3.75rem)',
             }}
           >
             {HERO_HEADLINE}
@@ -185,13 +185,13 @@ function AnimationHero({ data }: { data: LandingMedia }) {
             {HERO_SUBCOPY}
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
-            <Link
-              to="/login"
-              className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
+            <button
+              onClick={onContactClick}
+              className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90 cursor-pointer"
               style={{ backgroundColor: INK, color: BG }}
             >
               Book a Consultation
-            </Link>
+            </button>
             <Link
               to="/services"
               className="inline-flex items-center h-12 text-[15px] transition-opacity hover:opacity-60"
@@ -201,9 +201,9 @@ function AnimationHero({ data }: { data: LandingMedia }) {
             </Link>
           </div>
 
-          {/* Wide animation card — no longer competing with side text for width */}
-          <div className="mt-8 w-full overflow-hidden flex justify-center">
-            <LazyMount minHeight={540} fallback={<div className="w-full max-w-[1280px] mx-auto rounded-xl" style={{ height: 540, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><Suspense fallback={<div className="w-full max-w-[1280px] mx-auto rounded-xl" style={{ height: 540, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><AgentReasoningAnimation /></Suspense></LazyMount>
+          {/* Wide animation card — hidden on mobile, 5-column tree unreadable below 640px */}
+          <div className="hidden sm:flex mt-8 w-full overflow-hidden justify-center">
+            <LazyMount minHeight={440} fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 440, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><Suspense fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 440, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><AgentReasoningAnimation /></Suspense></LazyMount>
           </div>
         </div>
 
