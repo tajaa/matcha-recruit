@@ -349,7 +349,10 @@ struct RecruitingPipelineView: View {
     // MARK: - Posting tab
 
     private var postingTab: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let sections = viewModel.project?.sections ?? []
+        let hasSections = !sections.isEmpty
+
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Text(isFinalized ? "● finalized" : "○ draft")
                     .font(.system(size: 10))
@@ -359,7 +362,7 @@ struct RecruitingPipelineView: View {
                     Task {
                         await viewModel.savePosting(
                             title: recruiting.posting.title,
-                            content: postingDraft,
+                            content: hasSections ? combinedSectionsMarkdown(sections) : postingDraft,
                             finalized: !isFinalized
                         )
                     }
@@ -380,30 +383,65 @@ struct RecruitingPipelineView: View {
             .padding(.horizontal, 16)
             .padding(.top, 12)
 
-            ScrollView {
-                TextEditor(text: $postingDraft)
-                    .font(.system(size: 13))
-                    .scrollContentBackground(.hidden)
-                    .frame(minHeight: 300)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(Color.black.opacity(0.15))
-                    .onSubmit { Task { await savePosting() } }
-            }
-            .padding(.horizontal, 16)
-
-            HStack {
-                Spacer()
-                Button { Task { await savePosting() } } label: {
-                    Text("save posting")
-                        .font(.system(size: 11))
-                        .foregroundColor(Color.matcha500)
+            if hasSections {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(sections) { section in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(section.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white)
+                                if let content = section.content, !content.isEmpty {
+                                    Text(content)
+                                        .font(.system(size: 12))
+                                        .foregroundColor(.white.opacity(0.75))
+                                        .lineSpacing(3)
+                                        .textSelection(.enabled)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color.black.opacity(0.2))
+                            .cornerRadius(6)
+                        }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
                 }
-                .buttonStyle(.plain)
+            } else {
+                ScrollView {
+                    TextEditor(text: $postingDraft)
+                        .font(.system(size: 13))
+                        .scrollContentBackground(.hidden)
+                        .frame(minHeight: 300)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.black.opacity(0.15))
+                        .onSubmit { Task { await savePosting() } }
+                }
                 .padding(.horizontal, 16)
-                .padding(.bottom, 12)
+
+                HStack {
+                    Spacer()
+                    Button { Task { await savePosting() } } label: {
+                        Text("save posting")
+                            .font(.system(size: 11))
+                            .foregroundColor(Color.matcha500)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
+                }
             }
         }
+    }
+
+    private func combinedSectionsMarkdown(_ sections: [MWProjectSection]) -> String {
+        sections.map { section in
+            let body = section.content ?? ""
+            return "## \(section.title)\n\n\(body)"
+        }.joined(separator: "\n\n")
     }
 
     private func savePosting() async {

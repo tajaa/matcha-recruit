@@ -52,12 +52,17 @@ struct ChannelsSidebarView: View {
         .task {
             await load()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .mwChannelCreated)) { note in
+            Task {
+                await load()
+                if let newId = note.object as? String {
+                    appState.selectedChannelId = newId
+                }
+            }
+        }
         .sheet(isPresented: $showCreate) {
             CreateChannelSheet { newChannel in
-                Task {
-                    await load()
-                    appState.selectedChannelId = newChannel.id
-                }
+                NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
             }
         }
     }
@@ -144,6 +149,10 @@ struct ChannelsSidebarView: View {
             isLoading = false
         }
     }
+}
+
+extension Notification.Name {
+    static let mwChannelCreated = Notification.Name("mwChannelCreated")
 }
 
 struct CreateChannelSheet: View {

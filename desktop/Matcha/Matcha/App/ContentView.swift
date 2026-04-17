@@ -235,9 +235,9 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showCreateChannel) {
             CreateChannelSheet { newChannel in
-                appState.selectedChannelId = newChannel.id
                 appState.selectedThreadId = nil
                 appState.selectedProjectId = nil
+                NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
             }
         }
         .toolbar {
