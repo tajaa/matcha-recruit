@@ -257,7 +257,7 @@ export default function AgentReasoningAnimation() {
 
       {/* Body */}
       <div
-        className="relative flex-1 overflow-hidden"
+        className="relative overflow-hidden"
         style={{
           height: 440,
           transition: 'opacity 600ms ease',
