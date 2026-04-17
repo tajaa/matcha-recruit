@@ -164,7 +164,7 @@ function AnimationHero({ data, onContactClick }: { data: LandingMedia; onContact
         }}
       />
 
-      <div className="relative z-10 max-w-[1440px] mx-auto px-5 sm:px-10 pt-20 sm:pt-36 lg:pt-44 pb-12 sm:pb-16 sm:min-h-[100svh] flex flex-col">
+      <div className="relative z-10 max-w-[1440px] mx-auto px-5 sm:px-10 pt-28 sm:pt-36 lg:pt-44 pb-12 sm:pb-16 sm:min-h-[100svh] flex flex-col">
         {/* Stacked layout — headline + CTAs centered up top, full-width animation card below */}
         <div className="flex-1 flex flex-col items-center text-center">
           <h1
