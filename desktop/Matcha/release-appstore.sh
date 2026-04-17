@@ -45,7 +45,7 @@ PBXPROJ="$PROJECT/project.pbxproj"
 SCHEME="Matcha"
 CONFIG="Release"
 BUILD_DIR="$PROJECT_DIR/build/appstore"
-ARCHIVE_PATH="$BUILD_DIR/Matcha.xcarchive"
+ARCHIVE_PATH="$HOME/Library/Developer/Xcode/Archives/$(date +%Y-%m-%d)/Matcha.xcarchive"
 EXPORT_PATH="$BUILD_DIR/export"
 EXPORT_PLIST="$BUILD_DIR/ExportOptions.plist"
 PKG_PATH=""  # filled in after export
@@ -138,7 +138,7 @@ rollback_bump() {
 # ─── Archive ──────────────────────────────────────────────────────────────
 do_archive() {
     rm -rf "$ARCHIVE_PATH" "$EXPORT_PATH"
-    mkdir -p "$BUILD_DIR"
+    mkdir -p "$BUILD_DIR" "$(dirname "$ARCHIVE_PATH")"
 
     cat > "$EXPORT_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

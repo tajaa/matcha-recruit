@@ -1144,6 +1144,48 @@ async def _apply_ai_updates_and_operations(
                                 changed_sections = True
                         if changed_sections:
                             await proj_svc._update_sections(project_id, existing)
+                            # Mirror the section content into project_data.posting.content
+                            # so the Posting tab actually renders what the AI wrote.
+                            # Without this, sections live on project.sections but the
+                            # posting tab (which reads posting.content) stays empty —
+                            # so the AI says "drafted it" but the user sees nothing.
+                            try:
+                                composed_parts: list[str] = []
+                                for s in existing:
+                                    if not isinstance(s, dict):
+                                        continue
+                                    content = (s.get("content") or "").strip()
+                                    if not content:
+                                        continue
+                                    title = (s.get("title") or "").strip()
+                                    if title:
+                                        composed_parts.append(f"## {title}\n\n{content}")
+                                    else:
+                                        composed_parts.append(content)
+                                composed = "\n\n".join(composed_parts)
+                                if composed:
+                                    async with get_connection() as _pconn:
+                                        row = await _pconn.fetchrow(
+                                            "SELECT project_data FROM mw_projects WHERE id = $1", project_id
+                                        )
+                                    if row:
+                                        existing_data = row["project_data"]
+                                        if isinstance(existing_data, str):
+                                            existing_data = json.loads(existing_data or "{}")
+                                        existing_data = existing_data or {}
+                                        prior_posting = dict(existing_data.get("posting") or {})
+                                        # Don't trample a finalized posting — operator may
+                                        # have locked the content on purpose.
+                                        if not prior_posting.get("finalized"):
+                                            prior_posting["content"] = composed
+                                            await proj_svc.update_project_data(
+                                                project_id, {"posting": prior_posting}
+                                            )
+                            except Exception:
+                                logger.warning(
+                                    "Failed to mirror sections into posting for project %s",
+                                    project_id, exc_info=True,
+                                )
                     except Exception:
                         logger.warning("Failed to sync project_sections to project %s", project_id, exc_info=True)
 

@@ -102,9 +102,20 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   if (!res.ok) {
+    // Attempt JSON first (our APIs always return {detail: ...} on error).
+    // Fall back to a short status string — never leak a full HTML error page
+    // (e.g. nginx/Vite 502 during a backend restart) into the UI as a message.
     const errBody = await res.json().catch(() => null)
-    const msg = errBody?.detail || `${res.status} ${res.statusText}`
-    // Don't recursively report errors from the reporter endpoint itself
+    let msg: string
+    if (errBody?.detail) {
+      msg = typeof errBody.detail === 'string' ? errBody.detail : JSON.stringify(errBody.detail)
+    } else if (res.status >= 500) {
+      msg = res.status === 502 || res.status === 503 || res.status === 504
+        ? 'Server temporarily unavailable — retry in a moment.'
+        : `Server error (${res.status})`
+    } else {
+      msg = `${res.status} ${res.statusText || 'Request failed'}`
+    }
     if (path !== '/client-errors') {
       reportApiError({ endpoint: path, status: res.status, message: msg, body: errBody })
     }
