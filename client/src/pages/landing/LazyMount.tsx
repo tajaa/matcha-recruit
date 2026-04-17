@@ -41,7 +41,7 @@ export function LazyMount({ children, fallback, rootMargin = '400px', minHeight 
   return (
     <div
       ref={ref}
-      className="w-full h-full"
+      className={minHeight ? 'w-full' : 'w-full h-full'}
       style={{
         minHeight,
         opacity: shown ? 1 : 0,
