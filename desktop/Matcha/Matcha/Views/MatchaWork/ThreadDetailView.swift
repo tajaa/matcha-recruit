@@ -10,6 +10,14 @@ struct ThreadDetailView: View {
     @State private var showAgentPanel = false
     @State private var editingTitle = false
     @State private var titleDraft = ""
+    @FocusState private var titleFocused: Bool
+
+    private func commitTitle() {
+        let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        editingTitle = false
+        guard !trimmed.isEmpty, trimmed != viewModel.thread?.title else { return }
+        Task { await viewModel.updateTitle(trimmed) }
+    }
     @AppStorage("mw-chat-theme") private var lightMode = false
     @AppStorage("mw-model") private var selectedModelId = "flash"
     @AppStorage("mw-preview-collapsed") private var previewCollapsed = false
@@ -61,19 +69,28 @@ struct ThreadDetailView: View {
                 if let thread = viewModel.thread {
                     HStack(spacing: 8) {
                         if editingTitle {
-                            TextField("Thread title", text: $titleDraft, onCommit: {
-                                let trimmed = titleDraft.trimmingCharacters(in: .whitespacesAndNewlines)
-                                guard !trimmed.isEmpty else { editingTitle = false; return }
-                                editingTitle = false
-                                Task { await viewModel.updateTitle(trimmed) }
-                            })
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .frame(width: 200)
-                            .onExitCommand { editingTitle = false }
+                            TextField("Thread title", text: $titleDraft)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 200)
+                                .focused($titleFocused)
+                                .onSubmit { commitTitle() }
+                                // TextField onCommit only fires on Enter, so a
+                                // click-out used to discard the draft. Commit
+                                // on blur so clicking elsewhere saves the edit.
+                                .onChange(of: titleFocused) { _, focused in
+                                    if !focused && editingTitle { commitTitle() }
+                                }
+                                .onExitCommand {
+                                    // Escape discards the edit.
+                                    editingTitle = false
+                                }
 
-                            Button { editingTitle = false } label: {
+                            Button {
+                                // Explicit cancel — discard draft.
+                                editingTitle = false
+                            } label: {
                                 Image(systemName: "xmark")
                                     .font(.system(size: 10))
                                     .foregroundColor(.secondary)
@@ -86,11 +103,13 @@ struct ThreadDetailView: View {
                                 .onTapGesture {
                                     titleDraft = thread.title
                                     editingTitle = true
+                                    titleFocused = true
                                 }
 
                             Button {
                                 titleDraft = thread.title
                                 editingTitle = true
+                                titleFocused = true
                             } label: {
                                 Image(systemName: "pencil")
                                     .font(.system(size: 10))

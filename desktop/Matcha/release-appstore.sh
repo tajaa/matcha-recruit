@@ -97,12 +97,20 @@ OLD_VERSION=""
 NEW_VERSION=""
 
 bump_build_number() {
-    OLD_VERSION=$(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+' "$PBXPROJ" | head -1 | awk '{print $3}')
+    OLD_VERSION=$(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+(\.[0-9]+)*' "$PBXPROJ" | head -1 | awk '{print $3}')
     if [[ -z "$OLD_VERSION" ]]; then
         echo "${RED}error:${NC} no CURRENT_PROJECT_VERSION found in pbxproj"
         exit 1
     fi
-    NEW_VERSION=$((OLD_VERSION + 1))
+    # Bump the last numeric component (e.g. 2.1 → 2.2, 3 → 4)
+    local prefix last
+    prefix="${OLD_VERSION%.*}"
+    last="${OLD_VERSION##*.}"
+    if [[ "$prefix" == "$last" ]]; then
+        NEW_VERSION=$(( last + 1 ))
+    else
+        NEW_VERSION="${prefix}.$((last + 1))"
+    fi
     PBXPROJ_BACKUP="$(mktemp -t matcha-pbxproj.XXXXXX)"
     cp "$PBXPROJ" "$PBXPROJ_BACKUP"
     sed -i '' "s/CURRENT_PROJECT_VERSION = ${OLD_VERSION};/CURRENT_PROJECT_VERSION = ${NEW_VERSION};/g" "$PBXPROJ"

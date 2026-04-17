@@ -44,7 +44,7 @@ class ThreadDetailViewModel {
             return currentState["candidates"] != nil
         case .inventory:
             return currentState["inventory_items"] != nil
-        case .chat:
+        case .chat, .policy, .project, .languageTutor:
             return false
         }
     }

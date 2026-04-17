@@ -76,18 +76,39 @@ struct ProjectDetailView: View {
             } else {
                 VStack(spacing: 12) {
                     Spacer()
-                    Image(systemName: "bubble.left.and.bubble.right")
-                        .font(.system(size: 28))
-                        .foregroundColor(.secondary)
-                    Text("Starting chat…")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
+                    if let err = viewModel.errorMessage {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 28))
+                            .foregroundColor(.red)
+                        Text("Couldn't start chat")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white)
+                        Text(err)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                        Button("Retry") {
+                            Task {
+                                viewModel.errorMessage = nil
+                                await viewModel.createChat(title: nil)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        Image(systemName: "bubble.left.and.bubble.right")
+                            .font(.system(size: 28))
+                            .foregroundColor(.secondary)
+                        Text("Starting chat…")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
                     Spacer()
                 }
                 .frame(minWidth: 320)
                 .background(Color.appBackground)
                 .task {
-                    if viewModel.activeChatId == nil {
+                    if viewModel.activeChatId == nil && viewModel.errorMessage == nil {
                         await viewModel.createChat(title: nil)
                     }
                 }

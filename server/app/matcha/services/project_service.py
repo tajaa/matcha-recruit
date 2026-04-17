@@ -311,7 +311,8 @@ async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID,
             """
             INSERT INTO mw_threads (company_id, created_by, title, project_id, current_state)
             VALUES ($1, $2, $3, $4, $5::jsonb)
-            RETURNING id, title, status, version, created_at, updated_at, is_pinned, project_id
+            RETURNING id, title, status, version, created_at, updated_at, is_pinned,
+                      node_mode, compliance_mode, payer_mode, project_id
             """,
             company_id, user_id, title, project_id, initial_state,
         )

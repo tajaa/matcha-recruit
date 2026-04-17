@@ -25,6 +25,9 @@ enum MWTaskType: String, Codable {
     case handbook
     case resumeBatch = "resume_batch"
     case inventory
+    case policy
+    case project
+    case languageTutor = "language_tutor"
     case chat
 
     var label: String {
@@ -38,7 +41,17 @@ enum MWTaskType: String, Codable {
         case .offerLetter: return "offer letter"
         case .resumeBatch: return "resume batch"
         case .inventory: return "inventory"
+        case .policy: return "policy"
+        case .project: return "project"
+        case .languageTutor: return "language tutor"
         }
+    }
+
+    // Backend may introduce new skill values ahead of the client. Fall back to
+    // `.chat` instead of throwing so thread loads don't fail on unknown values.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = MWTaskType(rawValue: raw) ?? .chat
     }
 }
 
