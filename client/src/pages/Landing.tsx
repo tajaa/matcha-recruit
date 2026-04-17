@@ -152,7 +152,7 @@ function VideoHero({ data, onContactClick }: { data: LandingMedia; onContactClic
 function AnimationHero({ data, onContactClick }: { data: LandingMedia; onContactClick: () => void }) {
   return (
     <section
-      className="relative w-full min-h-[100svh] overflow-hidden"
+      className="relative w-full sm:min-h-[100svh] overflow-hidden"
       style={{ backgroundColor: BG }}
     >
       {/* Subtle warm radial glow from the animation side */}
@@ -164,7 +164,7 @@ function AnimationHero({ data, onContactClick }: { data: LandingMedia; onContact
         }}
       />
 
-      <div className="relative z-10 max-w-[1440px] mx-auto px-6 sm:px-10 pt-28 sm:pt-36 lg:pt-44 pb-16 min-h-[100svh] flex flex-col">
+      <div className="relative z-10 max-w-[1440px] mx-auto px-5 sm:px-10 pt-20 sm:pt-36 lg:pt-44 pb-12 sm:pb-16 sm:min-h-[100svh] flex flex-col">
         {/* Stacked layout — headline + CTAs centered up top, full-width animation card below */}
         <div className="flex-1 flex flex-col items-center text-center">
           <h1
@@ -205,6 +205,9 @@ function AnimationHero({ data, onContactClick }: { data: LandingMedia; onContact
           <div className="hidden sm:flex mt-8 w-full overflow-hidden justify-center">
             <LazyMount minHeight={440} fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 440, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><Suspense fallback={<div className="w-full max-w-[900px] mx-auto rounded-xl" style={{ height: 440, backgroundColor: '#0a0a08', border: '1px solid rgba(255,255,255,0.08)' }} />}><AgentReasoningAnimation /></Suspense></LazyMount>
           </div>
+
+          {/* Mobile-only simplified static card */}
+          <MobileHeroCard />
         </div>
 
         {/* Logo strip */}
@@ -215,6 +218,84 @@ function AnimationHero({ data, onContactClick }: { data: LandingMedia; onContact
         )}
       </div>
     </section>
+  )
+}
+
+const MOBILE_ROWS = [
+  { label: 'Written WVP Plan', cite: '§6401.9(c)' },
+  { label: 'Annual Training', cite: '§6401.9(e)' },
+  { label: 'Violent Incident Log', cite: '§6401.9(f)' },
+  { label: 'Hazard Assessment', cite: '§6401.9(c)(2)' },
+  { label: 'Annual Review', cite: '§6401.9(d)' },
+]
+
+function MobileHeroCard() {
+  return (
+    <div
+      className="sm:hidden mt-8 w-full rounded-xl overflow-hidden"
+      style={{
+        backgroundColor: '#0a0a08',
+        border: '1px solid rgba(255,255,255,0.08)',
+        boxShadow: '0 20px 40px -12px rgba(31, 29, 26, 0.25)',
+      }}
+    >
+      <div
+        className="px-4 py-3 flex items-center justify-between border-b"
+        style={{ borderColor: 'rgba(255,255,255,0.06)' }}
+      >
+        <div>
+          <div className="text-[10px] tracking-[0.18em] uppercase" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            CA · SB 553
+          </div>
+          <div className="text-[13px] mt-0.5" style={{ color: 'rgba(255,255,255,0.92)', fontFamily: DISPLAY }}>
+            Workplace Violence Prevention
+          </div>
+        </div>
+        <div
+          className="text-[10px] font-medium px-2 py-1 rounded"
+          style={{ color: '#ff6b6b', backgroundColor: 'rgba(255,107,107,0.12)' }}
+        >
+          5 GAPS
+        </div>
+      </div>
+      <ul className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.04)' }}>
+        {MOBILE_ROWS.map((r, i) => (
+          <li
+            key={r.cite}
+            className="px-4 py-3 flex items-center justify-between mobile-row-fade"
+            style={{
+              borderColor: 'rgba(255,255,255,0.04)',
+              animationDelay: `${i * 120}ms`,
+            }}
+          >
+            <div className="min-w-0 flex-1 pr-3">
+              <div className="text-[13px] truncate" style={{ color: 'rgba(255,255,255,0.88)' }}>
+                {r.label}
+              </div>
+              <div className="text-[11px] mt-0.5 font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                {r.cite}
+              </div>
+            </div>
+            <span
+              className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+              style={{ color: '#ff6b6b', backgroundColor: 'rgba(255,107,107,0.12)' }}
+            >
+              GAP
+            </span>
+          </li>
+        ))}
+      </ul>
+      <style>{`
+        .mobile-row-fade {
+          opacity: 0;
+          animation: mobileRowFade 0.5s ease-out forwards;
+        }
+        @keyframes mobileRowFade {
+          from { opacity: 0; transform: translateY(4px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
   )
 }
 
