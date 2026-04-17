@@ -91,6 +91,51 @@ export interface WageGapSummary {
   max_replacement_cost_exposure: number
 }
 
+// ── Flight-Risk (§3.3, QSR_RETENTION_PLAN.md) ──
+
+export type FlightRiskLevel = 'low' | 'elevated' | 'high' | 'critical'
+
+export interface ManagerHotspot {
+  manager_id: string
+  manager_name: string
+  flagged_count: number
+}
+
+export interface FlightRiskWidgetSummary {
+  employees_evaluated: number
+  critical_count: number
+  high_count: number
+  elevated_count: number
+  low_count: number
+  expected_loss_at_replacement: number
+  top_driver: string | null
+  top_driver_count: number
+  early_tenure_count: number
+  manager_hotspots: ManagerHotspot[]
+}
+
+export interface FlightRiskFactor {
+  name: string
+  contribution: number
+  color: 'green' | 'yellow' | 'red'
+  narrative: string
+  value: number | null
+}
+
+export interface EmployeeFlightRisk {
+  employee_id: string
+  name: string
+  score: number
+  tier: FlightRiskLevel
+  top_factor: string
+  factors: FlightRiskFactor[]
+  expected_replacement_cost: number
+}
+
+export interface EmployeeFlightRiskList {
+  employees: EmployeeFlightRisk[]
+}
+
 export interface DashboardStats {
   active_policies: number
   pending_signatures: number
@@ -101,6 +146,7 @@ export interface DashboardStats {
   incident_summary: IncidentSummary | null
   wage_alerts: WageAlertSummary | null
   wage_gap_summary: WageGapSummary | null
+  flight_risk_summary: FlightRiskWidgetSummary | null
   critical_compliance_alerts: number
   warning_compliance_alerts: number
   er_case_summary: ERCaseSummary | null

@@ -4,11 +4,11 @@ import { Button, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { MultiBatchModal } from '../../components/employees/MultiBatchModal'
 import { BulkUploadModal } from '../../components/employees/BulkUploadModal'
-import { WageGapCard, WageGapDrawer } from '../../components/dashboard'
+import { WageGapCard, WageGapDrawer, FlightRiskCard, FlightRiskDrawer, RetentionExplainer } from '../../components/dashboard'
 import { fetchDashboardStats } from '../../api/dashboard'
 import { useEmployees } from '../../hooks/employees/useEmployees'
 import { typeLabel } from '../../types/employee'
-import type { WageGapSummary } from '../../types/dashboard'
+import type { WageGapSummary, FlightRiskWidgetSummary } from '../../types/dashboard'
 
 export default function Employees() {
   const navigate = useNavigate()
@@ -20,13 +20,18 @@ export default function Employees() {
   const [showUpload, setShowUpload] = useState(false)
   const [wageGap, setWageGap] = useState<WageGapSummary | null>(null)
   const [wageDrawerOpen, setWageDrawerOpen] = useState(false)
+  const [flightRisk, setFlightRisk] = useState<FlightRiskWidgetSummary | null>(null)
+  const [flightDrawerOpen, setFlightDrawerOpen] = useState(false)
 
   useEffect(() => {
     // Reuse dashboard stats endpoint — it already computes wage_gap_summary
-    // and is Redis-cached, so a second caller is cheap.
+    // and flight_risk_summary, both Redis-cached, so a second caller is cheap.
     fetchDashboardStats()
-      .then((s) => setWageGap(s.wage_gap_summary))
-      .catch(() => setWageGap(null))
+      .then((s) => {
+        setWageGap(s.wage_gap_summary)
+        setFlightRisk(s.flight_risk_summary)
+      })
+      .catch(() => { setWageGap(null); setFlightRisk(null) })
   }, [])
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -66,19 +71,37 @@ export default function Employees() {
       {/* Wage gap widget — moved here from Command Center because it's
           an employee-comp tool. Hidden until the backend has hourly data
           to evaluate. */}
-      {wageGap && (
-        <div className="mt-6">
-          <WageGapCard
-            data={wageGap}
-            onOpenDetails={() => setWageDrawerOpen(true)}
-          />
-        </div>
+      {(wageGap || flightRisk) && (
+        <>
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            {wageGap && (
+              <WageGapCard
+                data={wageGap}
+                onOpenDetails={() => setWageDrawerOpen(true)}
+              />
+            )}
+            {flightRisk && (
+              <FlightRiskCard
+                data={flightRisk}
+                onOpenDetails={() => setFlightDrawerOpen(true)}
+              />
+            )}
+          </div>
+          <RetentionExplainer />
+        </>
       )}
       {wageGap && (
         <WageGapDrawer
           open={wageDrawerOpen}
           onClose={() => setWageDrawerOpen(false)}
           summary={wageGap}
+        />
+      )}
+      {flightRisk && (
+        <FlightRiskDrawer
+          open={flightDrawerOpen}
+          onClose={() => setFlightDrawerOpen(false)}
+          summary={flightRisk}
         />
       )}
 

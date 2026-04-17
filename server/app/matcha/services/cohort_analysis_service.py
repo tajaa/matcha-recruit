@@ -60,7 +60,7 @@ async def compute_cohort_analysis(
 
     Args:
         company_id: The company to analyze.
-        dimension: One of 'department', 'location', 'hire_quarter', 'tenure'.
+        dimension: One of 'department', 'location', 'hire_quarter', 'tenure', 'manager'.
 
     Returns:
         List of CohortResult, one per cohort, sorted by risk_concentration descending.
@@ -69,7 +69,7 @@ async def compute_cohort_analysis(
         # Fetch all active employees
         employees = await conn.fetch(
             """
-            SELECT id, department, work_state, start_date, employment_type
+            SELECT id, department, work_state, start_date, employment_type, manager_id
             FROM employees
             WHERE org_id = $1 AND termination_date IS NULL
             """,
@@ -80,6 +80,23 @@ async def compute_cohort_analysis(
             return []
 
         today = date.today()
+
+        # Manager-name lookup is only needed when grouping by manager.
+        manager_name_by_id: dict[UUID, str] = {}
+        if dimension == "manager":
+            mgr_ids = {emp["manager_id"] for emp in employees if emp["manager_id"]}
+            if mgr_ids:
+                mgr_rows = await conn.fetch(
+                    """
+                    SELECT id, first_name, last_name FROM employees
+                    WHERE id = ANY($1::uuid[])
+                    """,
+                    list(mgr_ids),
+                )
+                for row in mgr_rows:
+                    fn = row["first_name"] or ""
+                    ln = row["last_name"] or ""
+                    manager_name_by_id[row["id"]] = f"{fn} {ln}".strip() or "Unassigned"
 
         # Group employees into cohorts
         cohorts: dict[str, list] = {}
@@ -104,6 +121,9 @@ async def compute_cohort_analysis(
                     if isinstance(hd, datetime):
                         hd = hd.date()
                     key = _tenure_band(hd, today)
+            elif dimension == "manager":
+                mid = emp["manager_id"]
+                key = manager_name_by_id.get(mid, "Unassigned") if mid else "Unassigned"
             else:
                 key = emp["department"] or "Unassigned"
 

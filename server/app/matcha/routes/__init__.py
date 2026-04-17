@@ -20,6 +20,7 @@ from .billing import router as matcha_work_billing_router, admin_router as match
 from .notifications import router as mw_notifications_router
 from .risk_assessment import router as risk_assessment_router
 from .pre_termination import router as pre_termination_router
+from .flight_risk import router as flight_risk_router
 from .inbound_email import router as anonymous_report_router
 from .training import router as training_router
 from .i9 import router as i9_router
@@ -107,6 +108,12 @@ matcha_router.include_router(
     dependencies=[Depends(require_feature("employees"))],
 )
 matcha_router.include_router(
+    flight_risk_router,
+    prefix="/flight-risk",
+    tags=["flight-risk"],
+    dependencies=[Depends(require_feature("employees"))],
+)
+matcha_router.include_router(
     training_router,
     prefix="/training",
     tags=["training"],
@@ -159,6 +166,7 @@ __all__ = [
     "matcha_work_public_router",
     "matcha_work_billing_router",
     "pre_termination_router",
+    "flight_risk_router",
     "training_router",
     "i9_router",
     "cobra_router",

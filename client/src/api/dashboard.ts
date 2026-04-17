@@ -7,6 +7,9 @@ import type {
   EscalatedQueryDetail,
   DashboardFlagsResponse,
   WageGapDetailsResponse,
+  EmployeeFlightRiskList,
+  EmployeeFlightRisk,
+  FlightRiskWidgetSummary,
 } from '../types/dashboard'
 
 export function fetchDashboardStats() {
@@ -55,6 +58,22 @@ export function analyzeDashboardFlags() {
 
 export function fetchWageGapDetails() {
   return api.get<WageGapDetailsResponse>('/dashboard/wage-gap/details')
+}
+
+export function fetchFlightRiskSummary() {
+  return api.get<FlightRiskWidgetSummary>('/flight-risk/summary')
+}
+
+export function fetchFlightRiskEmployees() {
+  return api.get<EmployeeFlightRiskList>('/flight-risk/employees')
+}
+
+export function fetchFlightRiskEmployee(employeeId: string) {
+  return api.get<EmployeeFlightRisk>(`/flight-risk/employees/${employeeId}`)
+}
+
+export function snapshotFlightRisk() {
+  return api.post<{ snapshotted: number }>('/flight-risk/snapshot')
 }
 
 export async function downloadWageGapCsv() {

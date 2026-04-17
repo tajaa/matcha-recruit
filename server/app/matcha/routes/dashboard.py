@@ -102,6 +102,32 @@ class WageGapDetailsResponse(BaseModel):
     role_rollups: List[RoleRollupItem]
 
 
+class ManagerHotspot(BaseModel):
+    manager_id: str
+    manager_name: str
+    flagged_count: int
+
+
+class FlightRiskWidgetSummary(BaseModel):
+    """Composite flight-risk aggregate (§3.3, QSR_RETENTION_PLAN.md).
+
+    Companion to WageGapSummary — same dollar-math language. Critical+high
+    bucket counts are the actionable headline. `expected_loss_at_replacement`
+    is upper-bound (assume every flagged person leaves) — same honest framing
+    as `max_replacement_cost_exposure` in the wage-gap widget.
+    """
+    employees_evaluated: int
+    critical_count: int
+    high_count: int
+    elevated_count: int
+    low_count: int
+    expected_loss_at_replacement: int
+    top_driver: Optional[str] = None
+    top_driver_count: int = 0
+    early_tenure_count: int = 0
+    manager_hotspots: List[ManagerHotspot] = []
+
+
 class WageGapSummary(BaseModel):
     """Hourly-wage market-gap stats (§3.1, QSR_RETENTION_PLAN.md).
 
@@ -130,6 +156,7 @@ class DashboardStats(BaseModel):
     incident_summary: Optional[IncidentSummary] = None
     wage_alerts: Optional[WageAlertSummary] = None
     wage_gap_summary: Optional[WageGapSummary] = None
+    flight_risk_summary: Optional[FlightRiskWidgetSummary] = None
     # New HR-admin focused fields
     critical_compliance_alerts: int = 0
     warning_compliance_alerts: int = 0
@@ -391,6 +418,31 @@ async def get_dashboard_stats(
     except Exception:
         logger.exception("Failed to compute wage gap summary for dashboard")
 
+    # Composite flight-risk score (§3.3, QSR_RETENTION_PLAN.md)
+    flight_risk_summary = None
+    try:
+        from ..services.flight_risk_service import compute_company_summary
+        fr = await compute_company_summary(company_id)
+        # Only surface when there are employees to evaluate — avoids a
+        # widget that always reads "0 evaluated" on empty companies.
+        if fr.employees_evaluated > 0:
+            flight_risk_summary = FlightRiskWidgetSummary(
+                employees_evaluated=fr.employees_evaluated,
+                critical_count=fr.critical_count,
+                high_count=fr.high_count,
+                elevated_count=fr.elevated_count,
+                low_count=fr.low_count,
+                expected_loss_at_replacement=fr.expected_loss_at_replacement,
+                top_driver=fr.top_driver,
+                top_driver_count=fr.top_driver_count,
+                early_tenure_count=fr.early_tenure_count,
+                manager_hotspots=[ManagerHotspot(**h) for h in fr.manager_hotspots],
+            )
+    except asyncpg.UndefinedTableError:
+        pass  # employees / wage_benchmarks not yet migrated — silent
+    except Exception:
+        logger.exception("Failed to compute flight-risk summary for dashboard")
+
     # Escalated Matcha Work queries
     escalated_queries_open = 0
     escalated_queries_high = 0
@@ -422,6 +474,7 @@ async def get_dashboard_stats(
         incident_summary=incident_summary,
         wage_alerts=wage_alerts,
         wage_gap_summary=wage_gap_summary,
+        flight_risk_summary=flight_risk_summary,
         critical_compliance_alerts=critical_compliance_alerts,
         warning_compliance_alerts=warning_compliance_alerts,
         er_case_summary=er_case_summary,
