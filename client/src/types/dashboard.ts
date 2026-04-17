@@ -42,6 +42,43 @@ export interface StalePolicySummary {
   oldest_days: number
 }
 
+export type FlightRiskTier = 'high' | 'medium' | 'low' | 'none'
+
+export interface EmployeeWageGapDetail {
+  employee_id: string
+  name: string
+  job_title: string | null
+  soc_code: string
+  soc_label: string
+  work_city: string | null
+  work_state: string | null
+  pay_rate: number
+  market_p50: number
+  market_p25: number | null
+  market_p75: number | null
+  delta_dollars_per_hour: number
+  delta_percent: number
+  annual_cost_to_reach_p50: number
+  annual_cost_to_reach_p25: number
+  benchmark_tier: 'metro' | 'state' | 'national'
+  benchmark_area: string
+  flight_risk_tier: FlightRiskTier
+}
+
+export interface RoleRollupItem {
+  soc_code: string
+  soc_label: string
+  headcount: number
+  below_market_count: number
+  median_delta_percent: number
+  total_annual_cost_to_lift_to_p50: number
+}
+
+export interface WageGapDetailsResponse {
+  employees: EmployeeWageGapDetail[]
+  role_rollups: RoleRollupItem[]
+}
+
 export interface WageGapSummary {
   hourly_employees_count: number
   employees_evaluated: number

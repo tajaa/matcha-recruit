@@ -67,6 +67,41 @@ class StalePolicySummary(BaseModel):
     oldest_days: int
 
 
+class EmployeeWageGapDetail(BaseModel):
+    employee_id: UUID
+    name: str
+    job_title: Optional[str] = None
+    soc_code: str
+    soc_label: str
+    work_city: Optional[str] = None
+    work_state: Optional[str] = None
+    pay_rate: float
+    market_p50: float
+    market_p25: Optional[float] = None
+    market_p75: Optional[float] = None
+    delta_dollars_per_hour: float
+    delta_percent: float
+    annual_cost_to_reach_p50: int
+    annual_cost_to_reach_p25: int
+    benchmark_tier: str
+    benchmark_area: str
+    flight_risk_tier: str
+
+
+class RoleRollupItem(BaseModel):
+    soc_code: str
+    soc_label: str
+    headcount: int
+    below_market_count: int
+    median_delta_percent: float
+    total_annual_cost_to_lift_to_p50: int
+
+
+class WageGapDetailsResponse(BaseModel):
+    employees: List[EmployeeWageGapDetail]
+    role_rollups: List[RoleRollupItem]
+
+
 class WageGapSummary(BaseModel):
     """Hourly-wage market-gap stats (§3.1, QSR_RETENTION_PLAN.md).
 
@@ -826,6 +861,88 @@ async def rebuild_flags_deterministic(company_id: UUID) -> int:
     raw_flags = _deterministic_flags_from_patterns(patterns)
     dept_names = {d["department"] for d in patterns.get("departments_with_multiple_incidents", [])}
     return await _write_flags_to_db(company_id, raw_flags, is_ai=False, dept_names=dept_names)
+
+
+@router.get("/wage-gap/details", response_model=WageGapDetailsResponse)
+async def get_wage_gap_details(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Per-employee + per-role wage-gap breakdown for the drill-down drawer.
+
+    The summary widget surfaces totals; this endpoint surfaces the rows
+    the operator can actually act on (name, current pay, target pay,
+    annualized raise cost, flight-risk tier).
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return WageGapDetailsResponse(employees=[], role_rollups=[])
+
+    try:
+        from ..services.wage_benchmark_service import compute_employee_wage_gaps
+        gaps, rollups = await compute_employee_wage_gaps(company_id)
+    except asyncpg.UndefinedTableError:
+        return WageGapDetailsResponse(employees=[], role_rollups=[])
+
+    return WageGapDetailsResponse(
+        employees=[EmployeeWageGapDetail(**g.__dict__) for g in gaps],
+        role_rollups=[RoleRollupItem(**r.__dict__) for r in rollups],
+    )
+
+
+@router.get("/wage-gap/export.csv")
+async def export_wage_gap_csv(
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """CSV export so the operator can share a raise plan with payroll/finance.
+
+    Columns match what payroll needs to actually process a pay adjustment:
+    employee, title, location, current rate, target rate (p50), $/hr raise,
+    annualized cost. No projections, no benchmarks they can't verify.
+    """
+    import csv
+    import io
+    from fastapi.responses import Response
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        return Response(content="", media_type="text/csv")
+
+    try:
+        from ..services.wage_benchmark_service import compute_employee_wage_gaps
+        gaps, _ = await compute_employee_wage_gaps(company_id)
+    except asyncpg.UndefinedTableError:
+        gaps = []
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow([
+        "employee_id", "name", "job_title", "soc_label",
+        "work_city", "work_state",
+        "current_pay_rate", "market_p25", "market_p50", "market_p75",
+        "delta_$/hr", "delta_%",
+        "raise_to_p25_annual_cost", "raise_to_p50_annual_cost",
+        "benchmark_tier", "benchmark_area", "flight_risk_tier",
+    ])
+    for g in gaps:
+        writer.writerow([
+            g.employee_id, g.name, g.job_title or "", g.soc_label,
+            g.work_city or "", g.work_state or "",
+            f"{g.pay_rate:.2f}",
+            f"{g.market_p25:.2f}" if g.market_p25 else "",
+            f"{g.market_p50:.2f}",
+            f"{g.market_p75:.2f}" if g.market_p75 else "",
+            f"{g.delta_dollars_per_hour:.2f}",
+            f"{g.delta_percent:.3f}",
+            g.annual_cost_to_reach_p25,
+            g.annual_cost_to_reach_p50,
+            g.benchmark_tier, g.benchmark_area, g.flight_risk_tier,
+        ])
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="wage-gap.csv"'},
+    )
 
 
 @router.get("/flags", response_model=DashboardFlagsResponse)

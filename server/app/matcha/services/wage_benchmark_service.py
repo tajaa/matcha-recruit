@@ -107,6 +107,44 @@ class WageBenchmark:
 
 
 @dataclass
+class EmployeeWageGap:
+    """Per-employee wage-gap detail — the actionable unit behind the summary widget."""
+    employee_id: str
+    name: str
+    job_title: Optional[str]
+    soc_code: str
+    soc_label: str
+    work_city: Optional[str]
+    work_state: Optional[str]
+    pay_rate: float
+    market_p50: float
+    market_p25: Optional[float]
+    market_p75: Optional[float]
+    delta_dollars_per_hour: float     # pay - market (negative = below)
+    delta_percent: float              # fraction, e.g. -0.15 = 15% below
+    annual_cost_to_reach_p50: int     # (market_p50 - pay) * 2080, clamped ≥0
+    annual_cost_to_reach_p25: int     # (market_p25 - pay) * 2080, clamped ≥0
+    benchmark_tier: str               # 'metro' | 'state' | 'national' — transparency
+    benchmark_area: str
+    flight_risk_tier: str             # 'high' | 'medium' | 'low' | 'none' — derived from delta_percent
+
+    @property
+    def is_below_market(self) -> bool:
+        return self.delta_percent <= BELOW_MARKET_THRESHOLD
+
+
+@dataclass
+class RoleRollup:
+    """Aggregate gap stats by SOC code — useful for 'raise this whole class' decisions."""
+    soc_code: str
+    soc_label: str
+    headcount: int
+    below_market_count: int
+    median_delta_percent: float
+    total_annual_cost_to_lift_to_p50: int
+
+
+@dataclass
 class CompanyWageGapSummary:
     """Aggregate for the operator-dashboard widget.
 
@@ -385,6 +423,133 @@ def _empty_summary(hourly_count: int) -> CompanyWageGapSummary:
         annual_cost_to_lift=0,
         max_replacement_cost_exposure=0,
     )
+
+
+def _flight_risk_tier(delta_percent: float) -> str:
+    """Frame the gap as retention risk so the operator knows what to triage first.
+
+    Thresholds are judgment calls from QSR_RETENTION_PLAN.md §3.1 — the
+    actionable buckets, not a statistical model:
+      - high:   ≥20% below market (very likely to leave for a $2/hr raise elsewhere)
+      - medium: 10–20% below (susceptible to competing offers)
+      - low:    <10% below (within normal variance)
+      - none:   at or above market
+    """
+    if delta_percent <= -0.20:
+        return "high"
+    if delta_percent <= BELOW_MARKET_THRESHOLD:
+        return "medium"
+    if delta_percent < 0:
+        return "low"
+    return "none"
+
+
+async def compute_employee_wage_gaps(
+    company_id: UUID,
+) -> tuple[list[EmployeeWageGap], list[RoleRollup]]:
+    """Per-employee detail for the wage-gap drill-down.
+
+    Same classification + benchmark lookup as `compute_company_wage_gap`, but
+    returns the full row set (sortable, filterable in the UI) plus SOC
+    rollups so the operator can act on whole roles instead of one-offs.
+    """
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT id, first_name, last_name, job_title, work_city, work_state, pay_rate
+            FROM employees
+            WHERE org_id = $1
+              AND termination_date IS NULL
+              AND pay_classification = 'hourly'
+              AND pay_rate IS NOT NULL
+              AND pay_rate > 0
+            """,
+            company_id,
+        )
+
+    if not rows:
+        return [], []
+
+    classified: list[tuple[dict, str]] = []
+    needed_socs: set[str] = set()
+    needed_states: set[str] = set()
+
+    for row in rows:
+        cls = classify_title(row["job_title"])
+        if not cls:
+            continue
+        soc_code, _ = cls
+        classified.append((dict(row), soc_code))
+        needed_socs.add(soc_code)
+        if row["work_state"]:
+            needed_states.add(row["work_state"].upper())
+
+    index = await _fetch_benchmark_index(needed_socs, needed_states)
+
+    gaps: list[EmployeeWageGap] = []
+    by_soc: dict[str, list[EmployeeWageGap]] = {}
+    soc_label_by_code: dict[str, str] = {}
+
+    for row, soc_code in classified:
+        bm = index.pick(soc_code, row["work_city"], row["work_state"])
+        if not bm or not bm.hourly_p50:
+            continue
+
+        pay = float(row["pay_rate"])
+        market_p50 = float(bm.hourly_p50)
+        delta_dollars = pay - market_p50
+        delta_pct = delta_dollars / market_p50 if market_p50 > 0 else 0.0
+        name = f"{row['first_name']} {row['last_name']}".strip()
+
+        cost_to_p50 = max(0, int(round((market_p50 - pay) * ANNUAL_HOURS)))
+        market_p25 = float(bm.hourly_p25) if bm.hourly_p25 else None
+        cost_to_p25 = (
+            max(0, int(round((market_p25 - pay) * ANNUAL_HOURS)))
+            if market_p25 is not None else 0
+        )
+
+        gap = EmployeeWageGap(
+            employee_id=str(row["id"]),
+            name=name,
+            job_title=row["job_title"],
+            soc_code=soc_code,
+            soc_label=bm.soc_label,
+            work_city=row["work_city"],
+            work_state=row["work_state"],
+            pay_rate=pay,
+            market_p50=market_p50,
+            market_p25=market_p25,
+            market_p75=float(bm.hourly_p75) if bm.hourly_p75 else None,
+            delta_dollars_per_hour=round(delta_dollars, 2),
+            delta_percent=round(delta_pct, 4),
+            annual_cost_to_reach_p50=cost_to_p50,
+            annual_cost_to_reach_p25=cost_to_p25,
+            benchmark_tier=bm.area_type,
+            benchmark_area=bm.area_name or (bm.state or "national"),
+            flight_risk_tier=_flight_risk_tier(delta_pct),
+        )
+        gaps.append(gap)
+        by_soc.setdefault(soc_code, []).append(gap)
+        soc_label_by_code[soc_code] = bm.soc_label
+
+    # Sort: biggest gaps first (most below market), then by dollar cost
+    gaps.sort(key=lambda g: (g.delta_percent, -g.annual_cost_to_reach_p50))
+
+    rollups: list[RoleRollup] = []
+    for soc, role_gaps in by_soc.items():
+        below = [g for g in role_gaps if g.is_below_market]
+        rollups.append(RoleRollup(
+            soc_code=soc,
+            soc_label=soc_label_by_code[soc],
+            headcount=len(role_gaps),
+            below_market_count=len(below),
+            median_delta_percent=round(_median([g.delta_percent for g in role_gaps]), 4),
+            total_annual_cost_to_lift_to_p50=sum(g.annual_cost_to_reach_p50 for g in below),
+        ))
+    # Sort rollups by total cost-to-lift desc — biggest payroll levers first
+    rollups.sort(key=lambda r: -r.total_annual_cost_to_lift_to_p50)
+
+    return gaps, rollups
 
 
 def _median(values: list[float]) -> float:

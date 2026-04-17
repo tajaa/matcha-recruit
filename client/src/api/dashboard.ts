@@ -6,6 +6,7 @@ import type {
   EscalatedQueryListResponse,
   EscalatedQueryDetail,
   DashboardFlagsResponse,
+  WageGapDetailsResponse,
 } from '../types/dashboard'
 
 export function fetchDashboardStats() {
@@ -50,4 +51,28 @@ export function fetchDashboardFlags() {
 
 export function analyzeDashboardFlags() {
   return api.post<{ analyzed: number; is_ai: boolean; analyzed_at: string }>('/dashboard/flags/analyze')
+}
+
+export function fetchWageGapDetails() {
+  return api.get<WageGapDetailsResponse>('/dashboard/wage-gap/details')
+}
+
+export async function downloadWageGapCsv() {
+  // Auth is Bearer-token, not cookie, so a plain <a href> won't send creds.
+  // Fetch as blob, build an object URL, click a synthetic <a download>.
+  const token = localStorage.getItem('matcha_access_token')
+  const base = import.meta.env.VITE_API_URL ?? '/api'
+  const res = await fetch(`${base}/dashboard/wage-gap/export.csv`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `wage-gap-${new Date().toISOString().slice(0, 10)}.csv`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }

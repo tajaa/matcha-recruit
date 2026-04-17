@@ -1,5 +1,5 @@
 {
-  "_comment": "Free-text job-title → BLS SOC code mapping for wage benchmarking. Rules are matched in order; first hit wins. Loaded into memory at service init by wage_benchmark_service.py — no DB hit per classify call.",
+  "_comment": "Free-text job-title → BLS SOC code mapping for wage benchmarking. Rules are matched in order; first hit wins. Loaded into memory at service init by wage_benchmark_service.py — no DB hit per classify call. More specific BH roles must appear before generic ones (e.g. 'psychiatric registered nurse' before 'registered nurse').",
   "rules": [
     {
       "keywords": ["barista", "espresso", "coffee maker", "coffee bar"],
@@ -45,6 +45,102 @@
       "keywords": ["chef", "head cook", "executive chef", "sous chef"],
       "soc_code": "35-1011",
       "label": "Chefs and Head Cooks"
+    },
+
+    {
+      "keywords": ["psychiatric nurse practitioner", "psych np", "pmhnp"],
+      "soc_code": "29-1171",
+      "label": "Nurse Practitioners (Psychiatric)"
+    },
+    {
+      "keywords": ["nurse practitioner", " np "],
+      "soc_code": "29-1171",
+      "label": "Nurse Practitioners"
+    },
+    {
+      "keywords": ["psychiatric registered nurse", "psych rn", "psychiatric rn"],
+      "soc_code": "29-1141",
+      "label": "Registered Nurses (Psychiatric)"
+    },
+    {
+      "keywords": ["registered nurse", " rn "],
+      "soc_code": "29-1141",
+      "label": "Registered Nurses"
+    },
+    {
+      "keywords": ["psychiatric technician", "behavioral health tech", "mental health tech", "mht", "bh tech", "psych tech"],
+      "soc_code": "29-2053",
+      "label": "Psychiatric Technicians"
+    },
+    {
+      "keywords": ["psychiatric aide", "psych aide", "mental health aide"],
+      "soc_code": "31-1133",
+      "label": "Psychiatric Aides"
+    },
+    {
+      "keywords": ["behavior technician", "behavioral technician", "rbt", "registered behavior"],
+      "soc_code": "29-2053",
+      "label": "Psychiatric Technicians (Behavior Tech)"
+    },
+    {
+      "keywords": ["peer support specialist", "peer support", "peer counselor", "peer advocate"],
+      "soc_code": "21-1094",
+      "label": "Community Health Workers (Peer Support)"
+    },
+    {
+      "keywords": ["alcohol & drug counselor", "alcohol and drug counselor", "substance abuse counselor", "addiction counselor", "cadc", "sud counselor"],
+      "soc_code": "21-1018",
+      "label": "Substance Abuse, Behavioral Disorder, and Mental Health Counselors"
+    },
+    {
+      "keywords": ["licensed clinical social worker", "lcsw", "clinical social worker", "social worker"],
+      "soc_code": "21-1023",
+      "label": "Mental Health and Substance Abuse Social Workers"
+    },
+    {
+      "keywords": ["licensed marriage & family therapist", "licensed marriage and family therapist", "marriage & family therapist", "marriage and family therapist", "lmft", "mft"],
+      "soc_code": "21-1013",
+      "label": "Marriage and Family Therapists"
+    },
+    {
+      "keywords": ["licensed professional clinical counselor", "lpcc", "mental health counselor", "clinical counselor", "licensed professional counselor", "lpc"],
+      "soc_code": "21-1018",
+      "label": "Mental Health Counselors"
+    },
+    {
+      "keywords": ["board certified behavior analyst", "bcba", "behavior analyst"],
+      "soc_code": "19-3039",
+      "label": "Psychologists, All Other (BCBA)"
+    },
+    {
+      "keywords": ["clinical psychologist", "counseling psychologist", "psychologist"],
+      "soc_code": "19-3031",
+      "label": "Clinical and Counseling Psychologists"
+    },
+    {
+      "keywords": ["psychiatrist"],
+      "soc_code": "29-1223",
+      "label": "Psychiatrists"
+    },
+    {
+      "keywords": ["occupational therapist", " ot "],
+      "soc_code": "29-1122",
+      "label": "Occupational Therapists"
+    },
+    {
+      "keywords": ["recreational therapist"],
+      "soc_code": "29-1125",
+      "label": "Recreational Therapists"
+    },
+    {
+      "keywords": ["art therapist", "music therapist", "drama therapist", "dance therapist", "expressive therapist"],
+      "soc_code": "29-1129",
+      "label": "Therapists, All Other (Art/Music)"
+    },
+    {
+      "keywords": ["case manager", "care coordinator", "care manager"],
+      "soc_code": "21-1093",
+      "label": "Social and Human Service Assistants"
     }
   ]
 }

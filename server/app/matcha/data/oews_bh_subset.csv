@@ -1,0 +1,55 @@
+soc_code,soc_label,area_type,area_code,area_name,state,hourly_p10,hourly_p25,hourly_p50,hourly_p75,hourly_p90,annual_p50,period
+21-1013,Marriage and Family Therapists,national,US,United States,,18.50,24.00,30.50,40.00,52.00,63440,2024Q4
+21-1013,Marriage and Family Therapists,state,CA,California,CA,22.00,28.50,35.00,44.50,58.00,72800,2024Q4
+21-1018,"Substance Abuse, Behavioral Disorder, and Mental Health Counselors",national,US,United States,,17.50,22.00,27.50,35.50,46.00,57200,2024Q4
+21-1018,"Substance Abuse, Behavioral Disorder, and Mental Health Counselors",state,CA,California,CA,20.50,24.50,28.50,36.00,46.00,59280,2024Q4
+21-1018,"Substance Abuse, Behavioral Disorder, and Mental Health Counselors",metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,20.00,24.00,28.00,35.50,45.50,58240,2024Q4
+21-1018,"Substance Abuse, Behavioral Disorder, and Mental Health Counselors",metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,22.00,27.00,32.00,40.00,52.00,66560,2024Q4
+21-1018,"Substance Abuse, Behavioral Disorder, and Mental Health Counselors",metro,41940,"San Jose-Sunnyvale-Santa Clara, CA",CA,22.50,27.50,32.50,41.00,53.00,67600,2024Q4
+21-1018,"Substance Abuse, Behavioral Disorder, and Mental Health Counselors",metro,40140,"Riverside-San Bernardino-Ontario, CA",CA,19.50,23.50,27.00,34.00,44.00,56160,2024Q4
+21-1018,"Substance Abuse, Behavioral Disorder, and Mental Health Counselors",metro,41740,"San Diego-Chula Vista-Carlsbad, CA",CA,20.00,24.00,28.00,35.00,45.00,58240,2024Q4
+21-1023,Mental Health and Substance Abuse Social Workers,national,US,United States,,19.50,24.50,30.00,39.00,50.50,62400,2024Q4
+21-1023,Mental Health and Substance Abuse Social Workers,state,CA,California,CA,24.00,30.00,36.00,45.00,56.50,74880,2024Q4
+21-1023,Mental Health and Substance Abuse Social Workers,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,23.50,29.00,35.00,44.00,55.50,72800,2024Q4
+21-1023,Mental Health and Substance Abuse Social Workers,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,26.00,32.00,38.50,48.00,60.00,80080,2024Q4
+21-1094,Community Health Workers,national,US,United States,,14.50,17.50,22.00,28.50,37.00,45760,2024Q4
+21-1094,Community Health Workers,state,CA,California,CA,17.50,20.00,23.50,29.00,36.50,48880,2024Q4
+21-1094,Community Health Workers,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,17.00,19.50,23.00,28.50,36.00,47840,2024Q4
+21-1094,Community Health Workers,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,19.00,22.00,25.50,31.00,38.50,53040,2024Q4
+21-1093,Social and Human Service Assistants,national,US,United States,,13.00,16.00,20.00,25.50,32.50,41600,2024Q4
+21-1093,Social and Human Service Assistants,state,CA,California,CA,16.50,19.00,22.50,27.50,34.00,46800,2024Q4
+21-1093,Social and Human Service Assistants,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,16.00,18.50,22.00,27.00,33.50,45760,2024Q4
+21-1093,Social and Human Service Assistants,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,17.50,20.50,24.00,29.50,36.00,49920,2024Q4
+19-3031,Clinical and Counseling Psychologists,national,US,United States,,25.00,33.00,43.00,57.00,75.00,89440,2024Q4
+19-3031,Clinical and Counseling Psychologists,state,CA,California,CA,32.50,42.00,52.00,65.00,84.00,108160,2024Q4
+19-3031,Clinical and Counseling Psychologists,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,32.00,41.00,51.00,64.00,82.00,106080,2024Q4
+19-3031,Clinical and Counseling Psychologists,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,36.00,46.00,58.00,72.00,92.00,120640,2024Q4
+19-3039,"Psychologists, All Other",national,US,United States,,22.00,29.00,38.50,50.00,66.00,80080,2024Q4
+19-3039,"Psychologists, All Other",state,CA,California,CA,29.00,37.00,46.50,58.00,74.00,96720,2024Q4
+29-1122,Occupational Therapists,national,US,United States,,30.00,37.50,46.00,55.50,66.00,95680,2024Q4
+29-1122,Occupational Therapists,state,CA,California,CA,35.00,42.00,50.50,60.00,72.00,105040,2024Q4
+29-1122,Occupational Therapists,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,34.50,41.50,50.00,59.50,71.00,104000,2024Q4
+29-1122,Occupational Therapists,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,38.00,46.00,55.00,65.00,78.00,114400,2024Q4
+29-1125,Recreational Therapists,national,US,United States,,19.00,23.00,29.00,36.50,46.00,60320,2024Q4
+29-1125,Recreational Therapists,state,CA,California,CA,22.50,26.50,32.00,40.00,50.00,66560,2024Q4
+29-1129,"Therapists, All Other",national,US,United States,,19.50,24.00,31.00,40.00,52.50,64480,2024Q4
+29-1129,"Therapists, All Other",state,CA,California,CA,23.50,28.50,35.50,45.00,58.00,73840,2024Q4
+29-1141,Registered Nurses,national,US,United States,,25.50,31.50,40.00,51.00,65.00,83200,2024Q4
+29-1141,Registered Nurses,state,CA,California,CA,42.00,54.00,68.50,85.50,102.00,142480,2024Q4
+29-1141,Registered Nurses,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,41.00,52.50,66.50,83.00,99.50,138320,2024Q4
+29-1141,Registered Nurses,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,48.50,62.00,78.00,95.00,115.00,162240,2024Q4
+29-1141,Registered Nurses,metro,41740,"San Diego-Chula Vista-Carlsbad, CA",CA,42.50,54.00,67.50,84.00,100.00,140400,2024Q4
+29-1171,Nurse Practitioners,national,US,United States,,40.50,47.00,57.50,70.00,82.50,119600,2024Q4
+29-1171,Nurse Practitioners,state,CA,California,CA,53.00,63.50,78.50,94.00,110.00,163280,2024Q4
+29-1171,Nurse Practitioners,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,52.00,62.50,77.00,92.50,108.00,160160,2024Q4
+29-1171,Nurse Practitioners,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,58.00,69.50,85.00,101.00,118.00,176800,2024Q4
+29-1223,Psychiatrists,national,US,United States,,55.00,78.00,115.00,148.00,183.00,239200,2024Q4
+29-1223,Psychiatrists,state,CA,California,CA,70.00,96.00,135.00,175.00,213.00,280800,2024Q4
+29-2053,Psychiatric Technicians,national,US,United States,,15.00,17.50,22.00,28.50,36.00,45760,2024Q4
+29-2053,Psychiatric Technicians,state,CA,California,CA,22.50,27.50,33.00,40.00,48.00,68640,2024Q4
+29-2053,Psychiatric Technicians,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,22.00,27.00,32.50,39.50,47.00,67600,2024Q4
+29-2053,Psychiatric Technicians,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,24.50,30.00,36.00,43.50,51.50,74880,2024Q4
+31-1133,Psychiatric Aides,national,US,United States,,13.00,15.00,18.00,23.00,29.50,37440,2024Q4
+31-1133,Psychiatric Aides,state,CA,California,CA,17.00,18.50,20.50,25.00,32.00,42640,2024Q4
+31-1133,Psychiatric Aides,metro,31080,"Los Angeles-Long Beach-Anaheim, CA",CA,16.50,18.00,20.00,24.50,31.00,41600,2024Q4
+31-1133,Psychiatric Aides,metro,41860,"San Francisco-Oakland-Berkeley, CA",CA,18.50,20.00,22.50,27.50,34.50,46800,2024Q4

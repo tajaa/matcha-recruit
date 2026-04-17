@@ -24,13 +24,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.config import load_settings
 from app.database import close_pool, get_connection, init_pool
 
-CSV_PATH = os.path.join(
+_DATA_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "app",
     "matcha",
     "data",
-    "oews_qsr_subset.csv",
 )
+
+# Load every curated BLS OEWS subset in this directory. Keep files narrow by
+# domain (QSR, behavioral health, etc.) so adding a new vertical = drop in a
+# new CSV, no script changes.
+CSV_PATHS = [
+    os.path.join(_DATA_DIR, "oews_qsr_subset.csv"),
+    os.path.join(_DATA_DIR, "oews_bh_subset.csv"),
+]
 
 
 def _decimal(val: str) -> Decimal | None:
@@ -47,15 +54,19 @@ async def seed():
     settings = load_settings()
     await init_pool(settings.database_url)
 
-    if not os.path.exists(CSV_PATH):
-        print(f"ERROR: source CSV not found at {CSV_PATH}")
+    rows: list[dict] = []
+    for path in CSV_PATHS:
+        if not os.path.exists(path):
+            print(f"WARN: source CSV not found at {path} — skipping")
+            continue
+        with open(path) as f:
+            sub = list(csv.DictReader(f))
+        rows.extend(sub)
+        print(f"Loaded {len(sub)} benchmark rows from {os.path.basename(path)}")
+
+    if not rows:
+        print("ERROR: no benchmark rows loaded")
         sys.exit(1)
-
-    with open(CSV_PATH) as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
-
-    print(f"Loaded {len(rows)} benchmark rows from {os.path.basename(CSV_PATH)}")
 
     inserted = 0
     updated = 0

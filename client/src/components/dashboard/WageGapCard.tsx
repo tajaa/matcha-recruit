@@ -1,8 +1,9 @@
-import { TrendingDown, AlertCircle } from 'lucide-react'
+import { TrendingDown, AlertCircle, ChevronRight } from 'lucide-react'
 import type { WageGapSummary } from '../../types/dashboard'
 
 interface Props {
   data: WageGapSummary
+  onOpenDetails?: () => void
 }
 
 /**
@@ -15,7 +16,7 @@ interface Props {
  * The widget is hidden when there's nothing to evaluate (no hourly employees
  * matched to a SOC code) — the backend already returns null in that case.
  */
-export function WageGapCard({ data }: Props) {
+export function WageGapCard({ data, onOpenDetails }: Props) {
   const {
     employees_below_market: below,
     employees_evaluated: evaluated,
@@ -38,9 +39,26 @@ export function WageGapCard({ data }: Props) {
   const medianPct = median_delta_percent != null ? Math.round(median_delta_percent * 100) : null
   const headlineNumber = `${below}/${evaluated}`
 
+  const clickable = !!onOpenDetails && evaluated > 0
+  const Wrapper: any = clickable ? 'button' : 'div'
+  const wrapperProps = clickable
+    ? { onClick: onOpenDetails, type: 'button', 'aria-label': 'View wage gap details' }
+    : {}
+
   return (
-    <div className={`relative overflow-hidden rounded-xl border bg-zinc-900/60 p-5 ${accentClasses.ring}`}>
+    <Wrapper
+      {...wrapperProps}
+      className={`group relative overflow-hidden rounded-xl border bg-zinc-900/60 p-5 w-full text-left ${accentClasses.ring} ${
+        clickable ? 'cursor-pointer hover:bg-zinc-900/80 transition-colors' : ''
+      }`}
+    >
       <TrendingDown className={`absolute -top-2 -right-2 h-20 w-20 ${accentClasses.bgIcon}`} />
+      {clickable && (
+        <div className="absolute top-3 right-3 flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-zinc-500 group-hover:text-zinc-300">
+          View employees
+          <ChevronRight className="h-3 w-3" />
+        </div>
+      )}
 
       {/* Headline row */}
       <div className="flex items-start justify-between gap-4">
@@ -106,7 +124,7 @@ export function WageGapCard({ data }: Props) {
           </span>
         </p>
       )}
-    </div>
+    </Wrapper>
   )
 }
 
