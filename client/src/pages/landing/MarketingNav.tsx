@@ -8,6 +8,7 @@ interface Props {
 }
 
 const NAV_LINKS = [
+  { to: '/', label: 'Platform' },
   { to: '/matcha-work', label: 'Matcha Work' },
   { to: '/services', label: 'Consulting' },
 ]

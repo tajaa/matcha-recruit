@@ -18,7 +18,7 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-const HERO_HEADLINE = 'Agentic Risk Management'
+const HERO_HEADLINE = 'The Platform: Agentic Risk Management'
 const HERO_SUBCOPY =
   'Bespoke HR, governance, employee relations, and AI integration consulting — for organizations that can\u2019t afford to guess.'
 

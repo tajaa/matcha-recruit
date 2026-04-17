@@ -15,6 +15,8 @@ class ContactFormRequest(BaseModel):
     contact_name: str
     email: EmailStr
     description: str
+    preferred_date: str | None = None
+    preferred_time: str | None = None
 
 
 class ContactFormResponse(BaseModel):
@@ -41,6 +43,8 @@ async def submit_contact_form(request: ContactFormRequest):
         sender_email=request.email,
         company_name=request.company_name,
         message=request.description,
+        preferred_date=request.preferred_date,
+        preferred_time=request.preferred_time,
     )
 
     if not success:

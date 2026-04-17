@@ -644,6 +644,8 @@ Sent on behalf of {company_name} via Matcha
         sender_email: str,
         company_name: str,
         message: str,
+        preferred_date: str | None = None,
+        preferred_time: str | None = None,
     ) -> bool:
         """Send a contact form submission to the admin email.
 
@@ -654,6 +656,25 @@ Sent on behalf of {company_name} via Matcha
             return False
 
         contact_email = self.settings.contact_email
+
+        is_consultation = preferred_date is not None or preferred_time is not None
+        subject_prefix = "Consultation Request" if is_consultation else "Contact Form"
+
+        schedule_html = ""
+        schedule_text = ""
+        if is_consultation:
+            date_str = preferred_date or "Not specified"
+            time_str = preferred_time or "Not specified"
+            schedule_html = f"""
+                <div style="margin-bottom: 16px;">
+                    <div class="label">Requested Date</div>
+                    <div class="value">{date_str}</div>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <div class="label">Requested Time (ET)</div>
+                    <div class="value">{time_str}</div>
+                </div>"""
+            schedule_text = f"\nRequested Date: {date_str}\nRequested Time (ET): {time_str}"
 
         html_content = f"""
 <!DOCTYPE html>
@@ -678,7 +699,7 @@ Sent on behalf of {company_name} via Matcha
             <div class="logo">MATCHA</div>
         </div>
         <div class="content">
-            <h2 style="margin-top: 0;">New Contact Form Submission</h2>
+            <h2 style="margin-top: 0;">{'New Consultation Request' if is_consultation else 'New Contact Form Submission'}</h2>
 
             <div class="info-card">
                 <div style="margin-bottom: 16px;">
@@ -689,10 +710,10 @@ Sent on behalf of {company_name} via Matcha
                     <div class="label">Contact Name</div>
                     <div class="value">{sender_name}</div>
                 </div>
-                <div>
+                <div style="margin-bottom: 16px;">
                     <div class="label">Email</div>
                     <div class="value"><a href="mailto:{sender_email}">{sender_email}</a></div>
-                </div>
+                </div>{schedule_html}
             </div>
 
             <div class="label">Message</div>
@@ -707,11 +728,11 @@ Sent on behalf of {company_name} via Matcha
 """
 
         text_content = f"""
-New Contact Form Submission
+{'New Consultation Request' if is_consultation else 'New Contact Form Submission'}
 
 Company: {company_name}
 Contact: {sender_name}
-Email: {sender_email}
+Email: {sender_email}{schedule_text}
 
 Message:
 {message}
@@ -723,7 +744,7 @@ Sent from Matcha Recruit contact form
         return await self.send_email(
             to_email=contact_email,
             to_name="Matcha Team",
-            subject=f"Contact Form: {company_name} - {sender_name}",
+            subject=f"{subject_prefix}: {company_name} - {sender_name}",
             html_content=html_content,
             text_content=text_content,
         )

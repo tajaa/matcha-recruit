@@ -12,13 +12,6 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-type Testimonial = {
-  quote: string
-  author: string
-  title: string
-  company: string
-}
-
 type EngagementDetail = { label: string; value: string }
 
 type Pillar = {
@@ -28,7 +21,7 @@ type Pillar = {
   tagline: string
   description: string
   deliverables: string[]
-  testimonial: Testimonial
+  highlight: string
   engagement: EngagementDetail[]
 }
 
@@ -47,13 +40,8 @@ const PILLARS: Pillar[] = [
       'Hiring, termination, and classification review',
       'Advisory retainers with standing senior access',
     ],
-    testimonial: {
-      quote:
-        'Matcha\u2019s HR team built our entire people function in six weeks — the kind of work we\u2019d have hired a full-time CHRO for.',
-      author: 'Sarah Chen',
-      title: 'CEO',
-      company: 'Aurora Biotech',
-    },
+    highlight:
+      'Full people-function buildout — compensation frameworks, multi-state handbook, and performance programs — in the time it takes to hire one person.',
     engagement: [
       { label: 'Duration', value: '6 weeks' },
       { label: 'Scope', value: 'Full HR buildout' },
@@ -74,13 +62,8 @@ const PILLARS: Pillar[] = [
       'Audit preparation and remediation',
       'Credential and license program setup',
     ],
-    testimonial: {
-      quote:
-        'They ran a full-stack compliance gap analysis across seven states in ten days. We closed forty-two findings before our SOC 2 renewal.',
-      author: 'Mark Weiss',
-      title: 'COO',
-      company: 'Helix Health',
-    },
+    highlight:
+      'Jurisdiction-aware gap analysis across every operating state — findings prioritized by risk, written up in a format counsel and auditors can act on.',
     engagement: [
       { label: 'Duration', value: '10 days' },
       { label: 'Coverage', value: '7 states' },
@@ -101,13 +84,8 @@ const PILLARS: Pillar[] = [
       'ER case strategy and documentation',
       'Cross-case pattern detection and remediation playbooks',
     ],
-    testimonial: {
-      quote:
-        'We had three interlocking cases we couldn\u2019t untangle internally. Matcha ran the investigation end-to-end with a defensible memo in two weeks.',
-      author: 'Jennifer Park',
-      title: 'General Counsel',
-      company: 'Stratify Labs',
-    },
+    highlight:
+      'Interlocking cases, high-stakes separations, or first-time investigations — we run the process end-to-end and hand off a memo your counsel can use.',
     engagement: [
       { label: 'Duration', value: '2 weeks' },
       { label: 'Scope', value: '3 interlocking cases' },
@@ -128,13 +106,8 @@ const PILLARS: Pillar[] = [
       'Deployment playbooks and change-management',
       'Board-ready AI risk reporting',
     ],
-    testimonial: {
-      quote:
-        'They flagged a BIPA violation in a vendor we almost signed a $400k contract with. We saved a lot more than the engagement fee.',
-      author: 'David Riaz',
-      title: 'CTO',
-      company: 'Northwind Ops',
-    },
+    highlight:
+      'Independent evaluation of the tools you are already running or about to sign — bias, compliance, and operational risk surfaced before they become incidents.',
     engagement: [
       { label: 'Duration', value: '3 weeks' },
       { label: 'Scope', value: '5 AI vendors' },
@@ -178,11 +151,11 @@ export default function ServicesPage() {
 
   return (
     <div style={{ backgroundColor: BG, color: INK }} className="min-h-screen">
-      <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} />
+      <PricingContactModal isOpen={isPricingOpen} onClose={() => setIsPricingOpen(false)} mode="consultation" />
       <ComplianceTicker />
       <MarketingNav onPricingClick={() => setIsPricingOpen(true)} onDemoClick={() => setIsPricingOpen(true)} />
 
-      <Hero />
+      <Hero onBookClick={() => setIsPricingOpen(true)} />
 
       <main>
         {PILLARS.map((p, i) => (
@@ -201,7 +174,7 @@ export default function ServicesPage() {
 // Hero
 // ---------------------------------------------------------------------------
 
-function Hero() {
+function Hero({ onBookClick }: { onBookClick: () => void }) {
   return (
     <section className="relative w-full overflow-hidden" style={{ backgroundColor: BG }}>
       <div
@@ -242,13 +215,13 @@ function Hero() {
               Bespoke HR, governance, employee relations, and AI integration consulting — led by senior practitioners who\u2019ve been in the room when it mattered.
             </p>
             <div className="mt-10 flex items-center gap-4 flex-wrap">
-              <Link
-                to="/login"
-                className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90"
+              <button
+                onClick={onBookClick}
+                className="inline-flex items-center px-7 h-12 rounded-full text-[15px] font-medium transition-opacity hover:opacity-90 cursor-pointer"
                 style={{ backgroundColor: INK, color: BG }}
               >
                 Book a Consultation
-              </Link>
+              </button>
               <Link
                 to="/matcha-work"
                 className="inline-flex items-center h-12 text-[15px] transition-opacity hover:opacity-60"
@@ -366,14 +339,14 @@ function PillarSection({ pillar, reverse }: { pillar: Pillar; reverse: boolean }
             </div>
           </div>
 
-          {/* Right: pull quote + engagement card */}
+          {/* Right: highlight + engagement card */}
           <div className="md:pt-8">
-            <figure
+            <div
               className="relative pl-6 pr-2"
               style={{ borderLeft: `2px solid ${INK}` }}
             >
-              <blockquote
-                className="italic leading-snug"
+              <p
+                className="leading-snug"
                 style={{
                   fontFamily: DISPLAY,
                   fontWeight: 400,
@@ -382,17 +355,9 @@ function PillarSection({ pillar, reverse }: { pillar: Pillar; reverse: boolean }
                   lineHeight: 1.25,
                 }}
               >
-                &ldquo;{pillar.testimonial.quote}&rdquo;
-              </blockquote>
-              <figcaption className="mt-5 text-sm" style={{ color: MUTED }}>
-                <div className="font-medium" style={{ color: INK }}>
-                  {pillar.testimonial.author}
-                </div>
-                <div>
-                  {pillar.testimonial.title}, {pillar.testimonial.company}
-                </div>
-              </figcaption>
-            </figure>
+                {pillar.highlight}
+              </p>
+            </div>
 
             <div
               className="mt-10 grid grid-cols-3 gap-px rounded-lg overflow-hidden"
