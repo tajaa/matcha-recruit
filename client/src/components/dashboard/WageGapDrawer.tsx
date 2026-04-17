@@ -304,7 +304,7 @@ export function WageGapDrawer({ open, onClose, summary }: Props) {
 }
 
 function SortHeader({
-  label, active, dir, onClick, align = 'left',
+  label, active, onClick, align = 'left',
 }: { label: string; active: boolean; dir: 'asc' | 'desc'; onClick: () => void; align?: 'left' | 'right' }) {
   return (
     <th className={`font-medium px-3 py-2 ${align === 'right' ? 'text-right' : 'text-left'}`}>

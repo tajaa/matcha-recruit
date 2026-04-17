@@ -10,8 +10,6 @@ import {
   ProfileBanner,
   GettingStarted,
   FlagsTable,
-  WageGapCard,
-  WageGapDrawer,
 } from '../../components/dashboard'
 
 import type { DashboardStats, DashboardFlagsResponse } from '../../types/dashboard'
@@ -24,7 +22,6 @@ export default function Dashboard() {
   const [flagsData, setFlagsData] = useState<DashboardFlagsResponse | null>(null)
   const [flagsRefreshing, setFlagsRefreshing] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [wageDrawerOpen, setWageDrawerOpen] = useState(false)
 
   useEffect(() => {
     if (meLoading) return
@@ -101,22 +98,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Wage gap vs. market — surfaced when the backend has data to show */}
-      {stats?.wage_gap_summary && (
-        <div className="mb-6">
-          <WageGapCard
-            data={stats.wage_gap_summary}
-            onOpenDetails={() => setWageDrawerOpen(true)}
-          />
-        </div>
-      )}
-      {stats?.wage_gap_summary && (
-        <WageGapDrawer
-          open={wageDrawerOpen}
-          onClose={() => setWageDrawerOpen(false)}
-          summary={stats.wage_gap_summary}
-        />
-      )}
 
       {/* Flags & Actions — the main dashboard content */}
       <FlagsTable

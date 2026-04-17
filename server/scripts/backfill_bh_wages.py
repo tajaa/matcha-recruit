@@ -44,11 +44,14 @@ from app.matcha.services.wage_benchmark_service import classify_title, lookup_be
 
 DEFAULT_COMPANY_ID = UUID("1a1123e5-4c24-4735-8501-9a64a1dd7691")  # 360 Behavioral Health
 
-# Titles to mark W-2 hourly. In CA behavioral health, associate-level clinicians
-# (pre-licensure LCSW/LMFT/LPCC/LPC) and per-diem NPs are typically paid hourly,
-# so we include the licensed titles too — the fake roster doesn't distinguish
-# associate vs. fully licensed. Exempt: Psychiatrist, BCBA, Psychologist, plus
-# office/admin titles that fall through to unclassified.
+# Titles that are W-2 hourly in real CA behavioral health orgs. Frontline
+# paraprofessionals (peer support, psych tech/aide, behavior tech/RBT) and
+# shift-based staff clinicians (staff RN, CADC in residential, expressive
+# therapists, OT at staff level, case managers) are hourly. Fully licensed
+# master's/doctoral clinicians (LCSW, LMFT, LPCC, BCBA, NP, Psychologist,
+# Psychiatrist) are salaried exempt and stay out of the widget — that's the
+# point: this surfaces the hourly-workforce retention lever, not clinician
+# comp bands.
 HOURLY_TITLE_KEYWORDS = [
     "peer support",
     "alcohol & drug counselor",
@@ -69,7 +72,6 @@ HOURLY_TITLE_KEYWORDS = [
     "psych rn",
     "psychiatric nurse",
     "registered nurse",
-    "nurse practitioner",
     "art therapist",
     "music therapist",
     "drama therapist",
@@ -78,15 +80,6 @@ HOURLY_TITLE_KEYWORDS = [
     "occupational therapist",
     "case manager",
     "care coordinator",
-    "licensed clinical social worker",
-    "social worker",
-    "licensed marriage & family therapist",
-    "licensed marriage and family therapist",
-    "marriage & family therapist",
-    "marriage and family therapist",
-    "licensed professional clinical counselor",
-    "clinical counselor",
-    "mental health counselor",
 ]
 
 

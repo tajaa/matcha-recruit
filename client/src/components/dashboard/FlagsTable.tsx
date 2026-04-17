@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, ChevronUp, ChevronDown, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react'
+import { Search, ChevronUp, ChevronDown, AlertTriangle, RefreshCw, Loader2, Map as MapIcon } from 'lucide-react'
 import type { DashboardFlag, HeatMapCell, BusinessLocation } from '../../types/dashboard'
 import { RiskHeatMap } from './RiskHeatMap'
 import { LocationMap } from './LocationMap'
@@ -33,6 +33,7 @@ export function FlagsTable({ flags, heatMap, locations, totalFlags: _totalFlags,
   const [priorityFilter, setPriorityFilter] = useState<string>('all')
   const [sortKey, setSortKey] = useState<SortKey>('priority')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const [showMap, setShowMap] = useState(false)
 
   function toggleSort(key: SortKey) {
     if (sortKey === key) {
@@ -76,8 +77,24 @@ export function FlagsTable({ flags, heatMap, locations, totalFlags: _totalFlags,
 
   return (
     <div>
-      {/* Location map */}
-      <LocationMap locations={locations} heatMap={heatMap} />
+      {/* Location map — gated behind a toggle. The US map is heavy and only
+          useful when the operator cares about geographic distribution, so
+          don't render it by default on every Command Center load. */}
+      <div className="mb-4">
+        <button
+          onClick={() => setShowMap((v) => !v)}
+          className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-vsc-text/60 hover:text-vsc-text transition-colors"
+        >
+          <MapIcon size={12} />
+          {showMap ? 'Hide location map' : 'Show location map'}
+          {showMap ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        </button>
+        {showMap && (
+          <div className="mt-3">
+            <LocationMap locations={locations} heatMap={heatMap} />
+          </div>
+        )}
+      </div>
 
       {/* Heat map */}
       <RiskHeatMap cells={heatMap} />

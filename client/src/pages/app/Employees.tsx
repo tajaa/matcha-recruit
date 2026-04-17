@@ -4,8 +4,11 @@ import { Button, Input, Select } from '../../components/ui'
 import { EmployeeStatusBadge } from '../../components/employees/EmployeeStatusBadge'
 import { MultiBatchModal } from '../../components/employees/MultiBatchModal'
 import { BulkUploadModal } from '../../components/employees/BulkUploadModal'
+import { WageGapCard, WageGapDrawer } from '../../components/dashboard'
+import { fetchDashboardStats } from '../../api/dashboard'
 import { useEmployees } from '../../hooks/employees/useEmployees'
 import { typeLabel } from '../../types/employee'
+import type { WageGapSummary } from '../../types/dashboard'
 
 export default function Employees() {
   const navigate = useNavigate()
@@ -15,6 +18,16 @@ export default function Employees() {
   const [department, setDepartment] = useState('')
   const [showBatch, setShowBatch] = useState(false)
   const [showUpload, setShowUpload] = useState(false)
+  const [wageGap, setWageGap] = useState<WageGapSummary | null>(null)
+  const [wageDrawerOpen, setWageDrawerOpen] = useState(false)
+
+  useEffect(() => {
+    // Reuse dashboard stats endpoint — it already computes wage_gap_summary
+    // and is Redis-cached, so a second caller is cheap.
+    fetchDashboardStats()
+      .then((s) => setWageGap(s.wage_gap_summary))
+      .catch(() => setWageGap(null))
+  }, [])
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
@@ -49,6 +62,25 @@ export default function Employees() {
           <Button onClick={() => setShowBatch(true)}>Add Employees</Button>
         </div>
       </div>
+
+      {/* Wage gap widget — moved here from Command Center because it's
+          an employee-comp tool. Hidden until the backend has hourly data
+          to evaluate. */}
+      {wageGap && (
+        <div className="mt-6">
+          <WageGapCard
+            data={wageGap}
+            onOpenDetails={() => setWageDrawerOpen(true)}
+          />
+        </div>
+      )}
+      {wageGap && (
+        <WageGapDrawer
+          open={wageDrawerOpen}
+          onClose={() => setWageDrawerOpen(false)}
+          summary={wageGap}
+        />
+      )}
 
       <MultiBatchModal
         open={showBatch}
