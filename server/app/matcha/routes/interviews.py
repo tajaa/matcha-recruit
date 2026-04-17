@@ -1426,10 +1426,11 @@ async def interview_websocket(
                     )
                     print(f"[Interview {interview_id}] Queued analysis task for background processing")
                 else:
-                    # No transcript, mark as completed without analysis
+                    # No transcript — session failed before any conversation. Reset so candidate can retry.
+                    print(f"[Interview {interview_id}] Reset to pending — no transcript captured (type={interview_type})")
                     async with get_connection() as conn:
                         await conn.execute(
-                            "UPDATE interviews SET status = 'completed' WHERE id = $1",
+                            "UPDATE interviews SET status = 'pending', completed_at = NULL WHERE id = $1",
                             interview_id,
                         )
 
