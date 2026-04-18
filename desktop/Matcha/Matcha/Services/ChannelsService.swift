@@ -39,14 +39,34 @@ class ChannelsService {
         let _: JoinResponse = try await client.request(method: "POST", path: "\(basePath)/\(id)/leave")
     }
 
+    struct PaidChannelConfig: Encodable {
+        let priceCents: Int
+        let currency: String
+        let inactivityThresholdDays: Int?
+        let inactivityWarningDays: Int
+
+        enum CodingKeys: String, CodingKey {
+            case priceCents = "price_cents"
+            case currency
+            case inactivityThresholdDays = "inactivity_threshold_days"
+            case inactivityWarningDays = "inactivity_warning_days"
+        }
+    }
+
     struct CreateRequest: Encodable {
         let name: String
         let description: String?
         let visibility: String
+        let paidConfig: PaidChannelConfig?
+
+        enum CodingKeys: String, CodingKey {
+            case name, description, visibility
+            case paidConfig = "paid_config"
+        }
     }
 
-    func createChannel(name: String, description: String?, visibility: String = "public") async throws -> ChannelDetail {
-        let body = CreateRequest(name: name, description: description, visibility: visibility)
+    func createChannel(name: String, description: String?, visibility: String = "public", paidConfig: PaidChannelConfig? = nil) async throws -> ChannelDetail {
+        let body = CreateRequest(name: name, description: description, visibility: visibility, paidConfig: paidConfig)
         return try await client.request(method: "POST", path: basePath, body: body)
     }
 

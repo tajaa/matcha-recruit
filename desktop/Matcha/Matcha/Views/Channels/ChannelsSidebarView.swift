@@ -161,13 +161,24 @@ extension Notification.Name {
 
 struct CreateChannelSheet: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(AppState.self) private var appState
     let onCreated: (ChannelDetail) -> Void
 
     @State private var name = ""
     @State private var description = ""
     @State private var visibility = "public"
+    @State private var isPaid = false
+    @State private var priceDollars = "5"
     @State private var isSubmitting = false
     @State private var errorMessage: String?
+
+    // Paid/creator channels are for personal accounts only. Matches the
+    // backend rule in /channels POST (role must be individual or admin)
+    // and the web client's canCreatePaid gating.
+    private var canCreatePaid: Bool {
+        let role = appState.currentUser?.role ?? ""
+        return role == "individual" || role == "admin"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -202,6 +213,34 @@ struct CreateChannelSheet: View {
                 visibilityButton(label: "public")
                 visibilityButton(label: "private")
                 Spacer()
+            }
+
+            if canCreatePaid {
+                Toggle(isOn: $isPaid) {
+                    Text("paid (subscribers only)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
+
+                if isPaid {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("price / month (usd)")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.4))
+                        HStack(spacing: 4) {
+                            Text("$")
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.5))
+                            TextField("", text: $priceDollars, prompt: Text("5").foregroundColor(.white.opacity(0.25)))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 13))
+                                .foregroundColor(.white.opacity(0.9))
+                        }
+                        Divider()
+                    }
+                }
             }
 
             if let errorMessage {
@@ -267,11 +306,27 @@ struct CreateChannelSheet: View {
     private func create() async {
         isSubmitting = true
         errorMessage = nil
+        var paidConfig: ChannelsService.PaidChannelConfig? = nil
+        if isPaid && canCreatePaid {
+            guard let dollars = Double(priceDollars.trimmingCharacters(in: .whitespaces)), dollars > 0 else {
+                errorMessage = "Enter a valid price"
+                isSubmitting = false
+                return
+            }
+            let cents = Int((dollars * 100).rounded())
+            paidConfig = ChannelsService.PaidChannelConfig(
+                priceCents: cents,
+                currency: "usd",
+                inactivityThresholdDays: nil,
+                inactivityWarningDays: 3
+            )
+        }
         do {
             let channel = try await ChannelsService.shared.createChannel(
                 name: name.trimmingCharacters(in: .whitespaces),
                 description: description.isEmpty ? nil : description,
-                visibility: visibility
+                visibility: visibility,
+                paidConfig: paidConfig
             )
             onCreated(channel)
             dismiss()
