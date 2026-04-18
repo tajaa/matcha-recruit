@@ -38,6 +38,8 @@ export default function MatchaWorkList() {
 
   useEffect(() => {
     if (me?.user?.role !== 'individual') return
+    // Backend flag is the source of truth — survives storage wipes across browsers/devices.
+    if (me.user.work_onboarded) return
     let seen = false
     try {
       seen = !!localStorage.getItem(ONBOARDING_STORAGE_KEY)

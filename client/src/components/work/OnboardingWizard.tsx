@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react'
+import { api } from '../../api/client'
+import { invalidateMeCache } from '../../hooks/useMe'
 import {
   MessageSquare,
   FolderKanban,
@@ -108,6 +110,8 @@ function markCompleted() {
   } catch {
     /* ignore */
   }
+  // Persist server-side so the flag survives storage wipes, browser changes, and device switches.
+  api.post('/auth/work-onboarded').then(() => invalidateMeCache()).catch(() => {})
 }
 
 export default function OnboardingWizard({ onDismiss }: OnboardingWizardProps) {

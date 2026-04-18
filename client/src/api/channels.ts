@@ -109,8 +109,13 @@ export interface ChannelRevenue {
   recent_events: { event_type: string; amount_cents: number; created_at: string; user_id: string }[]
 }
 
-export const createChannel = (name: string, description?: string, visibility: string = 'public', paidConfig?: PaidChannelConfig) =>
-  api.post<ChannelDetail>('/channels', { name, description, visibility, paid_config: paidConfig })
+export const CHANNELS_CHANGED_EVENT = 'mw-channels-changed'
+
+export const createChannel = async (name: string, description?: string, visibility: string = 'public', paidConfig?: PaidChannelConfig) => {
+  const res = await api.post<ChannelDetail>('/channels', { name, description, visibility, paid_config: paidConfig })
+  window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
+  return res
+}
 
 export const getChannel = (id: string) =>
   api.get<ChannelDetail>(`/channels/${id}`)
@@ -121,14 +126,20 @@ export const getChannelMessages = (id: string, before?: string) =>
 export const deleteChannelMessage = (channelId: string, messageId: string) =>
   api.delete<{ ok: boolean }>(`/channels/${channelId}/messages/${messageId}`)
 
-export const joinChannel = (id: string) =>
-  api.post(`/channels/${id}/join`)
+export const joinChannel = async (id: string) => {
+  const res = await api.post(`/channels/${id}/join`)
+  window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
+  return res
+}
 
 export const addChannelMembers = (id: string, userIds: string[]) =>
   api.post(`/channels/${id}/members`, { user_ids: userIds })
 
-export const leaveChannel = (id: string) =>
-  api.post(`/channels/${id}/leave`)
+export const leaveChannel = async (id: string) => {
+  const res = await api.post(`/channels/${id}/leave`)
+  window.dispatchEvent(new CustomEvent(CHANNELS_CHANGED_EVENT))
+  return res
+}
 
 export const updateChannel = (id: string, updates: { name?: string; description?: string }) =>
   api.patch<ChannelSummary>(`/channels/${id}`, updates)

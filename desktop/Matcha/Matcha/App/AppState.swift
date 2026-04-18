@@ -14,6 +14,11 @@ class AppState {
     var unreadInboxCount: Int = 0
     var isPlusActive: Bool = false
     var isSceneActive: Bool = true
+    /// Bumped whenever a channel is created/joined/left so observing views
+    /// reload their lists. Pairs with the existing `.mwChannelCreated`
+    /// NotificationCenter signal — belt-and-suspenders for SwiftUI view
+    /// hierarchies where `.onReceive` hasn't fired reliably.
+    var channelsListGeneration: Int = 0
     private var heartbeatTask: Task<Void, Never>?
     private var inboxPollTask: Task<Void, Never>?
 

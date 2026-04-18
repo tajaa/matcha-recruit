@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Hash, FolderOpen, MessageSquare, Plus, ChevronDown, PanelLeftClose, Mail, MailOpen, Home, Pencil, LogOut, FileText, Presentation, Users, X, Compass, CreditCard, Sparkles } from 'lucide-react'
-import { listChannels, updateChannel, listPendingConnections } from '../../api/channels'
+import { listChannels, updateChannel, listPendingConnections, CHANNELS_CHANGED_EVENT } from '../../api/channels'
 import { disconnectSharedChannelSocket } from '../../api/channelSocket'
 import type { ChannelSummary } from '../../api/channels'
 import { listThreads, listProjects, updateTitle, updateProjectMeta, createProjectNew, getMWSubscription, startPersonalCheckout } from '../../api/matchaWork'
@@ -65,6 +65,15 @@ export default function WorkSidebar({ open, onToggle }: Props) {
       listChannels().then(setChannels).catch(() => {})
     }
   }, [location.pathname])
+
+  // Refetch channels when anywhere in the app creates/joins/leaves one.
+  useEffect(() => {
+    const handler = () => {
+      listChannels().then(setChannels).catch(() => {})
+    }
+    window.addEventListener(CHANNELS_CHANGED_EVENT, handler)
+    return () => window.removeEventListener(CHANNELS_CHANGED_EVENT, handler)
+  }, [])
 
   // Poll inbox unread
   useEffect(() => {

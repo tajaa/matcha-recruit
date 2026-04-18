@@ -1907,7 +1907,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 current_user.id
             )
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -1992,7 +1992,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                         onboarding_needed["integrations"] = True
 
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -2061,7 +2061,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 default_company_features_json(),
             )
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -2106,7 +2106,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
             )
             terms_accepted = bool(profile and profile["terms_accepted_at"] is not None)
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -2129,7 +2129,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 "visible_features": visible_features,
             }
 
-    return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar}, "profile": None, "visible_features": visible_features}
+    return {"user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))}, "profile": None, "visible_features": visible_features}
 
 
 @router.post("/broker/accept-terms", response_model=BrokerTermsAcceptanceResponse)
@@ -2449,6 +2449,21 @@ async def update_profile(
                 )
 
         return {"status": "profile_updated"}
+
+
+@router.post("/work-onboarded")
+async def mark_work_onboarded(current_user: CurrentUser = Depends(get_current_user)):
+    """Mark that the user has completed the Matcha Work onboarding wizard."""
+    async with get_connection() as conn:
+        await conn.execute(
+            """
+            UPDATE users
+            SET beta_features = COALESCE(beta_features, '{}'::jsonb) || '{"work_onboarded": true}'::jsonb
+            WHERE id = $1
+            """,
+            current_user.id,
+        )
+    return {"ok": True}
 
 
 # ===========================================

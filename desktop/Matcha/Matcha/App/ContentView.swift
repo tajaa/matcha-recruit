@@ -237,6 +237,7 @@ struct ContentView: View {
             CreateChannelSheet { newChannel in
                 appState.selectedThreadId = nil
                 appState.selectedProjectId = nil
+                appState.channelsListGeneration &+= 1
                 NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
             }
         }

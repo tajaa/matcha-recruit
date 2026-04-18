@@ -315,6 +315,7 @@ export interface MeUser {
   email: string
   role: string
   avatar_url?: string | null
+  work_onboarded?: boolean
 }
 
 export interface MeClientProfile {

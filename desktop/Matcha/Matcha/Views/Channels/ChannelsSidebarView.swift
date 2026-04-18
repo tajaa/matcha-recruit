@@ -60,8 +60,12 @@ struct ChannelsSidebarView: View {
                 }
             }
         }
+        .onChange(of: appState.channelsListGeneration) { _, _ in
+            Task { await load() }
+        }
         .sheet(isPresented: $showCreate) {
             CreateChannelSheet { newChannel in
+                appState.channelsListGeneration &+= 1
                 NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
             }
         }
