@@ -39,6 +39,10 @@ class ChannelsService {
         let _: JoinResponse = try await client.request(method: "POST", path: "\(basePath)/\(id)/leave")
     }
 
+    func deleteChannel(id: String) async throws {
+        let _: JoinResponse = try await client.request(method: "DELETE", path: "\(basePath)/\(id)")
+    }
+
     struct PaidChannelConfig: Encodable {
         let priceCents: Int
         let currency: String

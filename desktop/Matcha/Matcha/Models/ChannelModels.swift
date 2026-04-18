@@ -141,6 +141,7 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
     let lastMessageAt: String?
     let lastMessagePreview: String?
     let isMember: Bool
+    let myRole: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, slug, description, visibility
@@ -150,6 +151,7 @@ struct ChannelSummary: Codable, Identifiable, Hashable {
         case lastMessageAt = "last_message_at"
         case lastMessagePreview = "last_message_preview"
         case isMember = "is_member"
+        case myRole = "my_role"
     }
 }
 

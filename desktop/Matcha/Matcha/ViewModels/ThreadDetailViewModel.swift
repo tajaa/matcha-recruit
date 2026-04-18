@@ -272,6 +272,10 @@ class ThreadDetailViewModel {
                 }
             }
 
+            // Notify any open project panel to refresh — the AI may have written
+            // project_sections / posting.content that the panel must re-fetch.
+            NotificationCenter.default.post(name: .mwProjectDataChanged, object: nil)
+
             if let usage = data.resolvedTokenUsage() {
                 tokenUsage = usage
             }

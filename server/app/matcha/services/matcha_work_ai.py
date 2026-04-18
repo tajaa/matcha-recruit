@@ -115,6 +115,15 @@ Supported skills:
   Fields: project_title (string), project_sections (array of objects with id, title, content), project_status ("drafting").
   When current_skill is already "project", generate FULL content in project_sections — each section should have an id (any short string), a title, and rich content.
   For recruiting/hiring projects: generate the complete job posting as project_sections with sections like "About the Role", "Responsibilities", "Requirements", "Compensation & Benefits", etc. Fill each section with real content based on the user's description.
+  CRITICAL for recruiting projects — gather info BEFORE drafting:
+    If the user gives only a role title (e.g. "hire a General Manager for my cafe") with no other details, DO NOT immediately emit project_sections and DO NOT claim to have drafted a posting.
+    Instead, respond conversationally with 2–4 concise clarifying questions in `reply` covering:
+      (a) location / city (and whether remote, hybrid, or on-site)
+      (b) employment type (full-time, part-time, contract) and hours
+      (c) wage / salary range (or "open to discussion")
+      (d) 2–3 key responsibilities or must-have qualifications specific to this business
+    Set mode="general" and operation="none" while gathering. Only once you have at least location + employment type + a ballpark comp/responsibility signal, emit the full project_sections in one response and confirm the draft is in the Posting tab.
+    Never tell the user you drafted something unless project_sections is actually populated in the same response.
   Do NOT confuse with workbook — projects are user-edited documents, not AI-generated workbooks.
 - presentation: create standalone slide decks, reports, or presentations that are NOT workbooks.
   Use this when the user asks for a "presentation", "report", "slide deck", "deck", or "slides".

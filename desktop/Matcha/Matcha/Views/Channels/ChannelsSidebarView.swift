@@ -7,68 +7,110 @@ struct ChannelsSidebarView: View {
     @State private var isLoading = true
     @State private var showCreate = false
     @State private var errorMessage: String?
+    @State private var channelPendingDelete: ChannelSummary?
+    @State private var isDeleting = false
 
     var body: some View {
+        content
+            .background(Color.appBackground)
+            .task { await load() }
+            .onReceive(NotificationCenter.default.publisher(for: .mwChannelCreated)) { note in
+                Task {
+                    await load()
+                    if let newId = note.object as? String {
+                        appState.selectedChannelId = newId
+                    }
+                }
+            }
+            .onChange(of: appState.channelsListGeneration) { _, _ in
+                Task { await load() }
+            }
+            .sheet(isPresented: $showCreate) {
+                CreateChannelSheet { newChannel in
+                    appState.channelsListGeneration &+= 1
+                    NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
+                }
+            }
+            .confirmationDialog(
+                channelPendingDelete.map { "Delete #\($0.name)?" } ?? "Delete channel?",
+                isPresented: deleteDialogBinding,
+                titleVisibility: .visible,
+                presenting: channelPendingDelete
+            ) { channel in
+                Button("Delete", role: .destructive) {
+                    Task { await delete(channel) }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: { channel in
+                Text(channel.isPaid
+                    ? "This will archive the channel, cancel all active paid subscriptions, and notify members. This cannot be undone."
+                    : "This will archive the channel and notify members. This cannot be undone.")
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
         VStack(spacing: 0) {
             if showHeader {
                 header
                 Divider().opacity(0.3)
             }
-
             if isLoading {
-                Spacer()
-                Text("Loading…")
+                loadingView
+            } else if channels.isEmpty {
+                emptyView
+            } else {
+                channelList
+            }
+        }
+    }
+
+    private var loadingView: some View {
+        VStack {
+            Spacer()
+            Text("Loading…")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+    }
+
+    private var emptyView: some View {
+        VStack {
+            Spacer()
+            VStack(spacing: 8) {
+                Text("No channels yet")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                Spacer()
-            } else if channels.isEmpty {
-                Spacer()
-                VStack(spacing: 8) {
-                    Text("No channels yet")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                    Button {
-                        showCreate = true
-                    } label: {
-                        Text("Create one")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color.matcha500)
-                    }
-                    .buttonStyle(.plain)
+                Button {
+                    showCreate = true
+                } label: {
+                    Text("Create one")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(Color.matcha500)
                 }
-                Spacer()
-            } else {
-                ScrollView {
-                    LazyVStack(spacing: 0) {
-                        ForEach(channels, id: \.id) { channel in
-                            row(for: channel)
-                        }
-                    }
-                    .padding(.vertical, 4)
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+    }
+
+    private var channelList: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(channels, id: \.id) { channel in
+                    row(for: channel)
                 }
             }
+            .padding(.vertical, 4)
         }
-        .background(Color.appBackground)
-        .task {
-            await load()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .mwChannelCreated)) { note in
-            Task {
-                await load()
-                if let newId = note.object as? String {
-                    appState.selectedChannelId = newId
-                }
-            }
-        }
-        .onChange(of: appState.channelsListGeneration) { _, _ in
-            Task { await load() }
-        }
-        .sheet(isPresented: $showCreate) {
-            CreateChannelSheet { newChannel in
-                appState.channelsListGeneration &+= 1
-                NotificationCenter.default.post(name: .mwChannelCreated, object: newChannel.id)
-            }
-        }
+    }
+
+    private var deleteDialogBinding: Binding<Bool> {
+        Binding(
+            get: { channelPendingDelete != nil },
+            set: { if !$0 { channelPendingDelete = nil } }
+        )
     }
 
     private var header: some View {
@@ -139,6 +181,32 @@ struct ChannelsSidebarView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            let role = channel.myRole ?? ""
+            let isAdmin = (appState.currentUser?.role ?? "") == "admin"
+            if role == "owner" || isAdmin {
+                Button(role: .destructive) {
+                    channelPendingDelete = channel
+                } label: {
+                    Label("Delete channel", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    private func delete(_ channel: ChannelSummary) async {
+        isDeleting = true
+        defer { isDeleting = false }
+        do {
+            try await ChannelsService.shared.deleteChannel(id: channel.id)
+            if appState.selectedChannelId == channel.id {
+                appState.selectedChannelId = nil
+            }
+            appState.channelsListGeneration &+= 1
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func load() async {

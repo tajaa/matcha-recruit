@@ -229,6 +229,7 @@ struct ThreadListView: View {
 
 extension Notification.Name {
     static let mwCreateNewThread = Notification.Name("mwCreateNewThread")
+    static let mwProjectDataChanged = Notification.Name("mwProjectDataChanged")
 }
 
 struct ThreadRowView: View {

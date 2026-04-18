@@ -43,6 +43,32 @@ struct RecruitingPipelineView: View {
     private var interviewedCount: Int { recruiting.candidates.filter { $0.interviewStatus == "completed" || $0.interviewStatus == "interview_completed" }.count }
 
     var body: some View {
+        mainContent
+            .background(.ultraThinMaterial)
+            .onAppear {
+                postingDraft = recruiting.posting.content ?? ""
+                startAutoSync()
+            }
+            .onChange(of: viewModel.project?.id) {
+                postingDraft = recruiting.posting.content ?? ""
+            }
+            .onChange(of: recruiting.posting.content ?? "") { _, newValue in
+                if newValue != postingDraft {
+                    postingDraft = newValue
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
+                if let pid = viewModel.project?.id {
+                    Task { await viewModel.loadProject(id: pid) }
+                }
+            }
+            .onDisappear { autoSyncTask?.cancel() }
+            .sheet(isPresented: $showSendSheet) { sendInterviewSheet }
+            .sheet(item: $rejectTarget) { candidate in rejectSheet(for: candidate) }
+    }
+
+    @ViewBuilder
+    private var mainContent: some View {
         VStack(spacing: 0) {
             progressStrip
             guidanceBanner
@@ -61,36 +87,29 @@ struct RecruitingPipelineView: View {
                 candidatesTab(filter: .shortlist)
             }
         }
-        .background(.ultraThinMaterial)
-        .onAppear {
-            postingDraft = recruiting.posting.content ?? ""
-            startAutoSync()
-        }
-        .onChange(of: viewModel.project?.id) {
-            postingDraft = recruiting.posting.content ?? ""
-        }
-        .onDisappear { autoSyncTask?.cancel() }
-        .sheet(isPresented: $showSendSheet) {
-            SendInterviewSheet(
-                candidateCount: selectedCandidateIds.count,
-                onSend: { title, message in
-                    let ids = Array(selectedCandidateIds)
-                    Task {
-                        await viewModel.sendProjectInterviews(
-                            candidateIds: ids,
-                            positionTitle: title.isEmpty ? nil : title,
-                            customMessage: message.isEmpty ? nil : message
-                        )
-                        selectedCandidateIds.removeAll()
-                    }
-                }
-            )
-        }
-        .sheet(item: $rejectTarget) { candidate in
-            RejectCandidateSheet(candidate: candidate) { reason, sendEmail in
+    }
+
+    private var sendInterviewSheet: some View {
+        SendInterviewSheet(
+            candidateCount: selectedCandidateIds.count,
+            onSend: { title, message in
+                let ids = Array(selectedCandidateIds)
                 Task {
-                    await viewModel.rejectCandidate(candidateId: candidate.id, reason: reason, sendEmail: sendEmail)
+                    await viewModel.sendProjectInterviews(
+                        candidateIds: ids,
+                        positionTitle: title.isEmpty ? nil : title,
+                        customMessage: message.isEmpty ? nil : message
+                    )
+                    selectedCandidateIds.removeAll()
                 }
+            }
+        )
+    }
+
+    private func rejectSheet(for candidate: MWResumeCandidate) -> some View {
+        RejectCandidateSheet(candidate: candidate) { reason, sendEmail in
+            Task {
+                await viewModel.rejectCandidate(candidateId: candidate.id, reason: reason, sendEmail: sendEmail)
             }
         }
     }

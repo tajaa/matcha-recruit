@@ -197,6 +197,7 @@ class ChannelSummary(BaseModel):
     last_message_at: Optional[datetime] = None
     last_message_preview: Optional[str] = None
     is_member: bool = True
+    my_role: Optional[str] = None  # current user's channel_role (owner/moderator/member)
 
 
 class ChannelDetail(BaseModel):
@@ -303,7 +304,8 @@ async def list_channels(
                    (SELECT SUBSTRING(msg3.content, 1, 100) FROM channel_messages msg3
                     WHERE msg3.channel_id = ch.id
                     ORDER BY msg3.created_at DESC LIMIT 1) AS last_message_preview,
-                   cm.user_id IS NOT NULL AS is_member
+                   cm.user_id IS NOT NULL AS is_member,
+                   cm.role AS my_role
             FROM channels ch
             LEFT JOIN channel_members cm ON cm.channel_id = ch.id AND cm.user_id = $1
             WHERE ch.is_archived = false
@@ -332,6 +334,7 @@ async def list_channels(
                 last_message_at=r["last_message_at"],
                 last_message_preview=r["last_message_preview"],
                 is_member=r["is_member"],
+                my_role=r["my_role"],
             )
             for r in rows
         ]
@@ -1606,6 +1609,91 @@ async def kick_member(
             )
         except Exception:
             pass
+
+    return {"ok": True}
+
+
+@router.delete("/{channel_id}")
+async def delete_channel(
+    channel_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Soft-delete a channel (mark archived). Owner or admin only. Cancels any active paid subscriptions."""
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT name, is_archived, is_paid FROM channels WHERE id = $1",
+            channel_id,
+        )
+        if not row:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if row["is_archived"]:
+            return {"ok": True, "already_archived": True}
+
+        my_role = await conn.fetchval(
+            "SELECT role FROM channel_members WHERE channel_id = $1 AND user_id = $2",
+            channel_id, current_user.id,
+        )
+        if my_role != "owner" and current_user.role != "admin":
+            raise HTTPException(status_code=403, detail="Only the channel owner can delete this channel")
+
+        channel_name = row["name"]
+        is_paid = bool(row["is_paid"])
+
+        member_ids = [r["user_id"] for r in await conn.fetch(
+            "SELECT user_id FROM channel_members WHERE channel_id = $1",
+            channel_id,
+        )]
+
+        active_subs = []
+        if is_paid:
+            active_subs = [r["stripe_subscription_id"] for r in await conn.fetch(
+                """
+                SELECT stripe_subscription_id FROM channel_members
+                WHERE channel_id = $1
+                  AND stripe_subscription_id IS NOT NULL
+                  AND subscription_status IN ('active', 'trialing', 'past_due')
+                """,
+                channel_id,
+            )]
+
+    if active_subs:
+        from ..services.channel_payment_service import cancel_subscription, ChannelPaymentError
+        for sub_id in active_subs:
+            try:
+                await cancel_subscription(sub_id)
+            except ChannelPaymentError:
+                pass
+
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE channels SET is_archived = true, updated_at = NOW() WHERE id = $1",
+            channel_id,
+        )
+        if active_subs:
+            await conn.execute(
+                """
+                UPDATE channel_members SET subscription_status = 'canceled'
+                WHERE channel_id = $1 AND stripe_subscription_id IS NOT NULL
+                """,
+                channel_id,
+            )
+
+    try:
+        company_id = await _get_company_id(current_user)
+        from ...matcha.services import notification_service as notif_svc
+        for uid in member_ids:
+            if uid == current_user.id:
+                continue
+            await notif_svc.create_notification(
+                user_id=uid,
+                company_id=company_id,
+                type="channel_deleted",
+                title=f"#{channel_name} was deleted",
+                body=f"The channel #{channel_name} was deleted by the owner",
+                link="/work",
+            )
+    except Exception:
+        pass
 
     return {"ok": True}
 

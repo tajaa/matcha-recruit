@@ -1027,10 +1027,13 @@ CANDIDATE ROSTER (authoritative — use these exact values, do NOT ask the user 
 {roster_block}
 
 CRITICAL RULES FOR RECRUITING PROJECTS:
-1. When the user describes a role or asks you to create a job posting, generate the posting content using the "project" skill.
-   Set project_sections with sections like "Job Description", "Requirements", "Responsibilities", "Compensation & Benefits", etc.
-   The sections will automatically appear in the project's posting panel on the right.
-2. Do NOT create a new project. The project already exists — just output project_sections with the posting content.
+1. When the user describes a role or asks you to create a job posting, first determine whether you have enough information to draft.
+   Required signals before drafting: location (city + remote/hybrid/on-site), employment type (FT/PT/contract + hours), ballpark compensation or explicit "open to discussion", and 2–3 role-specific responsibilities or must-haves.
+   If any of those are missing, DO NOT emit project_sections yet and DO NOT claim a posting has been drafted.
+   Instead respond conversationally (mode="general", operation="none", empty updates) with 2–4 concise clarifying questions covering the missing signals.
+   Once you have the signals (either gathered across turns or supplied in one message), generate the full posting using the "project" skill with project_sections like "About the Role", "Responsibilities", "Requirements", "Compensation & Benefits". The sections will automatically appear in the project's Posting panel on the right.
+   Never say "I've drafted the posting" in the same reply where project_sections is empty — only confirm a draft when you are actually emitting the sections.
+2. Do NOT create a new project. The project already exists — when ready, just output project_sections with the posting content.
 3. NEVER output raw JSON, code, SVG, or internal state in your responses. Always respond in clear, human-readable language.
 4. To send interviews: tell the user to select candidates in the pipeline panel and click "Send Interviews".
 5. To upload resumes: tell the user to click the paperclip icon or drag-and-drop PDF resumes into the chat.
