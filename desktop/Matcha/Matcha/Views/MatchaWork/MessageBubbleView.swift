@@ -35,12 +35,19 @@ struct MessageBubbleView: View {
                     if message.role == "user" { Spacer(minLength: 60) }
                     VStack(alignment: message.role == "user" ? .trailing : .leading, spacing: 4) {
                         VStack(alignment: .leading, spacing: 0) {
+                            // Attachment images (user messages may carry screenshots)
+                            if let atts = message.metadata?.attachments, !atts.isEmpty {
+                                attachmentStrip(atts)
+                                    .padding(.horizontal, 8)
+                                    .padding(.top, 8)
+                            }
+
                             // Message content
                             if message.role == "assistant" {
                                 markdownContent
                                     .padding(.horizontal, 12)
                                     .padding(.vertical, 8)
-                            } else {
+                            } else if !message.content.isEmpty {
                                 Text(message.content)
                                     .font(.system(size: 14))
                                     .foregroundColor(.white)
@@ -75,6 +82,40 @@ struct MessageBubbleView: View {
             return Color.matcha600
         }
         return lightMode ? Color(white: 0.96) : Color.zinc800
+    }
+
+    @ViewBuilder
+    private func attachmentStrip(_ attachments: [MWMessageAttachment]) -> some View {
+        let images = attachments.filter { ($0.kind ?? "image") == "image" }
+        if !images.isEmpty {
+            let columns = min(images.count, 3)
+            LazyVGrid(
+                columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: columns),
+                spacing: 6
+            ) {
+                ForEach(images, id: \.url) { att in
+                    AsyncImage(url: URL(string: att.url)) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().scaledToFill()
+                        case .failure:
+                            Image(systemName: "photo")
+                                .foregroundColor(.white.opacity(0.4))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color.black.opacity(0.15))
+                        default:
+                            ProgressView()
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color.black.opacity(0.15))
+                        }
+                    }
+                    .frame(height: 120)
+                    .clipped()
+                    .cornerRadius(8)
+                }
+            }
+            .frame(maxWidth: 320)
+        }
     }
 
     private var markdownContent: some View {

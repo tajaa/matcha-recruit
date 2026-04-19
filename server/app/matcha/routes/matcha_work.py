@@ -5839,8 +5839,26 @@ async def send_message_stream(
             detail=f"Token limit reached ({quota['used']:,}/{quota['limit']:,} tokens used). Resets at {quota['resets_at']}.",
         )
 
+    # Normalize & persist attachment URLs on the user message metadata. Client
+    # uploads images separately (stored in currentState["images"]) and sends the
+    # URLs here so they become part of the message itself — visible in the
+    # bubble and passed to the AI as multimodal parts.
+    attach_urls: list[str] = []
+    if body.image_urls:
+        attach_urls = [u for u in body.image_urls if isinstance(u, str) and u]
+    user_meta = {"attachments": [{"url": u, "kind": "image"} for u in attach_urls]} if attach_urls else None
+
     # Save user message before streaming
-    user_msg = await doc_svc.add_message(thread_id, "user", body.content)
+    user_msg = await doc_svc.add_message(thread_id, "user", body.content, metadata=user_meta)
+
+    # Once the attachments are persisted on the message itself, clear them from
+    # thread state so they don't leak into the next send or get re-consumed by
+    # the presentation skill.
+    if attach_urls:
+        try:
+            await doc_svc.apply_update(thread_id, {"images": []}, diff_summary="Consumed inline chat attachments")
+        except Exception:
+            logger.warning("Failed to clear thread images after attaching to message %s", thread_id, exc_info=True)
 
     # Fetch message history + company profile + context summary in parallel
     messages, profile, (context_summary, summary_at_count) = await asyncio.gather(
@@ -5848,10 +5866,29 @@ async def send_message_stream(
         doc_svc.get_company_profile_for_ai(company_id),
         doc_svc.get_context_summary(thread_id),
     )
-    msg_dicts = [{"role": m["role"], "content": m["content"]} for m in messages]
+    msg_dicts = []
+    for m in messages:
+        entry = {"role": m["role"], "content": m["content"]}
+        meta = m.get("metadata")
+        if isinstance(meta, str):
+            try:
+                meta = json.loads(meta)
+            except Exception:
+                meta = None
+        if isinstance(meta, dict):
+            atts = meta.get("attachments") or []
+            urls = [a.get("url") for a in atts if isinstance(a, dict) and a.get("url")]
+            if urls:
+                entry["image_urls"] = urls
+        msg_dicts.append(entry)
 
     # Inject selected slide content into the AI-facing message (not saved to DB)
     _inject_slide_context(msg_dicts, thread["current_state"], body.slide_index)
+
+    # Pre-fetch any image attachment bytes concurrently off the event loop so
+    # the prompt builder (which runs in a thread pool) doesn't block on I/O.
+    from ..services.matcha_work_ai import fetch_image_parts_for_messages
+    await fetch_image_parts_for_messages(msg_dicts)
 
     ai_provider = get_ai_provider()
     ctx = _build_company_context(profile)

@@ -109,7 +109,20 @@ class ThreadDetailViewModel {
         // Capture and clear slide selection before send
         let capturedSlideIndex = selectedSlideIndex
 
-        // Optimistic local message so the user sees their input immediately
+        // Optimistic local message so the user sees their input immediately.
+        // Attach any pending image URLs so screenshots render in the bubble
+        // before the server confirms — matches the final persisted metadata.
+        let optimisticImages = presentationImageURLs
+        let optimisticMeta: MWMessageMetadata? = optimisticImages.isEmpty ? nil : MWMessageMetadata(
+            complianceReasoning: nil,
+            aiReasoningSteps: nil,
+            referencedCategories: nil,
+            referencedLocations: nil,
+            payerSources: nil,
+            affectedEmployees: nil,
+            complianceGaps: nil,
+            attachments: optimisticImages.map { MWMessageAttachment(url: $0, kind: "image") }
+        )
         let tempId = UUID().uuidString
         let localMsg = MWMessage(
             id: tempId,
@@ -117,7 +130,7 @@ class ThreadDetailViewModel {
             role: "user",
             content: content,
             versionCreated: nil,
-            metadata: nil,
+            metadata: optimisticMeta,
             createdAt: ISO8601DateFormatter().string(from: Date())
         )
 
@@ -128,6 +141,12 @@ class ThreadDetailViewModel {
             selectedSlideIndex = nil
             errorMessage = nil
             tokenUsage = nil
+            // Clear thread-state image chips optimistically since they are now
+            // bound to the outgoing user message. The complete event will also
+            // return the cleared state from the backend.
+            if !optimisticImages.isEmpty {
+                currentState["images"] = AnyCodable([String]())
+            }
         }
 
         guard let url = URL(string: "\(streamBasePath)/threads/\(threadId)/messages/stream") else {
@@ -154,13 +173,24 @@ class ThreadDetailViewModel {
             let content: String
             let slideIndex: Int?
             let model: String?
+            let imageUrls: [String]?
             enum CodingKeys: String, CodingKey {
                 case content, model
                 case slideIndex = "slide_index"
+                case imageUrls = "image_urls"
             }
         }
+        // Snapshot any pending image attachments. Backend persists them on the
+        // user message metadata and clears them from thread state so the next
+        // send starts clean.
+        let pendingImages = presentationImageURLs
         request.httpBody = try? JSONEncoder().encode(
-            SendBody(content: content, slideIndex: capturedSlideIndex, model: model)
+            SendBody(
+                content: content,
+                slideIndex: capturedSlideIndex,
+                model: model,
+                imageUrls: pendingImages.isEmpty ? nil : pendingImages
+            )
         )
 
         var receivedComplete = false

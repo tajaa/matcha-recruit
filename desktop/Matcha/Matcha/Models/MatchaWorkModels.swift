@@ -313,6 +313,7 @@ struct MWMessageMetadata: Codable {
     let payerSources: [MWPayerPolicySource]?
     let affectedEmployees: [MWAffectedEmployeeGroup]?
     let complianceGaps: [MWComplianceGap]?
+    let attachments: [MWMessageAttachment]?
 
     enum CodingKeys: String, CodingKey {
         case complianceReasoning = "compliance_reasoning"
@@ -322,7 +323,13 @@ struct MWMessageMetadata: Codable {
         case payerSources = "payer_sources"
         case affectedEmployees = "affected_employees"
         case complianceGaps = "compliance_gaps"
+        case attachments
     }
+}
+
+struct MWMessageAttachment: Codable, Hashable {
+    let url: String
+    let kind: String?
 }
 
 struct MWComplianceReasoningLocation: Codable {
