@@ -413,6 +413,191 @@ class MatchaWorkService {
         return try await client.request(method: "POST", path: "\(basePath)/projects", body: Body(title: title, projectType: projectType))
     }
 
+    // MARK: - Consultations (project_type == "consultation")
+
+    struct ConsultationCreateBody: Encodable {
+        let title: String
+        let projectType = "consultation"
+        let client: MWConsultationClient
+        let engagement: MWEngagement
+        let tags: [String]
+        enum CodingKeys: String, CodingKey {
+            case title, client, engagement, tags
+            case projectType = "project_type"
+        }
+    }
+
+    func createConsultation(
+        title: String,
+        clientProfile: MWConsultationClient,
+        engagement: MWEngagement,
+        tags: [String]
+    ) async throws -> MWProject {
+        let body = ConsultationCreateBody(title: title, client: clientProfile, engagement: engagement, tags: tags)
+        return try await self.client.request(method: "POST", path: "\(basePath)/projects", body: body)
+    }
+
+    struct ConsultationPatchBody: Encodable {
+        let client: MWConsultationClient?
+        let engagement: MWEngagement?
+        let stage: String?
+        let tags: [String]?
+        let customFields: [MWCustomField]?
+        enum CodingKeys: String, CodingKey {
+            case client, engagement, stage, tags
+            case customFields = "custom_fields"
+        }
+    }
+
+    func patchConsultation(
+        id: String,
+        clientProfile: MWConsultationClient? = nil,
+        engagement: MWEngagement? = nil,
+        stage: String? = nil,
+        tags: [String]? = nil,
+        customFields: [MWCustomField]? = nil
+    ) async throws -> MWProject {
+        let body = ConsultationPatchBody(
+            client: clientProfile, engagement: engagement, stage: stage,
+            tags: tags, customFields: customFields
+        )
+        return try await self.client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(id)/consultation",
+            body: body
+        )
+    }
+
+    struct SessionAppendBody: Encodable {
+        let at: String?
+        let durationMin: Int?
+        let notes: String?
+        let billable: Bool
+        let rateCentsOverride: Int?
+        let linkedThreadId: String?
+        enum CodingKeys: String, CodingKey {
+            case at, notes, billable
+            case durationMin = "duration_min"
+            case rateCentsOverride = "rate_cents_override"
+            case linkedThreadId = "linked_thread_id"
+        }
+    }
+
+    func appendSession(
+        projectId: String,
+        at: String?,
+        durationMin: Int?,
+        notes: String?,
+        billable: Bool,
+        rateCentsOverride: Int? = nil,
+        linkedThreadId: String? = nil
+    ) async throws -> MWProject {
+        let body = SessionAppendBody(
+            at: at, durationMin: durationMin, notes: notes,
+            billable: billable, rateCentsOverride: rateCentsOverride,
+            linkedThreadId: linkedThreadId
+        )
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/sessions",
+            body: body
+        )
+    }
+
+    struct SessionPatchBody: Encodable {
+        let at: String?
+        let durationMin: Int?
+        let notes: String?
+        let billable: Bool?
+        let rateCentsOverride: Int?
+        let linkedThreadId: String?
+        let invoiceId: String?
+        enum CodingKeys: String, CodingKey {
+            case at, notes, billable
+            case durationMin = "duration_min"
+            case rateCentsOverride = "rate_cents_override"
+            case linkedThreadId = "linked_thread_id"
+            case invoiceId = "invoice_id"
+        }
+    }
+
+    func updateSession(
+        projectId: String,
+        sessionId: String,
+        at: String? = nil,
+        durationMin: Int? = nil,
+        notes: String? = nil,
+        billable: Bool? = nil,
+        rateCentsOverride: Int? = nil,
+        linkedThreadId: String? = nil,
+        invoiceId: String? = nil
+    ) async throws -> MWProject {
+        let body = SessionPatchBody(
+            at: at, durationMin: durationMin, notes: notes,
+            billable: billable, rateCentsOverride: rateCentsOverride,
+            linkedThreadId: linkedThreadId, invoiceId: invoiceId
+        )
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/sessions/\(sessionId)",
+            body: body
+        )
+    }
+
+    func deleteSession(projectId: String, sessionId: String) async throws -> MWProject {
+        try await client.request(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/sessions/\(sessionId)"
+        )
+    }
+
+    struct ActionItemAddBody: Encodable {
+        let text: String
+        let sourceThreadId: String?
+        enum CodingKeys: String, CodingKey { case text; case sourceThreadId = "source_thread_id" }
+    }
+
+    func addActionItem(projectId: String, text: String, sourceThreadId: String? = nil) async throws -> MWProject {
+        let body = ActionItemAddBody(text: text, sourceThreadId: sourceThreadId)
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/action-items",
+            body: body
+        )
+    }
+
+    struct ActionItemPatchBody: Encodable {
+        let text: String?
+        let completed: Bool?
+        let pendingConfirmation: Bool?
+        enum CodingKeys: String, CodingKey {
+            case text, completed
+            case pendingConfirmation = "pending_confirmation"
+        }
+    }
+
+    func patchActionItem(
+        projectId: String,
+        itemId: String,
+        text: String? = nil,
+        completed: Bool? = nil,
+        pendingConfirmation: Bool? = nil
+    ) async throws -> MWProject {
+        let body = ActionItemPatchBody(text: text, completed: completed, pendingConfirmation: pendingConfirmation)
+        return try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/action-items/\(itemId)",
+            body: body
+        )
+    }
+
+    func deleteActionItem(projectId: String, itemId: String) async throws -> MWProject {
+        try await client.request(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/action-items/\(itemId)"
+        )
+    }
+
     func getProjectDetail(id: String) async throws -> MWProject {
         try await client.request(method: "GET", path: "\(basePath)/projects/\(id)")
     }

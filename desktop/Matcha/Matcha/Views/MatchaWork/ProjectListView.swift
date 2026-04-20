@@ -127,7 +127,8 @@ struct ProjectListView: View {
     private func load() async {
         do {
             let p = try await MatchaWorkService.shared.listProjects()
-            await MainActor.run { projects = p; isLoading = false }
+            let filtered = p.filter { $0.projectType != "consultation" }
+            await MainActor.run { projects = filtered; isLoading = false }
         } catch {
             await MainActor.run { isLoading = false }
         }
