@@ -42,7 +42,7 @@ struct PreviewPanelView: View {
                     ResumeBatchPanelView(state: currentState, threadId: threadId)
                 case .inventory:
                     InventoryPanelView(state: currentState)
-                case .chat, .policy, .project, .languageTutor:
+                case .chat, .policy, .project, .languageTutor, .blog:
                     EmptyPreviewView()
                 }
             }
