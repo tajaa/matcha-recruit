@@ -27,6 +27,7 @@ enum MWTaskType: String, Codable {
     case inventory
     case policy
     case project
+    case blog
     case languageTutor = "language_tutor"
     case chat
 
@@ -43,6 +44,7 @@ enum MWTaskType: String, Codable {
         case .inventory: return "inventory"
         case .policy: return "policy"
         case .project: return "project"
+        case .blog: return "blog"
         case .languageTutor: return "language tutor"
         }
     }
@@ -1167,6 +1169,84 @@ struct MWPayerModeRequest: Codable {
 
 struct MWUpdateTitleRequest: Codable {
     let title: String
+}
+
+// MARK: - Blog (project_type == "blog")
+
+struct MWBlogAuthor: Codable, Hashable {
+    var name: String?
+    var bio: String?
+    var avatarUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case name, bio
+        case avatarUrl = "avatar_url"
+    }
+}
+
+struct MWBlogData {
+    var slug: String
+    var excerpt: String
+    var status: String          // draft | scheduled | published
+    var tone: String
+    var audience: String
+    var tags: [String]
+    var author: MWBlogAuthor
+    var wordCount: Int
+    var readMinutes: Int
+    var publishedAt: String?
+    var coverImageUrl: String?
+    var scheduledFor: String?
+
+    static func from(projectData: [String: AnyCodable]?) -> MWBlogData {
+        let data = projectData ?? [:]
+        let encoder = JSONEncoder()
+        let decoder = JSONDecoder()
+
+        func decode<T: Decodable>(_ key: String, as type: T.Type) -> T? {
+            guard let any = data[key] else { return nil }
+            guard let json = try? encoder.encode(any) else { return nil }
+            return try? decoder.decode(T.self, from: json)
+        }
+
+        let author = decode("author", as: MWBlogAuthor.self) ?? MWBlogAuthor()
+        let tags: [String]
+        if let ts = data["tags"]?.value as? [String] {
+            tags = ts
+        } else if let ts = data["tags"]?.value as? [AnyCodable] {
+            tags = ts.compactMap { $0.value as? String }
+        } else {
+            tags = []
+        }
+
+        return MWBlogData(
+            slug: data["slug"]?.value as? String ?? "",
+            excerpt: data["excerpt"]?.value as? String ?? "",
+            status: data["status"]?.value as? String ?? "draft",
+            tone: data["tone"]?.value as? String ?? "expert-casual",
+            audience: data["audience"]?.value as? String ?? "",
+            tags: tags,
+            author: author,
+            wordCount: data["word_count"]?.value as? Int ?? 0,
+            readMinutes: data["read_minutes"]?.value as? Int ?? 1,
+            publishedAt: data["published_at"]?.value as? String,
+            coverImageUrl: data["cover_image_url"]?.value as? String,
+            scheduledFor: data["scheduled_for"]?.value as? String
+        )
+    }
+}
+
+struct MWBlogPatchRequest: Codable {
+    var slug: String?
+    var excerpt: String?
+    var tone: String?
+    var audience: String?
+    var tags: [String]?
+    var author: MWBlogAuthor?
+}
+
+struct MWBlogStatusRequest: Codable {
+    var status: String
 }
 
 // AnyCodable for flexible JSON

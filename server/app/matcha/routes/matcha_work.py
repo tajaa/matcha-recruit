@@ -1070,6 +1070,59 @@ Unbilled this period: ${unbilled_cents/100:.2f}
     return ctx
 
 
+async def _inject_blog_context(ctx: str, row) -> str:
+    """Inject context for a blog post draft so the AI can outline/draft/revise
+    sections with the configured voice, audience, and existing section IDs."""
+    project_data = json.loads(row["project_data"]) if isinstance(row["project_data"], str) else (row["project_data"] or {})
+    sections = json.loads(row["sections"]) if isinstance(row["sections"], str) else (row["sections"] or [])
+    title = row["title"] or "(untitled)"
+    slug = project_data.get("slug") or ""
+    tone = project_data.get("tone") or "expert-casual"
+    audience = project_data.get("audience") or "(not set — ask the user if drafting)"
+    tags = project_data.get("tags") or []
+    status = project_data.get("status") or "draft"
+    excerpt = project_data.get("excerpt") or "(none)"
+    stats = project_data.get("stats") or {}
+
+    section_lines: list[str] = []
+    for i, s in enumerate(sections, start=1):
+        if not isinstance(s, dict):
+            continue
+        sid = s.get("id") or "?"
+        st = (s.get("title") or "(untitled)").strip()
+        content = s.get("content") or ""
+        wc = len([w for w in re.split(r"\s+", content.strip()) if w])
+        section_lines.append(f'  {i}. id={sid} · "{st}" ({wc} words)')
+    sec_block = "\n".join(section_lines) if section_lines else "  (no sections yet — draft an outline first)"
+
+    ctx += f"""
+
+=== BLOG POST CONTEXT ===
+This chat is tied to a blog post draft (authoring workspace, NOT the public marketing site).
+Title: {title}
+Slug: {slug}
+Status: {status}
+Audience: {audience}
+Tone: {tone}
+Tags: {', '.join(tags) if tags else '(none)'}
+Word count: {stats.get('word_count', 0)} · Reading time: {stats.get('read_minutes', 0)} min
+Excerpt: {excerpt}
+
+Current outline (sections, in order — use these exact ids when emitting blog_section_draft/blog_section_revision):
+{sec_block}
+
+CRITICAL RULES:
+- First-pass OUTLINE requests: emit blog_outline as an array of {{title, bullets: [string]}} objects (4–8 sections, 2–4 bullets each). Do NOT draft section content on the same turn.
+- Section drafting: emit blog_section_draft as a JSON object keyed by section_id: {{"<section_id>": "<markdown content>", ...}}. Use section_ids from the list above — never invent one. 200–450 words unless asked otherwise.
+- Revisions: emit blog_section_revision with {{section_id, content, change_summary}}.
+- Title ideas: emit blog_title_suggestions as an array of 3–5 strings. Never silently rename the post.
+- Never fabricate statistics, quotes, or URLs. If a source is needed, ask the user to paste one.
+- Respect the configured audience — don't explain foundational concepts they'd already know.
+- Avoid LLM tics: "delve", "navigate the landscape", "in today's fast-paced world", "it's important to note".
+"""
+    return ctx
+
+
 async def _inject_recruiting_project_context(ctx: str, thread: dict, current_state: dict) -> str:
     """If this thread belongs to a recruiting project, inject context so the AI
     generates posting sections instead of creating a new project. If it's a
@@ -1088,6 +1141,8 @@ async def _inject_recruiting_project_context(ctx: str, thread: dict, current_sta
         return ctx
     if row["project_type"] == "consultation":
         return await _inject_consultation_context(ctx, row)
+    if row["project_type"] == "blog":
+        return await _inject_blog_context(ctx, row)
     if row["project_type"] != "recruiting":
         return ctx
 
@@ -1178,7 +1233,7 @@ async def _apply_ai_updates_and_operations(
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
     # inferring from the update keys themselves so workbook/review/etc. updates
     # created on a fresh thread aren't silently dropped.
-    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
         skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
         if skill_from_updates != "chat":
             skill = skill_from_updates
@@ -1203,11 +1258,21 @@ async def _apply_ai_updates_and_operations(
         and _looks_like_send_draft_command(user_message)
     )
     can_execute_operation = should_execute_skill or force_send_draft
+    blog_directives: dict = {}
 
     if should_execute_skill and ai_resp.structured_update:
         safe_updates = _validate_updates_for_skill(skill, ai_resp.structured_update)
         if skill == "handbook" and current_state.get("handbook_source_type") == "upload":
             safe_updates = {}
+
+        # Blog directives are handled separately — strip them before doc_svc.apply_update
+        # so they don't pollute the thread state schema.
+        if skill == "blog":
+            from ..services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
+            for _bk in _BLOG_FIELDS:
+                if _bk in safe_updates:
+                    blog_directives[_bk] = safe_updates.pop(_bk)
+
         # No-project guard: don't persist project_title/project_sections on
         # threads with no linked project. Otherwise the state accumulates a
         # phantom project the user can't see and the AI keeps "updating" it.
@@ -1347,6 +1412,42 @@ async def _apply_ai_updates_and_operations(
                     cover_result = await doc_svc.apply_update(thread_id, {"cover_image_url": cover_url})
                     current_version = cover_result["version"]
                     current_state = cover_result["current_state"]
+
+    # Apply blog section drafts / revisions to the project's sections array.
+    # blog_outline and blog_title_suggestions are informational — AI described them
+    # in the reply text — so we only act on draft/revision keys here.
+    if blog_directives and project_id:
+        from ..services import project_service as _blog_proj_svc
+        try:
+            existing_secs = list(await _blog_proj_svc.get_sections(project_id))
+            secs_by_id = {s.get("id"): i for i, s in enumerate(existing_secs) if s.get("id")}
+            blog_secs_changed = False
+
+            draft = blog_directives.get("blog_section_draft")
+            if isinstance(draft, dict):
+                for _sid, _content in draft.items():
+                    if not isinstance(_content, str) or not _content.strip():
+                        continue
+                    idx = secs_by_id.get(_sid)
+                    if idx is not None:
+                        existing_secs[idx] = {**existing_secs[idx], "content": _content.strip()}
+                        blog_secs_changed = True
+
+            revision = blog_directives.get("blog_section_revision")
+            if isinstance(revision, dict):
+                _rsid = revision.get("section_id")
+                _rcontent = (revision.get("content") or "").strip()
+                if _rsid and _rcontent:
+                    idx = secs_by_id.get(_rsid)
+                    if idx is not None:
+                        existing_secs[idx] = {**existing_secs[idx], "content": _rcontent}
+                        blog_secs_changed = True
+
+            if blog_secs_changed:
+                await _blog_proj_svc._update_sections(project_id, existing_secs)
+                changed = True
+        except Exception:
+            logger.warning("Failed to apply blog section directives for project %s", project_id, exc_info=True)
 
     operation = str(ai_resp.operation or "none").strip().lower()
     if force_send_draft and operation in {"none", "create", "update", "track"}:
@@ -2738,6 +2839,15 @@ async def create_project_endpoint(
             client_name = (extra_data["client"] or {}).get("name")
             if client_name:
                 title = client_name
+    elif project_type == "blog":
+        blog = body.get("blog") or {}
+        extra_data = {
+            "title": title,
+            "audience": blog.get("audience"),
+            "tone": blog.get("tone"),
+            "tags": blog.get("tags") or [],
+            "author": blog.get("author") or {},
+        }
 
     try:
         return await proj_svc.create_project(
@@ -2991,6 +3101,40 @@ async def delete_action_item_endpoint(
     from ..services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.delete_action_item(project_id, item_id)
+
+
+# ── Blog endpoints (project_type == 'blog') ──
+
+
+@router.patch("/projects/{project_id}/blog")
+async def patch_blog_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    try:
+        return await proj_svc.patch_blog(project_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/projects/{project_id}/blog/status")
+async def transition_blog_status_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    to = (body or {}).get("to")
+    if not to:
+        raise HTTPException(status_code=400, detail="Missing 'to'")
+    try:
+        return await proj_svc.transition_blog_status(project_id, to)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.post("/projects/{project_id}/sections")
@@ -4806,19 +4950,43 @@ async def export_project_endpoint(
     title = project["title"]
     sections = project["sections"]
 
-    if fmt not in ("pdf", "md", "docx"):
-        raise HTTPException(status_code=400, detail="Supported formats: pdf, md, docx")
+    if fmt not in ("pdf", "md", "docx", "md_frontmatter"):
+        raise HTTPException(status_code=400, detail="Supported formats: pdf, md, md_frontmatter, docx")
 
-    if fmt == "md":
-        md_lines = [f"# {title}\n"]
+    if fmt in ("md", "md_frontmatter"):
+        md_lines: list[str] = []
+        if fmt == "md_frontmatter":
+            pdata = project.get("project_data") or {}
+            slug = pdata.get("slug") or ""
+            excerpt = (pdata.get("excerpt") or "").replace('"', '\\"')
+            tags = pdata.get("tags") or []
+            status = pdata.get("status") or "draft"
+            published_at = pdata.get("published_at") or ""
+            safe_title = title.replace('"', '\\"')
+            md_lines.append("---")
+            md_lines.append(f'title: "{safe_title}"')
+            if slug:
+                md_lines.append(f"slug: {slug}")
+            if excerpt:
+                md_lines.append(f'excerpt: "{excerpt}"')
+            if tags:
+                md_lines.append("tags:")
+                for t in tags:
+                    md_lines.append(f"  - {t}")
+            md_lines.append(f"status: {status}")
+            if published_at:
+                md_lines.append(f"published_at: {published_at}")
+            md_lines.append("---\n")
+        md_lines.append(f"# {title}\n")
         for s in sections:
             if s.get("title"):
                 md_lines.append(f"## {s['title']}\n")
             md_lines.append(s.get("content", "") + "\n")
+        suffix = ".md"
         return Response(
             content="\n".join(md_lines),
             media_type="text/markdown",
-            headers={"Content-Disposition": f'attachment; filename="{title}.md"'},
+            headers={"Content-Disposition": f'attachment; filename="{title}{suffix}"'},
         )
 
     if fmt == "pdf":

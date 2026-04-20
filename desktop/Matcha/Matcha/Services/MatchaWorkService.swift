@@ -831,4 +831,40 @@ class MatchaWorkService {
         invalidateThread(threadId: threadId)
         return result.images
     }
+
+    // MARK: - Blog (project_type == "blog")
+
+    struct BlogCreateBody: Encodable {
+        let title: String
+        let projectType = "blog"
+        let blog: BlogMeta
+        struct BlogMeta: Encodable {
+            let audience: String
+            let tone: String
+            let tags: [String]
+        }
+        enum CodingKeys: String, CodingKey {
+            case title, blog
+            case projectType = "project_type"
+        }
+    }
+
+    func createBlog(
+        title: String,
+        audience: String = "",
+        tone: String = "expert-casual",
+        tags: [String] = []
+    ) async throws -> MWProject {
+        let body = BlogCreateBody(title: title, blog: .init(audience: audience, tone: tone, tags: tags))
+        return try await client.request(method: "POST", path: "\(basePath)/projects", body: body)
+    }
+
+    func patchBlog(id: String, patch: MWBlogPatchRequest) async throws -> MWProject {
+        try await client.request(method: "PATCH", path: "\(basePath)/projects/\(id)/blog", body: patch)
+    }
+
+    func transitionBlogStatus(id: String, status: String) async throws -> MWProject {
+        let body = MWBlogStatusRequest(status: status)
+        return try await client.request(method: "POST", path: "\(basePath)/projects/\(id)/blog/status", body: body)
+    }
 }

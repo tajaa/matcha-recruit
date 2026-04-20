@@ -7,6 +7,7 @@ struct ProjectListView: View {
     @State private var isLoading = true
     @State private var isCreating = false
     @State private var showTypePicker = false
+    @State private var showNewBlog = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -48,6 +49,22 @@ struct ProjectListView: View {
                                 .buttonStyle(.plain)
                                 .foregroundColor(.white)
                             }
+                            Button {
+                                showTypePicker = false
+                                showNewBlog = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "doc.richtext")
+                                        .font(.system(size: 11))
+                                        .frame(width: 16)
+                                    Text("Blog Post")
+                                        .font(.system(size: 12))
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.white)
                         }
                         .padding(12)
                         .frame(width: 180)
@@ -90,7 +107,7 @@ struct ProjectListView: View {
                             .lineLimit(1)
                         HStack(spacing: 4) {
                             if let type = project.projectType {
-                                Text(type)
+                                Text(type == "blog" ? "blog" : type)
                                     .font(.system(size: 9, weight: .medium))
                                     .foregroundColor(.matcha500)
                                     .padding(.horizontal, 4)
@@ -98,11 +115,29 @@ struct ProjectListView: View {
                                     .background(Color.matcha500.opacity(0.12))
                                     .cornerRadius(3)
                             }
-                            let sCount = project.sections?.count ?? 0
-                            let cCount = project.chatCount ?? 0
-                            Text("\(sCount) section\(sCount == 1 ? "" : "s") · \(cCount) chat\(cCount == 1 ? "" : "s")")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
+                            if project.projectType == "blog" {
+                                let blogStatus = (project.projectData?["status"]?.value as? String) ?? "draft"
+                                let statusColor: Color = blogStatus == "published" ? .green : blogStatus == "scheduled" ? .orange : .secondary
+                                Text(blogStatus)
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(statusColor)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(statusColor.opacity(0.12))
+                                    .cornerRadius(3)
+                                let wc = (project.projectData?["word_count"]?.value as? Int) ?? 0
+                                if wc > 0 {
+                                    Text("\(wc) words")
+                                        .font(.system(size: 10))
+                                        .foregroundColor(.secondary)
+                                }
+                            } else {
+                                let sCount = project.sections?.count ?? 0
+                                let cCount = project.chatCount ?? 0
+                                Text("\(sCount) section\(sCount == 1 ? "" : "s") · \(cCount) chat\(cCount == 1 ? "" : "s")")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
                         }
                     }
                     .padding(.vertical, 2)
@@ -122,6 +157,13 @@ struct ProjectListView: View {
         }
         .background(Color.appBackground)
         .task { await load() }
+        .sheet(isPresented: $showNewBlog) {
+            NewBlogSheet { proj in
+                projects.insert(proj, at: 0)
+                appState.selectedProjectId = proj.id
+                appState.selectedThreadId = nil
+            }
+        }
     }
 
     private func load() async {

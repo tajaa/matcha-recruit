@@ -135,9 +135,17 @@ HANDBOOK_FIELDS = [
 ]
 POLICY_FIELDS = list(PolicyDocument.model_fields.keys())
 PROJECT_FIELDS = list(ProjectDocument.model_fields.keys())
+# Blog directive keys — these are NOT persisted to thread state.
+# They're stripped before apply_update and handled in _apply_ai_updates_and_operations.
+BLOG_FIELDS = [
+    "blog_outline",
+    "blog_section_draft",
+    "blog_section_revision",
+    "blog_title_suggestions",
+]
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
-SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "none"}
+SUPPORTED_AI_SKILLS = {"chat", "offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog", "none"}
 SUPPORTED_AI_OPERATIONS = {
     "create",
     "update",
@@ -221,6 +229,16 @@ Supported skills:
   - Invoice / proposal / SOW drafting → use the pricing_model and rate from CONSULTATION CONTEXT. Never invent a rate or fee.
   - Never fabricate client facts (meetings that didn't happen, decisions that weren't made). If a fact isn't in the context, ask the user for it.
   - For consultation chats, mode="general", skill="none", operation="none" — do NOT emit project_sections; consultations are not document-drafting projects.
+- blog: authoring workspace for long-form blog post drafts.
+  When BLOG POST CONTEXT appears in the system context, this chat is tied to a blog post draft.
+  Draft voice = the configured tone. Default to "expert-casual": concrete, confident, uses the user's language; avoid filler and LLM tics ("delve", "navigate the landscape", "in today's fast-paced world").
+  First-pass OUTLINE requests: emit blog_outline (4–8 sections with 2–4 bullets each as a list of {{title, bullets}} objects). Do NOT emit blog_section_draft on the same turn as an outline.
+  Section drafting: emit blog_section_draft as an object keyed by the section_id from BLOG POST CONTEXT. 200–450 words per section unless the user asks otherwise. Use markdown; short paragraphs, subheadings, and bullet lists where they earn their keep.
+  Revisions: emit blog_section_revision as {{section_id, content, change_summary}}.
+  Title suggestions: emit blog_title_suggestions as a list of 3–5 string options. Never silently rename the post.
+  Never fabricate stats, quotes, or URLs. If you need a source, ask the user to paste one.
+  Respect the configured audience from BLOG POST CONTEXT.
+  For blog chats, mode="skill", skill="blog", operation="none". Do NOT emit project_sections.
 - presentation: create standalone slide decks, reports, or presentations that are NOT workbooks.
   Use this when the user asks for a "presentation", "report", "slide deck", "deck", or "slides".
   Fields: presentation_title (string), subtitle (string), theme (string: professional/minimal/bold),
@@ -371,7 +389,7 @@ Output constraints:
 - JSON format:
 {{
   "mode": "skill|general|clarify|refuse",
-  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|policy|project|none",
+  "skill": "offer_letter|review|workbook|onboarding|presentation|handbook|policy|project|blog|none",
   "operation": "create|update|save_draft|send_draft|finalize|send_requests|track|create_employees|generate_presentation|generate_handbook|generate_policy|none",
   "confidence": 0.0,
   "updates": {{}},
@@ -1214,8 +1232,10 @@ class GeminiProvider(MatchaWorkAIProvider):
             valid_fields = POLICY_FIELDS
         elif current_skill == "project":
             valid_fields = PROJECT_FIELDS
+        elif current_skill == "blog":
+            valid_fields = BLOG_FIELDS
         else:
-            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS + POLICY_FIELDS + PROJECT_FIELDS
+            valid_fields = OFFER_LETTER_FIELDS + REVIEW_FIELDS + WORKBOOK_FIELDS + ONBOARDING_FIELDS + PRESENTATION_FIELDS + HANDBOOK_FIELDS + POLICY_FIELDS + PROJECT_FIELDS + BLOG_FIELDS
 
         # Static part — instructions + company context (cached at Gemini API level)
         static_prompt = MATCHA_WORK_STATIC_PROMPT_TEMPLATE.format(

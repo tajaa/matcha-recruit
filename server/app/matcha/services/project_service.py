@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -12,9 +13,44 @@ from ...database import get_connection
 logger = logging.getLogger(__name__)
 
 
-_ALLOWED_PROJECT_TYPES = {"general", "presentation", "recruiting", "consultation"}
+_ALLOWED_PROJECT_TYPES = {"general", "presentation", "recruiting", "consultation", "blog"}
 _ALLOWED_STAGES = {"lead", "proposal", "active", "completed", "archived"}
 _ALLOWED_PRICING_MODELS = {"hourly", "retainer", "fixed", "free"}
+_ALLOWED_BLOG_TONES = {"expert-casual", "technical", "exec-brief", "conversational", "academic"}
+_ALLOWED_BLOG_STATUSES = {"draft", "scheduled", "published"}
+
+
+def _slugify(text: str) -> str:
+    s = (text or "").lower().strip()
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-")[:80] or "untitled"
+
+
+def _seed_blog_data(extra_data: Optional[dict]) -> dict:
+    e = extra_data or {}
+    tone = e.get("tone") if e.get("tone") in _ALLOWED_BLOG_TONES else "expert-casual"
+    return {
+        "slug": _slugify(e.get("title") or ""),
+        "excerpt": None,
+        "cover_image_url": None,
+        "author": e.get("author") or {},
+        "audience": e.get("audience"),
+        "tone": tone,
+        "tags": [str(t) for t in (e.get("tags") or [])],
+        "status": "draft",
+        "published_at": None,
+        "stats": {"word_count": 0, "read_minutes": 0},
+    }
+
+
+def _compute_blog_stats(sections: list) -> dict:
+    wc = 0
+    for s in sections or []:
+        if not isinstance(s, dict):
+            continue
+        content = s.get("content") or ""
+        wc += len([w for w in re.split(r"\s+", content.strip()) if w])
+    return {"word_count": wc, "read_minutes": max(1, round(wc / 225)) if wc else 0}
 
 
 def _seed_consultation_data(extra_data: Optional[dict]) -> dict:
@@ -73,9 +109,14 @@ async def create_project(
             if owner_check != company_id:
                 raise ValueError("Hiring client does not belong to this workspace")
 
-        initial_project_data = (
-            _seed_consultation_data(extra_data) if project_type == "consultation" else {}
-        )
+        if project_type == "consultation":
+            initial_project_data = _seed_consultation_data(extra_data)
+        elif project_type == "blog":
+            seed_extra = dict(extra_data or {})
+            seed_extra.setdefault("title", title)
+            initial_project_data = _seed_blog_data(seed_extra)
+        else:
+            initial_project_data = {}
         row = await conn.fetchrow(
             """
             INSERT INTO mw_projects (company_id, created_by, title, project_type, hiring_client_id, project_data)
@@ -236,24 +277,87 @@ async def list_projects(
 
 async def update_project(project_id: UUID, updates: dict) -> dict:
     async with get_connection() as conn:
-        allowed = {"title", "is_pinned", "status", "hiring_client_id"}
-        sets = []
-        vals = []
-        idx = 1
-        for k, v in updates.items():
-            if k in allowed:
-                sets.append(f"{k} = ${idx}")
-                vals.append(v)
-                idx += 1
-        if not sets:
-            row = await conn.fetchrow("SELECT * FROM mw_projects WHERE id = $1", project_id)
-            return dict(row) if row else {}
-        vals.append(project_id)
-        row = await conn.fetchrow(
-            f"UPDATE mw_projects SET {', '.join(sets)}, updated_at = NOW() WHERE id = ${idx} RETURNING *",
-            *vals,
-        )
+        async with conn.transaction():
+            prior = await conn.fetchrow(
+                "SELECT title, project_type, project_data FROM mw_projects WHERE id = $1 FOR UPDATE",
+                project_id,
+            )
+            allowed = {"title", "is_pinned", "status", "hiring_client_id"}
+            sets = []
+            vals = []
+            idx = 1
+            for k, v in updates.items():
+                if k in allowed:
+                    sets.append(f"{k} = ${idx}")
+                    vals.append(v)
+                    idx += 1
+            if not sets:
+                row = await conn.fetchrow("SELECT * FROM mw_projects WHERE id = $1", project_id)
+                return dict(row) if row else {}
+            vals.append(project_id)
+            row = await conn.fetchrow(
+                f"UPDATE mw_projects SET {', '.join(sets)}, updated_at = NOW() WHERE id = ${idx} RETURNING *",
+                *vals,
+            )
+            # Blog: re-derive slug when title changes AND current slug matches prior auto-slug
+            if prior and prior["project_type"] == "blog" and "title" in updates:
+                new_title = updates["title"]
+                prior_title = prior["title"] or ""
+                data = prior["project_data"]
+                if isinstance(data, str):
+                    data = json.loads(data or "{}")
+                data = data or {}
+                current_slug = data.get("slug") or ""
+                if not current_slug or current_slug == _slugify(prior_title):
+                    data["slug"] = _slugify(new_title)
+                    row = await conn.fetchrow(
+                        "UPDATE mw_projects SET project_data = $1::jsonb WHERE id = $2 RETURNING *",
+                        json.dumps(data), project_id,
+                    )
     return _parse_project(row)
+
+
+# ── Blog operations ──
+
+
+async def patch_blog(project_id: UUID, patch: dict) -> dict:
+    """Partial update of blog project_data (excerpt/tone/tags/slug/author/audience)."""
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            if "slug" in patch and patch["slug"] is not None:
+                data["slug"] = _slugify(str(patch["slug"]))
+            if "excerpt" in patch:
+                data["excerpt"] = patch["excerpt"]
+            if "audience" in patch:
+                data["audience"] = patch["audience"]
+            if "tone" in patch:
+                tone = patch["tone"]
+                if tone not in _ALLOWED_BLOG_TONES:
+                    raise ValueError(f"Unknown tone '{tone}'")
+                data["tone"] = tone
+            if "tags" in patch and isinstance(patch["tags"], list):
+                data["tags"] = [str(t) for t in patch["tags"]]
+            if "author" in patch and isinstance(patch["author"], dict):
+                author = dict(data.get("author") or {})
+                author.update(patch["author"])
+                data["author"] = author
+            return await _persist_data(conn, project_id, data)
+
+
+async def transition_blog_status(project_id: UUID, to: str) -> dict:
+    """Flip blog status. Phase 1: draft <-> published only."""
+    if to not in _ALLOWED_BLOG_STATUSES:
+        raise ValueError(f"Unknown status '{to}'")
+    async with get_connection() as conn:
+        async with conn.transaction():
+            data = await _load_and_lock_data(conn, project_id)
+            data["status"] = to
+            if to == "published":
+                data["published_at"] = datetime.now(timezone.utc).isoformat()
+            elif to == "draft":
+                data["published_at"] = None
+            return await _persist_data(conn, project_id, data)
 
 
 async def archive_project(project_id: UUID):
@@ -267,17 +371,41 @@ async def archive_project(project_id: UUID):
 # ── Section operations ──
 
 async def _update_sections(project_id: UUID, sections: list) -> dict:
-    """Atomically update sections and bump version."""
+    """Atomically update sections and bump version.
+    For blog projects also recomputes word_count/read_minutes into project_data.stats.
+    """
     async with get_connection() as conn:
-        row = await conn.fetchrow(
-            """
-            UPDATE mw_projects
-            SET sections = $1::jsonb, version = version + 1, updated_at = NOW()
-            WHERE id = $2
-            RETURNING *
-            """,
-            json.dumps(sections), project_id,
-        )
+        async with conn.transaction():
+            meta = await conn.fetchrow(
+                "SELECT project_type, project_data FROM mw_projects WHERE id = $1 FOR UPDATE",
+                project_id,
+            )
+            if meta and meta["project_type"] == "blog":
+                data = meta["project_data"]
+                if isinstance(data, str):
+                    data = json.loads(data or "{}")
+                data = data or {}
+                data["stats"] = _compute_blog_stats(sections)
+                row = await conn.fetchrow(
+                    """
+                    UPDATE mw_projects
+                    SET sections = $1::jsonb, project_data = $2::jsonb,
+                        version = version + 1, updated_at = NOW()
+                    WHERE id = $3
+                    RETURNING *
+                    """,
+                    json.dumps(sections), json.dumps(data), project_id,
+                )
+            else:
+                row = await conn.fetchrow(
+                    """
+                    UPDATE mw_projects
+                    SET sections = $1::jsonb, version = version + 1, updated_at = NOW()
+                    WHERE id = $2
+                    RETURNING *
+                    """,
+                    json.dumps(sections), project_id,
+                )
     return _parse_project(row)
 
 

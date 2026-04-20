@@ -314,4 +314,40 @@ class ProjectDetailViewModel {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
     }
+
+    // MARK: - Blog
+
+    var blogData: MWBlogData {
+        MWBlogData.from(projectData: project?.projectData)
+    }
+
+    func patchBlog(_ patch: MWBlogPatchRequest) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.patchBlog(id: pid, patch: patch)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func transitionBlogStatus(to status: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.transitionBlogStatus(id: pid, status: status)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func exportBlogMarkdown() async -> Data? {
+        guard let pid = project?.id else { return nil }
+        do {
+            return try await service.exportProject(projectId: pid, format: "md_frontmatter")
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+            return nil
+        }
+    }
 }

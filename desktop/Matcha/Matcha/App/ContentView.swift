@@ -13,6 +13,7 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = true
     @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = true
     @State private var showNewConsultation = false
+    @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
     @State private var showCreateChannel = false
     @State private var showProjectTypePicker = false
@@ -119,9 +120,31 @@ struct ContentView: View {
                                             .buttonStyle(.plain)
                                             .foregroundColor(.white)
                                         }
+                                        Button {
+                                            showProjectTypePicker = false
+                                            showNewBlog = true
+                                        } label: {
+                                            HStack {
+                                                Image(systemName: "doc.richtext")
+                                                    .font(.system(size: 11))
+                                                    .frame(width: 16)
+                                                Text("Blog Post")
+                                                    .font(.system(size: 12))
+                                            }
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(.vertical, 4)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .foregroundColor(.white)
                                     }
                                     .padding(12)
                                     .frame(width: 180)
+                                }
+                                .sheet(isPresented: $showNewBlog) {
+                                    NewBlogSheet { proj in
+                                        appState.selectedProjectId = proj.id
+                                        appState.selectedThreadId = nil
+                                    }
                                 }
                             }
                         ) {

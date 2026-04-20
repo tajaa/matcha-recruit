@@ -22,6 +22,13 @@ struct ProjectDetailView: View {
                 recruitingLayout
             } else if viewModel.project?.projectType == "consultation" {
                 consultationLayout
+            } else if viewModel.project?.projectType == "blog" {
+                BlogEditorView(
+                    viewModel: viewModel,
+                    chatVM: chatVM,
+                    lightMode: lightMode,
+                    selectedModel: selectedModelValue
+                )
             } else {
                 standardLayout
             }
