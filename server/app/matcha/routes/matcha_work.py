@@ -1133,15 +1133,18 @@ Unbilled this period: ${unbilled_cents/100:.2f}
     return ctx
 
 
-async def _inject_blog_context(ctx: str, row) -> str:
-    """Inject context for a blog post draft so the AI can outline/draft/revise
-    sections with the configured voice, audience, and existing section IDs."""
+def _format_blog_mode_state(row) -> str:
+    """Return a plain-text block describing the current blog draft (title,
+    tone, audience, sections with ids, word counts, etc.). This is passed as
+    `blog_mode_state` to the AI provider, which uses a dedicated blog-only
+    system prompt — no generic multi-skill prompt and no risk of the AI
+    invoking project/workbook/etc skills."""
     project_data = json.loads(row["project_data"]) if isinstance(row["project_data"], str) else (row["project_data"] or {})
     sections = json.loads(row["sections"]) if isinstance(row["sections"], str) else (row["sections"] or [])
     title = row["title"] or "(untitled)"
-    slug = project_data.get("slug") or ""
+    slug = project_data.get("slug") or "(auto)"
     tone = project_data.get("tone") or "expert-casual"
-    audience = project_data.get("audience") or "(not set — ask the user if drafting)"
+    audience = project_data.get("audience") or "(not set — ask the user before drafting)"
     tags = project_data.get("tags") or []
     status = project_data.get("status") or "draft"
     excerpt = project_data.get("excerpt") or "(none)"
@@ -1156,37 +1159,35 @@ async def _inject_blog_context(ctx: str, row) -> str:
         content = s.get("content") or ""
         wc = len([w for w in re.split(r"\s+", content.strip()) if w])
         section_lines.append(f'  {i}. id={sid} · "{st}" ({wc} words)')
-    sec_block = "\n".join(section_lines) if section_lines else "  (no sections yet — draft an outline first)"
+    sec_block = "\n".join(section_lines) if section_lines else "  (no sections yet — if the user wants to start, emit blog_outline to seed them)"
 
-    ctx += f"""
+    return (
+        f"Title: {title}\n"
+        f"Slug: {slug}\n"
+        f"Status: {status}\n"
+        f"Audience: {audience}\n"
+        f"Tone: {tone}\n"
+        f"Tags: {', '.join(tags) if tags else '(none)'}\n"
+        f"Word count: {stats.get('word_count', 0)} · Reading time: {stats.get('read_minutes', 0)} min\n"
+        f"Excerpt: {excerpt}\n\n"
+        f"Sections (in order — use these exact ids when emitting blog_section_draft/blog_section_revision):\n"
+        f"{sec_block}"
+    )
 
-=== BLOG POST CONTEXT ===
-This chat is tied to a blog post draft (authoring workspace, NOT the public marketing site).
-Title: {title}
-Slug: {slug}
-Status: {status}
-Audience: {audience}
-Tone: {tone}
-Tags: {', '.join(tags) if tags else '(none)'}
-Word count: {stats.get('word_count', 0)} · Reading time: {stats.get('read_minutes', 0)} min
-Excerpt: {excerpt}
 
-Current outline (sections, in order — use these exact ids when emitting blog_section_draft/blog_section_revision):
-{sec_block}
-
-CRITICAL RULES:
-- Skill for this chat is ALWAYS "blog". NEVER emit skill="project". NEVER emit project_title, project_sections, or project_status — those fields are for a different kind of document and will be silently dropped here.
-- You are ALREADY INSIDE this blog draft. Do NOT claim to 'create a project', 'initialize a project', 'set up a project', 'start a new project/document', or 'structure ideas into a project' — the blog already exists and the user is viewing it. Refer to it as 'this blog', 'your draft', 'the post', or by its title. Never say 'as a project', 'in the project panel', or 'in the project document' — say 'in the Preview tab' or 'your draft' instead.
-- To create initial sections for a new blog with no sections yet: emit blog_outline (an array of {{title, bullets: [string]}} objects). The UI will turn those into editable sections. Do NOT use project_sections — that will NOT appear in the blog sidebar.
-- First-pass OUTLINE requests: emit blog_outline as an array of {{title, bullets: [string]}} objects (4–8 sections, 2–4 bullets each). Do NOT draft section content on the same turn.
-- Section drafting: emit blog_section_draft as a JSON object keyed by section_id: {{"<section_id>": "<markdown content>", ...}}. Use section_ids from the list above — never invent one. 200–450 words unless asked otherwise.
-- Revisions: emit blog_section_revision with {{section_id, content, change_summary}}.
-- Title ideas: emit blog_title_suggestions as an array of 3–5 strings. Never silently rename the post.
-- Never fabricate statistics, quotes, or URLs. If a source is needed, ask the user to paste one.
-- Respect the configured audience — don't explain foundational concepts they'd already know.
-- Avoid LLM tics: "delve", "navigate the landscape", "in today's fast-paced world", "it's important to note".
-"""
-    return ctx
+async def _fetch_blog_mode_state(project_id: Optional[UUID]) -> Optional[str]:
+    """If the project is a blog, return a formatted blog state string for the
+    dedicated blog system prompt. Otherwise return None."""
+    if not project_id:
+        return None
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            "SELECT title, project_type, sections, project_data FROM mw_projects WHERE id = $1",
+            project_id,
+        )
+    if not row or row["project_type"] != "blog":
+        return None
+    return _format_blog_mode_state(row)
 
 
 async def _inject_recruiting_project_context(ctx: str, thread: dict, current_state: dict) -> str:
@@ -1208,7 +1209,9 @@ async def _inject_recruiting_project_context(ctx: str, thread: dict, current_sta
     if row["project_type"] == "consultation":
         return await _inject_consultation_context(ctx, row)
     if row["project_type"] == "blog":
-        return await _inject_blog_context(ctx, row)
+        # Blog projects use a dedicated system prompt (built separately via
+        # _fetch_blog_mode_state) — skip the generic context injection.
+        return ctx
     if row["project_type"] != "recruiting":
         return ctx
 
@@ -6225,6 +6228,8 @@ async def send_message(
                 if k not in ("project_title", "project_sections", "project_status")
             }
 
+    blog_mode_state = await _fetch_blog_mode_state(thread.get("project_id"))
+
     ai_resp = await ai_provider.generate(
         msg_dicts, ai_facing_state, company_context=ctx,
         slide_index=body.slide_index, context_summary=context_summary,
@@ -6232,6 +6237,7 @@ async def send_message(
         compliance_mode=bool(thread.get("compliance_mode")),
         payer_mode=bool(thread.get("payer_mode")),
         node_mode=bool(thread.get("node_mode")),
+        blog_mode_state=blog_mode_state,
     )
     _scope_slide_update(ai_resp, thread["current_state"], body.slide_index)
     final_usage = ai_resp.token_usage
@@ -6596,6 +6602,7 @@ async def send_message_stream(
             # Run generation as a background task and emit keepalives every 15 s
             # so proxies with short read-timeouts (e.g. nginx default 60 s) don't
             # close the SSE connection while we wait for the AI to finish.
+            stream_blog_mode_state = await _fetch_blog_mode_state(thread.get("project_id"))
             _ai_task = asyncio.create_task(ai_provider.generate(
                 msg_dicts, thread["current_state"], company_context=ctx,
                 slide_index=body.slide_index, context_summary=context_summary,
@@ -6605,6 +6612,7 @@ async def send_message_stream(
                 compliance_mode=bool(thread.get("compliance_mode")),
                 payer_mode=bool(thread.get("payer_mode")),
                 node_mode=bool(thread.get("node_mode")),
+                blog_mode_state=stream_blog_mode_state,
             ))
             while True:
                 done, _ = await asyncio.wait({_ai_task}, timeout=15.0)

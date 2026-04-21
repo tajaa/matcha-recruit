@@ -161,6 +161,53 @@ SUPPORTED_AI_OPERATIONS = {
     "none",
 }
 
+MATCHA_WORK_BLOG_SYSTEM_PROMPT = """You are Matcha Work, a writing partner helping the user author one specific blog post draft.
+
+Today's date: {today}
+
+## Context
+You are in a dedicated BLOG authoring chat. The user is viewing their draft in a side panel with three tabs: Write, Preview, Publish. The blog draft already exists — you never create it, start it, initialize it, or "make a project" for it. You only update it.
+
+## The only surface that exists here
+- The blog draft (this is a data structure with fields: title, slug, status, tone, audience, tags, sections, excerpt).
+- Sections (ordered list, each with id, title, content).
+- Refer to the draft as "this blog", "your draft", "the post", or by its title.
+- Do NOT say "a project", "the project", "the project document", "the project panel", "a separate project", or "I've created/initialized/started a project". Those phrasings are wrong — this is a blog, not a project.
+- The user-visible UI surface is "the Write tab" / "the Preview tab" / "the Publish tab". Not "the panel".
+
+## Your job — one of these per turn
+1. Brainstorm / discuss the blog conversationally in `reply`. Emit no updates.
+2. Create the initial outline (only when the blog has zero sections AND the user wants to start drafting): emit `blog_outline` as an array of `{{"title": str, "bullets": [str]}}` — 4–8 items, 2–4 bullets each. Do NOT draft section content on the same turn.
+3. Draft section content: emit `blog_section_draft` as an object keyed by the section_id of an existing section: `{{"<section_id>": "<markdown content>", ...}}`. 200–450 words per section unless the user asks otherwise. Use markdown (short paragraphs, subheadings, bullet lists where they earn their keep). Use section_ids from the state below — never invent one.
+4. Revise an existing section: emit `blog_section_revision` as `{{"section_id": str, "content": str, "change_summary": str}}`.
+5. Suggest alternative titles: emit `blog_title_suggestions` as an array of 3–5 strings. Never silently rename the post.
+
+## Voice
+- Default tone: the configured tone of this blog (shown below). Fallback: "expert-casual" — concrete, confident, uses the user's language.
+- Avoid LLM tics: "delve", "navigate the landscape", "in today's fast-paced world", "it's important to note".
+- Never fabricate statistics, quotes, or URLs. If you need a source, ask the user to paste one.
+- Respect the configured audience — don't explain foundational concepts they'd already know.
+
+## Response format (strict JSON)
+```json
+{{
+  "reply": "Short conversational message. Don't dump the full outline here — say e.g. 'I've added 5 sections to the Write tab — ask me to flesh out any of them.'",
+  "mode": "skill",
+  "skill": "blog",
+  "operation": "none",
+  "confidence": 0.9,
+  "missing_fields": [],
+  "updates": {{ /* one of blog_outline / blog_section_draft / blog_section_revision / blog_title_suggestions, or empty object */ }}
+}}
+```
+
+{company_context}
+
+=== BLOG DRAFT STATE ===
+{blog_state}
+"""
+
+
 PAYER_MODE_SYSTEM_PROMPT = """You are a medical policy and coverage expert assistant for {company_name}.
 
 Today's date: {today}
@@ -912,6 +959,7 @@ class GeminiProvider(MatchaWorkAIProvider):
         compliance_mode: bool = False,
         payer_mode: bool = False,
         node_mode: bool = False,
+        blog_mode_state: Optional[str] = None,
     ) -> AIResponse:
         if payer_mode_prompt:
             # Payer mode: dedicated medical policy prompt, plain text response (no JSON)
@@ -956,7 +1004,7 @@ class GeminiProvider(MatchaWorkAIProvider):
 
         static_prompt, dynamic_prompt, contents, valid_fields, inferred_skill = self._build_prompt_and_contents(
             messages, current_state, company_context=company_context, slide_index=slide_index,
-            context_summary=context_summary,
+            context_summary=context_summary, blog_mode_state=blog_mode_state,
         )
         model = await _get_model(self.settings, model_override, company_id=company_id)
 
@@ -1233,14 +1281,50 @@ class GeminiProvider(MatchaWorkAIProvider):
         company_context: str = "",
         slide_index: Optional[int] = None,
         context_summary: Optional[str] = None,
+        blog_mode_state: Optional[str] = None,
     ) -> tuple[str, str, list, list[str], str]:
         """Returns (static_prompt, dynamic_prompt, contents, valid_fields, skill).
 
         static_prompt: instructions + company context (cacheable, changes slowly)
         dynamic_prompt: current_state + summary + slide lock (changes per message)
+
+        When blog_mode_state is provided (set by the route for project_type='blog'),
+        a dedicated blog-only system prompt is used instead of the generic
+        multi-skill prompt. This removes every non-blog skill from the AI's
+        vocabulary so it cannot hallucinate creating a project document.
         """
         window_size = 15 if context_summary else 20
         windowed = messages[-window_size:]
+
+        # Dedicated blog mode — swap the entire system prompt. Bypasses the
+        # generic multi-skill prompt so the AI can't hallucinate using project /
+        # workbook / other skills on a blog chat.
+        if blog_mode_state is not None:
+            static_prompt = MATCHA_WORK_BLOG_SYSTEM_PROMPT.format(
+                today=date.today().isoformat(),
+                company_context=company_context,
+                blog_state=blog_mode_state,
+            )
+            if context_summary:
+                static_prompt += (
+                    f"\n\n## Conversation Context Summary\n"
+                    f"(Earlier messages were summarized to preserve context)\n"
+                    f"{context_summary}\n"
+                )
+            blog_contents: list = []
+            for msg in windowed:
+                role = "user" if msg["role"] == "user" else "model"
+                parts: list = []
+                if role == "user":
+                    for image_bytes, mime in (msg.get("image_parts") or []):
+                        if image_bytes:
+                            parts.append(types.Part.from_bytes(data=image_bytes, mime_type=mime))
+                text_content = msg.get("content") or ""
+                if text_content or not parts:
+                    parts.append(types.Part(text=text_content))
+                blog_contents.append(types.Content(role=role, parts=parts))
+            return static_prompt, "", blog_contents, list(BLOG_FIELDS), "blog"
+
         current_skill = _infer_skill_from_state(current_state)
         if current_skill == "offer_letter":
             valid_fields = OFFER_LETTER_FIELDS
