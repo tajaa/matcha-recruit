@@ -6027,9 +6027,11 @@ async def send_message(
         ctx += (
             "\n\n=== NO PROJECT ATTACHED ==="
             "\nThis chat is a standalone thread with no linked project document."
-            "\n- Do NOT invoke the `project` skill. Do NOT emit project_title or project_sections."
-            "\n- Do NOT tell the user you've 'created a project' or 'updated the project panel' — there is no project panel for this chat."
-            "\n- If the user wants to draft a long-form document (article, report, brief, job posting), tell them to create a Project from the sidebar (+ next to Projects) and then chat inside that project."
+            "\n- Do NOT invoke the `project` or `blog` skill."
+            "\n- Do NOT emit project_title, project_sections, blog_outline, blog_section_draft, or blog_section_revision."
+            "\n- Do NOT tell the user you've 'created a project', 'started a blog draft', or 'updated the project panel' — there is no project panel for this chat."
+            "\n- If the user wants to draft a blog post, tell them to use the + button next to Projects in the sidebar and choose 'Blog Post'."
+            "\n- If the user wants any other long-form document (article, report, brief, job posting), tell them to create a Project from the sidebar (+ next to Projects) and chat inside it."
             "\n- Otherwise, answer normally as mode=\"general\", skill=\"none\"."
         )
 
