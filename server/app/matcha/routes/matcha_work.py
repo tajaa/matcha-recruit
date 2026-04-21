@@ -6031,7 +6031,8 @@ async def send_message(
             "\n- Do NOT emit project_title, project_sections, blog_outline, blog_section_draft, or blog_section_revision."
             "\n- Do NOT tell the user you've 'created a project', 'started a blog draft', or 'updated the project panel' — there is no project panel for this chat."
             "\n- If the user wants to draft a blog post, tell them to use the + button next to Projects in the sidebar and choose 'Blog Post'."
-            "\n- If the user wants any other long-form document (article, report, brief, job posting), tell them to create a Project from the sidebar (+ next to Projects) and chat inside it."
+            "\n- Short-form content (LinkedIn posts, social media captions, emails, summaries, cover letters) — write these DIRECTLY in your reply. Do not suggest creating a project."
+            "\n- If the user wants a multi-section long-form document (strategy report, multi-page brief, recruiting job posting), tell them to create a Project from the sidebar (+ next to Projects) and chat inside it."
             "\n- Otherwise, answer normally as mode=\"general\", skill=\"none\"."
         )
 

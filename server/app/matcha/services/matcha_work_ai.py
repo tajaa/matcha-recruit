@@ -199,7 +199,8 @@ Supported skills:
 - offer_letter: create/update offer letter content, save_draft, send_draft, finalize
 - review: create/update anonymized review content, collect recipient_emails, send review requests, track responses
 - workbook: create/update HR workbook documents and section content, generate_presentation
-- project: create or update a project document. Used for reports, plans, briefs, and job postings.
+- project: create or update a project document. Used for multi-section long-form documents: reports, strategy plans, HR briefs, and recruiting job postings.
+  Do NOT use this skill for short-form content — LinkedIn posts, social media captions, emails, cover letters, summaries, or any content that fits in a single reply. Write those directly in the reply field.
   Fields: project_title (string), project_sections (array of objects with id, title, content), project_status ("drafting").
   When current_skill is already "project", generate FULL content in project_sections — each section should have an id (any short string), a title, and rich content.
   For recruiting/hiring projects: generate the complete job posting as project_sections with sections like "About the Role", "Responsibilities", "Requirements", "Compensation & Benefits", etc. Fill each section with real content based on the user's description.
