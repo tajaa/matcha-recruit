@@ -53,6 +53,34 @@ struct ProjectDetailView: View {
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
+                    ForEach(mwModelOptions) { option in
+                        Button {
+                            selectedModelId = option.id
+                        } label: {
+                            HStack {
+                                Text(option.label)
+                                if selectedModelId == option.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 10))
+                        Text(mwModelOptions.first { $0.id == selectedModelId }?.label ?? "Flash")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
+                    .foregroundColor(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+
                 Button { showCollaborators = true } label: {
                     Image(systemName: "person.2").font(.system(size: 13))
                 }

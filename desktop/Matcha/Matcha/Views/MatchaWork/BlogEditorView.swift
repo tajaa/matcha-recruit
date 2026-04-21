@@ -7,6 +7,8 @@ struct BlogEditorView: View {
     let lightMode: Bool
     let selectedModel: String?
 
+    @AppStorage("mw-model") private var selectedModelId = "flash"
+
     @State private var tab: Tab = .write
     @State private var selectedSectionId: String?
     @State private var showExport = false
@@ -34,6 +36,34 @@ struct BlogEditorView: View {
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
+                Menu {
+                    ForEach(mwModelOptions) { option in
+                        Button {
+                            selectedModelId = option.id
+                        } label: {
+                            HStack {
+                                Text(option.label)
+                                if selectedModelId == option.id {
+                                    Image(systemName: "checkmark")
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "cpu")
+                            .font(.system(size: 10))
+                        Text(mwModelOptions.first { $0.id == selectedModelId }?.label ?? "Flash")
+                            .font(.system(size: 10, weight: .medium))
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 4)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
+                    .foregroundColor(.secondary)
+                }
+                .menuStyle(.borderlessButton)
+
                 Menu {
                     Button("Markdown + Frontmatter") { exportMd() }
                     Button("Markdown") { exportMd(format: "md") }
