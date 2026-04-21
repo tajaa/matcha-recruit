@@ -515,19 +515,62 @@ async def apply_blog_directives(
     outline: Optional[list] = None,
     draft: Optional[dict] = None,
     revision: Optional[dict] = None,
+    replace: Optional[list] = None,
 ) -> tuple[dict, bool]:
-    """Apply AI blog directives (outline seed / section drafts / section revision)
-    under a single row lock. Returns (project_dict, changed_bool).
+    """Apply AI blog directives under a single row lock.
+
+    Returns (project_dict, changed_bool).
 
     - `outline` seeds sections only when the blog currently has zero sections.
     - `draft` is a dict keyed by section_id → markdown content.
     - `revision` is {section_id, content, change_summary?}.
+    - `replace` is the full new ordered list of sections:
+      [{id?, title, content?}, ...]. Replaces the entire sections list.
+      Items with an id matching an existing section preserve existing content
+      (and may update title). Items without id become new sections. Existing
+      sections whose id is not in `replace` are deleted. Rejected if empty.
     """
     import uuid as _uuid
 
     def mutate(sections: list):
         changed = False
         new_sections = list(sections)
+
+        # Destructive restructure takes precedence. When replace is provided
+        # the AI intends to overwrite the section list wholesale. Skip outline
+        # seeding and treat draft/revision directives against the NEW section
+        # ids (after the replace).
+        if isinstance(replace, list) and replace:
+            existing_by_id = {s.get("id"): s for s in new_sections if s.get("id")}
+            replaced: list = []
+            for item in replace:
+                if not isinstance(item, dict):
+                    continue
+                title = (item.get("title") or "").strip()
+                raw_id = item.get("id")
+                if raw_id and raw_id in existing_by_id:
+                    base = existing_by_id[raw_id]
+                    merged = {**base}
+                    if title:
+                        merged["title"] = title
+                    if "content" in item:
+                        new_content = (item.get("content") or "").strip()
+                        if new_content:
+                            merged["content"] = new_content
+                    replaced.append(merged)
+                else:
+                    if not title:
+                        continue
+                    content = (item.get("content") or "").strip()
+                    replaced.append({
+                        "id": _uuid.uuid4().hex[:12],
+                        "title": title,
+                        "content": content,
+                    })
+            # Guard: never allow an empty replacement to silently wipe the blog.
+            if replaced:
+                new_sections = replaced
+                changed = True
 
         if outline and not new_sections:
             seeded = []

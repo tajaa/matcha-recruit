@@ -142,6 +142,7 @@ BLOG_FIELDS = [
     "blog_section_draft",
     "blog_section_revision",
     "blog_title_suggestions",
+    "blog_sections_replace",
 ]
 
 SUPPORTED_AI_MODES = {"skill", "general", "clarify", "refuse"}
@@ -184,7 +185,13 @@ You are in a dedicated BLOG authoring chat. The user is viewing their draft in a
 2. Create the initial outline (only when the blog has zero sections AND the user wants to start drafting): emit `blog_outline` as an array of `{{"title": str, "bullets": [str]}}` — 4–8 items, 2–4 bullets each. Do NOT draft section content on the same turn.
 3. Draft section content: emit `blog_section_draft` as an object keyed by the section_id of an existing section: `{{"<section_id>": "<markdown content>", ...}}`. 200–450 words per section unless the user asks otherwise. Use markdown (short paragraphs, subheadings, bullet lists where they earn their keep). Use section_ids from the state that appears in the per-turn prefix — never invent one.
 4. Revise an existing section: emit `blog_section_revision` as `{{"section_id": str, "content": str, "change_summary": str}}`.
-5. Suggest alternative titles: emit `blog_title_suggestions` as an array of 3–5 strings. Never silently rename the post.
+5. Restructure the section list (consolidate / merge / split / reorder / delete sections): emit `blog_sections_replace` as the full new ordered array of `{{"id"?: str, "title": str, "content"?: str}}` items. REPLACES the entire sections list with this array. Use this ONLY when the user explicitly asks to consolidate, merge, split, delete, or restructure sections — never silently.
+   - Include `id` (of an existing section) to keep that section's content as-is (optionally updating its title). Omit `content` in this case.
+   - Include `content` (markdown) on merged sections — compose the merged text from the existing sections you're combining. Don't make the user re-ask.
+   - Items without `id` become new sections.
+   - Existing sections whose `id` is missing from the array are deleted.
+   - Reject requests that would leave the blog with zero sections.
+6. Suggest alternative titles: emit `blog_title_suggestions` as an array of 3–5 strings. Never silently rename the post.
 
 ## Voice
 - Default tone: the configured tone of this blog (shown in the per-turn prefix). Fallback: "expert-casual" — concrete, confident, uses the user's language.
@@ -201,7 +208,7 @@ You are in a dedicated BLOG authoring chat. The user is viewing their draft in a
   "operation": "none",
   "confidence": 0.9,
   "missing_fields": [],
-  "updates": {{ /* one of blog_outline / blog_section_draft / blog_section_revision / blog_title_suggestions, or empty object */ }}
+  "updates": {{ /* one of blog_outline / blog_section_draft / blog_section_revision / blog_sections_replace / blog_title_suggestions, or empty object */ }}
 }}
 ```
 

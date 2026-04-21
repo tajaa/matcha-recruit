@@ -1382,22 +1382,16 @@ async def _apply_ai_updates_and_operations(
             # Match by title (case-insensitive) so regenerations update existing
             # sections in place instead of appending duplicates. Sections added
             # manually by the user keep their own titles and are preserved.
-            # Skip project_sections sync for consultation projects — they are
-            # CRM engagements, not document drafts. The AI is prompted not to
-            # emit project_sections in consultation chats, but guard here too
-            # so a stray emission doesn't overwrite the consultation schema.
-            _is_consultation = False
-            if project_id:
-                try:
-                    async with get_connection() as _conn:
-                        _is_consultation = await _conn.fetchval(
-                            "SELECT project_type = 'consultation' FROM mw_projects WHERE id = $1",
-                            project_id,
-                        ) or False
-                except Exception:
-                    pass
+            # Skip this sync for consultation and blog projects:
+            #   - Consultations are CRM engagements, not document drafts
+            #   - Blog drafts use blog_outline / blog_section_draft / blog_sections_replace
+            #     directives; a stray project_sections emission would silently
+            #     append to the blog's sections (was a real bug, see commit
+            #     history). Use project_meta to decide without another DB fetch.
+            _project_type = (project_meta or {}).get("project_type") if project_id else None
+            _skip_project_sections_sync = _project_type in ("consultation", "blog")
 
-            if project_id and not _is_consultation and "project_sections" in safe_updates:
+            if project_id and not _skip_project_sections_sync and "project_sections" in safe_updates:
                 from ..services import project_service as proj_svc
                 new_sections = safe_updates.get("project_sections") or []
                 if new_sections:
@@ -1517,6 +1511,7 @@ async def _apply_ai_updates_and_operations(
                 outline=blog_directives.get("blog_outline") if isinstance(blog_directives.get("blog_outline"), list) else None,
                 draft=blog_directives.get("blog_section_draft") if isinstance(blog_directives.get("blog_section_draft"), dict) else None,
                 revision=blog_directives.get("blog_section_revision") if isinstance(blog_directives.get("blog_section_revision"), dict) else None,
+                replace=blog_directives.get("blog_sections_replace") if isinstance(blog_directives.get("blog_sections_replace"), list) else None,
             )
             if blog_secs_changed:
                 changed = True
