@@ -161,7 +161,11 @@ SUPPORTED_AI_OPERATIONS = {
     "none",
 }
 
-MATCHA_WORK_BLOG_SYSTEM_PROMPT = """You are Matcha Work, a writing partner helping the user author one specific blog post draft.
+# Blog mode is split into static/dynamic so the static part can be cached at
+# the Gemini API level like the generic static prompt. Only the dynamic part
+# (current blog state — title, sections, stats) varies per message.
+
+MATCHA_WORK_BLOG_STATIC_PROMPT = """You are Matcha Work, a writing partner helping the user author one specific blog post draft.
 
 Today's date: {today}
 
@@ -178,12 +182,12 @@ You are in a dedicated BLOG authoring chat. The user is viewing their draft in a
 ## Your job — one of these per turn
 1. Brainstorm / discuss the blog conversationally in `reply`. Emit no updates.
 2. Create the initial outline (only when the blog has zero sections AND the user wants to start drafting): emit `blog_outline` as an array of `{{"title": str, "bullets": [str]}}` — 4–8 items, 2–4 bullets each. Do NOT draft section content on the same turn.
-3. Draft section content: emit `blog_section_draft` as an object keyed by the section_id of an existing section: `{{"<section_id>": "<markdown content>", ...}}`. 200–450 words per section unless the user asks otherwise. Use markdown (short paragraphs, subheadings, bullet lists where they earn their keep). Use section_ids from the state below — never invent one.
+3. Draft section content: emit `blog_section_draft` as an object keyed by the section_id of an existing section: `{{"<section_id>": "<markdown content>", ...}}`. 200–450 words per section unless the user asks otherwise. Use markdown (short paragraphs, subheadings, bullet lists where they earn their keep). Use section_ids from the state that appears in the per-turn prefix — never invent one.
 4. Revise an existing section: emit `blog_section_revision` as `{{"section_id": str, "content": str, "change_summary": str}}`.
 5. Suggest alternative titles: emit `blog_title_suggestions` as an array of 3–5 strings. Never silently rename the post.
 
 ## Voice
-- Default tone: the configured tone of this blog (shown below). Fallback: "expert-casual" — concrete, confident, uses the user's language.
+- Default tone: the configured tone of this blog (shown in the per-turn prefix). Fallback: "expert-casual" — concrete, confident, uses the user's language.
 - Avoid LLM tics: "delve", "navigate the landscape", "in today's fast-paced world", "it's important to note".
 - Never fabricate statistics, quotes, or URLs. If you need a source, ask the user to paste one.
 - Respect the configured audience — don't explain foundational concepts they'd already know.
@@ -202,8 +206,11 @@ You are in a dedicated BLOG authoring chat. The user is viewing their draft in a
 ```
 
 {company_context}
+"""
 
-=== BLOG DRAFT STATE ===
+
+MATCHA_WORK_BLOG_DYNAMIC_PROMPT = """## Current blog draft state
+
 {blog_state}
 """
 
@@ -1296,17 +1303,18 @@ class GeminiProvider(MatchaWorkAIProvider):
         window_size = 15 if context_summary else 20
         windowed = messages[-window_size:]
 
-        # Dedicated blog mode — swap the entire system prompt. Bypasses the
-        # generic multi-skill prompt so the AI can't hallucinate using project /
-        # workbook / other skills on a blog chat.
+        # Dedicated blog mode — swap the entire prompt. Bypasses the generic
+        # multi-skill prompt so the AI can't hallucinate using project /
+        # workbook / other skills on a blog chat. Split into static (cacheable)
+        # + dynamic (blog state, per message) so Gemini context caching hits.
         if blog_mode_state is not None:
-            static_prompt = MATCHA_WORK_BLOG_SYSTEM_PROMPT.format(
+            static_prompt = MATCHA_WORK_BLOG_STATIC_PROMPT.format(
                 today=date.today().isoformat(),
                 company_context=company_context,
-                blog_state=blog_mode_state,
             )
+            dynamic_prompt = MATCHA_WORK_BLOG_DYNAMIC_PROMPT.format(blog_state=blog_mode_state)
             if context_summary:
-                static_prompt += (
+                dynamic_prompt += (
                     f"\n\n## Conversation Context Summary\n"
                     f"(Earlier messages were summarized to preserve context)\n"
                     f"{context_summary}\n"
@@ -1323,7 +1331,7 @@ class GeminiProvider(MatchaWorkAIProvider):
                 if text_content or not parts:
                     parts.append(types.Part(text=text_content))
                 blog_contents.append(types.Content(role=role, parts=parts))
-            return static_prompt, "", blog_contents, list(BLOG_FIELDS), "blog"
+            return static_prompt, dynamic_prompt, blog_contents, list(BLOG_FIELDS), "blog"
 
         current_skill = _infer_skill_from_state(current_state)
         if current_skill == "offer_letter":

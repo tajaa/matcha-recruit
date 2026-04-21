@@ -1175,9 +1175,11 @@ def _format_blog_mode_state(row) -> str:
     )
 
 
-async def _fetch_blog_mode_state(project_id: Optional[UUID]) -> Optional[str]:
-    """If the project is a blog, return a formatted blog state string for the
-    dedicated blog system prompt. Otherwise return None."""
+async def _fetch_project_meta(project_id: Optional[UUID]) -> Optional[dict]:
+    """Fetch the project row needed by AI-turn helpers (skill routing + blog
+    prompt). One query per turn — callers pass the result to both
+    `_apply_ai_updates_and_operations` and `_blog_mode_state_from_meta`.
+    """
     if not project_id:
         return None
     async with get_connection() as conn:
@@ -1185,9 +1187,15 @@ async def _fetch_blog_mode_state(project_id: Optional[UUID]) -> Optional[str]:
             "SELECT title, project_type, sections, project_data FROM mw_projects WHERE id = $1",
             project_id,
         )
-    if not row or row["project_type"] != "blog":
+    return dict(row) if row else None
+
+
+def _blog_mode_state_from_meta(project_meta: Optional[dict]) -> Optional[str]:
+    """If the project meta describes a blog, return the formatted state block
+    for the dedicated blog system prompt. Otherwise None."""
+    if not project_meta or project_meta.get("project_type") != "blog":
         return None
-    return _format_blog_mode_state(row)
+    return _format_blog_mode_state(project_meta)
 
 
 async def _inject_recruiting_project_context(ctx: str, thread: dict, current_state: dict) -> str:
@@ -1296,23 +1304,21 @@ async def _apply_ai_updates_and_operations(
     user_message: str,
     current_user_id: Optional[UUID] = None,
     project_id: Optional[UUID] = None,
+    project_meta: Optional[dict] = None,
 ) -> tuple[dict, int, Optional[str], bool, str]:
-    """Apply structured updates, execute supported operations, and return updated response state."""
-    # If the thread belongs to a blog project, force skill="blog" regardless of
-    # what the AI claimed. The AI keeps emitting skill="project" + project_sections
-    # for blog drafts; if we let that through, the state gets a phantom project
-    # document that locks future inference into "project" skill forever.
-    project_type_hint: Optional[str] = None
-    if project_id:
-        try:
-            async with get_connection() as _conn:
-                project_type_hint = await _conn.fetchval(
-                    "SELECT project_type FROM mw_projects WHERE id = $1", project_id
-                )
-        except Exception:
-            project_type_hint = None
+    """Apply structured updates, execute supported operations, and return updated response state.
+
+    `project_meta` (when supplied by the caller) contains at least
+    `project_type` for the thread's project. We rely on it to drive the
+    blog-skill routing below without a redundant DB fetch.
+    """
+    project_type_hint = (project_meta or {}).get("project_type") if project_id else None
 
     skill = ai_resp.skill or _infer_skill_from_state(current_state)
+    # Blog projects always route to the blog skill — covers both legacy threads
+    # whose state inference would otherwise return "project", and any future
+    # prompt drift. With the dedicated blog system prompt in place, this is a
+    # safety net rather than the primary defence.
     if project_type_hint == "blog":
         skill = "blog"
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
@@ -1350,36 +1356,15 @@ async def _apply_ai_updates_and_operations(
         if skill == "handbook" and current_state.get("handbook_source_type") == "upload":
             safe_updates = {}
 
-        # Blog directives are handled separately — strip them before doc_svc.apply_update
-        # so they don't pollute the thread state schema.
+        # Blog directives aren't part of the thread document schema — strip them
+        # out of safe_updates and process them in the blog directive handler.
+        # _validate_updates_for_skill("blog", ...) already whitelists BLOG_FIELDS
+        # only, so nothing else survives for blog chats.
         if skill == "blog":
             from ..services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
             for _bk in _BLOG_FIELDS:
                 if _bk in safe_updates:
                     blog_directives[_bk] = safe_updates.pop(_bk)
-            # In a blog chat, project_* fields would be caught by _validate_updates_for_skill
-            # above, but in case the AI sneaks them through (e.g. raw emission under skill="project"
-            # that got force-reclassified to "blog"), also scrub them from the raw update dict
-            # before any other code inspects it. Additionally: if the AI emitted project_title /
-            # project_sections meant to seed the blog outline, convert project_sections into a
-            # blog_outline directive so the work isn't lost.
-            raw = ai_resp.structured_update if isinstance(ai_resp.structured_update, dict) else {}
-            if project_type_hint == "blog" and "blog_outline" not in blog_directives:
-                proj_secs = raw.get("project_sections")
-                if isinstance(proj_secs, list) and proj_secs:
-                    converted = []
-                    for s in proj_secs:
-                        if not isinstance(s, dict):
-                            continue
-                        title = (s.get("title") or "").strip()
-                        content = (s.get("content") or "").strip()
-                        bullets = [b.strip() for b in re.split(r"\n+|•|-\s", content) if b.strip()][:4]
-                        if title:
-                            converted.append({"title": title, "bullets": bullets or [content[:140]] if content else []})
-                    if converted:
-                        blog_directives["blog_outline"] = converted
-            for _pk in ("project_title", "project_sections", "project_status"):
-                safe_updates.pop(_pk, None)
 
         # No-project guard: don't persist project_title/project_sections on
         # threads with no linked project. Otherwise the state accumulates a
@@ -1521,59 +1506,19 @@ async def _apply_ai_updates_and_operations(
                     current_version = cover_result["version"]
                     current_state = cover_result["current_state"]
 
-    # Apply blog directives (outline / section drafts / revisions) to the project's
-    # sections array. blog_title_suggestions is informational — AI describes the
-    # options in the reply text.
+    # Apply blog directives atomically under a row lock (prevents lost updates
+    # from concurrent manual edits). blog_title_suggestions is informational —
+    # AI describes options in reply text, no persistence.
     if blog_directives and project_id:
         from ..services import project_service as _blog_proj_svc
         try:
-            existing_secs = list(await _blog_proj_svc.get_sections(project_id))
-            secs_by_id = {s.get("id"): i for i, s in enumerate(existing_secs) if s.get("id")}
-            blog_secs_changed = False
-
-            # blog_outline: create initial sections from an array of {title, bullets}.
-            # Only applies when there are no existing sections — never wipe user edits.
-            outline = blog_directives.get("blog_outline")
-            if isinstance(outline, list) and outline and not existing_secs:
-                import uuid as _uuid
-                new_secs = []
-                for item in outline:
-                    if not isinstance(item, dict):
-                        continue
-                    t = (item.get("title") or "").strip()
-                    if not t:
-                        continue
-                    bullets = item.get("bullets") or []
-                    bullets = [str(b).strip() for b in bullets if isinstance(b, (str, int, float)) and str(b).strip()]
-                    content = "\n".join(f"- {b}" for b in bullets) if bullets else ""
-                    new_secs.append({"id": _uuid.uuid4().hex[:12], "title": t, "content": content})
-                if new_secs:
-                    existing_secs = new_secs
-                    secs_by_id = {s["id"]: i for i, s in enumerate(existing_secs)}
-                    blog_secs_changed = True
-
-            draft = blog_directives.get("blog_section_draft")
-            if isinstance(draft, dict):
-                for _sid, _content in draft.items():
-                    if not isinstance(_content, str) or not _content.strip():
-                        continue
-                    idx = secs_by_id.get(_sid)
-                    if idx is not None:
-                        existing_secs[idx] = {**existing_secs[idx], "content": _content.strip()}
-                        blog_secs_changed = True
-
-            revision = blog_directives.get("blog_section_revision")
-            if isinstance(revision, dict):
-                _rsid = revision.get("section_id")
-                _rcontent = (revision.get("content") or "").strip()
-                if _rsid and _rcontent:
-                    idx = secs_by_id.get(_rsid)
-                    if idx is not None:
-                        existing_secs[idx] = {**existing_secs[idx], "content": _rcontent}
-                        blog_secs_changed = True
-
+            _, blog_secs_changed = await _blog_proj_svc.apply_blog_directives(
+                project_id,
+                outline=blog_directives.get("blog_outline") if isinstance(blog_directives.get("blog_outline"), list) else None,
+                draft=blog_directives.get("blog_section_draft") if isinstance(blog_directives.get("blog_section_draft"), dict) else None,
+                revision=blog_directives.get("blog_section_revision") if isinstance(blog_directives.get("blog_section_revision"), dict) else None,
+            )
             if blog_secs_changed:
-                await _blog_proj_svc._update_sections(project_id, existing_secs)
                 changed = True
         except Exception:
             logger.warning("Failed to apply blog section directives for project %s", project_id, exc_info=True)
@@ -6228,7 +6173,8 @@ async def send_message(
                 if k not in ("project_title", "project_sections", "project_status")
             }
 
-    blog_mode_state = await _fetch_blog_mode_state(thread.get("project_id"))
+    project_meta = await _fetch_project_meta(thread.get("project_id"))
+    blog_mode_state = _blog_mode_state_from_meta(project_meta)
 
     ai_resp = await ai_provider.generate(
         msg_dicts, ai_facing_state, company_context=ctx,
@@ -6258,6 +6204,7 @@ async def send_message(
         user_message=body.content,
         current_user_id=current_user.id,
         project_id=thread.get("project_id"),
+        project_meta=project_meta,
     )
 
     # Build metadata from compliance reasoning chains + payer sources
@@ -6602,7 +6549,8 @@ async def send_message_stream(
             # Run generation as a background task and emit keepalives every 15 s
             # so proxies with short read-timeouts (e.g. nginx default 60 s) don't
             # close the SSE connection while we wait for the AI to finish.
-            stream_blog_mode_state = await _fetch_blog_mode_state(thread.get("project_id"))
+            stream_project_meta = await _fetch_project_meta(thread.get("project_id"))
+            stream_blog_mode_state = _blog_mode_state_from_meta(stream_project_meta)
             _ai_task = asyncio.create_task(ai_provider.generate(
                 msg_dicts, thread["current_state"], company_context=ctx,
                 slide_index=body.slide_index, context_summary=context_summary,
@@ -6639,6 +6587,7 @@ async def send_message_stream(
                 user_message=body.content,
                 current_user_id=current_user.id,
                 project_id=thread.get("project_id"),
+                project_meta=stream_project_meta,
             )
 
             # Build metadata from compliance reasoning chains + payer sources

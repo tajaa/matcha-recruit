@@ -369,24 +369,51 @@ async def archive_project(project_id: UUID):
 
 
 # ── Section operations ──
+#
+# All mutating section ops go through `_mutate_sections`: acquire row lock,
+# read sections, let a mutator callable produce the new list + any "extra"
+# return value for the caller, then write back in the same transaction. This
+# eliminates the read-modify-write race the separate get_sections / _update_sections
+# pattern had. The write is skipped entirely when the new sections JSON matches
+# the old — avoids version bumps and stats recompute on no-op updates.
 
-async def _update_sections(project_id: UUID, sections: list) -> dict:
-    """Atomically update sections and bump version.
-    For blog projects also recomputes word_count/read_minutes into project_data.stats.
+def _sections_from_row(raw) -> list:
+    if raw is None:
+        return []
+    return json.loads(raw) if isinstance(raw, str) else list(raw)
+
+
+async def _mutate_sections(project_id: UUID, mutator) -> tuple[dict, object]:
+    """Run `mutator(sections) -> (new_sections, extra)` under a row lock.
+
+    Returns (project_dict, extra). `extra` is whatever the mutator wants to
+    hand back to its caller (e.g. the newly-inserted section object).
+    When new_sections is byte-identical to the existing list, the write and
+    stats recompute are skipped — the existing row is returned untouched.
     """
     async with get_connection() as conn:
         async with conn.transaction():
-            meta = await conn.fetchrow(
-                "SELECT project_type, project_data FROM mw_projects WHERE id = $1 FOR UPDATE",
+            row = await conn.fetchrow(
+                "SELECT * FROM mw_projects WHERE id = $1 FOR UPDATE",
                 project_id,
             )
-            if meta and meta["project_type"] == "blog":
-                data = meta["project_data"]
+            if row is None:
+                raise ValueError(f"Project {project_id} not found")
+            current = _sections_from_row(row["sections"])
+            new_sections, extra = mutator(current)
+            # No-op detection: same JSON encoding → skip write.
+            new_json = json.dumps(new_sections)
+            old_json = json.dumps(current)
+            if new_json == old_json:
+                return _parse_project(row), extra
+
+            if row["project_type"] == "blog":
+                data = row["project_data"]
                 if isinstance(data, str):
                     data = json.loads(data or "{}")
                 data = data or {}
-                data["stats"] = _compute_blog_stats(sections)
-                row = await conn.fetchrow(
+                data["stats"] = _compute_blog_stats(new_sections)
+                updated = await conn.fetchrow(
                     """
                     UPDATE mw_projects
                     SET sections = $1::jsonb, project_data = $2::jsonb,
@@ -394,31 +421,36 @@ async def _update_sections(project_id: UUID, sections: list) -> dict:
                     WHERE id = $3
                     RETURNING *
                     """,
-                    json.dumps(sections), json.dumps(data), project_id,
+                    new_json, json.dumps(data), project_id,
                 )
             else:
-                row = await conn.fetchrow(
+                updated = await conn.fetchrow(
                     """
                     UPDATE mw_projects
                     SET sections = $1::jsonb, version = version + 1, updated_at = NOW()
                     WHERE id = $2
                     RETURNING *
                     """,
-                    json.dumps(sections), project_id,
+                    new_json, project_id,
                 )
-    return _parse_project(row)
+    return _parse_project(updated), extra
+
+
+async def _update_sections(project_id: UUID, sections: list) -> dict:
+    """Back-compat wrapper: replaces the full sections list atomically. Prefer
+    `_mutate_sections` for read-modify-write; use this only when the caller
+    has already decided on the final list (e.g. outline seeding from AI)."""
+    project, _ = await _mutate_sections(project_id, lambda _prev: (sections, None))
+    return project
 
 
 async def get_sections(project_id: UUID) -> list:
     async with get_connection() as conn:
         raw = await conn.fetchval("SELECT sections FROM mw_projects WHERE id = $1", project_id)
-    if raw is None:
-        return []
-    return json.loads(raw) if isinstance(raw, str) else raw
+    return _sections_from_row(raw)
 
 
 async def add_section(project_id: UUID, section: dict) -> dict:
-    sections = await get_sections(project_id)
     new_section = {
         "id": os.urandom(8).hex(),
         "title": section.get("title"),
@@ -427,42 +459,119 @@ async def add_section(project_id: UUID, section: dict) -> dict:
     }
     if section.get("diagram_data"):
         new_section["diagram_data"] = section["diagram_data"]
-    sections.append(new_section)
-    result = await _update_sections(project_id, sections)
-    return {"section": new_section, **result}
+
+    def mutate(sections):
+        return ([*sections, new_section], new_section)
+
+    project, inserted = await _mutate_sections(project_id, mutate)
+    return {"section": inserted, **project}
 
 
 async def update_section(project_id: UUID, section_id: str, updates: dict) -> dict:
-    sections = await get_sections(project_id)
-    for i, s in enumerate(sections):
-        if s.get("id") == section_id:
-            merged = {**s}
-            if "title" in updates:
-                merged["title"] = updates["title"]
-            if "content" in updates:
-                merged["content"] = updates["content"]
-            if "diagram_data" in updates:
-                merged["diagram_data"] = updates["diagram_data"]
-            sections[i] = merged
-            break
-    return await _update_sections(project_id, sections)
+    def mutate(sections):
+        out = []
+        for s in sections:
+            if s.get("id") == section_id:
+                merged = {**s}
+                if "title" in updates:
+                    merged["title"] = updates["title"]
+                if "content" in updates:
+                    merged["content"] = updates["content"]
+                if "diagram_data" in updates:
+                    merged["diagram_data"] = updates["diagram_data"]
+                out.append(merged)
+            else:
+                out.append(s)
+        return (out, None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
 
 
 async def delete_section(project_id: UUID, section_id: str) -> dict:
-    sections = await get_sections(project_id)
-    sections = [s for s in sections if s.get("id") != section_id]
-    return await _update_sections(project_id, sections)
+    def mutate(sections):
+        return ([s for s in sections if s.get("id") != section_id], None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
 
 
 async def reorder_sections(project_id: UUID, section_ids: list[str]) -> dict:
-    sections = await get_sections(project_id)
-    section_map = {s["id"]: s for s in sections}
-    reordered = [section_map[sid] for sid in section_ids if sid in section_map]
-    seen = set(section_ids)
-    for s in sections:
-        if s["id"] not in seen:
-            reordered.append(s)
-    return await _update_sections(project_id, reordered)
+    def mutate(sections):
+        section_map = {s["id"]: s for s in sections}
+        reordered = [section_map[sid] for sid in section_ids if sid in section_map]
+        seen = set(section_ids)
+        for s in sections:
+            if s["id"] not in seen:
+                reordered.append(s)
+        return (reordered, None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
+
+
+async def apply_blog_directives(
+    project_id: UUID,
+    outline: Optional[list] = None,
+    draft: Optional[dict] = None,
+    revision: Optional[dict] = None,
+) -> tuple[dict, bool]:
+    """Apply AI blog directives (outline seed / section drafts / section revision)
+    under a single row lock. Returns (project_dict, changed_bool).
+
+    - `outline` seeds sections only when the blog currently has zero sections.
+    - `draft` is a dict keyed by section_id → markdown content.
+    - `revision` is {section_id, content, change_summary?}.
+    """
+    import uuid as _uuid
+
+    def mutate(sections: list):
+        changed = False
+        new_sections = list(sections)
+
+        if outline and not new_sections:
+            seeded = []
+            for item in outline:
+                if not isinstance(item, dict):
+                    continue
+                title = (item.get("title") or "").strip()
+                if not title:
+                    continue
+                bullets = item.get("bullets") or []
+                bullets = [str(b).strip() for b in bullets if isinstance(b, (str, int, float)) and str(b).strip()]
+                content = "\n".join(f"- {b}" for b in bullets) if bullets else ""
+                seeded.append({"id": _uuid.uuid4().hex[:12], "title": title, "content": content})
+            if seeded:
+                new_sections = seeded
+                changed = True
+
+        by_id = {s.get("id"): i for i, s in enumerate(new_sections) if s.get("id")}
+
+        if isinstance(draft, dict):
+            for sid, content in draft.items():
+                if not isinstance(content, str) or not content.strip():
+                    continue
+                idx = by_id.get(sid)
+                if idx is not None:
+                    new_sections[idx] = {**new_sections[idx], "content": content.strip()}
+                    changed = True
+
+        if isinstance(revision, dict):
+            rsid = revision.get("section_id")
+            rcontent = (revision.get("content") or "").strip()
+            if rsid and rcontent:
+                idx = by_id.get(rsid)
+                if idx is not None:
+                    new_sections[idx] = {**new_sections[idx], "content": rcontent}
+                    changed = True
+
+        if not changed:
+            # Signal no-op so _mutate_sections skips the write.
+            return (sections, False)
+        return (new_sections, True)
+
+    project, changed_flag = await _mutate_sections(project_id, mutate)
+    return project, bool(changed_flag)
 
 
 async def create_project_chat(project_id: UUID, company_id: UUID, user_id: UUID, title: str | None = None) -> dict:
