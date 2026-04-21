@@ -1112,6 +1112,7 @@ Current outline (sections, in order — use these exact ids when emitting blog_s
 {sec_block}
 
 CRITICAL RULES:
+- You are ALREADY INSIDE this blog draft. Do NOT claim to 'create a project', 'initialize a project', 'set up a project', or 'start a new project/document' — the project exists and the user is viewing it. Refer to it as 'this blog', 'your draft', 'the post', or by its title. Never say 'in the project panel' — say 'in the Preview tab' or 'your draft' instead.
 - First-pass OUTLINE requests: emit blog_outline as an array of {{title, bullets: [string]}} objects (4–8 sections, 2–4 bullets each). Do NOT draft section content on the same turn.
 - Section drafting: emit blog_section_draft as a JSON object keyed by section_id: {{"<section_id>": "<markdown content>", ...}}. Use section_ids from the list above — never invent one. 200–450 words unless asked otherwise.
 - Revisions: emit blog_section_revision with {{section_id, content, change_summary}}.
@@ -6029,7 +6030,8 @@ async def send_message(
             "\nThis chat is a standalone thread with no linked project document."
             "\n- Do NOT invoke the `project` or `blog` skill."
             "\n- Do NOT emit project_title, project_sections, blog_outline, blog_section_draft, or blog_section_revision."
-            "\n- Do NOT tell the user you've 'created a project', 'started a blog draft', or 'updated the project panel' — there is no project panel for this chat."
+            "\n- Do NOT claim to have created, initialized, set up, started, drafted, structured, opened, saved, or organized ANY project, document, draft, workspace, outline, or panel. None of those exist for this chat. Your reply is the ONLY artifact — whatever you write is what the user gets."
+            "\n- Do NOT reference 'the project panel', 'the draft panel', 'the canvas', 'the document', 'the workspace', or any UI surface other than this chat. No such surface exists for this thread."
             "\n- If the user wants to draft a blog post, tell them to use the + button next to Projects in the sidebar and choose 'Blog Post'."
             "\n- Short-form content (LinkedIn posts, social media captions, emails, summaries, cover letters) — write these DIRECTLY in your reply. Do not suggest creating a project."
             "\n- If the user wants a multi-section long-form document (strategy report, multi-page brief, recruiting job posting), tell them to create a Project from the sidebar (+ next to Projects) and chat inside it."
