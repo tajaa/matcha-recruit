@@ -259,6 +259,23 @@ fi
 trap - ERR
 [[ -n "$PBXPROJ_BACKUP" ]] && rm -f "$PBXPROJ_BACKUP"
 
+# Auto-commit the pbxproj bump so subsequent runs (and fresh checkouts) see
+# the correct baseline. Without this, the bump lives only in the uncommitted
+# working tree — any `git checkout -- pbxproj` or branch switch silently
+# regresses the build number, and the next run bumps from the old committed
+# value, producing a duplicate build number that App Store Connect rejects.
+# Only stage the pbxproj explicitly so unrelated working-tree changes don't
+# get swept in.
+if ! $NO_BUMP && [[ -n "$NEW_VERSION" ]]; then
+    if git -C "$(dirname "$PBXPROJ")" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        git add "$PBXPROJ"
+        if ! git diff --cached --quiet -- "$PBXPROJ"; then
+            git commit -m "chore(desktop): bump build to ${NEW_VERSION}" -- "$PBXPROJ" >/dev/null
+            echo "${GREEN}committed:${NC} build ${NEW_VERSION} pbxproj bump"
+        fi
+    fi
+fi
+
 if $NO_UPLOAD; then
     echo
     echo "${GREEN}archive ready (upload skipped)${NC}"
