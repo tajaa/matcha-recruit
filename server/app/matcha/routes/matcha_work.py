@@ -591,6 +591,66 @@ def _append_action_note(reply: str, note: Optional[str]) -> str:
     return f"{clean_reply}\n\n{clean_note}"
 
 
+# Phrases that reference UI surfaces that DO NOT EXIST for a plain thread:
+# there is no project panel / project document / draft panel / canvas for a
+# thread. The AI keeps hallucinating claims like "see the full draft in the
+# project document" or "I've also initialized a project document" — scrub any
+# sentence containing one of these phrases from replies on plain threads.
+_PHANTOM_SURFACE_PHRASES = [
+    "project document",
+    "project panel",
+    "project canvas",
+    "draft panel",
+    "document panel",
+    "separate project",
+    "new project",
+    "a project for",
+    "project for you",
+    "project for this",
+    "project workspace",
+]
+
+
+_PHANTOM_FALLBACK_REPLY = (
+    "This is a plain chat — I can't create projects or documents from here. "
+    "If you want me to draft something, just tell me what and I'll write it directly in this chat. "
+    "Or create a Project from the + button next to Projects in the sidebar for a persistent document workspace."
+)
+
+
+def _scrub_phantom_surface_claims(reply: str, project_id: Optional[UUID]) -> str:
+    """Strip sentences that reference a project surface that doesn't exist.
+
+    Plain threads are just chats (no project attached). The AI keeps
+    hallucinating it has created/saved something in a 'project document' /
+    'project panel' — none of which exist for a plain thread. Strip any
+    sentence containing one of those phrases. If scrubbing leaves nothing,
+    return a plain-thread fallback so the user sees something actionable
+    instead of the hallucinated claim.
+
+    For threads inside a project, leave replies alone — the project's
+    surfaces are real.
+    """
+    if project_id is not None or not reply:
+        return reply
+    lower_phrases = [p.lower() for p in _PHANTOM_SURFACE_PHRASES]
+    out_lines: list[str] = []
+    for line in reply.splitlines():
+        parts = re.split(r"(?<=[.!?])\s+", line)
+        kept = [p for p in parts if not any(ph in p.lower() for ph in lower_phrases)]
+        out_lines.append(" ".join(kept))
+    cleaned = "\n".join(out_lines)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    if not cleaned:
+        return _PHANTOM_FALLBACK_REPLY
+    # If scrubbing produced a stub (short, no real content left), replace it
+    # too. Heuristic: under 40 chars with no alphanumeric draft signal.
+    if len(cleaned) < 40 and not re.search(r"[A-Za-z]{5,}.*[A-Za-z]{5,}.*[A-Za-z]{5,}", cleaned):
+        return _PHANTOM_FALLBACK_REPLY
+    return cleaned
+
+
 def _extract_emails_from_text(text: str) -> list[str]:
     if not text:
         return []
@@ -1758,6 +1818,8 @@ async def _apply_ai_updates_and_operations(
             action_note = "I understood the command, but couldn't complete it right now."
 
         assistant_reply = _append_action_note(assistant_reply, action_note)
+
+    assistant_reply = _scrub_phantom_surface_claims(assistant_reply, project_id)
 
     return current_state, current_version, pdf_url, changed, assistant_reply
 
