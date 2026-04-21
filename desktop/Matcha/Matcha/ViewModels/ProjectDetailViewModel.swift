@@ -15,6 +15,9 @@ class ProjectDetailViewModel {
             let proj = try await service.getProjectDetail(id: id)
             await MainActor.run {
                 project = proj
+                if activeChatId == nil {
+                    activeChatId = proj.chats?.first?.id
+                }
                 isLoading = false
             }
         } catch {

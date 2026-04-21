@@ -156,12 +156,13 @@ struct ProjectListView: View {
             }
         }
         .background(Color.appBackground)
-        .task { await load() }
+        .task(id: appState.projectsListGeneration) { await load() }
         .sheet(isPresented: $showNewBlog) {
             NewBlogSheet { proj in
                 projects.insert(proj, at: 0)
                 appState.selectedProjectId = proj.id
                 appState.selectedThreadId = nil
+                appState.projectsListGeneration &+= 1
             }
         }
     }

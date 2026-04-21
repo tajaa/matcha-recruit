@@ -144,6 +144,7 @@ struct ContentView: View {
                                     NewBlogSheet { proj in
                                         appState.selectedProjectId = proj.id
                                         appState.selectedThreadId = nil
+                                        appState.projectsListGeneration &+= 1
                                     }
                                 }
                             }
@@ -440,6 +441,7 @@ struct ContentView: View {
                     appState.selectedProjectId = proj.id
                     appState.selectedThreadId = nil
                     appState.selectedChannelId = nil
+                    appState.projectsListGeneration &+= 1
                     isCreatingProject = false
                 }
             } catch {
