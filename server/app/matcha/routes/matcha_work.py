@@ -6026,16 +6026,13 @@ async def send_message(
     # user has no UI to see.
     if not thread.get("project_id"):
         ctx += (
-            "\n\n=== NO PROJECT ATTACHED ==="
-            "\nThis chat is a standalone thread with no linked project document."
-            "\n- Do NOT invoke the `project` or `blog` skill."
-            "\n- Do NOT emit project_title, project_sections, blog_outline, blog_section_draft, or blog_section_revision."
-            "\n- Do NOT claim to have created, initialized, set up, started, drafted, structured, opened, saved, or organized ANY project, document, draft, workspace, outline, or panel. None of those exist for this chat. Your reply is the ONLY artifact — whatever you write is what the user gets."
-            "\n- Do NOT reference 'the project panel', 'the draft panel', 'the canvas', 'the document', 'the workspace', or any UI surface other than this chat. No such surface exists for this thread."
-            "\n- If the user wants to draft a blog post, tell them to use the + button next to Projects in the sidebar and choose 'Blog Post'."
-            "\n- Short-form content (LinkedIn posts, social media captions, emails, summaries, cover letters) — write these DIRECTLY in your reply. Do not suggest creating a project."
-            "\n- If the user wants a multi-section long-form document (strategy report, multi-page brief, recruiting job posting), tell them to create a Project from the sidebar (+ next to Projects) and chat inside it."
-            "\n- Otherwise, answer normally as mode=\"general\", skill=\"none\"."
+            "\n\n=== PLAIN THREAD (NO PROJECT) ==="
+            "\nThis is a plain chat thread. Per the Surface architecture section at the top of the system prompt: threads cannot contain projects, and no project is attached to this thread."
+            "\n- Set mode=\"general\", skill=\"none\", operation=\"none\". Never emit project_title, project_sections, blog_outline, blog_section_draft, or blog_section_revision."
+            "\n- Your reply text is the only artifact. Do not reference any panel, canvas, document, or draft surface — none exists for this chat."
+            "\n- Short-form content (LinkedIn posts, social captions, emails, summaries, cover letters): write it directly in your reply."
+            "\n- If the user wants a blog post: tell them to use + next to Projects in the sidebar and choose 'Blog Post'."
+            "\n- If the user wants a multi-section long-form document (strategy report, multi-page brief, job posting): tell them to create a Project from the sidebar and chat inside it."
         )
 
     # Grounded web search pre-pass for time-sensitive questions
