@@ -224,6 +224,9 @@ def _validate_updates_for_skill(skill: str, updates: dict) -> dict:
         valid_fields = VALID_INVENTORY_FIELDS
     elif skill == "project":
         valid_fields = VALID_PROJECT_FIELDS
+    elif skill == "blog":
+        from ..services.matcha_work_ai import BLOG_FIELDS as _BLOG_FIELDS
+        valid_fields = set(_BLOG_FIELDS)
     else:
         return {}
     return {k: v for k, v in updates.items() if k in valid_fields}
@@ -1172,7 +1175,9 @@ Current outline (sections, in order — use these exact ids when emitting blog_s
 {sec_block}
 
 CRITICAL RULES:
-- You are ALREADY INSIDE this blog draft. Do NOT claim to 'create a project', 'initialize a project', 'set up a project', or 'start a new project/document' — the project exists and the user is viewing it. Refer to it as 'this blog', 'your draft', 'the post', or by its title. Never say 'in the project panel' — say 'in the Preview tab' or 'your draft' instead.
+- Skill for this chat is ALWAYS "blog". NEVER emit skill="project". NEVER emit project_title, project_sections, or project_status — those fields are for a different kind of document and will be silently dropped here.
+- You are ALREADY INSIDE this blog draft. Do NOT claim to 'create a project', 'initialize a project', 'set up a project', 'start a new project/document', or 'structure ideas into a project' — the blog already exists and the user is viewing it. Refer to it as 'this blog', 'your draft', 'the post', or by its title. Never say 'as a project', 'in the project panel', or 'in the project document' — say 'in the Preview tab' or 'your draft' instead.
+- To create initial sections for a new blog with no sections yet: emit blog_outline (an array of {{title, bullets: [string]}} objects). The UI will turn those into editable sections. Do NOT use project_sections — that will NOT appear in the blog sidebar.
 - First-pass OUTLINE requests: emit blog_outline as an array of {{title, bullets: [string]}} objects (4–8 sections, 2–4 bullets each). Do NOT draft section content on the same turn.
 - Section drafting: emit blog_section_draft as a JSON object keyed by section_id: {{"<section_id>": "<markdown content>", ...}}. Use section_ids from the list above — never invent one. 200–450 words unless asked otherwise.
 - Revisions: emit blog_section_revision with {{section_id, content, change_summary}}.
@@ -1290,11 +1295,27 @@ async def _apply_ai_updates_and_operations(
     project_id: Optional[UUID] = None,
 ) -> tuple[dict, int, Optional[str], bool, str]:
     """Apply structured updates, execute supported operations, and return updated response state."""
+    # If the thread belongs to a blog project, force skill="blog" regardless of
+    # what the AI claimed. The AI keeps emitting skill="project" + project_sections
+    # for blog drafts; if we let that through, the state gets a phantom project
+    # document that locks future inference into "project" skill forever.
+    project_type_hint: Optional[str] = None
+    if project_id:
+        try:
+            async with get_connection() as _conn:
+                project_type_hint = await _conn.fetchval(
+                    "SELECT project_type FROM mw_projects WHERE id = $1", project_id
+                )
+        except Exception:
+            project_type_hint = None
+
     skill = ai_resp.skill or _infer_skill_from_state(current_state)
+    if project_type_hint == "blog":
+        skill = "blog"
     # If skill is not a known document type (e.g. "none" or "chat"), fall back to
     # inferring from the update keys themselves so workbook/review/etc. updates
     # created on a fresh thread aren't silently dropped.
-    if skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
+    elif skill not in ("offer_letter", "review", "workbook", "onboarding", "presentation", "handbook", "policy", "resume_batch", "inventory", "project", "blog") and isinstance(ai_resp.structured_update, dict) and ai_resp.structured_update:
         skill_from_updates = _infer_skill_from_state(ai_resp.structured_update)
         if skill_from_updates != "chat":
             skill = skill_from_updates
@@ -1333,6 +1354,29 @@ async def _apply_ai_updates_and_operations(
             for _bk in _BLOG_FIELDS:
                 if _bk in safe_updates:
                     blog_directives[_bk] = safe_updates.pop(_bk)
+            # In a blog chat, project_* fields would be caught by _validate_updates_for_skill
+            # above, but in case the AI sneaks them through (e.g. raw emission under skill="project"
+            # that got force-reclassified to "blog"), also scrub them from the raw update dict
+            # before any other code inspects it. Additionally: if the AI emitted project_title /
+            # project_sections meant to seed the blog outline, convert project_sections into a
+            # blog_outline directive so the work isn't lost.
+            raw = ai_resp.structured_update if isinstance(ai_resp.structured_update, dict) else {}
+            if project_type_hint == "blog" and "blog_outline" not in blog_directives:
+                proj_secs = raw.get("project_sections")
+                if isinstance(proj_secs, list) and proj_secs:
+                    converted = []
+                    for s in proj_secs:
+                        if not isinstance(s, dict):
+                            continue
+                        title = (s.get("title") or "").strip()
+                        content = (s.get("content") or "").strip()
+                        bullets = [b.strip() for b in re.split(r"\n+|•|-\s", content) if b.strip()][:4]
+                        if title:
+                            converted.append({"title": title, "bullets": bullets or [content[:140]] if content else []})
+                    if converted:
+                        blog_directives["blog_outline"] = converted
+            for _pk in ("project_title", "project_sections", "project_status"):
+                safe_updates.pop(_pk, None)
 
         # No-project guard: don't persist project_title/project_sections on
         # threads with no linked project. Otherwise the state accumulates a
@@ -1474,15 +1518,36 @@ async def _apply_ai_updates_and_operations(
                     current_version = cover_result["version"]
                     current_state = cover_result["current_state"]
 
-    # Apply blog section drafts / revisions to the project's sections array.
-    # blog_outline and blog_title_suggestions are informational — AI described them
-    # in the reply text — so we only act on draft/revision keys here.
+    # Apply blog directives (outline / section drafts / revisions) to the project's
+    # sections array. blog_title_suggestions is informational — AI describes the
+    # options in the reply text.
     if blog_directives and project_id:
         from ..services import project_service as _blog_proj_svc
         try:
             existing_secs = list(await _blog_proj_svc.get_sections(project_id))
             secs_by_id = {s.get("id"): i for i, s in enumerate(existing_secs) if s.get("id")}
             blog_secs_changed = False
+
+            # blog_outline: create initial sections from an array of {title, bullets}.
+            # Only applies when there are no existing sections — never wipe user edits.
+            outline = blog_directives.get("blog_outline")
+            if isinstance(outline, list) and outline and not existing_secs:
+                import uuid as _uuid
+                new_secs = []
+                for item in outline:
+                    if not isinstance(item, dict):
+                        continue
+                    t = (item.get("title") or "").strip()
+                    if not t:
+                        continue
+                    bullets = item.get("bullets") or []
+                    bullets = [str(b).strip() for b in bullets if isinstance(b, (str, int, float)) and str(b).strip()]
+                    content = "\n".join(f"- {b}" for b in bullets) if bullets else ""
+                    new_secs.append({"id": _uuid.uuid4().hex[:12], "title": t, "content": content})
+                if new_secs:
+                    existing_secs = new_secs
+                    secs_by_id = {s["id"]: i for i, s in enumerate(existing_secs)}
+                    blog_secs_changed = True
 
             draft = blog_directives.get("blog_section_draft")
             if isinstance(draft, dict):
