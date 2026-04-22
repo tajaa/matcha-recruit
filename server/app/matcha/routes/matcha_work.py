@@ -1503,6 +1503,7 @@ async def _apply_ai_updates_and_operations(
     # Apply blog directives atomically under a row lock (prevents lost updates
     # from concurrent manual edits). blog_title_suggestions is informational —
     # AI describes options in reply text, no persistence.
+    blog_changes_applied = False
     if blog_directives and project_id:
         from ..services import project_service as _blog_proj_svc
         try:
@@ -1515,8 +1516,44 @@ async def _apply_ai_updates_and_operations(
             )
             if blog_secs_changed:
                 changed = True
+                blog_changes_applied = True
         except Exception:
             logger.warning("Failed to apply blog section directives for project %s", project_id, exc_info=True)
+
+    # "Say it, do it" enforcement for blog chats. If the AI claimed to have
+    # added/drafted/written/updated something but no directive actually
+    # applied, strip the claim from the reply and replace it with an honest
+    # propose-then-act line. Eliminates the pattern where the AI says
+    # "I've put together an outline in the Write tab" while the sections
+    # panel stays empty.
+    if project_type_hint == "blog" and not blog_changes_applied and assistant_reply:
+        claim_patterns = [
+            r"\bI['’]ve\s+(?:put\s+together|added|drafted|written|written\s+up|updated|revised|structured|consolidated|created|outlined|put\s+down|laid\s+out|pulled\s+together|organized|compiled|assembled|set\s+up|composed)\b[^.!?]*[.!?]",
+            r"\b(?:here['’]s|I['’]ve\s+got)\s+(?:an?|the|your)\s+(?:initial\s+)?outline[^.!?]*[.!?]",
+            r"\bin\s+the\s+(?:Write|Preview|Publish)\s+tab[^.!?]*[.!?]",
+            r"\bthe\s+outline\s+is\s+(?:now\s+)?in[^.!?]*[.!?]",
+            r"\b(?:added|updated|populated|seeded|filled)\s+(?:the\s+)?(?:outline|sections?|draft)[^.!?]*[.!?]",
+        ]
+        import re as _re_claim
+        stripped_reply = assistant_reply
+        found_claim = False
+        for pat in claim_patterns:
+            if _re_claim.search(pat, stripped_reply, flags=_re_claim.IGNORECASE):
+                found_claim = True
+                stripped_reply = _re_claim.sub(pat, "", stripped_reply, flags=_re_claim.IGNORECASE)
+        if found_claim:
+            stripped_reply = _re_claim.sub(r"[ \t]+", " ", stripped_reply)
+            stripped_reply = _re_claim.sub(r"\s+([.!?,;])", r"\1", stripped_reply)
+            stripped_reply = _re_claim.sub(r"\n{3,}", "\n\n", stripped_reply).strip()
+            honest_tail = (
+                "\n\n(Note: I haven't actually written that to the Write tab yet — "
+                "tell me to go ahead and I'll draft the outline now.)"
+            )
+            assistant_reply = (stripped_reply or "Ready when you are.") + honest_tail
+            logger.warning(
+                "[MW-blog] scrubbed phantom outline claim from reply for project %s thread %s",
+                project_id, thread_id,
+            )
 
     operation = str(ai_resp.operation or "none").strip().lower()
     if force_send_draft and operation in {"none", "create", "update", "track"}:
