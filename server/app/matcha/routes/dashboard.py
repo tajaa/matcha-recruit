@@ -674,38 +674,39 @@ async def _detect_risk_patterns(company_id: UUID) -> dict:
         except Exception:
             pass
 
-        # 6. Wage violations (salary vs state minimum)
+        # 6. Wage violations — delegate to the same per-location impact
+        #    calculator that powers /stats.wage_alerts and the risk assessment
+        #    page. Previous version had `e.location_id` (wrong column — real
+        #    FK is `work_location_id`) and a hardcoded CA-only threshold, so
+        #    the query silently errored out and no wage flags ever appeared.
         try:
-            wage_rows = await conn.fetch(
-                """SELECT e.department, e.job_title, e.pay_rate, e.work_state, bl.city, bl.state,
-                          COUNT(*) OVER (PARTITION BY COALESCE(bl.state, e.work_state)) AS state_count
-                   FROM employees e
-                   LEFT JOIN business_locations bl ON e.location_id = bl.id
-                   WHERE e.org_id = $1 AND e.termination_date IS NULL
-                     AND e.pay_classification = 'exempt'
-                     AND e.pay_rate IS NOT NULL AND e.pay_rate > 0
-                   LIMIT 200""",
+            from ...core.services.compliance_service import get_employee_impact_for_location
+
+            location_rows = await conn.fetch(
+                "SELECT id, city, state FROM business_locations WHERE company_id = $1 AND is_active = true",
                 company_id,
             )
-            ca_min = 70_405
-            violations = []
-            for r in wage_rows:
-                state = (r.get("state") or r.get("work_state") or "").upper()
-                if state in ("CA", "CALIFORNIA"):
-                    salary = float(r["pay_rate"]) if r["pay_rate"] else 0
-                    if 0 < salary < ca_min:
+            violations: list[dict] = []
+            for loc in location_rows:
+                impact = await get_employee_impact_for_location(loc["id"], company_id)
+                vbt = impact.get("violations_by_rate_type", {}) or {}
+                for rate_type, items in vbt.items():
+                    for v in items:
                         violations.append({
-                            "department": r.get("department") or "Unknown",
-                            "job_title": r.get("job_title") or "Unknown",
-                            "salary": salary,
-                            "minimum": ca_min,
-                            "state": "CA",
-                            "location": f"{r.get('city') or ''}, CA".strip(", "),
+                            "employee_id": v.get("employee_id"),
+                            "employee_name": v.get("employee_name") or "Employee",
+                            "pay_classification": v.get("pay_classification") or rate_type,
+                            "salary": float(v.get("pay_rate") or 0),
+                            "minimum": float(v.get("threshold") or 0),
+                            "shortfall": float(v.get("shortfall") or 0),
+                            "state": (loc.get("state") or "").upper(),
+                            "location": f"{loc.get('city') or ''}, {loc.get('state') or ''}".strip(", "),
+                            "rate_type": rate_type,
                         })
             if violations:
                 patterns["wage_violations"] = violations
         except Exception:
-            pass
+            logger.exception("Failed to compute wage violations for dashboard flags")
 
         # 7. Stale policies
         try:
@@ -797,11 +798,24 @@ def _deterministic_flags_from_patterns(patterns: dict) -> list[dict]:
     flags: list[dict] = []
 
     for v in patterns.get("wage_violations", []):
+        name = v.get("employee_name") or "Employee"
+        salary = float(v.get("salary") or 0)
+        minimum = float(v.get("minimum") or 0)
+        state = v.get("state") or ""
+        classification = v.get("pay_classification") or ""
+        is_exempt = classification == "exempt" or v.get("rate_type") == "exempt_salary"
+        label = "exempt minimum salary" if is_exempt else "minimum wage"
+        salary_str = f"${salary:,.0f}" if is_exempt else f"${salary:,.2f}/hr"
+        minimum_str = f"${minimum:,.0f}" if is_exempt else f"${minimum:,.2f}/hr"
         flags.append({
             "category": "Compliance",
-            "location_subject": v.get("location") or "CA",
-            "description": f"{v['job_title']} in {v['department']} is paid ${v['salary']:,.0f} but CA minimum is ${v['minimum']:,}.",
-            "recommendation": f"Change to hourly or increase salary to ${v['minimum']:,}.",
+            "location_subject": v.get("location") or state or "Company-wide",
+            "description": f"{name} is paid {salary_str} but the {state} {label} is {minimum_str}.",
+            "recommendation": (
+                f"Raise {name}'s salary to {minimum_str} or reclassify as non-exempt."
+                if is_exempt
+                else f"Raise {name}'s hourly rate to {minimum_str}."
+            ),
             "severity": "critical",
             "source_type": "wage",
             "link": "/app/employees",
