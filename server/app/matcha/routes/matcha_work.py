@@ -6450,6 +6450,12 @@ async def send_message_stream(
             await doc_svc.apply_update(thread_id, {"images": []}, diff_summary="Consumed inline chat attachments")
         except Exception:
             logger.warning("Failed to clear thread images after attaching to message %s", thread_id, exc_info=True)
+        # apply_update persists to the DB but the in-memory `thread` dict we
+        # fetched earlier still holds the old image URLs. Mirror the clear
+        # locally so the complete event returns current_state.images == []
+        # and the client doesn't re-render the attachments in the text box.
+        if isinstance(thread.get("current_state"), dict):
+            thread["current_state"]["images"] = []
 
     # Fetch message history + company profile + context summary in parallel
     messages, profile, (context_summary, summary_at_count) = await asyncio.gather(
