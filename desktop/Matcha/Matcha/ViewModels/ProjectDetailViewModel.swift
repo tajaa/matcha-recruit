@@ -29,6 +29,20 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Refetch project without touching activeChatId or isLoading. Called when
+    /// a child chat stream completes and may have mutated sections / posting /
+    /// blog data on the server. Using loadProject here would reset activeChatId
+    /// and flicker the loading state.
+    func refreshProject() async {
+        guard let pid = project?.id else { return }
+        do {
+            let proj = try await service.getProjectDetail(id: pid)
+            await MainActor.run { project = proj }
+        } catch {
+            // Silent — background refresh; don't clobber user-facing errors.
+        }
+    }
+
     func addSection(title: String) async {
         guard let pid = project?.id else { return }
         do {

@@ -44,6 +44,13 @@ struct ProjectDetailView: View {
                 Task { await chatVM.loadThread(id: chatId) }
             }
         }
+        // Chat streams mutate project data (sections for blog, posting for
+        // recruiting, consultation fields, etc.) via server-side directives.
+        // Refetch the project when a stream completes so the panel reflects
+        // the new state without requiring the user to navigate away and back.
+        .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
+            Task { await viewModel.refreshProject() }
+        }
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 if let project = viewModel.project {
