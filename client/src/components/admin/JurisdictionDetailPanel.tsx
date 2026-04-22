@@ -78,6 +78,45 @@ function getCategoryLabel(cat: string) {
   return CATEGORY_LABELS[cat] ?? cat
 }
 
+// Read an SSE stream with a proper line-buffered decoder. The previous
+// inline version called `decoder.decode(value).split('\n')` without buffering,
+// which dropped any line that straddled a chunk boundary — including the
+// final `data: [DONE]` — so callers never fired their post-stream refetch and
+// the UI showed stale (pre-scan) data even after the scan completed.
+async function readSSEStream(
+  res: Response,
+  onEvent: (ev: any) => void,
+  onDone: () => void,
+): Promise<void> {
+  const reader = res.body?.getReader()
+  if (!reader) { onDone(); return }
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let done = false
+  const flush = (line: string) => {
+    if (!line.startsWith('data: ')) return
+    const data = line.slice(6)
+    if (data === '[DONE]') { done = true; return }
+    try { onEvent(JSON.parse(data)) } catch {}
+  }
+  while (!done) {
+    const { done: streamDone, value } = await reader.read()
+    if (streamDone) break
+    buffer += decoder.decode(value, { stream: true })
+    let nl: number
+    while ((nl = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, nl).replace(/\r$/, '')
+      buffer = buffer.slice(nl + 1)
+      if (line) flush(line)
+      if (done) break
+    }
+  }
+  // Flush any trailing line (server usually terminates with \n, but be safe).
+  const tail = (buffer + decoder.decode()).trim()
+  if (tail && !done) flush(tail)
+  onDone()
+}
+
 
 // ── Component ──────────────────────────────────────────────────────────────────
 
@@ -115,27 +154,14 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     const base = import.meta.env.VITE_API_URL || '/api'
     fetch(`${base}/admin/jurisdictions/${id}/check`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setScanning(false); fetchDetail(); onCheckComplete?.(); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setScanning(false); return }
-            if (ev.message) setScanMessages((p) => [...p, ev.message])
-          } catch {}
-        }
-      }
-      setScanning(false)
-    }).catch(() => setScanning(false))
+    }).then((res) => readSSEStream(
+      res,
+      (ev) => {
+        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
+        if (ev.message) setScanMessages((p) => [...p, ev.message])
+      },
+      () => { setScanning(false); fetchDetail(); onCheckComplete?.() },
+    )).catch(() => setScanning(false))
   }
 
   function startSpecialtyCheck() {
@@ -144,27 +170,14 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     const base = import.meta.env.VITE_API_URL || '/api'
     fetch(`${base}/admin/jurisdictions/${id}/check-specialty`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setSpecialtyRunning(false); fetchDetail(); onCheckComplete?.(); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setSpecialtyRunning(false); return }
-            if (ev.message) setScanMessages((p) => [...p, ev.message])
-          } catch {}
-        }
-      }
-      setSpecialtyRunning(false)
-    }).catch(() => setSpecialtyRunning(false))
+    }).then((res) => readSSEStream(
+      res,
+      (ev) => {
+        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
+        if (ev.message) setScanMessages((p) => [...p, ev.message])
+      },
+      () => { setSpecialtyRunning(false); fetchDetail(); onCheckComplete?.() },
+    )).catch(() => setSpecialtyRunning(false))
   }
 
   function startMedicalCheck() {
@@ -173,27 +186,14 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     const base = import.meta.env.VITE_API_URL || '/api'
     fetch(`${base}/admin/jurisdictions/${id}/check-medical-compliance`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setMedicalRunning(false); fetchDetail(); onCheckComplete?.(); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setMedicalRunning(false); return }
-            if (ev.message) setScanMessages((p) => [...p, ev.message])
-          } catch {}
-        }
-      }
-      setMedicalRunning(false)
-    }).catch(() => setMedicalRunning(false))
+    }).then((res) => readSSEStream(
+      res,
+      (ev) => {
+        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
+        if (ev.message) setScanMessages((p) => [...p, ev.message])
+      },
+      () => { setMedicalRunning(false); fetchDetail(); onCheckComplete?.() },
+    )).catch(() => setMedicalRunning(false))
   }
 
   function startLifeSciCheck() {
@@ -202,27 +202,14 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     const base = import.meta.env.VITE_API_URL || '/api'
     fetch(`${base}/admin/jurisdictions/${id}/check-life-sciences`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setLifeSciRunning(false); fetchDetail(); onCheckComplete?.(); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setLifeSciRunning(false); return }
-            if (ev.message) setScanMessages((p) => [...p, ev.message])
-          } catch {}
-        }
-      }
-      setLifeSciRunning(false)
-    }).catch(() => setLifeSciRunning(false))
+    }).then((res) => readSSEStream(
+      res,
+      (ev) => {
+        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
+        if (ev.message) setScanMessages((p) => [...p, ev.message])
+      },
+      () => { setLifeSciRunning(false); fetchDetail(); onCheckComplete?.() },
+    )).catch(() => setLifeSciRunning(false))
   }
 
   function startFedSourcesCheck() {
@@ -231,30 +218,17 @@ export default function JurisdictionDetailPanel({ id, city, state, categoriesMis
     const base = import.meta.env.VITE_API_URL || '/api'
     fetch(`${base}/admin/jurisdictions/${id}/check-federal-sources`, {
       method: 'POST', headers: { Authorization: `Bearer ${token}` },
-    }).then(async (res) => {
-      const reader = res.body?.getReader()
-      const decoder = new TextDecoder()
-      if (!reader) return
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        for (const line of decoder.decode(value).split('\n')) {
-          if (line.startsWith(': ')) continue
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6)
-          if (data === '[DONE]') { setFedSourcesRunning(false); return }
-          try {
-            const ev = JSON.parse(data)
-            if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); setFedSourcesRunning(false); return }
-            if (ev.type === 'preview') {
-              setFedPreview({ results: ev.results, by_category: ev.by_category, total: ev.total })
-            }
-            if (ev.message) setScanMessages((p) => [...p, ev.message])
-          } catch {}
+    }).then((res) => readSSEStream(
+      res,
+      (ev) => {
+        if (ev.type === 'error') { setScanMessages((p) => [...p, `Error: ${ev.message}`]); return }
+        if (ev.type === 'preview') {
+          setFedPreview({ results: ev.results, by_category: ev.by_category, total: ev.total })
         }
-      }
-      setFedSourcesRunning(false)
-    }).catch(() => setFedSourcesRunning(false))
+        if (ev.message) setScanMessages((p) => [...p, ev.message])
+      },
+      () => setFedSourcesRunning(false),
+    )).catch(() => setFedSourcesRunning(false))
   }
 
   async function applyFedSources() {
