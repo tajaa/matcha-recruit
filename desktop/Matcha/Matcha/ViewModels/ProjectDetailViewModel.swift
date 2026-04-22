@@ -15,9 +15,13 @@ class ProjectDetailViewModel {
             let proj = try await service.getProjectDetail(id: id)
             await MainActor.run {
                 project = proj
-                if activeChatId == nil {
-                    activeChatId = proj.chats?.first?.id
-                }
+                // Always pick up the loaded project's first chat. The VM is
+                // persistent @State on ProjectDetailView, so switching to a
+                // different project (or creating a new one) reuses the same
+                // instance. Without this reset, activeChatId from the previous
+                // project leaks in, and chatVM renders the old project's
+                // chat in the new project's editor.
+                activeChatId = proj.chats?.first?.id
                 isLoading = false
             }
         } catch {
