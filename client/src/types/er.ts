@@ -74,6 +74,7 @@ export type SuggestedGuidanceCard = {
   priority: GuidancePriority
   blockers: string[]
   action: SuggestedGuidanceAction
+  interview_questions?: string[] | null
 }
 
 export type SuggestedGuidanceResponse = {

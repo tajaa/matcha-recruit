@@ -236,6 +236,10 @@ class SuggestedGuidanceCard(BaseModel):
     priority: GuidancePriority = "medium"
     blockers: list[str] = []
     action: SuggestedGuidanceAction
+    # Optional quick-start question list — populated when the card recommends
+    # an interview so the human investigator has a concrete jumping-off
+    # point. Null when the action isn't interview-oriented.
+    interview_questions: Optional[list[str]] = None
 
 
 class SuggestedGuidanceResponse(BaseModel):

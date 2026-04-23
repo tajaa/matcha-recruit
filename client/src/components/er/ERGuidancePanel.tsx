@@ -31,7 +31,13 @@ type ERGuidancePanelProps = {
   documentCount: number
   hasDescription: boolean
   caseStatus?: string
-  onActionClick?: (action: { type: string; label: string }) => void
+  onActionClick?: (action: {
+    type: string
+    label: string
+    tab?: string | null
+    analysis_type?: string | null
+    search_query?: string | null
+  }) => void
   onBeginDetermination?: (outcome: ERCaseOutcome, adminNotes: string, outcomeDetail?: OutcomeOption) => Promise<void>
   skipCache?: boolean
   onCacheSkipped?: () => void
@@ -405,11 +411,30 @@ export function ERGuidancePanel({ caseId, guidance, onGuidanceChange, onGuidance
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => onActionClick?.({ type: card.action.type, label: card.action.label })}
+                  onClick={() => onActionClick?.({
+                    type: card.action.type,
+                    label: card.action.label,
+                    tab: card.action.tab,
+                    analysis_type: card.action.analysis_type,
+                    search_query: card.action.search_query,
+                  })}
                 >
                   {card.action.label}
                 </Button>
               </div>
+
+              {card.interview_questions && card.interview_questions.length > 0 && (
+                <div className="mt-3 rounded-md border border-zinc-800 bg-zinc-900/40 px-3 py-2">
+                  <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 mb-1.5">
+                    Suggested questions
+                  </p>
+                  <ol className="list-decimal pl-4 space-y-1 text-xs text-zinc-300">
+                    {card.interview_questions.map((q, i) => (
+                      <li key={i}>{q}</li>
+                    ))}
+                  </ol>
+                </div>
+              )}
             </Card>
           ))}
         </div>

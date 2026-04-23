@@ -474,7 +474,14 @@ Return ONLY a JSON object with this structure:
         "tab": null,
         "analysis_type": null,
         "search_query": null
-      }}
+      }},
+      "interview_questions": [
+        "Walk me through what you observed on [specific date/time] in your own words.",
+        "What did [subject] say or do immediately before the incident?",
+        "Who else was present, and what were they doing?",
+        "Had you seen similar behavior or conditions before this incident?",
+        "Is there documentation, messages, or records we should pull to corroborate this?"
+      ]
     }}
   ]
 }}
@@ -498,6 +505,7 @@ Constraints:
 9. Focus on what the HUMAN must do: interview people, collect records, request documents. Do NOT recommend running system analyses that are already completed.
 10. Always use real names from the documents — never use generic placeholders like "the employee" or "reporting party" when names are available.
 11. In healthcare settings, never recommend HR interview patients, patient family members, or other non-employees. Use Patient Advocate or Risk Management channels instead.
+12. Whenever the card recommends a witness interview (action.type == "upload_document" for interview notes, or title/recommendation references interviewing a person), include an "interview_questions" array with 4-6 concrete questions the interviewer should ask. Reference specific facts, names, dates, and events from the case evidence — do not emit generic templates. Omit the field (or set null) when the card is not interview-related.
 """
 
 

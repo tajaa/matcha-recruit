@@ -244,6 +244,27 @@ export default function ERCaseDetail() {
                 caseStatus={case_.status}
                 skipCache={skipGuidanceCache}
                 onCacheSkipped={() => setSkipGuidanceCache(false)}
+                onActionClick={(action) => {
+                  // Route Guidance card buttons to the correct tab. The click
+                  // was previously a no-op because no handler was wired.
+                  switch (action.type) {
+                    case 'upload_document':
+                      setTab('documents')
+                      break
+                    case 'search_evidence':
+                      setTab('evidence')
+                      break
+                    case 'open_tab':
+                      if (action.tab === 'timeline') setTab('timeline')
+                      else if (action.tab === 'discrepancies') setTab('discrepancies')
+                      else if (action.tab === 'policy') setTab('policy')
+                      else if (action.tab === 'search') setTab('evidence')
+                      break
+                    case 'run_analysis':
+                      // Stay on guidance — generating runs from this panel.
+                      break
+                  }
+                }}
                 onBeginDetermination={async (outcome: ERCaseOutcome, adminNotes: string, outcomeDetail?: OutcomeOption) => {
                   await updateCase({ status: 'closed' as ERCaseStatus, outcome })
                   try {
