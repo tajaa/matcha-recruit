@@ -290,6 +290,18 @@ class ThreadDetailViewModel {
             let updatedState = data.currentState ?? currentState
             currentState = updatedState
 
+            // If the user's just-sent message carried attachments, force-clear
+            // the thread-state image chips. The server is supposed to empty
+            // current_state.images once it binds the URLs to the user
+            // message metadata, but users still saw chips re-appear after
+            // send — either the returned state races the clear or a cached
+            // copy pre-dates the fix. This client-side guard is idempotent
+            // with the server fix and makes the chip-reappearance bug
+            // impossible regardless.
+            if !(userMessage.metadata?.attachments ?? []).isEmpty {
+                currentState["images"] = AnyCodable([String]())
+            }
+
             if let v = data.version {
                 thread?.version = v
             }
