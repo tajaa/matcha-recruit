@@ -317,7 +317,23 @@ struct ChatPanelView: View {
                         .foregroundColor(.white)
                         .lineLimit(1...6)
                         .padding(.vertical, 8)
-                        .onSubmit { send() }
+                        // Plain Return sends; Shift+Return inserts a newline.
+                        // .onSubmit fired on both plain and Shift+Return in
+                        // the vertical-axis TextField, so users couldn't
+                        // break thoughts across lines. onKeyPress lets us
+                        // inspect modifiers — we handle plain Return here
+                        // and append a literal newline for Shift+Return
+                        // (cursor-position-aware insertion would need
+                        // NSTextView integration; appending is the standard
+                        // chat-app compromise).
+                        .onKeyPress(.return) { press in
+                            if press.modifiers.contains(.shift) {
+                                inputText += "\n"
+                                return .handled
+                            }
+                            send()
+                            return .handled
+                        }
 
                     Button { send() } label: {
                         Image(systemName: "arrow.up.circle.fill")
