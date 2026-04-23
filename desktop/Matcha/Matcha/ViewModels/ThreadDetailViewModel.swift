@@ -259,6 +259,22 @@ class ThreadDetailViewModel {
                     await MainActor.run { self.errorMessage = priorError }
                 }
             }
+
+            // Final guard: whether the send succeeded, partially succeeded,
+            // or errored, if the user attached images to this send we treat
+            // them as consumed from the composer. Without this, an
+            // error-path reload pulls server-side current_state that may
+            // still hold the pending images (e.g. failed before the
+            // server-side clear, or a cached read slipped through) and the
+            // chips re-appear in the text box as if the send never
+            // happened. User intent is "these images belong to the message
+            // I just sent" — reflect that locally regardless of the
+            // server's eventual-consistency state.
+            if !pendingImages.isEmpty {
+                await MainActor.run {
+                    currentState["images"] = AnyCodable([String]())
+                }
+            }
         }
         streamingTask = task
         await task.value
