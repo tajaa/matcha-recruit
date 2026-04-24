@@ -312,12 +312,30 @@ struct ProjectDetailView: View {
                     statChip(icon: "person.2", label: "\(project.collaborators?.count ?? 0) collaborators")
                 }
 
-                if let collabs = project.collaborators, !collabs.isEmpty {
-                    Divider().opacity(0.3).padding(.top, 6)
+                Divider().opacity(0.3).padding(.top, 6)
+
+                HStack {
                     Text("COLLABORATORS")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundColor(.secondary)
                         .tracking(0.5)
+                    Spacer()
+                    Button { showCollaborators = true } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.badge.plus").font(.system(size: 10))
+                            Text("Invite").font(.system(size: 11, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.matcha600)
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Invite a collaborator to this project")
+                }
+
+                if let collabs = project.collaborators, !collabs.isEmpty {
                     ForEach(collabs) { c in
                         HStack(spacing: 8) {
                             Circle().fill(Color.matcha500).frame(width: 22, height: 22)
@@ -334,6 +352,11 @@ struct ProjectDetailView: View {
                             }
                         }
                     }
+                } else {
+                    Text("No collaborators yet — click Invite to add someone.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .padding(.vertical, 4)
                 }
                 Spacer()
             }
