@@ -289,9 +289,49 @@ class ThreadDetailViewModel {
     private func handleSSEEvent(_ event: SSEEvent, tempMessageId: String? = nil) {
         switch event.type {
         case "complete":
-            guard let data = event.data, let userMessage = data.userMessage else {
+            guard let data = event.data, let serverUserMessage = data.userMessage else {
                 streamingContent = ""
                 return
+            }
+
+            // Preserve optimistic attachments if the server didn't echo them on
+            // the user message. The streaming user_message should carry
+            // metadata.attachments that were persisted server-side, but when
+            // it arrives empty (old cached send, metadata decode hiccup,
+            // server roundtrip drop) we lose the image from the bubble. Pull
+            // the attachments off the optimistic placeholder we're about to
+            // remove, and graft them onto the real message.
+            var preservedAttachments: [MWMessageAttachment] = []
+            if let tempId = tempMessageId,
+               let optimistic = messages.first(where: { $0.id == tempId }),
+               let atts = optimistic.metadata?.attachments, !atts.isEmpty {
+                preservedAttachments = atts
+            }
+            let userMessage: MWMessage
+            if !preservedAttachments.isEmpty,
+               (serverUserMessage.metadata?.attachments ?? []).isEmpty {
+                let existingMeta = serverUserMessage.metadata
+                let mergedMeta = MWMessageMetadata(
+                    complianceReasoning: existingMeta?.complianceReasoning,
+                    aiReasoningSteps: existingMeta?.aiReasoningSteps,
+                    referencedCategories: existingMeta?.referencedCategories,
+                    referencedLocations: existingMeta?.referencedLocations,
+                    payerSources: existingMeta?.payerSources,
+                    affectedEmployees: existingMeta?.affectedEmployees,
+                    complianceGaps: existingMeta?.complianceGaps,
+                    attachments: preservedAttachments
+                )
+                userMessage = MWMessage(
+                    id: serverUserMessage.id,
+                    threadId: serverUserMessage.threadId,
+                    role: serverUserMessage.role,
+                    content: serverUserMessage.content,
+                    versionCreated: serverUserMessage.versionCreated,
+                    metadata: mergedMeta,
+                    createdAt: serverUserMessage.createdAt
+                )
+            } else {
+                userMessage = serverUserMessage
             }
 
             // Replace optimistic local message with the real server message
@@ -306,15 +346,11 @@ class ThreadDetailViewModel {
             let updatedState = data.currentState ?? currentState
             currentState = updatedState
 
-            // If the user's just-sent message carried attachments, force-clear
-            // the thread-state image chips. The server is supposed to empty
-            // current_state.images once it binds the URLs to the user
-            // message metadata, but users still saw chips re-appear after
-            // send — either the returned state races the clear or a cached
-            // copy pre-dates the fix. This client-side guard is idempotent
-            // with the server fix and makes the chip-reappearance bug
-            // impossible regardless.
-            if !(userMessage.metadata?.attachments ?? []).isEmpty {
+            // Force-clear thread-state image chips when the user message (or
+            // its optimistic twin) had attachments. Done unconditionally after
+            // the state overwrite so a server-returned non-empty images array
+            // never re-populates the composer chip.
+            if !(userMessage.metadata?.attachments ?? []).isEmpty || !preservedAttachments.isEmpty {
                 currentState["images"] = AnyCodable([String]())
             }
 
