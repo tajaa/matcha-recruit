@@ -134,39 +134,8 @@ struct ChatPanelView: View {
                 ProgressView().tint(.secondary)
                 Spacer()
             } else {
-                // Messages
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 12) {
-                            ForEach(viewModel.messages) { message in
-                                MessageBubbleView(message: message, lightMode: lightMode)
-                                    .id(message.id)
-                            }
-                            if viewModel.isStreaming {
-                                StreamingBubbleView(content: viewModel.streamingContent)
-                                    .id("streaming")
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 12)
-                    }
-                    .onChange(of: viewModel.messages.count) {
-                        if let lastId = viewModel.messages.last?.id {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo(lastId, anchor: .bottom)
-                            }
-                        }
-                    }
-                    .onChange(of: viewModel.isStreaming) {
-                        if viewModel.isStreaming {
-                            withAnimation { proxy.scrollTo("streaming", anchor: .bottom) }
-                        }
-                    }
-                }
-
+                messagesArea
                 Divider().opacity(0.3)
-
-                // Error banner
                 if let err = viewModel.errorMessage {
                     Text(err)
                         .font(.system(size: 12))
@@ -176,107 +145,9 @@ struct ChatPanelView: View {
                         .padding(.vertical, 6)
                         .background(Color.red.opacity(0.1))
                 }
-
-                // Image strip
-                if !viewModel.presentationImageURLs.isEmpty || viewModel.isUploadingImages {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
-                            ForEach(viewModel.presentationImageURLs, id: \.self) { url in
-                                ImageThumbnailView(
-                                    url: url,
-                                    onPreview: { previewURL = url },
-                                    onRemove: { Task { await viewModel.removeImage(url: url) } }
-                                )
-                            }
-
-                            if viewModel.isUploadingImages {
-                                ZStack {
-                                    Color.zinc800.cornerRadius(6)
-                                    ProgressView().controlSize(.small)
-                                }
-                                .frame(width: 64, height: 64)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8)
-                    }
-                    .background(Color.zinc900)
-                    Divider().opacity(0.3)
-                }
-
-                // Slide selection indicator
-                if let idx = viewModel.selectedSlideIndex {
-                    HStack(spacing: 6) {
-                        Image(systemName: "rectangle.on.rectangle")
-                            .font(.system(size: 11))
-                            .foregroundColor(.matcha500)
-                        let title = selectedSlideTitle
-                        Text("Slide \(idx + 1)\(title.map { ": \($0)" } ?? "")")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Color.matcha500.opacity(0.85))
-                        Spacer()
-                        Button {
-                            viewModel.selectedSlideIndex = nil
-                        } label: {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 10, weight: .medium))
-                                .foregroundColor(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .help("Clear slide selection")
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(Color.matcha500.opacity(0.08))
-                    .overlay(
-                        Rectangle()
-                            .frame(height: 1)
-                            .foregroundColor(Color.matcha500.opacity(0.2)),
-                        alignment: .top
-                    )
-                }
-
-                // Jurisdiction bar (compliance mode)
-                if viewModel.thread?.complianceMode == true {
-                    HStack(spacing: 6) {
-                        Image(systemName: "mappin")
-                            .font(.system(size: 11))
-                            .foregroundColor(.cyan)
-                        Text("JURISDICTIONS")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .tracking(0.5)
-
-                        // Show locations from compliance reasoning in recent messages
-                        if let meta = viewModel.messages.last(where: { $0.role == "assistant" })?.metadata,
-                           let locs = meta.complianceReasoning, !locs.isEmpty {
-                            ForEach(locs, id: \.locationId) { loc in
-                                Text(loc.locationLabel)
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.cyan)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.cyan.opacity(0.1))
-                                    .cornerRadius(4)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .stroke(Color.cyan.opacity(0.25), lineWidth: 1)
-                                    )
-                            }
-                        } else {
-                            Text("Active — locations will appear with responses")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                        }
-
-                        Spacer()
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .background(lightMode ? Color(white: 0.97) : Color.zinc900.opacity(0.5))
-                }
-
-                // Upload progress
+                imageStrip
+                slideBar
+                jurisdictionBar
                 if let progress = uploadProgress {
                     HStack(spacing: 6) {
                         ProgressView().controlSize(.mini)
@@ -289,66 +160,7 @@ struct ChatPanelView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(Color.matcha500.opacity(0.06))
                 }
-
-                // Input area
-                HStack(alignment: .bottom, spacing: 10) {
-                    // Image attach button
-                    let atLimit = viewModel.presentationImageURLs.count >= 4
-                    Button { pickImages() } label: {
-                        Image(systemName: "photo.badge.plus")
-                            .font(.system(size: 17))
-                            .foregroundColor(
-                                atLimit || viewModel.isUploadingImages
-                                ? Color.secondary.opacity(0.35)
-                                : .secondary
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(atLimit || viewModel.isUploadingImages)
-                    .help(
-                        atLimit
-                        ? "Maximum 4 images per thread"
-                        : "Upload images (\(viewModel.presentationImageURLs.count)/4)"
-                    )
-
-                    TextField(inputPlaceholder, text: $inputText, axis: .vertical)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 14))
-                        .foregroundColor(.white)
-                        .lineLimit(1...6)
-                        .padding(.vertical, 8)
-                        // Plain Return sends; Shift+Return inserts a newline.
-                        // .onSubmit fired on both plain and Shift+Return in
-                        // the vertical-axis TextField, so users couldn't
-                        // break thoughts across lines. onKeyPress lets us
-                        // inspect modifiers — we handle plain Return here
-                        // and append a literal newline for Shift+Return
-                        // (cursor-position-aware insertion would need
-                        // NSTextView integration; appending is the standard
-                        // chat-app compromise).
-                        .onKeyPress(.return) { press in
-                            if press.modifiers.contains(.shift) {
-                                inputText += "\n"
-                                return .handled
-                            }
-                            send()
-                            return .handled
-                        }
-
-                    Button { send() } label: {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 28))
-                            .foregroundColor(
-                                inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? .secondary : .matcha500
-                            )
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isStreaming)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(Color.zinc900)
+                inputBar
             }
         }
         .overlay(
@@ -369,6 +181,184 @@ struct ChatPanelView: View {
                 ImagePreviewSheet(url: url, onDismiss: { previewURL = nil })
             }
         }
+    }
+
+    @ViewBuilder private var messagesArea: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 12) {
+                    ForEach(viewModel.messages) { message in
+                        MessageBubbleView(message: message, lightMode: lightMode)
+                            .id(message.id)
+                    }
+                    if viewModel.isStreaming {
+                        StreamingBubbleView(content: viewModel.streamingContent)
+                            .id("streaming")
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+            }
+            .onChange(of: viewModel.messages.count) {
+                if let lastId = viewModel.messages.last?.id {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(lastId, anchor: .bottom)
+                    }
+                }
+            }
+            .onChange(of: viewModel.isStreaming) {
+                if viewModel.isStreaming {
+                    withAnimation { proxy.scrollTo("streaming", anchor: .bottom) }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var imageStrip: some View {
+        if !viewModel.presentationImageURLs.isEmpty || viewModel.isUploadingImages {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(viewModel.presentationImageURLs, id: \.self) { url in
+                        ImageThumbnailView(
+                            url: url,
+                            onPreview: { previewURL = url },
+                            onRemove: { Task { await viewModel.removeImage(url: url) } }
+                        )
+                    }
+                    if viewModel.isUploadingImages {
+                        ZStack {
+                            Color.zinc800.cornerRadius(6)
+                            ProgressView().controlSize(.small)
+                        }
+                        .frame(width: 64, height: 64)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            .background(Color.zinc900)
+            Divider().opacity(0.3)
+        }
+    }
+
+    @ViewBuilder private var slideBar: some View {
+        if let idx = viewModel.selectedSlideIndex {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.on.rectangle")
+                    .font(.system(size: 11))
+                    .foregroundColor(.matcha500)
+                let title = selectedSlideTitle
+                Text("Slide \(idx + 1)\(title.map { ": \($0)" } ?? "")")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(Color.matcha500.opacity(0.85))
+                Spacer()
+                Button { viewModel.selectedSlideIndex = nil } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Clear slide selection")
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(Color.matcha500.opacity(0.08))
+            .overlay(
+                Rectangle()
+                    .frame(height: 1)
+                    .foregroundColor(Color.matcha500.opacity(0.2)),
+                alignment: .top
+            )
+        }
+    }
+
+    @ViewBuilder private var jurisdictionBar: some View {
+        if viewModel.thread?.complianceMode == true {
+            HStack(spacing: 6) {
+                Image(systemName: "mappin")
+                    .font(.system(size: 11))
+                    .foregroundColor(.cyan)
+                Text("JURISDICTIONS")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .tracking(0.5)
+                if let meta = viewModel.messages.last(where: { $0.role == "assistant" })?.metadata,
+                   let locs = meta.complianceReasoning, !locs.isEmpty {
+                    ForEach(locs, id: \.locationId) { loc in
+                        Text(loc.locationLabel)
+                            .font(.system(size: 10))
+                            .foregroundColor(.cyan)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.cyan.opacity(0.1))
+                            .cornerRadius(4)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .stroke(Color.cyan.opacity(0.25), lineWidth: 1)
+                            )
+                    }
+                } else {
+                    Text("Active — locations will appear with responses")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 6)
+            .background(lightMode ? Color(white: 0.97) : Color.zinc900.opacity(0.5))
+        }
+    }
+
+    @ViewBuilder private var inputBar: some View {
+        let atLimit = viewModel.presentationImageURLs.count >= 4
+        HStack(alignment: .bottom, spacing: 10) {
+            Button { pickImages() } label: {
+                Image(systemName: "photo.badge.plus")
+                    .font(.system(size: 17))
+                    .foregroundColor(
+                        atLimit || viewModel.isUploadingImages
+                        ? Color.secondary.opacity(0.35)
+                        : .secondary
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(atLimit || viewModel.isUploadingImages)
+            .help(
+                atLimit
+                ? "Maximum 4 images per thread"
+                : "Upload images (\(viewModel.presentationImageURLs.count)/4)"
+            )
+
+            TextField(inputPlaceholder, text: $inputText, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 14))
+                .foregroundColor(.white)
+                .lineLimit(1...6)
+                .padding(.vertical, 8)
+                .onKeyPress(.return) { press in
+                    if press.modifiers.contains(.shift) {
+                        inputText += "\n"
+                        return .handled
+                    }
+                    send()
+                    return .handled
+                }
+
+            Button { send() } label: {
+                Image(systemName: "arrow.up.circle.fill")
+                    .font(.system(size: 28))
+                    .foregroundColor(
+                        inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? .secondary : .matcha500
+                    )
+            }
+            .buttonStyle(.plain)
+            .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isStreaming)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(Color.zinc900)
     }
 }
 
