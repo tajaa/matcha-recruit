@@ -6,6 +6,7 @@ struct CollaboratorPanelView: View {
     @State private var collaborators: [MWProjectCollaborator] = []
     @State private var searchText = ""
     @State private var searchResults: [MWAdminSearchUser] = []
+    @State private var suggestions: [MWAdminSearchUser] = []
     @State private var isSearching = false
     @State private var isLoading = true
     @State private var errorMessage: String?
@@ -34,10 +35,21 @@ struct CollaboratorPanelView: View {
             .padding(.vertical, 8)
             .background(Color.zinc800.opacity(0.5))
 
-            // Search results
-            if !searchResults.isEmpty {
+            // Suggestions / search results — show friends + recent contacts
+            // by default (loaded on appear), replaced by search hits as user
+            // types ≥2 chars.
+            let displayed = searchText.count >= 2 ? searchResults : suggestions
+            if !displayed.isEmpty {
                 VStack(spacing: 0) {
-                    ForEach(searchResults) { user in
+                    Text(searchText.count >= 2 ? "Results" : "Suggestions")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.5)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.top, 6)
+                        .padding(.bottom, 2)
+                    ForEach(displayed) { user in
                         let alreadyAdded = collaborators.contains { $0.userId == user.id }
                         Button {
                             guard !alreadyAdded else { return }
@@ -64,6 +76,12 @@ struct CollaboratorPanelView: View {
                 }
                 .background(Color.zinc800.opacity(0.3))
                 Divider().opacity(0.3)
+            } else if searchText.count >= 2 && !isSearching {
+                Text("No users found.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
             }
 
             // Current collaborators
@@ -114,7 +132,21 @@ struct CollaboratorPanelView: View {
             }
         }
         .background(Color.appBackground)
-        .task { await load() }
+        .task {
+            await load()
+            await loadSuggestions()
+        }
+    }
+
+    private func loadSuggestions() async {
+        do {
+            // Empty query returns invitable users (friends, inbox contacts,
+            // company peers, prior collaborators, admins) sorted by name.
+            let s = try await MatchaWorkService.shared.searchInvitableUsers(query: "")
+            await MainActor.run { suggestions = s }
+        } catch {
+            // Silent — suggestions are optional. Search still works.
+        }
     }
 
     private func load() async {
