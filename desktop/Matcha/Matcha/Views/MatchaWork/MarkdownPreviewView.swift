@@ -46,7 +46,7 @@ struct MarkdownPreviewView: View {
     // MARK: - Block parsing
 
     private enum RenderedBlock {
-        case text(String)
+        case text(String, lineHeight: CGFloat)
         case image(alt: String, url: URL)
         case video(url: URL)
     }
@@ -54,14 +54,25 @@ struct MarkdownPreviewView: View {
     private func renderBlocks(for content: String) -> [RenderedBlock] {
         var blocks: [RenderedBlock] = []
         var textBuffer: [String] = []
+        var lineHeightStack: [CGFloat] = [1.0]
         let flushText = {
             let joined = textBuffer.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
             if !joined.isEmpty {
-                blocks.append(.text(joined))
+                blocks.append(.text(joined, lineHeight: lineHeightStack.last ?? 1.0))
             }
             textBuffer.removeAll()
         }
         for line in content.components(separatedBy: "\n") {
+            if let lh = parseLineHeightOpen(line: line) {
+                flushText()
+                lineHeightStack.append(lh)
+                continue
+            }
+            if parseLineHeightClose(line: line) {
+                flushText()
+                if lineHeightStack.count > 1 { lineHeightStack.removeLast() }
+                continue
+            }
             if let img = parseImage(line: line) {
                 flushText()
                 blocks.append(img)
@@ -76,6 +87,27 @@ struct MarkdownPreviewView: View {
         }
         flushText()
         return blocks
+    }
+
+    /// Matches `<div style="line-height:N">` (also allows `line-height: N;` etc).
+    private func parseLineHeightOpen(line: String) -> CGFloat? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let lower = trimmed.lowercased()
+        guard lower.hasPrefix("<div"), lower.contains("line-height") else { return nil }
+        guard let range = lower.range(of: #"line-height\s*:\s*([0-9]*\.?[0-9]+)"#, options: .regularExpression) else {
+            return nil
+        }
+        let match = String(lower[range])
+        let numberString = match
+            .replacingOccurrences(of: "line-height", with: "")
+            .replacingOccurrences(of: ":", with: "")
+            .trimmingCharacters(in: .whitespaces)
+        return Double(numberString).map { CGFloat($0) }
+    }
+
+    private func parseLineHeightClose(line: String) -> Bool {
+        let trimmed = line.trimmingCharacters(in: .whitespaces).lowercased()
+        return trimmed == "</div>"
     }
 
     /// Matches standalone image line: ![alt](url)
@@ -119,7 +151,11 @@ struct MarkdownPreviewView: View {
     @ViewBuilder
     private func renderBlock(_ block: RenderedBlock) -> some View {
         switch block {
-        case .text(let raw):
+        case .text(let raw, let lineHeight):
+            // Convert line-height multiplier to SwiftUI `lineSpacing` (extra
+            // space between lines, in points). 1.0 multiplier = 0 extra.
+            let fontSize: CGFloat = 13
+            let extra = max(0, (lineHeight - 1.0) * fontSize)
             if let attributed = try? AttributedString(
                 markdown: raw,
                 options: AttributedString.MarkdownParsingOptions(
@@ -127,14 +163,16 @@ struct MarkdownPreviewView: View {
                 )
             ) {
                 Text(attributed)
-                    .font(.system(size: 13))
+                    .font(.system(size: fontSize))
                     .foregroundColor(Color(white: 0.85))
+                    .lineSpacing(extra)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text(raw)
-                    .font(.system(size: 13))
+                    .font(.system(size: fontSize))
                     .foregroundColor(Color(white: 0.85))
+                    .lineSpacing(extra)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

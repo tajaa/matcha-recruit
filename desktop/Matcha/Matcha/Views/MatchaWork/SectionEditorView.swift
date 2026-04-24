@@ -267,6 +267,28 @@ struct SectionEditorView: View {
                 controller.wrapSelection(left: "[", right: "](https://)", placeholder: "text")
             }
             Divider().frame(height: 14).padding(.horizontal, 2)
+            toolbarButton("1×", help: "Single line spacing") {
+                controller.wrapSelection(
+                    left: "<div style=\"line-height:1.0\">\n",
+                    right: "\n</div>",
+                    placeholder: "text"
+                )
+            }
+            toolbarButton("1.5", help: "1.5 line spacing") {
+                controller.wrapSelection(
+                    left: "<div style=\"line-height:1.5\">\n",
+                    right: "\n</div>",
+                    placeholder: "text"
+                )
+            }
+            toolbarButton("2×", help: "Double line spacing") {
+                controller.wrapSelection(
+                    left: "<div style=\"line-height:2.0\">\n",
+                    right: "\n</div>",
+                    placeholder: "text"
+                )
+            }
+            Divider().frame(height: 14).padding(.horizontal, 2)
             toolbarIcon("photo", help: projectId == nil ? "Image (no project)" : "Insert image (max 50 MB)") {
                 pickMedia(kind: .image)
             }
