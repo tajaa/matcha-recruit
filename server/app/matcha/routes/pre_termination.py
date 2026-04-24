@@ -850,3 +850,112 @@ async def delete_post_term_claim(
         if not row:
             raise HTTPException(status_code=404, detail="Post-termination claim not found")
         return {"message": "Claim deleted", "id": str(row["id"])}
+
+
+# ---------------------------------------------------------------------------
+# Pre-termination check analytics (risk assessment dashboard)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/checks/analytics")
+async def get_pre_term_check_analytics(
+    period: str = Query("12m", pattern=r"^(30d|90d|6m|12m|all)$"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Aggregate analytics for pre_termination_checks over a period.
+
+    Returns totals, band distribution, average score, override rate, most-common
+    red flags, and outcome distribution. Shape matches PreTermAnalytics on the
+    client (SeparationRiskCard).
+    """
+    from datetime import timedelta
+
+    period_map = {"30d": 30, "90d": 90, "6m": 180, "12m": 365, "all": None}
+    days = period_map[period]
+
+    company_id = await get_client_company_id(current_user)
+    if not company_id:
+        return {
+            "total_checks": 0, "by_band": {}, "avg_score": 0, "override_rate": 0,
+            "most_common_red_flags": [], "by_outcome": {}, "period": period,
+        }
+
+    async with get_connection() as conn:
+        if days is not None:
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            rows = await conn.fetch(
+                """
+                SELECT overall_band, overall_score, outcome, dimensions,
+                       requires_acknowledgment, acknowledged
+                FROM pre_termination_checks
+                WHERE company_id = $1 AND computed_at >= $2
+                """,
+                company_id, cutoff,
+            )
+        else:
+            rows = await conn.fetch(
+                """
+                SELECT overall_band, overall_score, outcome, dimensions,
+                       requires_acknowledgment, acknowledged
+                FROM pre_termination_checks
+                WHERE company_id = $1
+                """,
+                company_id,
+            )
+
+    total = len(rows)
+    if total == 0:
+        return {
+            "total_checks": 0, "by_band": {}, "avg_score": 0, "override_rate": 0,
+            "most_common_red_flags": [], "by_outcome": {}, "period": period,
+        }
+
+    by_band: dict[str, int] = {}
+    by_outcome: dict[str, int] = {}
+    red_flag_counts: dict[str, int] = {}
+    score_sum = 0
+    override_count = 0
+    ack_eligible = 0
+
+    for r in rows:
+        band = r["overall_band"]
+        by_band[band] = by_band.get(band, 0) + 1
+        score_sum += int(r["overall_score"] or 0)
+
+        outcome = r["outcome"] or "pending"
+        by_outcome[outcome] = by_outcome.get(outcome, 0) + 1
+
+        # Override rate: of checks that required acknowledgment, how many were
+        # acknowledged AND proceeded anyway (manager overrode the high-risk flag).
+        if r["requires_acknowledgment"]:
+            ack_eligible += 1
+            if r["acknowledged"] and outcome == "proceeded":
+                override_count += 1
+
+        dims = r["dimensions"]
+        if isinstance(dims, str):
+            try:
+                dims = json.loads(dims)
+            except (json.JSONDecodeError, TypeError):
+                dims = None
+        if isinstance(dims, dict):
+            for key, val in dims.items():
+                if isinstance(val, dict) and val.get("red_flag"):
+                    red_flag_counts[key] = red_flag_counts.get(key, 0) + 1
+
+    avg_score = score_sum / total if total else 0
+    override_rate = (override_count / ack_eligible * 100) if ack_eligible else 0
+    most_common = [
+        {"dimension": k, "count": v}
+        for k, v in sorted(red_flag_counts.items(), key=lambda kv: kv[1], reverse=True)
+    ]
+
+    return {
+        "total_checks": total,
+        "by_band": by_band,
+        "avg_score": avg_score,
+        "override_rate": override_rate,
+        "most_common_red_flags": most_common,
+        "by_outcome": by_outcome,
+        "period": period,
+    }

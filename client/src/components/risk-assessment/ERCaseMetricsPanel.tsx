@@ -15,7 +15,7 @@ export function ERCaseMetricsPanel() {
 
   useEffect(() => {
     setLoading(true)
-    api.get<ERCaseMetrics>(`/er-copilot/metrics?days=${days}`)
+    api.get<ERCaseMetrics>(`/er/cases/metrics?days=${days}`)
       .then(setMetrics)
       .catch(() => setMetrics(null))
       .finally(() => setLoading(false))

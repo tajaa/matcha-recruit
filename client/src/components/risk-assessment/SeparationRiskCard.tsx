@@ -24,7 +24,7 @@ export function SeparationRiskCard() {
   const [analytics, setAnalytics] = useState<PreTermAnalytics | null>(null)
 
   useEffect(() => {
-    api.get<PreTermAnalytics>('/employees/pre-termination-checks/analytics?period=12m')
+    api.get<PreTermAnalytics>('/pre-termination/checks/analytics?period=12m')
       .then(setAnalytics)
       .catch(() => {}) // Graceful degradation
   }, [])

@@ -1359,9 +1359,17 @@ async def interview_websocket(
             except Exception:
                 pass
     except Exception as e:
-        print(f"[Interview {interview_id}] Error: {e}")
+        import traceback
+        print(f"[Interview {interview_id}] Error: {e}\n{traceback.format_exc()}")
         try:
             await send_message(MessageType.SYSTEM, f"Error: {str(e)}")
+        except Exception:
+            pass
+        try:
+            # Surface a meaningful close reason to the client instead of the
+            # generic "1011 None" the default FastAPI handler would send.
+            reason = str(e)[:120] if str(e) else e.__class__.__name__
+            await websocket.close(code=1011, reason=reason)
         except Exception:
             pass
     finally:

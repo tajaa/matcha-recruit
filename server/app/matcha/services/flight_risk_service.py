@@ -364,7 +364,9 @@ async def compute_for_company(company_id: UUID) -> list[FlightRiskResult]:
     """Score every active employee for the company. Single roster query
     plus a handful of aggregate queries — all in-memory after that."""
     today = date.today()
-    now = datetime.now(timezone.utc)
+    # er_cases.closed_at and ir_incidents.occurred_at are TIMESTAMP (naive);
+    # asyncpg rejects tz-aware values on those columns.
+    now = datetime.utcnow()
     ninety_days_ago = now - timedelta(days=90)
     twelve_months_ago = now - timedelta(days=365)
 
