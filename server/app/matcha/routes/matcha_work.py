@@ -5367,11 +5367,15 @@ async def export_project_endpoint(
         except ImportError:
             raise HTTPException(status_code=500, detail="PDF generation not available")
 
-        prefix = doc_svc.build_matcha_work_thread_storage_prefix(company_id, project_id, "project-exports")
-        pdf_url = await get_storage().upload_file(
-            pdf_bytes, f"{title}.pdf", prefix=prefix, content_type="application/pdf"
+        # Return raw bytes so the desktop client can write them directly to
+        # the save-panel URL. A previous implementation uploaded to S3 and
+        # returned {"pdf_url": ...} JSON, which the client wrote as the .pdf
+        # file — producing an unopenable JSON-in-PDF-extension on disk.
+        return Response(
+            content=pdf_bytes,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{title}.pdf"'},
         )
-        return {"pdf_url": pdf_url}
 
     if fmt == "docx":
         try:
@@ -5394,12 +5398,11 @@ async def export_project_endpoint(
             return buf.getvalue()
 
         docx_bytes = await asyncio.to_thread(_build_docx)
-        prefix = doc_svc.build_matcha_work_thread_storage_prefix(company_id, project_id, "project-exports")
-        docx_url = await get_storage().upload_file(
-            docx_bytes, f"{title}.docx", prefix=prefix,
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        return Response(
+            content=docx_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            headers={"Content-Disposition": f'attachment; filename="{title}.docx"'},
         )
-        return {"docx_url": docx_url}
 
 
 # ── Thread-scoped project endpoints (legacy, kept for backward compat) ──

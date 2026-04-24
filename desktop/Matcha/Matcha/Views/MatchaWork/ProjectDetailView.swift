@@ -576,7 +576,19 @@ struct ProjectDetailView: View {
 
     private func export(format: String) {
         Task { @MainActor in
-            guard let data = await viewModel.exportProject(format: format) else { return }
+            guard let data = await viewModel.exportProject(format: format) else {
+                // exportProject sets viewModel.errorMessage on failure; surface
+                // it as an alert so the user sees why nothing happened instead
+                // of a silent no-op.
+                if let msg = viewModel.errorMessage {
+                    let alert = NSAlert()
+                    alert.messageText = "Export failed"
+                    alert.informativeText = msg
+                    alert.alertStyle = .warning
+                    alert.runModal()
+                }
+                return
+            }
             let panel = NSSavePanel()
             panel.nameFieldStringValue = "\(viewModel.project?.title ?? "project").\(format)"
             // allowedContentTypes pins the save dialog to the correct extension
