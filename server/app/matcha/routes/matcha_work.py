@@ -3346,6 +3346,14 @@ ALLOWED_PROJECT_FILE_EXTENSIONS = {
 }
 PROJECT_FILE_MAX_BYTES = 10 * 1024 * 1024  # 10 MB
 
+# Blog post media — images + video embedded inline in section markdown.
+# Higher cap accounts for short videos; keep in sync with desktop toolbar.
+ALLOWED_BLOG_MEDIA_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".heic",
+    ".mp4", ".mov", ".m4v", ".webm",
+}
+BLOG_MEDIA_MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
 
 @router.post("/projects/{project_id}/files")
 async def upload_project_file(
@@ -3422,6 +3430,35 @@ async def delete_project_file_endpoint(
 
     await project_file_service.delete_project_file(file_id, project_id)
     return {"deleted": True}
+
+
+@router.post("/projects/{project_id}/blog-media")
+async def upload_blog_media(
+    project_id: UUID,
+    file: UploadFile = File(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Upload an inline image or short video for a blog post. Returns {url, kind}.
+    The caller embeds the URL in section markdown (image or <video> tag)."""
+    project, _role = await _verify_project_access(project_id, current_user)
+    company_id = project.get("company_id") or await get_client_company_id(current_user)
+
+    fname = file.filename or "file"
+    ext = os.path.splitext(fname)[1].lower()
+    if ext not in ALLOWED_BLOG_MEDIA_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Unsupported media type: {ext}")
+
+    content = await file.read()
+    if len(content) > BLOG_MEDIA_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="File exceeds 50 MB limit")
+
+    storage_url = await get_storage().upload_file(
+        content, fname,
+        prefix=f"matcha-work/{company_id}/{project_id}/blog-media",
+        content_type=file.content_type,
+    )
+    kind = "video" if ext in {".mp4", ".mov", ".m4v", ".webm"} else "image"
+    return {"url": storage_url, "kind": kind, "filename": fname, "size": len(content)}
 
 
 # ── Project-scoped kanban tasks (collab projects) ──

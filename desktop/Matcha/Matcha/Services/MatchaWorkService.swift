@@ -795,6 +795,45 @@ class MatchaWorkService {
         )
     }
 
+    struct BlogMediaUpload: Codable {
+        let url: String
+        let kind: String
+        let filename: String?
+        let size: Int?
+    }
+
+    func uploadBlogMedia(
+        projectId: String,
+        file: (data: Data, filename: String, mimeType: String)
+    ) async throws -> BlogMediaUpload {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        body.append("--\(boundary)\r\n")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(file.filename)\"\r\n")
+        body.append("Content-Type: \(file.mimeType)\r\n\r\n")
+        body.append(file.data)
+        body.append("\r\n")
+        body.append("--\(boundary)--\r\n")
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/blog-media") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? "Upload failed"
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
+        }
+        return try JSONDecoder().decode(BlogMediaUpload.self, from: data)
+    }
+
     // MARK: - Billing
 
     func getPersonalSubscription() async throws -> MWSubscription {

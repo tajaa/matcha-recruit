@@ -242,7 +242,8 @@ struct BlogEditorView: View {
                 },
                 onRestore: { restoredContent in
                     Task { await viewModel.updateSection(sectionId: sectionId, content: restoredContent) }
-                }
+                },
+                projectId: viewModel.project?.id
             )
         } else {
             // Show AI chat panel

@@ -1,4 +1,6 @@
 import SwiftUI
+import UniformTypeIdentifiers
+import AppKit
 
 struct SectionEditorView: View {
     let section: MWProjectSection
@@ -6,6 +8,10 @@ struct SectionEditorView: View {
     var onAcceptRevision: (() -> Void)? = nil
     var onRejectRevision: (() -> Void)? = nil
     var onRestore: ((String) -> Void)? = nil
+    /// Project id for blog-media uploads. When nil the image / video toolbar
+    /// buttons are disabled (callers that don't expose a project context can
+    /// omit this).
+    var projectId: String? = nil
 
     @State private var title: String = ""
     @State private var content: String = ""
@@ -13,6 +19,9 @@ struct SectionEditorView: View {
     @State private var isSaved = false
     @State private var hasUnsavedChanges = false
     @State private var showPendingPreview = true
+    @State private var controller = MarkdownEditorController()
+    @State private var uploadStatus: String? = nil
+    @State private var uploadError: String? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,20 +41,30 @@ struct SectionEditorView: View {
                 pendingRevisionBanner
             }
 
+            formattingToolbar
+
             // Content editor
-            TextEditor(text: $content)
-                .font(.system(size: 14))
-                .foregroundColor(.white)
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
+            MarkdownTextEditor(text: $content, controller: $controller)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
                 .onChange(of: content) { scheduleSave() }
 
-            // Toolbar
+            // Footer
             HStack(spacing: 12) {
                 Text("Markdown supported")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
+                if let status = uploadStatus {
+                    Text(status)
+                        .font(.system(size: 10))
+                        .foregroundColor(.matcha500)
+                }
+                if let err = uploadError {
+                    Text(err)
+                        .font(.system(size: 10))
+                        .foregroundColor(.red)
+                        .lineLimit(1)
+                }
                 Spacer()
                 historyMenu
                 if isSaved {
@@ -211,6 +230,149 @@ struct SectionEditorView: View {
                 withAnimation { isSaved = true }
                 try? await Task.sleep(for: .seconds(2))
                 withAnimation { isSaved = false }
+            }
+        }
+    }
+
+    // MARK: - Formatting toolbar
+
+    @ViewBuilder
+    private var formattingToolbar: some View {
+        HStack(spacing: 3) {
+            toolbarButton("B", bold: true, help: "Bold") {
+                controller.wrapSelection(left: "**", right: "**", placeholder: "bold")
+            }
+            toolbarButton("I", italic: true, help: "Italic") {
+                controller.wrapSelection(left: "*", right: "*", placeholder: "italic")
+            }
+            toolbarButton("H1", help: "Heading 1") {
+                controller.prefixLines(with: "# ")
+            }
+            toolbarButton("H2", help: "Heading 2") {
+                controller.prefixLines(with: "## ")
+            }
+            toolbarIcon("list.bullet", help: "Bulleted list") {
+                controller.prefixLines(with: "- ")
+            }
+            toolbarIcon("list.number", help: "Numbered list") {
+                controller.prefixLines(with: "1. ")
+            }
+            toolbarIcon("text.quote", help: "Quote") {
+                controller.prefixLines(with: "> ")
+            }
+            toolbarIcon("chevron.left.forwardslash.chevron.right", help: "Inline code") {
+                controller.wrapSelection(left: "`", right: "`", placeholder: "code")
+            }
+            toolbarIcon("link", help: "Link") {
+                controller.wrapSelection(left: "[", right: "](https://)", placeholder: "text")
+            }
+            Divider().frame(height: 14).padding(.horizontal, 2)
+            toolbarIcon("photo", help: projectId == nil ? "Image (no project)" : "Insert image (max 50 MB)") {
+                pickMedia(kind: .image)
+            }
+            .disabled(projectId == nil)
+            toolbarIcon("video", help: projectId == nil ? "Video (no project)" : "Insert video (max 50 MB)") {
+                pickMedia(kind: .video)
+            }
+            .disabled(projectId == nil)
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 6)
+        .background(Color.zinc800.opacity(0.35))
+        .overlay(
+            Rectangle().frame(height: 1).foregroundColor(.white.opacity(0.08)),
+            alignment: .bottom
+        )
+    }
+
+    @ViewBuilder
+    private func toolbarButton(_ label: String, bold: Bool = false, italic: Bool = false, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 12, weight: bold ? .bold : .medium, design: .default))
+                .italic(italic)
+                .frame(width: 26, height: 22)
+                .foregroundColor(.white)
+                .background(Color.zinc800)
+                .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    @ViewBuilder
+    private func toolbarIcon(_ systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11))
+                .frame(width: 26, height: 22)
+                .foregroundColor(.white)
+                .background(Color.zinc800)
+                .cornerRadius(4)
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    // MARK: - Media upload
+
+    private enum MediaKind { case image, video }
+
+    private func pickMedia(kind: MediaKind) {
+        guard projectId != nil else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        switch kind {
+        case .image:
+            panel.allowedContentTypes = [.png, .jpeg, .gif, .webP, .heic, .svg]
+        case .video:
+            panel.allowedContentTypes = [.movie, .video, .quickTimeMovie, .mpeg4Movie]
+        }
+        panel.begin { response in
+            guard response == .OK, let url = panel.urls.first else { return }
+            Task { await uploadAndInsert(url: url, kind: kind) }
+        }
+    }
+
+    private func uploadAndInsert(url: URL, kind: MediaKind) async {
+        guard let pid = projectId else { return }
+        guard let data = try? Data(contentsOf: url) else {
+            await MainActor.run { uploadError = "Couldn't read file" }
+            return
+        }
+        if data.count > 50 * 1024 * 1024 {
+            await MainActor.run { uploadError = "File exceeds 50 MB" }
+            return
+        }
+        let ext = url.pathExtension.lowercased()
+        let mime = UTType(filenameExtension: ext)?.preferredMIMEType ?? (kind == .image ? "image/png" : "video/mp4")
+        await MainActor.run {
+            uploadStatus = "Uploading \(url.lastPathComponent)…"
+            uploadError = nil
+        }
+        do {
+            let uploaded = try await MatchaWorkService.shared.uploadBlogMedia(
+                projectId: pid,
+                file: (data: data, filename: url.lastPathComponent, mimeType: mime)
+            )
+            await MainActor.run {
+                let snippet: String
+                switch kind {
+                case .image:
+                    snippet = "![\(url.deletingPathExtension().lastPathComponent)](\(uploaded.url))"
+                case .video:
+                    snippet = "<video src=\"\(uploaded.url)\" controls width=\"100%\"></video>"
+                }
+                controller.insertBlock(snippet)
+                uploadStatus = nil
+            }
+        } catch {
+            await MainActor.run {
+                uploadStatus = nil
+                uploadError = error.localizedDescription
             }
         }
     }
