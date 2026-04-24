@@ -310,22 +310,23 @@ struct ChatPanelView: View {
         }
     }
 
+    private var imgAtLimit: Bool { viewModel.presentationImageURLs.count >= 4 }
+
     @ViewBuilder private var inputBar: some View {
-        let atLimit = viewModel.presentationImageURLs.count >= 4
         HStack(alignment: .bottom, spacing: 10) {
             Button { pickImages() } label: {
                 Image(systemName: "photo.badge.plus")
                     .font(.system(size: 17))
                     .foregroundColor(
-                        atLimit || viewModel.isUploadingImages
+                        imgAtLimit || viewModel.isUploadingImages
                         ? Color.secondary.opacity(0.35)
                         : .secondary
                     )
             }
             .buttonStyle(.plain)
-            .disabled(atLimit || viewModel.isUploadingImages)
+            .disabled(imgAtLimit || viewModel.isUploadingImages)
             .help(
-                atLimit
+                imgAtLimit
                 ? "Maximum 4 images per thread"
                 : "Upload images (\(viewModel.presentationImageURLs.count)/4)"
             )
