@@ -35,6 +35,8 @@
 		AA11BB22CC33DD44EE550008 /* InboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660008 /* InboxService.swift */; };
 		AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660009 /* InboxView.swift */; };
 		AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */; };
+		AA11BB22CC33DD44EE55000B /* KanbanBoardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */; };
+		AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */; };
 		B2C7DB8AE33E886529C5BF99 /* MatchaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC995D9793AD79440F7616A7 /* MatchaApp.swift */; };
 		B5C6D7E8F9A0112B3C4D5E6F /* InventoryPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6D7E8F9A0B1223C4D5E6F70 /* InventoryPanelView.swift */; };
 		C77BADBAE54E04005E00E518 /* ThreadListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0B3F3B04FAEA73368120D2C4 /* ThreadListView.swift */; };
@@ -92,6 +94,8 @@
 		AA11BB22CC33DD44EE660008 /* InboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxService.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660009 /* InboxView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE66000A /* InboxComposeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxComposeView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KanbanBoardView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectFilesView.swift; sourceTree = "<group>"; };
 		AD198140CC378D9E843FA827 /* Color+Extensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Color+Extensions.swift"; sourceTree = "<group>"; };
 		B13338371A8BC76142D4A946 /* LoadingDots.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoadingDots.swift; sourceTree = "<group>"; };
 		B9E4D71F3C825A064D17F308 /* SkillsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkillsView.swift; sourceTree = "<group>"; };
@@ -207,6 +211,8 @@
 			BB01CC22DD33EE44FF660001 /* NewBlogSheet.swift */,
 			BB01CC22DD33EE44FF660002 /* BlogEditorView.swift */,
 			BB01CC22DD33EE44FF660003 /* MarkdownPreviewView.swift */,
+			AA11BB22CC33DD44EE66000B /* KanbanBoardView.swift */,
+			AA11BB22CC33DD44EE66000C /* ProjectFilesView.swift */,
 			);
 			path = MatchaWork;
 			sourceTree = "<group>";
@@ -414,6 +420,8 @@
 				AA11BB22CC33DD44EE550008 /* InboxService.swift in Sources */,
 				AA11BB22CC33DD44EE550009 /* InboxView.swift in Sources */,
 				AA11BB22CC33DD44EE55000A /* InboxComposeView.swift in Sources */,
+				AA11BB22CC33DD44EE55000B /* KanbanBoardView.swift in Sources */,
+				AA11BB22CC33DD44EE55000C /* ProjectFilesView.swift in Sources */,
 				DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */,
 				DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */,
 				DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */,
@@ -468,7 +476,7 @@
 				CODE_SIGN_ENTITLEMENTS = Matcha/Matcha.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = 5D6TJVCPBK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -507,7 +515,7 @@
 				CODE_SIGN_ENTITLEMENTS = Matcha/Matcha.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 13;
+				CURRENT_PROJECT_VERSION = 14;
 				DEVELOPMENT_TEAM = 5D6TJVCPBK;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
