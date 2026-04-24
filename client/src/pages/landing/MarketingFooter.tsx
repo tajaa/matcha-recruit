@@ -42,7 +42,12 @@ export default function MarketingFooter() {
           className="mt-14 pt-6 border-t text-xs flex flex-col sm:flex-row justify-between gap-3"
           style={{ borderColor: LINE, color: MUTED }}
         >
-          <span>© {new Date().getFullYear()} Matcha, Inc. All rights reserved.</span>
+          <span>
+            © {new Date().getFullYear()} Matcha, Inc. All rights reserved.
+            {import.meta.env.VITE_LANDING_BUILD_VERSION ? (
+              <span className="ml-2 font-mono opacity-60">build {import.meta.env.VITE_LANDING_BUILD_VERSION}</span>
+            ) : null}
+          </span>
           <span>Made with care.</span>
         </div>
       </div>
