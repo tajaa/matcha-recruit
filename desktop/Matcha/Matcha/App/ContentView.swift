@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var showCreateChannel = false
     @State private var showProjectTypePicker = false
     @State private var isCreatingProject = false
+    @State private var projectCreateError: String?
 
     private struct GlassWindowModifier: ViewModifier {
         func body(content: Content) -> some View {
@@ -149,8 +150,31 @@ struct ContentView: View {
                                 }
                             }
                         ) {
-                            ProjectListView(showHeader: false)
-                                .frame(height: 220)
+                            VStack(alignment: .leading, spacing: 0) {
+                                if let err = projectCreateError {
+                                    HStack(alignment: .top, spacing: 6) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                            .font(.system(size: 9))
+                                            .foregroundColor(.red)
+                                        Text(err)
+                                            .font(.system(size: 10))
+                                            .foregroundColor(.red)
+                                            .lineLimit(3)
+                                        Spacer()
+                                        Button { projectCreateError = nil } label: {
+                                            Image(systemName: "xmark")
+                                                .font(.system(size: 8))
+                                                .foregroundColor(.secondary)
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Color.red.opacity(0.1))
+                                }
+                                ProjectListView(showHeader: false)
+                                    .frame(height: 220)
+                            }
                         }
 
                         Divider().opacity(0.2)
@@ -434,6 +458,7 @@ struct ContentView: View {
 
     private func createProject(type: String) {
         isCreatingProject = true
+        projectCreateError = nil
         Task {
             do {
                 let proj = try await MatchaWorkService.shared.createProject(title: "New Project", projectType: type)
@@ -445,7 +470,10 @@ struct ContentView: View {
                     isCreatingProject = false
                 }
             } catch {
-                await MainActor.run { isCreatingProject = false }
+                await MainActor.run {
+                    isCreatingProject = false
+                    projectCreateError = "Couldn't create project: \(error.localizedDescription)"
+                }
             }
         }
     }
