@@ -48,20 +48,47 @@ BUILD_DIR="$PROJECT_DIR/build/appstore"
 ARCHIVE_PATH="$HOME/Library/Developer/Xcode/Archives/$(date +%Y-%m-%d)/Matcha.xcarchive"
 EXPORT_PATH="$BUILD_DIR/export"
 EXPORT_PLIST="$BUILD_DIR/ExportOptions.plist"
+RELEASE_LOG="$PROJECT_DIR/release.log"
 PKG_PATH=""  # filled in after export
+
+# Persistent attempt log — append-only history of every release attempt with
+# build number + archive/upload status. Survives temp-dir cleanup so you can
+# always see why a TestFlight number is missing.
+log_attempt() {
+    local build="$1" archive="$2" upload="$3" note="${4:-}"
+    local ts
+    ts=$(date +"%Y-%m-%d %H:%M:%S")
+    printf "%s  build=%-6s archive=%-7s upload=%-9s %s\n" \
+        "$ts" "$build" "$archive" "$upload" "$note" >> "$RELEASE_LOG"
+}
 
 RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; GREEN=$'\033[0;32m'; DIM=$'\033[2m'; NC=$'\033[0m'
 
 NO_UPLOAD=false
 NO_BUMP=false
+SHOW_STATUS=false
 for arg in "$@"; do
     case "$arg" in
         --no-upload) NO_UPLOAD=true ;;
         --no-bump)   NO_BUMP=true ;;
+        --status)    SHOW_STATUS=true ;;
         -h|--help)   grep -E '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *)           echo "${RED}unknown arg:${NC} $arg"; exit 1 ;;
     esac
 done
+
+if $SHOW_STATUS; then
+    echo "${DIM}pbxproj build:${NC} $(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+(\.[0-9]+)*' "$PBXPROJ" | head -1 | awk '{print $3}')"
+    if [[ -f "$RELEASE_LOG" ]]; then
+        echo "${DIM}last 20 release attempts (release.log):${NC}"
+        tail -20 "$RELEASE_LOG" | sed 's/^/  /'
+    else
+        echo "${DIM}no release.log yet${NC}"
+    fi
+    echo
+    echo "${DIM}TestFlight (live):${NC} https://appstoreconnect.apple.com/apps → Matcha → TestFlight"
+    exit 0
+fi
 
 require() {
     local name="$1"
@@ -250,6 +277,7 @@ if ! $NO_BUMP; then
 fi
 
 if ! do_archive; then
+    log_attempt "$NEW_VERSION" "FAIL" "skipped" "archive failed — rolled back to $OLD_VERSION"
     rollback_bump
     exit 1
 fi
@@ -277,6 +305,7 @@ if ! $NO_BUMP && [[ -n "$NEW_VERSION" ]]; then
 fi
 
 if $NO_UPLOAD; then
+    log_attempt "$NEW_VERSION" "OK" "skipped" "--no-upload"
     echo
     echo "${GREEN}archive ready (upload skipped)${NC}"
     echo "  pkg:     $PKG_PATH"
@@ -285,8 +314,11 @@ if $NO_UPLOAD; then
 fi
 
 if ! do_upload; then
+    log_attempt "$NEW_VERSION" "OK" "FAIL" "upload to ASC failed — build number kept; re-run with --no-bump to retry"
     exit 1
 fi
+
+log_attempt "$NEW_VERSION" "OK" "OK" "uploaded to ASC; processing 5–15 min before TestFlight"
 
 echo
 echo "${GREEN}uploaded to App Store Connect${NC}"
@@ -295,3 +327,4 @@ echo "  pkg:     $PKG_PATH"
 echo "  next:    https://appstoreconnect.apple.com/ → Matcha → TestFlight (Mac)"
 echo
 echo "${DIM}note: ASC needs ~5–15 min to process the build before it appears${NC}"
+echo "${DIM}history: ./release-appstore.sh --status${NC}"
