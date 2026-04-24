@@ -383,6 +383,41 @@ def _sections_from_row(raw) -> list:
     return json.loads(raw) if isinstance(raw, str) else list(raw)
 
 
+_HISTORY_SNAPSHOT_INTERVAL_SEC = 300
+_HISTORY_MAX_ENTRIES = 20
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _maybe_append_history(section: dict, prior_content: str, prior_source: str) -> list:
+    """Append a snapshot of prior_content to section['history'] if >5min since
+    last snapshot. Returns updated history list. Caps at _HISTORY_MAX_ENTRIES.
+    No-op when prior_content is empty.
+    """
+    history = list(section.get("history") or [])
+    if not prior_content:
+        return history
+    last_at = history[-1].get("at") if history else None
+    now = datetime.now(timezone.utc)
+    if last_at:
+        try:
+            last_dt = datetime.fromisoformat(last_at)
+            if (now - last_dt).total_seconds() < _HISTORY_SNAPSHOT_INTERVAL_SEC:
+                return history
+        except ValueError:
+            pass
+    history.append({
+        "content": prior_content,
+        "source": prior_source or "user",
+        "at": now.isoformat(),
+    })
+    if len(history) > _HISTORY_MAX_ENTRIES:
+        history = history[-_HISTORY_MAX_ENTRIES:]
+    return history
+
+
 async def _mutate_sections(project_id: UUID, mutator) -> tuple[dict, object]:
     """Run `mutator(sections) -> (new_sections, extra)` under a row lock.
 
@@ -456,6 +491,9 @@ async def add_section(project_id: UUID, section: dict) -> dict:
         "title": section.get("title"),
         "content": section.get("content", ""),
         "source_message_id": section.get("source_message_id"),
+        "content_source": section.get("content_source") or "user",
+        "content_updated_at": _now_iso(),
+        "history": [],
     }
     if section.get("diagram_data"):
         new_section["diagram_data"] = section["diagram_data"]
@@ -468,17 +506,82 @@ async def add_section(project_id: UUID, section: dict) -> dict:
 
 
 async def update_section(project_id: UUID, section_id: str, updates: dict) -> dict:
+    """User-facing section update. Stamps content_source='user' and appends
+    a history snapshot (>=5min cadence) when content changes.
+    """
+    source = updates.get("_source") or "user"
+
     def mutate(sections):
         out = []
         for s in sections:
             if s.get("id") == section_id:
                 merged = {**s}
+                content_changed = (
+                    "content" in updates and updates["content"] != s.get("content")
+                )
+                if content_changed:
+                    merged["history"] = _maybe_append_history(
+                        s,
+                        s.get("content") or "",
+                        s.get("content_source") or "user",
+                    )
+                    merged["content"] = updates["content"]
+                    merged["content_source"] = source
+                    merged["content_updated_at"] = _now_iso()
+                    # User edit supersedes any pending AI suggestion.
+                    if source == "user":
+                        merged["pending_revision"] = None
+                        merged["pending_change_summary"] = None
                 if "title" in updates:
                     merged["title"] = updates["title"]
-                if "content" in updates:
-                    merged["content"] = updates["content"]
                 if "diagram_data" in updates:
                     merged["diagram_data"] = updates["diagram_data"]
+                out.append(merged)
+            else:
+                out.append(s)
+        return (out, None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
+
+
+async def accept_section_revision(project_id: UUID, section_id: str) -> dict:
+    """Promote pending_revision → content. Records history snapshot."""
+    def mutate(sections):
+        out = []
+        for s in sections:
+            if s.get("id") == section_id:
+                pending = s.get("pending_revision")
+                if not pending:
+                    out.append(s)
+                    continue
+                merged = {**s}
+                merged["history"] = _maybe_append_history(
+                    s,
+                    s.get("content") or "",
+                    s.get("content_source") or "user",
+                )
+                merged["content"] = pending
+                merged["content_source"] = "ai"
+                merged["content_updated_at"] = _now_iso()
+                merged["pending_revision"] = None
+                merged["pending_change_summary"] = None
+                out.append(merged)
+            else:
+                out.append(s)
+        return (out, None)
+
+    project, _ = await _mutate_sections(project_id, mutate)
+    return project
+
+
+async def reject_section_revision(project_id: UUID, section_id: str) -> dict:
+    """Discard pending_revision, leaving content untouched."""
+    def mutate(sections):
+        out = []
+        for s in sections:
+            if s.get("id") == section_id and (s.get("pending_revision") or s.get("pending_change_summary")):
+                merged = {**s, "pending_revision": None, "pending_change_summary": None}
                 out.append(merged)
             else:
                 out.append(s)
@@ -566,6 +669,9 @@ async def apply_blog_directives(
                         "id": _uuid.uuid4().hex[:12],
                         "title": title,
                         "content": content,
+                        "content_source": "ai",
+                        "content_updated_at": _now_iso(),
+                        "history": [],
                     })
             # Guard: never allow an empty replacement to silently wipe the blog.
             if replaced:
@@ -583,29 +689,63 @@ async def apply_blog_directives(
                 bullets = item.get("bullets") or []
                 bullets = [str(b).strip() for b in bullets if isinstance(b, (str, int, float)) and str(b).strip()]
                 content = "\n".join(f"- {b}" for b in bullets) if bullets else ""
-                seeded.append({"id": _uuid.uuid4().hex[:12], "title": title, "content": content})
+                seeded.append({
+                    "id": _uuid.uuid4().hex[:12],
+                    "title": title,
+                    "content": content,
+                    "content_source": "ai",
+                    "content_updated_at": _now_iso(),
+                    "history": [],
+                })
             if seeded:
                 new_sections = seeded
                 changed = True
 
         by_id = {s.get("id"): i for i, s in enumerate(new_sections) if s.get("id")}
 
+        # AI drafts/revisions on sections the user has edited land as
+        # pending_revision — never overwrite user content silently. First-time
+        # drafts on empty/AI-seeded sections write directly.
         if isinstance(draft, dict):
             for sid, content in draft.items():
                 if not isinstance(content, str) or not content.strip():
                     continue
                 idx = by_id.get(sid)
-                if idx is not None:
-                    new_sections[idx] = {**new_sections[idx], "content": content.strip()}
-                    changed = True
+                if idx is None:
+                    continue
+                sec = new_sections[idx]
+                existing = (sec.get("content") or "").strip()
+                source = sec.get("content_source") or ("user" if existing else "ai")
+                if existing and source == "user":
+                    new_sections[idx] = {
+                        **sec,
+                        "pending_revision": content.strip(),
+                        "pending_change_summary": "AI draft (review before applying)",
+                    }
+                else:
+                    new_sections[idx] = {
+                        **sec,
+                        "history": _maybe_append_history(sec, existing, source),
+                        "content": content.strip(),
+                        "content_source": "ai",
+                        "content_updated_at": _now_iso(),
+                    }
+                changed = True
 
         if isinstance(revision, dict):
             rsid = revision.get("section_id")
             rcontent = (revision.get("content") or "").strip()
+            rsummary = (revision.get("change_summary") or "").strip() or "AI revision (review before applying)"
             if rsid and rcontent:
                 idx = by_id.get(rsid)
                 if idx is not None:
-                    new_sections[idx] = {**new_sections[idx], "content": rcontent}
+                    sec = new_sections[idx]
+                    # Revisions ALWAYS stage as pending — user explicitly accepts.
+                    new_sections[idx] = {
+                        **sec,
+                        "pending_revision": rcontent,
+                        "pending_change_summary": rsummary,
+                    }
                     changed = True
 
         if not changed:

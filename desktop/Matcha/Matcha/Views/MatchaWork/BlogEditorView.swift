@@ -233,6 +233,15 @@ struct BlogEditorView: View {
                 section: section,
                 onSave: { title, content in
                     Task { await viewModel.updateSection(sectionId: sectionId, title: title, content: content) }
+                },
+                onAcceptRevision: {
+                    Task { await viewModel.acceptSectionRevision(sectionId: sectionId) }
+                },
+                onRejectRevision: {
+                    Task { await viewModel.rejectSectionRevision(sectionId: sectionId) }
+                },
+                onRestore: { restoredContent in
+                    Task { await viewModel.updateSection(sectionId: sectionId, content: restoredContent) }
                 }
             )
         } else {

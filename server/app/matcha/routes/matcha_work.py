@@ -1158,7 +1158,14 @@ def _format_blog_mode_state(row) -> str:
         st = (s.get("title") or "(untitled)").strip()
         content = s.get("content") or ""
         wc = len([w for w in re.split(r"\s+", content.strip()) if w])
-        section_lines.append(f'  {i}. id={sid} · "{st}" ({wc} words)')
+        source = s.get("content_source") or ("user" if content else "empty")
+        flags = []
+        if content and source == "user":
+            flags.append("USER-EDITED")
+        if s.get("pending_revision"):
+            flags.append("HAS-PENDING-AI-SUGGESTION")
+        flag_str = f" [{' · '.join(flags)}]" if flags else ""
+        section_lines.append(f'  {i}. id={sid} · "{st}" ({wc} words){flag_str}')
     sec_block = "\n".join(section_lines) if section_lines else "  (no sections yet — if the user wants to start, emit blog_outline to seed them)"
 
     return (
@@ -3301,6 +3308,30 @@ async def delete_project_section_endpoint(
     from ..services import project_service as proj_svc
     await _verify_project_access(project_id, current_user)
     return await proj_svc.delete_section(project_id, section_id)
+
+
+@router.post("/projects/{project_id}/sections/{section_id}/accept_revision")
+async def accept_project_section_revision_endpoint(
+    project_id: UUID,
+    section_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Promote a section's pending AI revision into its live content."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    return await proj_svc.accept_section_revision(project_id, section_id)
+
+
+@router.post("/projects/{project_id}/sections/{section_id}/reject_revision")
+async def reject_project_section_revision_endpoint(
+    project_id: UUID,
+    section_id: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Discard a section's pending AI revision, leaving live content untouched."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    return await proj_svc.reject_section_revision(project_id, section_id)
 
 
 # ── Project file attachment endpoints ──

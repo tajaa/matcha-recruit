@@ -11,7 +11,15 @@ const STATUS_OPTIONS = Object.entries(statusLabel).map(([value, label]) => ({ va
 
 type Tab = 'profile' | 'onboarding' | 'credentials'
 
-const PROFILE_FIELDS: { key: string; label: string; type?: string }[] = [
+type FieldOption = { value: string; label: string }
+type ProfileField = { key: string; label: string; type?: string; options?: FieldOption[] }
+
+const PAY_CLASSIFICATION_OPTIONS: FieldOption[] = [
+  { value: 'hourly', label: 'Hourly' },
+  { value: 'exempt', label: 'Exempt (Salary)' },
+]
+
+const PROFILE_FIELDS: ProfileField[] = [
   { key: 'first_name', label: 'First Name' },
   { key: 'last_name', label: 'Last Name' },
   { key: 'work_email', label: 'Work Email', type: 'email' },
@@ -21,7 +29,7 @@ const PROFILE_FIELDS: { key: string; label: string; type?: string }[] = [
   { key: 'department', label: 'Department' },
   { key: 'work_state', label: 'Work State' },
   { key: 'work_city', label: 'Work City' },
-  { key: 'pay_classification', label: 'Pay Classification' },
+  { key: 'pay_classification', label: 'Pay Classification', type: 'select', options: PAY_CLASSIFICATION_OPTIONS },
   { key: 'pay_rate', label: 'Pay Rate' },
   { key: 'start_date', label: 'Start Date', type: 'date' },
   { key: 'address', label: 'Address' },
@@ -139,6 +147,20 @@ export default function EmployeeDetail() {
                   {PROFILE_FIELDS.map((f) => {
                     const value = getFieldValue(employee as unknown as Record<string, unknown>, f.key)
                     if (editing) {
+                      if (f.type === 'select' && f.options) {
+                        return (
+                          <div key={f.key}>
+                            <Select
+                              label={f.label}
+                              options={f.options}
+                              placeholder="— Select —"
+                              value={draft[f.key] ?? ''}
+                              onChange={(e) => setDraft((d) => ({ ...d, [f.key]: e.target.value }))}
+                              className="text-sm"
+                            />
+                          </div>
+                        )
+                      }
                       return (
                         <div key={f.key}>
                           <Input
@@ -151,11 +173,12 @@ export default function EmployeeDetail() {
                         </div>
                       )
                     }
+                    const displayValue = f.options?.find((o) => o.value === value)?.label ?? value
                     return (
                       <div key={f.key}>
                         <dt className="text-zinc-500 text-xs">{f.label}</dt>
                         <dd className="text-zinc-200 text-sm mt-0.5">
-                          {value || <span className="text-zinc-600 italic">Not set</span>}
+                          {displayValue || <span className="text-zinc-600 italic">Not set</span>}
                         </dd>
                       </div>
                     )

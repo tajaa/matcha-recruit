@@ -677,15 +677,35 @@ struct MWProjectChat: Codable, Identifiable, Hashable {
     }
 }
 
+struct MWSectionHistoryEntry: Codable, Identifiable {
+    var id: String { at }
+    let content: String
+    let source: String?
+    let at: String
+}
+
 struct MWProjectSection: Codable, Identifiable {
     let id: String
     var title: String
     var content: String?
     var sourceMessageId: String?
+    var pendingRevision: String?
+    var pendingChangeSummary: String?
+    var contentSource: String?
+    var contentUpdatedAt: String?
+    var history: [MWSectionHistoryEntry]?
+
+    var hasPendingRevision: Bool {
+        !(pendingRevision?.isEmpty ?? true)
+    }
 
     enum CodingKeys: String, CodingKey {
-        case id, title, content
+        case id, title, content, history
         case sourceMessageId = "source_message_id"
+        case pendingRevision = "pending_revision"
+        case pendingChangeSummary = "pending_change_summary"
+        case contentSource = "content_source"
+        case contentUpdatedAt = "content_updated_at"
     }
 }
 

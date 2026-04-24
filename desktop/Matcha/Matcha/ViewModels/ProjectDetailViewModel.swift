@@ -73,6 +73,26 @@ class ProjectDetailViewModel {
         }
     }
 
+    func acceptSectionRevision(sectionId: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.acceptProjectSectionRevision(projectId: pid, sectionId: sectionId)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func rejectSectionRevision(sectionId: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.rejectProjectSectionRevision(projectId: pid, sectionId: sectionId)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
     func createChat(title: String?) async {
         guard let pid = project?.id else { return }
         do {

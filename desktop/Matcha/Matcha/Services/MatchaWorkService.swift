@@ -632,6 +632,14 @@ class MatchaWorkService {
         return try await client.request(method: "PUT", path: "\(basePath)/projects/\(projectId)/sections/reorder", body: Body(sectionIds: sectionIds))
     }
 
+    func acceptProjectSectionRevision(projectId: String, sectionId: String) async throws -> MWProject {
+        try await client.request(method: "POST", path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)/accept_revision")
+    }
+
+    func rejectProjectSectionRevision(projectId: String, sectionId: String) async throws -> MWProject {
+        try await client.request(method: "POST", path: "\(basePath)/projects/\(projectId)/sections/\(sectionId)/reject_revision")
+    }
+
     func createProjectChat(projectId: String, title: String? = nil) async throws -> MWThread {
         struct Body: Codable { let title: String? }
         return try await client.request(method: "POST", path: "\(basePath)/projects/\(projectId)/chats", body: Body(title: title))
