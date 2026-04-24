@@ -22,7 +22,10 @@ import ClientErrors from './pages/admin/ClientErrors'
 import ServerErrors from './pages/admin/ServerErrors'
 import NewsletterAdmin from './pages/admin/Newsletter'
 import LandingMediaAdmin from './pages/admin/LandingMedia'
+import Blogs from './pages/admin/Blogs'
 import Subscribe from './pages/landing/Subscribe'
+import BlogIndex from './pages/landing/BlogIndex'
+import BlogPostPage from './pages/landing/BlogPost'
 import CategoryDetailPage from './pages/admin/CategoryDetailPage'
 import PolicyDetailPage from './pages/admin/PolicyDetailPage'
 import Dashboard from './pages/app/Dashboard'
@@ -75,6 +78,8 @@ export default function App() {
       <Route path="/matcha-work" element={<MatchaWorkPage />} />
       <Route path="/services" element={<ServicesPage />} />
       <Route path="/subscribe" element={<Subscribe />} />
+      <Route path="/blog" element={<BlogIndex />} />
+      <Route path="/blog/:slug" element={<BlogPostPage />} />
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/register/beta" element={<BetaRegister />} />
@@ -113,6 +118,7 @@ export default function App() {
         <Route path="compliance-mgmt" element={<ComplianceManagement />} />
         <Route path="newsletter" element={<NewsletterAdmin />} />
         <Route path="landing-media" element={<LandingMediaAdmin />} />
+        <Route path="blogs" element={<Blogs />} />
       </Route>
       <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
         <Route index element={<BrokerDashboard />} />

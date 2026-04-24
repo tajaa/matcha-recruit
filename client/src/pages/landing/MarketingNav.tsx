@@ -11,6 +11,7 @@ const NAV_LINKS = [
   { to: '/', label: 'Platform' },
   { to: '/matcha-work', label: 'Matcha Work' },
   { to: '/services', label: 'Consulting' },
+  { to: '/blog', label: 'Blog' },
 ]
 
 export default function MarketingNav({ onPricingClick, onDemoClick }: Props) {
