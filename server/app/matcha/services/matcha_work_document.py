@@ -840,7 +840,8 @@ async def create_thread(
 async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None = None) -> Optional[dict]:
     async with get_connection() as conn:
         if user_id is not None:
-            # Allow access if company matches OR user is a collaborator
+            # Allow access if company matches OR user is a thread collaborator OR
+            # user is an active collaborator on the thread's parent project
             row = await conn.fetchrow(
                 """
                 SELECT id, company_id, created_by, title, status,
@@ -851,6 +852,11 @@ async def get_thread(thread_id: UUID, company_id: UUID, *, user_id: UUID | None 
                 WHERE id=$1 AND (
                     company_id IS NOT DISTINCT FROM $2
                     OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = $1 AND user_id = $3)
+                    OR EXISTS(
+                        SELECT 1 FROM mw_project_collaborators pc
+                        JOIN mw_threads t ON t.project_id = pc.project_id
+                        WHERE t.id = $1 AND pc.user_id = $3 AND pc.status = 'active'
+                    )
                 )
                 """,
                 thread_id,
@@ -902,10 +908,16 @@ async def list_threads(
                   ELSE 'chat'
                 END AS task_type
         """
-        # Build the access clause — include threads owned by company OR where user is a collaborator
+        # Build the access clause — threads owned by company, where user is a thread collaborator,
+        # OR where user is an active collaborator on the thread's parent project
         if user_id is not None:
             # $1=company_id(UUID), $2=user_id(UUID) — UUIDs first, ints after
-            access_clause = "(company_id=$1 OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = $2))"
+            access_clause = (
+                "(company_id=$1"
+                " OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = $2)"
+                " OR EXISTS(SELECT 1 FROM mw_project_collaborators pc WHERE pc.project_id = mw_threads.project_id"
+                " AND pc.user_id = $2 AND pc.status = 'active'))"
+            )
         else:
             access_clause = "company_id=$1"
 

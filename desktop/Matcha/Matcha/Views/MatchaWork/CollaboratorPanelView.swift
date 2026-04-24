@@ -152,7 +152,7 @@ struct CollaboratorPanelView: View {
             Task {
                 let q = searchText
                 do {
-                    let results = try await MatchaWorkService.shared.searchAdminUsers(query: q)
+                    let results = try await MatchaWorkService.shared.searchInvitableUsers(query: q)
                     await MainActor.run { searchResults = results }
                 } catch {
                     await MainActor.run { searchResults = [] }

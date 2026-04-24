@@ -6,6 +6,10 @@ class ProjectDetailViewModel {
     var activeChatId: String?
     var isLoading = false
     var errorMessage: String?
+    var tasks: [MWProjectTask] = []
+    var isLoadingTasks = false
+    var files: [MWProjectFile] = []
+    var isLoadingFiles = false
 
     private let service = MatchaWorkService.shared
 
@@ -389,6 +393,167 @@ class ProjectDetailViewModel {
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
             return nil
+        }
+    }
+
+    // MARK: - Collab: tasks
+
+    func loadTasks() async {
+        guard let pid = project?.id else { return }
+        await MainActor.run { isLoadingTasks = true }
+        do {
+            let list = try await service.listProjectTasks(projectId: pid)
+            await MainActor.run {
+                tasks = list
+                isLoadingTasks = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                isLoadingTasks = false
+            }
+        }
+    }
+
+    func addTask(title: String, column: String = "todo", priority: String = "medium") async {
+        guard let pid = project?.id else { return }
+        do {
+            let task = try await service.createProjectTask(
+                projectId: pid, title: title, boardColumn: column, priority: priority
+            )
+            await MainActor.run { tasks.insert(task, at: 0) }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func moveTask(id: String, toColumn column: String) async {
+        guard let pid = project?.id else { return }
+        // Optimistic update
+        await MainActor.run {
+            if let idx = tasks.firstIndex(where: { $0.id == id }) {
+                tasks[idx].boardColumn = column
+                if column == "done" {
+                    tasks[idx].status = "completed"
+                } else if tasks[idx].status == "completed" {
+                    tasks[idx].status = "pending"
+                }
+            }
+        }
+        do {
+            let updated = try await service.updateProjectTask(
+                projectId: pid, taskId: id,
+                patch: MatchaWorkService.ProjectTaskPatch(boardColumn: column)
+            )
+            await MainActor.run {
+                if let idx = tasks.firstIndex(where: { $0.id == id }) {
+                    tasks[idx] = updated
+                }
+            }
+        } catch {
+            await loadTasks()
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func toggleTaskComplete(id: String) async {
+        guard let pid = project?.id else { return }
+        guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
+        let newStatus = tasks[idx].status == "completed" ? "pending" : "completed"
+        await MainActor.run {
+            tasks[idx].status = newStatus
+            tasks[idx].boardColumn = newStatus == "completed" ? "done" : "todo"
+        }
+        do {
+            let updated = try await service.updateProjectTask(
+                projectId: pid, taskId: id,
+                patch: MatchaWorkService.ProjectTaskPatch(status: newStatus)
+            )
+            await MainActor.run {
+                if let i = tasks.firstIndex(where: { $0.id == id }) {
+                    tasks[i] = updated
+                }
+            }
+        } catch {
+            await loadTasks()
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func updateTask(id: String, patch: MatchaWorkService.ProjectTaskPatch) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.updateProjectTask(projectId: pid, taskId: id, patch: patch)
+            await MainActor.run {
+                if let i = tasks.firstIndex(where: { $0.id == id }) {
+                    tasks[i] = updated
+                }
+            }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func deleteTask(id: String) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run { tasks.removeAll { $0.id == id } }
+        do {
+            try await service.deleteProjectTask(projectId: pid, taskId: id)
+        } catch {
+            await loadTasks()
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func markProjectComplete() async {
+        guard let pid = project?.id else { return }
+        do {
+            try await service.markProjectComplete(projectId: pid)
+            await refreshProject()
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    // MARK: - Collab: files
+
+    func loadFiles() async {
+        guard let pid = project?.id else { return }
+        await MainActor.run { isLoadingFiles = true }
+        do {
+            let list = try await service.listProjectFiles(projectId: pid)
+            await MainActor.run {
+                files = list
+                isLoadingFiles = false
+            }
+        } catch {
+            await MainActor.run {
+                errorMessage = error.localizedDescription
+                isLoadingFiles = false
+            }
+        }
+    }
+
+    func uploadFile(data: Data, filename: String, mimeType: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let uploaded = try await service.uploadProjectFile(
+                projectId: pid, file: (data: data, filename: filename, mimeType: mimeType)
+            )
+            await MainActor.run { files.insert(uploaded, at: 0) }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func deleteFile(id: String) async {
+        guard let pid = project?.id else { return }
+        await MainActor.run { files.removeAll { $0.id == id } }
+        do {
+            try await service.deleteProjectFile(projectId: pid, fileId: id)
+        } catch {
+            await loadFiles()
+            await MainActor.run { errorMessage = error.localizedDescription }
         }
     }
 }

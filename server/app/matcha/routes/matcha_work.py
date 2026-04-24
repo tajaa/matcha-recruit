@@ -2901,10 +2901,13 @@ async def _verify_project_access(project_id: UUID, current_user: CurrentUser) ->
             return result
         raise HTTPException(status_code=404, detail="Project not found")
     company_id = await get_client_company_id(current_user)
-    if not company_id:
-        raise HTTPException(status_code=404, detail="Project not found")
-    project = await proj_svc.get_project(project_id, company_id, user_id=current_user.id)
+    project = None
+    if company_id:
+        project = await proj_svc.get_project(project_id, company_id, user_id=current_user.id)
     if not project:
+        result = await proj_svc.get_project_as_collaborator(project_id, current_user.id)
+        if result:
+            return result
         raise HTTPException(status_code=404, detail="Project not found")
     if not project.get("collaborator_role"):
         project["collaborator_role"] = "owner"
@@ -2913,7 +2916,7 @@ async def _verify_project_access(project_id: UUID, current_user: CurrentUser) ->
 
 @router.get("/projects")
 async def list_projects_endpoint(
-    status: Optional[str] = Query(None, pattern="^(active|archived)$"),
+    status: Optional[str] = Query(None, pattern="^(active|archived|completed)$"),
     hiring_client_id: Optional[UUID] = Query(None),
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
@@ -3419,6 +3422,126 @@ async def delete_project_file_endpoint(
 
     await project_file_service.delete_project_file(file_id, project_id)
     return {"deleted": True}
+
+
+# ── Project-scoped kanban tasks (collab projects) ──
+
+
+@router.get("/projects/{project_id}/tasks")
+async def list_project_tasks_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """List all kanban tasks for a project."""
+    from ..services import project_task_service as pt_svc
+    await _verify_project_access(project_id, current_user)
+    return await pt_svc.list_project_tasks(project_id)
+
+
+@router.post("/projects/{project_id}/tasks", status_code=201)
+async def create_project_task_endpoint(
+    project_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Create a kanban task in a project."""
+    from datetime import date as _date
+    from ..services import project_task_service as pt_svc
+
+    project, _role = await _verify_project_access(project_id, current_user)
+
+    due_raw = body.get("due_date")
+    due_date = None
+    if due_raw:
+        try:
+            due_date = _date.fromisoformat(due_raw)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid due_date")
+
+    assigned_raw = body.get("assigned_to")
+    assigned_to = UUID(assigned_raw) if assigned_raw else None
+
+    try:
+        return await pt_svc.create_project_task(
+            project_id=project_id,
+            company_id=project["company_id"],
+            created_by=current_user.id,
+            title=body.get("title", ""),
+            description=body.get("description"),
+            board_column=body.get("board_column", "todo"),
+            priority=body.get("priority", "medium"),
+            due_date=due_date,
+            assigned_to=assigned_to,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.patch("/projects/{project_id}/tasks/{task_id}")
+async def update_project_task_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    body: dict = Body(...),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Partial update. Drag-drop updates board_column; checkbox updates status."""
+    from datetime import date as _date
+    from ..services import project_task_service as pt_svc
+
+    await _verify_project_access(project_id, current_user)
+
+    patch: dict = {}
+    for key in ("title", "description", "priority", "board_column", "status"):
+        if key in body:
+            patch[key] = body[key]
+
+    if "due_date" in body:
+        v = body["due_date"]
+        if v is None or v == "":
+            patch["due_date"] = None
+        else:
+            try:
+                patch["due_date"] = _date.fromisoformat(v)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid due_date")
+
+    if "assigned_to" in body:
+        v = body["assigned_to"]
+        patch["assigned_to"] = UUID(v) if v else None
+
+    try:
+        result = await pt_svc.update_project_task(project_id, task_id, patch)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not result:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
+@router.delete("/projects/{project_id}/tasks/{task_id}")
+async def delete_project_task_endpoint(
+    project_id: UUID,
+    task_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    from ..services import project_task_service as pt_svc
+    await _verify_project_access(project_id, current_user)
+    if not await pt_svc.delete_project_task(project_id, task_id):
+        raise HTTPException(status_code=404, detail="Task not found")
+    return {"deleted": True}
+
+
+@router.post("/projects/{project_id}/complete")
+async def complete_project_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Mark project as completed. Owner-only."""
+    from ..services import project_task_service as pt_svc
+    _project, role = await _verify_project_access(project_id, current_user)
+    if role != "owner":
+        raise HTTPException(status_code=403, detail="Only the owner can mark a project complete")
+    return await pt_svc.mark_project_complete(project_id)
 
 
 # ── Research task endpoints ──
@@ -7482,7 +7605,7 @@ async def list_tasks(
                 SELECT id, title, description, due_date, horizon, priority, status,
                        completed_at, link, category, created_at, updated_at
                 FROM mw_tasks
-                WHERE company_id = $1 AND status != 'cancelled'
+                WHERE company_id = $1 AND status != 'cancelled' AND project_id IS NULL
                 ORDER BY
                     CASE WHEN status = 'completed' THEN 1 ELSE 0 END,
                     due_date ASC NULLS LAST,

@@ -631,6 +631,56 @@ enum MWProjectType: String, Codable {
     case general
     case presentation
     case recruiting
+    case collab
+}
+
+struct MWProjectFile: Codable, Identifiable, Hashable {
+    let id: String
+    var projectId: String?
+    var uploadedBy: String?
+    var filename: String
+    var storageUrl: String
+    var contentType: String?
+    var fileSize: Int
+    var createdAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, filename
+        case projectId = "project_id"
+        case uploadedBy = "uploaded_by"
+        case storageUrl = "storage_url"
+        case contentType = "content_type"
+        case fileSize = "file_size"
+        case createdAt = "created_at"
+    }
+}
+
+struct MWProjectTask: Codable, Identifiable, Hashable {
+    let id: String
+    var projectId: String?
+    var title: String
+    var description: String?
+    var boardColumn: String
+    var priority: String
+    var status: String
+    var assignedTo: String?
+    var assignedName: String?
+    var dueDate: String?
+    var completedAt: String?
+    var createdAt: String?
+    var updatedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, title, description, priority, status
+        case projectId = "project_id"
+        case boardColumn = "board_column"
+        case assignedTo = "assigned_to"
+        case assignedName = "assigned_name"
+        case dueDate = "due_date"
+        case completedAt = "completed_at"
+        case createdAt = "created_at"
+        case updatedAt = "updated_at"
+    }
 }
 
 struct MWProject: Codable, Identifiable {

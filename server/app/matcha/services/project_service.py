@@ -13,7 +13,7 @@ from ...database import get_connection
 logger = logging.getLogger(__name__)
 
 
-_ALLOWED_PROJECT_TYPES = {"general", "presentation", "recruiting", "consultation", "blog"}
+_ALLOWED_PROJECT_TYPES = {"general", "presentation", "recruiting", "consultation", "blog", "collab"}
 _ALLOWED_STAGES = {"lead", "proposal", "active", "completed", "archived"}
 _ALLOWED_PRICING_MODELS = {"hourly", "retainer", "fixed", "free"}
 _ALLOWED_BLOG_TONES = {"expert-casual", "technical", "exec-brief", "conversational", "academic"}

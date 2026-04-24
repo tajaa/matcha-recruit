@@ -337,7 +337,7 @@ struct ChatPanelView: View {
                 .foregroundColor(.white)
                 .lineLimit(1...6)
                 .padding(.vertical, 8)
-                .onKeyPress(.return) { press in
+                .onKeyPress(keys: [.return], phases: .down) { press in
                     if press.modifiers.contains(.shift) {
                         inputText += "\n"
                         return .handled

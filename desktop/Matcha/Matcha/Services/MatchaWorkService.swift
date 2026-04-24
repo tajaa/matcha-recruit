@@ -669,6 +669,132 @@ class MatchaWorkService {
         return try await client.request(method: "GET", path: "\(basePath)/admin-users/search?q=\(encoded)")
     }
 
+    func searchInvitableUsers(query: String) async throws -> [MWAdminSearchUser] {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        return try await client.request(method: "GET", path: "/api/channels/invitable-users?q=\(encoded)")
+    }
+
+    // MARK: - Project-scoped kanban tasks (collab projects)
+
+    func listProjectTasks(projectId: String) async throws -> [MWProjectTask] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/tasks")
+    }
+
+    func createProjectTask(
+        projectId: String,
+        title: String,
+        boardColumn: String = "todo",
+        description: String? = nil,
+        priority: String = "medium",
+        dueDate: String? = nil,
+        assignedTo: String? = nil
+    ) async throws -> MWProjectTask {
+        struct Body: Encodable {
+            let title: String
+            let description: String?
+            let board_column: String
+            let priority: String
+            let due_date: String?
+            let assigned_to: String?
+        }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/tasks",
+            body: Body(
+                title: title, description: description, board_column: boardColumn,
+                priority: priority, due_date: dueDate, assigned_to: assignedTo
+            )
+        )
+    }
+
+    struct ProjectTaskPatch: Encodable {
+        var title: String?
+        var description: String?
+        var boardColumn: String?
+        var priority: String?
+        var status: String?
+        var dueDate: String?
+        var assignedTo: String?
+
+        enum CodingKeys: String, CodingKey {
+            case title, description, priority, status
+            case boardColumn = "board_column"
+            case dueDate = "due_date"
+            case assignedTo = "assigned_to"
+        }
+    }
+
+    func updateProjectTask(
+        projectId: String,
+        taskId: String,
+        patch: ProjectTaskPatch
+    ) async throws -> MWProjectTask {
+        try await client.request(
+            method: "PATCH",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)",
+            body: patch
+        )
+    }
+
+    func deleteProjectTask(projectId: String, taskId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/tasks/\(taskId)"
+        )
+    }
+
+    func markProjectComplete(projectId: String) async throws {
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/complete"
+        )
+    }
+
+    // MARK: - Project files
+
+    func listProjectFiles(projectId: String) async throws -> [MWProjectFile] {
+        try await client.request(method: "GET", path: "\(basePath)/projects/\(projectId)/files")
+    }
+
+    func uploadProjectFile(
+        projectId: String,
+        file: (data: Data, filename: String, mimeType: String)
+    ) async throws -> MWProjectFile {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        body.append("--\(boundary)\r\n")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(file.filename)\"\r\n")
+        body.append("Content-Type: \(file.mimeType)\r\n\r\n")
+        body.append(file.data)
+        body.append("\r\n")
+        body.append("--\(boundary)--\r\n")
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/files") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let msg = String(data: data, encoding: .utf8) ?? "Upload failed"
+            throw APIError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, msg)
+        }
+        return try JSONDecoder().decode(MWProjectFile.self, from: data)
+    }
+
+    func deleteProjectFile(projectId: String, fileId: String) async throws {
+        _ = try await client.requestData(
+            method: "DELETE",
+            path: "\(basePath)/projects/\(projectId)/files/\(fileId)"
+        )
+    }
+
     // MARK: - Billing
 
     func getPersonalSubscription() async throws -> MWSubscription {

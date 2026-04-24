@@ -1,6 +1,19 @@
 import SwiftUI
 import AppKit
 
+enum CollabRightPanel: String, CaseIterable, Identifiable {
+    case kanban, files, sections, overview
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .kanban: return "Kanban"
+        case .files: return "Files"
+        case .sections: return "Sections"
+        case .overview: return "Overview"
+        }
+    }
+}
+
 struct ProjectDetailView: View {
     let projectId: String
     @State private var viewModel = ProjectDetailViewModel()
@@ -9,6 +22,8 @@ struct ProjectDetailView: View {
     @State private var newSectionTitle = ""
     @State private var showCollaborators = false
     @State private var showExportMenu = false
+    @State private var collabPanel: CollabRightPanel = .kanban
+    @State private var showCompleteConfirm = false
     @AppStorage("mw-chat-theme") private var lightMode = false
     @AppStorage("mw-model") private var selectedModelId = "flash"
 
@@ -29,6 +44,8 @@ struct ProjectDetailView: View {
                     lightMode: lightMode,
                     selectedModel: selectedModelValue
                 )
+            } else if viewModel.project?.projectType == "collab" {
+                collabLayout
             } else {
                 standardLayout
             }
@@ -99,6 +116,39 @@ struct ProjectDetailView: View {
                     }
                 }
 
+                if viewModel.project?.projectType == "collab" {
+                    if viewModel.project?.status == "completed" {
+                        HStack(spacing: 3) {
+                            Image(systemName: "checkmark.seal.fill")
+                                .font(.system(size: 11))
+                            Text("Completed")
+                                .font(.system(size: 10, weight: .medium))
+                        }
+                        .foregroundColor(.matcha500)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(Color.matcha500.opacity(0.12))
+                        .cornerRadius(6)
+                    } else {
+                        Button { showCompleteConfirm = true } label: {
+                            Image(systemName: "checkmark.circle").font(.system(size: 13))
+                        }
+                        .help("Mark project complete")
+                        .confirmationDialog(
+                            "Mark project complete?",
+                            isPresented: $showCompleteConfirm,
+                            titleVisibility: .visible
+                        ) {
+                            Button("Complete") {
+                                Task { await viewModel.markProjectComplete() }
+                            }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text("Owner only. Project will move to the Completed section.")
+                        }
+                    }
+                }
+
                 Menu {
                     Button("PDF") { export(format: "pdf") }
                     Button("Markdown") { export(format: "md") }
@@ -109,6 +159,199 @@ struct ProjectDetailView: View {
                 .help("Export project")
             }
         }
+    }
+
+    private var collabLayout: some View {
+        HSplitView {
+            if viewModel.activeChatId != nil {
+                ChatPanelView(viewModel: chatVM, lightMode: lightMode, selectedModel: selectedModelValue)
+                    .frame(minWidth: 340)
+            } else {
+                VStack(spacing: 12) {
+                    Spacer()
+                    if let err = viewModel.errorMessage {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 28))
+                            .foregroundColor(.red)
+                        Text("Couldn't start chat")
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(.white)
+                        Text(err)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 24)
+                        Button("Retry") {
+                            Task {
+                                viewModel.errorMessage = nil
+                                await viewModel.createChat(title: nil)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                    } else {
+                        ProgressView().tint(.secondary)
+                        Text("Starting chat…")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+                .frame(minWidth: 340)
+                .background(Color.appBackground)
+                .task {
+                    if viewModel.activeChatId == nil && viewModel.errorMessage == nil {
+                        await viewModel.createChat(title: nil)
+                    }
+                }
+            }
+
+            VStack(spacing: 0) {
+                Picker("", selection: $collabPanel) {
+                    ForEach(CollabRightPanel.allCases) { p in
+                        Text(p.label).tag(p)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+
+                Divider().opacity(0.3)
+
+                switch collabPanel {
+                case .kanban:
+                    KanbanBoardView(viewModel: viewModel)
+                case .files:
+                    ProjectFilesView(viewModel: viewModel)
+                case .sections:
+                    collabSections
+                case .overview:
+                    collabOverview
+                }
+            }
+            .frame(minWidth: 440)
+            .background(Color.appBackground)
+        }
+        .background(Color.appBackground)
+    }
+
+    private var collabSections: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Sections")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button { Task { await viewModel.addSection(title: "New Section") } } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Add section")
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+
+            Divider().opacity(0.3)
+
+            if let sections = viewModel.project?.sections, !sections.isEmpty {
+                if let sid = editingSectionId,
+                   let section = sections.first(where: { $0.id == sid }) {
+                    SectionEditorView(
+                        section: section,
+                        onSave: { title, content in
+                            Task { await viewModel.updateSection(sectionId: sid, title: title, content: content) }
+                        }
+                    )
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 0) {
+                            ForEach(sections) { section in
+                                Button { editingSectionId = section.id } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(section.title).font(.system(size: 12, weight: .medium)).foregroundColor(.white)
+                                        if let c = section.content, !c.isEmpty {
+                                            Text(c.prefix(120))
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.secondary)
+                                                .lineLimit(2)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(10)
+                                    .background(Color.zinc900.opacity(0.5))
+                                    .cornerRadius(6)
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 3)
+                            }
+                        }
+                    }
+                }
+            } else {
+                Spacer()
+                Text("No sections yet — use the AI chat or click + to add.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+        }
+    }
+
+    private var collabOverview: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let project = viewModel.project {
+                Text(project.title)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundColor(.white)
+
+                HStack(spacing: 14) {
+                    statChip(icon: "list.bullet", label: "\(viewModel.tasks.count) tasks")
+                    statChip(icon: "doc", label: "\(viewModel.files.count) files")
+                    statChip(icon: "person.2", label: "\(project.collaborators?.count ?? 0) collaborators")
+                }
+
+                if let collabs = project.collaborators, !collabs.isEmpty {
+                    Divider().opacity(0.3).padding(.top, 6)
+                    Text("COLLABORATORS")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                        .tracking(0.5)
+                    ForEach(collabs) { c in
+                        HStack(spacing: 8) {
+                            Circle().fill(Color.matcha500).frame(width: 22, height: 22)
+                                .overlay(Text(String(c.name.prefix(1)).uppercased()).font(.system(size: 9, weight: .bold)).foregroundColor(.white))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(c.name).font(.system(size: 12)).foregroundColor(.white)
+                                Text(c.email).font(.system(size: 10)).foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if c.role == "owner" {
+                                Text("Owner")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(.matcha500)
+                            }
+                        }
+                    }
+                }
+                Spacer()
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+    }
+
+    private func statChip(icon: String, label: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon).font(.system(size: 10))
+            Text(label).font(.system(size: 11))
+        }
+        .foregroundColor(.secondary)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(Color.zinc800)
+        .cornerRadius(6)
     }
 
     private var consultationLayout: some View {
