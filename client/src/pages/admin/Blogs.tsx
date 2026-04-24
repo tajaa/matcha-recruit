@@ -183,7 +183,7 @@ function BlogEditModal({
   const [metaDesc, setMetaDesc] = useState(post?.meta_description ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [autoSlug, setAutoSlug] = useState(isNew && !post?.slug)
+  const [autoSlug, setAutoSlug] = useState(isNew)
 
   useEffect(() => {
     if (autoSlug) setSlug(slugify(title))
