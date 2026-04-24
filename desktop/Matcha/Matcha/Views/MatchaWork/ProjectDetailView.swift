@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 enum CollabRightPanel: String, CaseIterable, Identifiable {
     case kanban, files, sections, overview
@@ -574,13 +575,34 @@ struct ProjectDetailView: View {
     }
 
     private func export(format: String) {
-        Task {
+        Task { @MainActor in
             guard let data = await viewModel.exportProject(format: format) else { return }
             let panel = NSSavePanel()
             panel.nameFieldStringValue = "\(viewModel.project?.title ?? "project").\(format)"
-            panel.begin { response in
+            // allowedContentTypes pins the save dialog to the correct extension
+            // and makes sure the file is written with it even if the user edits
+            // the name field without the extension.
+            switch format {
+            case "pdf": panel.allowedContentTypes = [.pdf]
+            case "docx":
+                if let t = UTType(filenameExtension: "docx") { panel.allowedContentTypes = [t] }
+            case "md":
+                if let t = UTType(filenameExtension: "md") { panel.allowedContentTypes = [t] }
+            default: break
+            }
+            let window = NSApp.keyWindow ?? NSApp.mainWindow
+            let handler: (NSApplication.ModalResponse) -> Void = { response in
                 guard response == .OK, let url = panel.url else { return }
-                try? data.write(to: url)
+                do {
+                    try data.write(to: url)
+                } catch {
+                    print("[Export] write failed: \(error)")
+                }
+            }
+            if let window {
+                panel.beginSheetModal(for: window, completionHandler: handler)
+            } else {
+                panel.begin(completionHandler: handler)
             }
         }
     }
