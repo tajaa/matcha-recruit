@@ -182,8 +182,12 @@ class ThreadDetailViewModel {
         }
         // Snapshot any pending image attachments. Backend persists them on the
         // user message metadata and clears them from thread state so the next
-        // send starts clean.
-        let pendingImages = presentationImageURLs
+        // send starts clean. NOTE: read the pre-clear snapshot captured at the
+        // top of this function — `presentationImageURLs` at this point reflects
+        // the optimistic clear done inside the MainActor block above and would
+        // always be empty, which would prevent the server from ever receiving
+        // (and therefore persisting) the image URLs.
+        let pendingImages = optimisticImages
         request.httpBody = try? JSONEncoder().encode(
             SendBody(
                 content: content,

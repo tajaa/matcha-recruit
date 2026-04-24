@@ -102,16 +102,16 @@ struct ContentView: View {
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
                                             .padding(.bottom, 4)
-                                        ForEach(["general", "presentation", "recruiting"], id: \.self) { type in
+                                        ForEach(["general", "presentation", "recruiting", "collab"], id: \.self) { type in
                                             Button {
                                                 showProjectTypePicker = false
                                                 createProject(type: type)
                                             } label: {
                                                 HStack {
-                                                    Image(systemName: type == "general" ? "doc.text" : type == "presentation" ? "rectangle.on.rectangle" : "person.3")
+                                                    Image(systemName: iconForProjectType(type))
                                                         .font(.system(size: 11))
                                                         .frame(width: 16)
-                                                    Text(type.capitalized)
+                                                    Text(labelForProjectType(type))
                                                         .font(.system(size: 12))
                                                 }
                                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -447,6 +447,23 @@ struct ContentView: View {
             } catch {
                 await MainActor.run { isCreatingProject = false }
             }
+        }
+    }
+
+    private func iconForProjectType(_ type: String) -> String {
+        switch type {
+        case "general": return "doc.text"
+        case "presentation": return "rectangle.on.rectangle"
+        case "recruiting": return "person.3"
+        case "collab": return "person.2.crop.square.stack"
+        default: return "doc.text"
+        }
+    }
+
+    private func labelForProjectType(_ type: String) -> String {
+        switch type {
+        case "collab": return "Collab"
+        default: return type.capitalized
         }
     }
 
