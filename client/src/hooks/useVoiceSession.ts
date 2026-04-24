@@ -9,6 +9,11 @@ interface UseVoiceSessionOptions {
   onTranscript: (role: 'user' | 'assistant', text: string) => void
   onStatusChange?: (status: VoiceSessionStatus) => void
   onSessionEnded?: () => void
+  /** Called when the WS closes before the session could start (Gemini init
+   * failure, rate limit, auth reject after upgrade, etc.). Distinct from
+   * onSessionEnded so the UI can show "connection failed" instead of
+   * "Interview Complete" when no conversation ever happened. */
+  onSessionFailed?: (reason: string) => void
 }
 
 const CLIENT_AUDIO_PREFIX = 0x01
@@ -31,6 +36,13 @@ export function useVoiceSession(options: UseVoiceSessionOptions | null) {
   const nextPlayTimeRef = useRef(0)
   const statusRef = useRef<VoiceSessionStatus>('idle')
   const autoStopSentRef = useRef(false)
+  /** True once the server has confirmed the session is live — either by
+   * sending "Session started" / any other status, streaming audio, or
+   * emitting a transcript. Used to tell "ended normally" apart from
+   * "closed before anything happened". */
+  const sessionStartedRef = useRef(false)
+  /** Captured close reason from server, surfaced to the UI on failure. */
+  const closeReasonRef = useRef<string>('')
 
   optionsRef.current = options
 
@@ -103,6 +115,8 @@ export function useVoiceSession(options: UseVoiceSessionOptions | null) {
     updateStatus('connecting')
     setElapsedSeconds(0)
     autoStopSentRef.current = false
+    sessionStartedRef.current = false
+    closeReasonRef.current = ''
 
     try {
       // Request mic access
@@ -170,26 +184,50 @@ export function useVoiceSession(options: UseVoiceSessionOptions | null) {
         if (event.data instanceof ArrayBuffer) {
           const bytes = new Uint8Array(event.data)
           if (bytes.length > 1 && bytes[0] === SERVER_AUDIO_PREFIX) {
+            // Any server audio means the session is definitively live.
+            sessionStartedRef.current = true
             // Strip prefix and play
             playPcmChunk(bytes.slice(1).buffer)
           }
         } else if (typeof event.data === 'string') {
           try {
             const msg = JSON.parse(event.data)
+            // Server uses `content` (ConversationMessage); older code also
+            // read `message`. Tolerate both.
+            const text = (msg.content ?? msg.message ?? msg.text ?? '') as string
             if (msg.type === 'user' || msg.type === 'assistant') {
-              optionsRef.current?.onTranscript(msg.type, msg.content || msg.text || '')
+              sessionStartedRef.current = true
+              optionsRef.current?.onTranscript(msg.type, text)
             } else if (msg.type === 'status') {
-              if (msg.message === 'interrupted') {
+              if (text === 'Session started') {
+                sessionStartedRef.current = true
+              } else if (text === 'interrupted') {
                 flushPlayback()
-              } else if (msg.message === 'session_ending' || msg.message === 'session_ended') {
+              } else if (text === 'session_ending' || text === 'session_ended') {
+                sessionStartedRef.current = true
                 updateStatus('ending')
+              }
+            } else if (msg.type === 'system') {
+              // Server-originated error messages land on this channel. Capture
+              // so onSessionFailed can surface them to the UI on close.
+              if (text.toLowerCase().startsWith('error')) {
+                closeReasonRef.current = text
               }
             }
           } catch { /* ignore malformed */ }
         }
       }
 
-      ws.onclose = () => {
+      ws.onclose = (evt) => {
+        if (!sessionStartedRef.current) {
+          const reason = closeReasonRef.current
+            || evt.reason
+            || 'The interview connection closed before the session could start. Please try again.'
+          updateStatus('error')
+          optionsRef.current?.onSessionFailed?.(reason)
+          cleanup()
+          return
+        }
         updateStatus('ended')
         optionsRef.current?.onSessionEnded?.()
         cleanup()

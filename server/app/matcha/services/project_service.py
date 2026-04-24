@@ -528,10 +528,10 @@ async def update_section(project_id: UUID, section_id: str, updates: dict) -> di
                     merged["content"] = updates["content"]
                     merged["content_source"] = source
                     merged["content_updated_at"] = _now_iso()
-                    # User edit supersedes any pending AI suggestion.
-                    if source == "user":
-                        merged["pending_revision"] = None
-                        merged["pending_change_summary"] = None
+                    # Intentionally preserve pending_revision. Only
+                    # accept_section_revision / reject_section_revision clear
+                    # it — user edits and pending AI suggestions coexist so
+                    # the banner stays actionable until the user decides.
                 if "title" in updates:
                     merged["title"] = updates["title"]
                 if "diagram_data" in updates:

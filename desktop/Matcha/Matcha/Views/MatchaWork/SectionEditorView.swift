@@ -11,6 +11,7 @@ struct SectionEditorView: View {
     @State private var content: String = ""
     @State private var saveTimer: Timer?
     @State private var isSaved = false
+    @State private var hasUnsavedChanges = false
     @State private var showPendingPreview = true
 
     var body: some View {
@@ -62,13 +63,33 @@ struct SectionEditorView: View {
         .onAppear {
             title = section.title
             content = section.content ?? ""
+            hasUnsavedChanges = false
         }
         .onChange(of: section.id) {
+            // Different section — flush any pending save for the prior one.
+            flushSaveIfDirty()
             title = section.title
             content = section.content ?? ""
             isSaved = false
+            hasUnsavedChanges = false
             showPendingPreview = true
         }
+        .onDisappear {
+            flushSaveIfDirty()
+        }
+    }
+
+    /// Fires an immediate synchronous-ish save if there are unsaved edits,
+    /// bypassing the 1s debounce. Called on view disappear and section switch
+    /// so user text is durable before any sibling action (chat send, tab
+    /// change) can trigger an AI revision against stale content.
+    private func flushSaveIfDirty() {
+        saveTimer?.invalidate()
+        saveTimer = nil
+        guard hasUnsavedChanges else { return }
+        let t = title.isEmpty ? nil : title
+        onSave(t, content)
+        hasUnsavedChanges = false
     }
 
     private var pendingRevisionBanner: some View {
@@ -179,11 +200,13 @@ struct SectionEditorView: View {
 
     private func scheduleSave() {
         isSaved = false
+        hasUnsavedChanges = true
         saveTimer?.invalidate()
         saveTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { _ in
             let t = title.isEmpty ? nil : title
             let c = content
             onSave(t, c)
+            hasUnsavedChanges = false
             Task { @MainActor in
                 withAnimation { isSaved = true }
                 try? await Task.sleep(for: .seconds(2))

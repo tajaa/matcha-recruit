@@ -71,6 +71,15 @@ export default function CandidateInterview() {
     setSessionInfo(null)
   }, [])
 
+  const handleSessionFailed = useCallback((reason: string) => {
+    // Server closed the WS before the interviewer ever spoke. Surface the
+    // real reason instead of jumping to 'completed', which would lie to
+    // the candidate and mark a never-happened interview as done.
+    setError(reason)
+    setState('error')
+    setSessionInfo(null)
+  }, [])
+
   const voice = useVoiceSession(
     sessionInfo
       ? {
@@ -79,6 +88,7 @@ export default function CandidateInterview() {
           maxDurationSeconds: sessionInfo.max_session_duration_seconds,
           onTranscript: handleTranscript,
           onSessionEnded: handleSessionEnded,
+          onSessionFailed: handleSessionFailed,
         }
       : null
   )
