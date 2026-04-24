@@ -36,6 +36,11 @@
 #   ./release-appstore.sh --no-bump       skip the build-number bump (re-upload
 #                                         the same number — only useful if a
 #                                         prior upload failed mid-flight)
+#   ./release-appstore.sh --status        show pbxproj build + last 20 attempts
+#   ./release-appstore.sh --set-build N   force pbxproj to N (recover from drift
+#                                         when pbxproj falls behind ASC because
+#                                         a previous archive failed and rolled
+#                                         back). Next run bumps from N.
 
 set -euo pipefail
 
@@ -67,15 +72,30 @@ RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; GREEN=$'\033[0;32m'; DIM=$'\033[2m'; NC
 NO_UPLOAD=false
 NO_BUMP=false
 SHOW_STATUS=false
-for arg in "$@"; do
-    case "$arg" in
-        --no-upload) NO_UPLOAD=true ;;
-        --no-bump)   NO_BUMP=true ;;
-        --status)    SHOW_STATUS=true ;;
+SET_BUILD=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --no-upload) NO_UPLOAD=true; shift ;;
+        --no-bump)   NO_BUMP=true; shift ;;
+        --status)    SHOW_STATUS=true; shift ;;
+        --set-build) SET_BUILD="$2"; shift 2 ;;
+        --set-build=*) SET_BUILD="${1#*=}"; shift ;;
         -h|--help)   grep -E '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *)           echo "${RED}unknown arg:${NC} $arg"; exit 1 ;;
+        *)           echo "${RED}unknown arg:${NC} $1"; exit 1 ;;
     esac
 done
+
+if [[ -n "$SET_BUILD" ]]; then
+    if ! [[ "$SET_BUILD" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+        echo "${RED}error:${NC} --set-build value must be numeric (e.g. 18)"
+        exit 1
+    fi
+    OLD=$(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+(\.[0-9]+)*' "$PBXPROJ" | head -1 | awk '{print $3}')
+    sed -i '' "s/CURRENT_PROJECT_VERSION = ${OLD};/CURRENT_PROJECT_VERSION = ${SET_BUILD};/g" "$PBXPROJ"
+    echo "${GREEN}build number:${NC} ${OLD} → ${SET_BUILD} (manual override)"
+    echo "${DIM}use this to recover from pbxproj/ASC drift; next run will bump from ${SET_BUILD}${NC}"
+    exit 0
+fi
 
 if $SHOW_STATUS; then
     echo "${DIM}pbxproj build:${NC} $(grep -oE 'CURRENT_PROJECT_VERSION = [0-9]+(\.[0-9]+)*' "$PBXPROJ" | head -1 | awk '{print $3}')"
