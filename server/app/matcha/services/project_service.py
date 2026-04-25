@@ -144,9 +144,9 @@ async def create_project(
         # Seed the creator as project owner
         await conn.execute(
             """
-            INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role)
-            VALUES ($1, $2, $2, 'owner')
-            ON CONFLICT (project_id, user_id) DO NOTHING
+            INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
+            VALUES ($1, $2, $2, 'owner', 'active')
+            ON CONFLICT (project_id, user_id) DO UPDATE SET status = 'active'
             """,
             row["id"], user_id,
         )
