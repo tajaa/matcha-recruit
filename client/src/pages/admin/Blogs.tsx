@@ -43,7 +43,7 @@ function slugify(input: string): string {
 export default function Blogs() {
   const [posts, setPosts] = useState<BlogPost[]>([])
   const [loading, setLoading] = useState(false)
-  const [filter, setFilter] = useState<BlogStatus | 'all'>('all')
+  const [filter, setFilter] = useState<BlogStatus | 'all' | 'pending'>('all')
   const [editing, setEditing] = useState<BlogPost | null>(null)
   const [creating, setCreating] = useState(false)
 
