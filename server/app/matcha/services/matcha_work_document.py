@@ -913,13 +913,13 @@ async def list_threads(
         if user_id is not None:
             # $1=company_id(UUID), $2=user_id(UUID) — UUIDs first, ints after
             access_clause = (
-                "(company_id=$1"
+                "project_id IS NULL AND (company_id=$1"
                 " OR EXISTS(SELECT 1 FROM mw_thread_collaborators WHERE thread_id = mw_threads.id AND user_id = $2)"
                 " OR EXISTS(SELECT 1 FROM mw_project_collaborators pc WHERE pc.project_id = mw_threads.project_id"
                 " AND pc.user_id = $2 AND pc.status = 'active'))"
             )
         else:
-            access_clause = "company_id=$1"
+            access_clause = "project_id IS NULL AND company_id=$1"
 
         collab_count_sql = "(SELECT COUNT(*) FROM mw_thread_collaborators WHERE thread_id = mw_threads.id) AS collaborator_count"
 
