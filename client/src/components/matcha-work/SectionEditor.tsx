@@ -67,7 +67,9 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, upload
     ],
     content,
     onUpdate: ({ editor: e }) => {
-      onUpdate(e.getHTML())
+      const html = e.getHTML()
+      lastServerContent.current = html
+      onUpdate(html)
     },
     editorProps: {
       attributes: {
@@ -101,7 +103,7 @@ export default function SectionEditor({ content, onUpdate, onImageUpload, upload
   useEffect(() => {
     if (editor && content !== lastServerContent.current) {
       lastServerContent.current = content
-      if (content !== '<p></p>') {
+      if (content !== '<p></p>' && content !== editor.getHTML()) {
         editor.commands.setContent(content, { emitUpdate: false })
       }
     }

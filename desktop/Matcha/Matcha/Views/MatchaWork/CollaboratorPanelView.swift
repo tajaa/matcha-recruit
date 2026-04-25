@@ -7,10 +7,34 @@ struct CollaboratorPanelView: View {
     @State private var searchText = ""
     @State private var searchResults: [MWAdminSearchUser] = []
     @State private var suggestions: [MWAdminSearchUser] = []
+    @State private var friends: [UserConnection] = []
     @State private var isSearching = false
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var searchTimer: Timer?
+
+    /// Friends filtered by the current search text (local filter).
+    private var filteredFriends: [UserConnection] {
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        let list: [UserConnection]
+        if q.count >= 2 {
+            list = friends.filter { $0.name.lowercased().contains(q) || $0.email.lowercased().contains(q) }
+        } else {
+            list = friends
+        }
+        // Exclude anyone already a collaborator.
+        return list.filter { friend in
+            !collaborators.contains { $0.userId == friend.userId }
+        }
+    }
+
+    /// Server-side search results or suggestions, excluding friends already
+    /// shown in the dedicated section above.
+    private var displayedUsers: [MWAdminSearchUser] {
+        let base = searchText.count >= 2 ? searchResults : suggestions
+        let friendIds = Set(friends.map(\.userId))
+        return base.filter { !friendIds.contains($0.id) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -35,54 +59,65 @@ struct CollaboratorPanelView: View {
             .padding(.vertical, 8)
             .background(Color.zinc800.opacity(0.5))
 
-            // Suggestions / search results — show friends + recent contacts
-            // by default (loaded on appear), replaced by search hits as user
-            // types ≥2 chars.
-            let displayed = searchText.count >= 2 ? searchResults : suggestions
-            if !displayed.isEmpty {
+            ScrollView {
                 VStack(spacing: 0) {
-                    Text(searchText.count >= 2 ? "Results" : "Suggestions")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .tracking(0.5)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.top, 6)
-                        .padding(.bottom, 2)
-                    ForEach(displayed) { user in
-                        let alreadyAdded = collaborators.contains { $0.userId == user.id }
-                        Button {
-                            guard !alreadyAdded else { return }
-                            Task { await addUser(userId: user.id) }
-                        } label: {
-                            HStack(spacing: 8) {
-                                Circle().fill(Color.matcha500).frame(width: 24, height: 24)
-                                    .overlay(Text(String(user.name.prefix(1)).uppercased()).font(.system(size: 10, weight: .bold)).foregroundColor(.white))
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(user.name).font(.system(size: 12)).foregroundColor(.white)
-                                    Text(user.email).font(.system(size: 10)).foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                if alreadyAdded {
-                                    Text("Added").font(.system(size: 10)).foregroundColor(.secondary)
-                                }
+                    // ── Friends section ──────────────────────────────
+                    if !filteredFriends.isEmpty {
+                        sectionHeader("Friends")
+                        ForEach(filteredFriends) { friend in
+                            let alreadyAdded = collaborators.contains { $0.userId == friend.userId }
+                            Button {
+                                guard !alreadyAdded else { return }
+                                Task { await addUser(userId: friend.userId) }
+                            } label: {
+                                userRow(
+                                    name: friend.name,
+                                    email: friend.email,
+                                    badgeColor: .matcha500,
+                                    alreadyAdded: alreadyAdded
+                                )
                             }
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
+                            .buttonStyle(.plain)
+                            .disabled(alreadyAdded)
                         }
-                        .buttonStyle(.plain)
-                        .disabled(alreadyAdded)
+                        Divider().opacity(0.3)
+                    }
+
+                    // ── Search results / Suggestions section ─────────
+                    if !displayedUsers.isEmpty {
+                        sectionHeader(searchText.count >= 2 ? "Results" : "Suggestions")
+                        ForEach(displayedUsers) { user in
+                            let alreadyAdded = collaborators.contains { $0.userId == user.id }
+                            Button {
+                                guard !alreadyAdded else { return }
+                                Task { await addUser(userId: user.id) }
+                            } label: {
+                                userRow(
+                                    name: user.name,
+                                    email: user.email,
+                                    badgeColor: .matcha500,
+                                    alreadyAdded: alreadyAdded
+                                )
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(alreadyAdded)
+                        }
+                    }
+
+                    // ── Empty state ──────────────────────────────────
+                    if filteredFriends.isEmpty && displayedUsers.isEmpty && searchText.count >= 2 && !isSearching {
+                        Text("No users found.")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
                     }
                 }
                 .background(Color.zinc800.opacity(0.3))
-                Divider().opacity(0.3)
-            } else if searchText.count >= 2 && !isSearching {
-                Text("No users found.")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
             }
+            .frame(maxHeight: 160)
+
+            Divider().opacity(0.3)
 
             // Current collaborators
             if isLoading {
@@ -134,7 +169,49 @@ struct CollaboratorPanelView: View {
         .background(Color.appBackground)
         .task {
             await load()
+            await loadFriends()
             await loadSuggestions()
+        }
+    }
+
+    // MARK: - Reusable row components
+
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(.secondary)
+            .tracking(0.5)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 6)
+            .padding(.bottom, 2)
+    }
+
+    private func userRow(name: String, email: String, badgeColor: Color, alreadyAdded: Bool) -> some View {
+        HStack(spacing: 8) {
+            Circle().fill(badgeColor).frame(width: 24, height: 24)
+                .overlay(Text(String(name.prefix(1)).uppercased()).font(.system(size: 10, weight: .bold)).foregroundColor(.white))
+            VStack(alignment: .leading, spacing: 1) {
+                Text(name).font(.system(size: 12)).foregroundColor(.white)
+                Text(email).font(.system(size: 10)).foregroundColor(.secondary)
+            }
+            Spacer()
+            if alreadyAdded {
+                Text("Added").font(.system(size: 10)).foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
+    // MARK: - Data loading
+
+    private func loadFriends() async {
+        do {
+            let f = try await ChannelsService.shared.listConnections()
+            await MainActor.run { friends = f }
+        } catch {
+            // Silent — friends are supplemental. Suggestions still work.
         }
     }
 

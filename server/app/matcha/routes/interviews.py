@@ -1360,16 +1360,29 @@ async def interview_websocket(
                 pass
     except Exception as e:
         import traceback
-        print(f"[Interview {interview_id}] Error: {e}\n{traceback.format_exc()}")
+        error_type = e.__class__.__name__
+        error_msg = str(e)
+        print(f"[Interview {interview_id}] Error ({error_type}): {error_msg}\n{traceback.format_exc()}")
+        
+        # Format a user-friendly error message
+        friendly_error = "An unexpected error occurred connecting to the AI."
+        if "RateLimitExceeded" in error_type or "429" in error_msg or "quota" in error_msg.lower():
+            friendly_error = "The AI system is currently at capacity. Please try again in a few minutes."
+        elif "403" in error_msg or "permission" in error_msg.lower() or "api key" in error_msg.lower():
+            friendly_error = "AI service configuration error. Please contact support."
+        elif "400" in error_msg or "invalid" in error_msg.lower() or "unsupported" in error_msg.lower():
+            friendly_error = "There was a problem starting the interview configuration. Please try again."
+        elif error_msg and error_msg.strip() and error_msg != "None":
+            friendly_error = error_msg[:120]
+            
         try:
-            await send_message(MessageType.SYSTEM, f"Error: {str(e)}")
+            await send_message(MessageType.SYSTEM, f"Error: {friendly_error}")
         except Exception:
             pass
         try:
             # Surface a meaningful close reason to the client instead of the
             # generic "1011 None" the default FastAPI handler would send.
-            reason = str(e)[:120] if str(e) else e.__class__.__name__
-            await websocket.close(code=1011, reason=reason)
+            await websocket.close(code=1011, reason=friendly_error[:120])
         except Exception:
             pass
     finally:
