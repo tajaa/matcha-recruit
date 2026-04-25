@@ -10,6 +10,19 @@ enum APIError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .httpError(let code, let message):
+            // Server returns an HTML "Updating in progress" page during deploys
+            // (502/503/504). Don't dump raw HTML into an alert — collapse to a
+            // friendly retry message. Same for any other 5xx body that looks
+            // like HTML rather than JSON {detail: "..."}.
+            if (500...599).contains(code) {
+                let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.lowercased().hasPrefix("<!doctype") || trimmed.hasPrefix("<html") {
+                    if code == 502 || code == 503 || code == 504 {
+                        return "Server is updating. Try again in 30 seconds."
+                    }
+                    return "Server error (\(code)). Try again in a moment."
+                }
+            }
             return "HTTP \(code): \(message)"
         case .decodingError(let error):
             return "Decoding error: \(error.localizedDescription)"
