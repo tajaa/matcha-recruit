@@ -162,6 +162,21 @@ def _normalize_guidance_cards(
             else []
         )
 
+        # Preserve AI-generated interview_questions list when present. Trim to
+        # a reasonable count + per-question length so a runaway response can't
+        # bloat the payload. The pydantic model field is optional so missing
+        # keys remain null on the wire.
+        questions_raw = card.get("interview_questions")
+        interview_questions: Optional[list[str]] = None
+        if isinstance(questions_raw, list):
+            cleaned = [
+                str(q).strip()[:280]
+                for q in questions_raw
+                if isinstance(q, str) and q.strip()
+            ]
+            if cleaned:
+                interview_questions = cleaned[:8]
+
         normalized_cards.append(
             {
                 "id": _guidance_card_id(card.get("id"), title, idx),
@@ -171,6 +186,7 @@ def _normalize_guidance_cards(
                 "priority": priority,
                 "blockers": blockers[:3],
                 "action": _normalize_guidance_action(card.get("action"), can_run_discrepancies),
+                "interview_questions": interview_questions,
             }
         )
 
@@ -288,6 +304,14 @@ def _build_fallback_guidance_payload(
                     "analysis_type": None,
                     "search_query": None,
                 },
+                "interview_questions": [
+                    "Walk me through what you observed in your own words, including the date, time, and location.",
+                    "Who else was present, and what was each person doing?",
+                    "What did the people involved say or do immediately before, during, and after the incident?",
+                    "Have you witnessed similar conduct or conditions before? If so, when and what happened?",
+                    "Did you report this — or hear of anyone else reporting it — to a manager, HR, or a hotline? What was the response?",
+                    "Are there documents, messages, photos, or records we should pull to corroborate your account?",
+                ],
             }
         )
 
