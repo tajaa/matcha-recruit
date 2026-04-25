@@ -328,11 +328,78 @@ struct BlogEditorView: View {
                         }
                     }
                 }
+
+                Divider().opacity(0.2).padding(.vertical, 4)
+
+                // Submit for review (publishing on hey-matcha.com/blog)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Publish to website")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.secondary)
+                    Text("Send this draft to the Matcha admin team for review. Once approved, it appears at hey-matcha.com/blog.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary.opacity(0.8))
+                    if let status = submitStatus {
+                        Text(status)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.matcha500)
+                    }
+                    if let err = submitError {
+                        Text(err).font(.system(size: 11)).foregroundColor(.red)
+                    }
+                    Button {
+                        Task { await submitForReview() }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if isSubmitting {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Image(systemName: "paperplane.fill").font(.system(size: 11))
+                            }
+                            Text(isSubmitting ? "Submitting…" : "Submit for review")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.matcha600)
+                        .cornerRadius(5)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isSubmitting)
+                }
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Color(white: 0.08))
+    }
+
+    @State private var isSubmitting = false
+    @State private var submitStatus: String? = nil
+    @State private var submitError: String? = nil
+
+    private func submitForReview() async {
+        guard let pid = viewModel.project?.id else { return }
+        await MainActor.run {
+            isSubmitting = true
+            submitStatus = nil
+            submitError = nil
+        }
+        do {
+            let result = try await MatchaWorkService.shared.submitBlogForReview(projectId: pid)
+            await MainActor.run {
+                isSubmitting = false
+                submitStatus = result.resubmitted
+                    ? "Re-submitted — admin will see your changes"
+                    : "Submitted — Matcha admin will review"
+            }
+        } catch {
+            await MainActor.run {
+                isSubmitting = false
+                submitError = "Submit failed: \(error.localizedDescription)"
+            }
+        }
     }
 
     // MARK: - Helpers

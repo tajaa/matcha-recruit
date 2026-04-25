@@ -3432,6 +3432,112 @@ async def delete_project_file_endpoint(
     return {"deleted": True}
 
 
+@router.post("/projects/{project_id}/submit-blog")
+async def submit_blog_for_review(
+    project_id: UUID,
+    body: dict = Body(default_factory=dict),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Submit a Matcha Work blog project to master admin for review.
+
+    Creates (or refreshes) a blog_posts row in 'draft' status with
+    submitted_for_review=TRUE so admins see it in their Pending Review queue.
+    Re-submitting the same project updates the existing draft instead of
+    creating a duplicate. Admins approve by flipping status to 'published';
+    reject by clearing submitted_for_review with review_notes.
+    """
+    project, _role = await _verify_project_access(project_id, current_user)
+    if project.get("project_type") != "blog":
+        raise HTTPException(status_code=400, detail="Only blog projects can be submitted for review")
+
+    title = (project.get("title") or "Untitled").strip() or "Untitled"
+    sections = project.get("sections") or []
+    pdata = project.get("project_data") or {}
+
+    # Stitch sections into one markdown document the same way the project
+    # markdown export does, minus the frontmatter.
+    md_parts: list[str] = [f"# {title}\n"]
+    for s in sections:
+        if s.get("title"):
+            md_parts.append(f"## {s['title']}\n")
+        md_parts.append((s.get("content") or "") + "\n")
+    content_md = "\n".join(md_parts)
+
+    excerpt_raw = (body.get("excerpt") or pdata.get("excerpt") or "").strip() or None
+    cover_image = (body.get("cover_image") or pdata.get("cover_image") or "").strip() or None
+    tags = body.get("tags") or pdata.get("tags") or []
+    if not isinstance(tags, list):
+        tags = []
+    submitter_notes = (body.get("notes") or "").strip() or None
+
+    # Slug from project_data if blog-mode populated it, else slugify the title.
+    raw_slug = (pdata.get("slug") or "").strip() or _slugify_blog(title)
+    base_slug = raw_slug
+
+    async with get_connection() as conn:
+        existing = await conn.fetchrow(
+            """
+            SELECT id, slug, status FROM blog_posts
+            WHERE source_project_id = $1
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            project_id,
+        )
+
+        if existing and existing["status"] != "published":
+            # Refresh existing draft / previously-rejected submission.
+            await conn.execute(
+                """
+                UPDATE blog_posts SET
+                    title = $1,
+                    content = $2,
+                    excerpt = COALESCE($3, excerpt),
+                    cover_image = COALESCE($4, cover_image),
+                    tags = $5::jsonb,
+                    submitted_for_review = TRUE,
+                    submitted_at = NOW(),
+                    submitter_id = $6,
+                    review_notes = $7,
+                    status = 'draft',
+                    updated_at = NOW()
+                WHERE id = $8
+                """,
+                title, content_md, excerpt_raw, cover_image,
+                json.dumps(tags), current_user.id, submitter_notes, existing["id"],
+            )
+            return {"id": str(existing["id"]), "slug": existing["slug"], "resubmitted": True}
+
+        # New submission — pick a unique slug
+        slug = base_slug
+        attempt = 1
+        while await conn.fetchval("SELECT 1 FROM blog_posts WHERE slug = $1", slug):
+            attempt += 1
+            slug = f"{base_slug}-{attempt}"
+
+        row = await conn.fetchrow(
+            """
+            INSERT INTO blog_posts (
+                author_id, title, slug, content, excerpt, cover_image,
+                status, tags, submitted_for_review, submitted_at,
+                submitter_id, source_project_id, review_notes
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, 'draft', $7::jsonb, TRUE, NOW(), $1, $8, $9)
+            RETURNING id, slug
+            """,
+            current_user.id, title, slug, content_md, excerpt_raw, cover_image,
+            json.dumps(tags), project_id, submitter_notes,
+        )
+        return {"id": str(row["id"]), "slug": row["slug"], "resubmitted": False}
+
+
+def _slugify_blog(text: str) -> str:
+    import re as _re
+    s = _re.sub(r"[^a-z0-9\s-]", "", (text or "").lower()).strip()
+    s = _re.sub(r"\s+", "-", s)
+    s = _re.sub(r"-+", "-", s).strip("-")
+    return s[:80] or "untitled"
+
+
 @router.post("/projects/{project_id}/blog-media")
 async def upload_blog_media(
     project_id: UUID,

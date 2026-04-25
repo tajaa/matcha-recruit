@@ -795,6 +795,21 @@ class MatchaWorkService {
         )
     }
 
+    struct BlogSubmitResult: Codable {
+        let id: String
+        let slug: String
+        let resubmitted: Bool
+    }
+
+    func submitBlogForReview(projectId: String, notes: String? = nil) async throws -> BlogSubmitResult {
+        struct Body: Codable { let notes: String? }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/submit-blog",
+            body: Body(notes: notes)
+        )
+    }
+
     struct BlogMediaUpload: Codable {
         let url: String
         let kind: String

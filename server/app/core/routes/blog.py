@@ -27,6 +27,7 @@ async def list_blogs(
     limit: int = 10,
     status: Optional[BlogStatus] = None,
     tag: Optional[str] = None,
+    pending_review: Optional[bool] = None,
     current_user: Optional[CurrentUser] = Depends(get_optional_user)
 ):
     """List blog posts. Admins can see all, public only published."""
@@ -56,6 +57,14 @@ async def list_blogs(
                  conditions.append(f"b.status = ${param_idx}")
                  params.append(BlogStatus.PUBLISHED.value)
                  param_idx += 1
+
+        # Pending-review filter (admin-only — public should never see drafts)
+        if pending_review is not None:
+            if not current_user or current_user.role != "admin":
+                raise HTTPException(status_code=403, detail="Admin only")
+            conditions.append(f"b.submitted_for_review = ${param_idx}")
+            params.append(pending_review)
+            param_idx += 1
 
         # Filter by tag
         if tag:
@@ -333,6 +342,16 @@ async def update_blog_post(
         if post.meta_description is not None:
             fields.append(f"meta_description = ${param_idx}")
             params.append(post.meta_description)
+            param_idx += 1
+
+        if post.submitted_for_review is not None:
+            fields.append(f"submitted_for_review = ${param_idx}")
+            params.append(post.submitted_for_review)
+            param_idx += 1
+
+        if post.review_notes is not None:
+            fields.append(f"review_notes = ${param_idx}")
+            params.append(post.review_notes)
             param_idx += 1
 
         if not fields:

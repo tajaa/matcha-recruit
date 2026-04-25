@@ -20,11 +20,15 @@ type BlogPost = {
   updated_at: string
   author_name?: string
   likes_count?: number
+  submitted_for_review?: boolean
+  submitted_at?: string | null
+  source_project_id?: string | null
+  review_notes?: string | null
 }
 
 type BlogList = { items: BlogPost[]; total: number }
 
-const STATUS_FILTERS: Array<BlogStatus | 'all'> = ['all', 'draft', 'published', 'archived']
+const STATUS_FILTERS: Array<BlogStatus | 'all' | 'pending'> = ['all', 'pending', 'draft', 'published', 'archived']
 
 function slugify(input: string): string {
   return input
@@ -47,13 +51,40 @@ export default function Blogs() {
     setLoading(true)
     try {
       const params = new URLSearchParams({ page: '1', limit: '100' })
-      if (filter !== 'all') params.set('status', filter)
+      if (filter === 'pending') {
+        params.set('pending_review', 'true')
+      } else if (filter !== 'all') {
+        params.set('status', filter)
+      }
       const data = await api.get<BlogList>(`/blogs?${params}`)
       setPosts(data.items)
     } catch (err) {
       console.error('Load blogs failed', err)
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function approve(p: BlogPost) {
+    try {
+      await api.put(`/blogs/${p.id}`, { status: 'published', submitted_for_review: false })
+      await load()
+    } catch (err) {
+      alert(`Approve failed: ${(err as Error).message}`)
+    }
+  }
+
+  async function reject(p: BlogPost) {
+    const notes = prompt('Rejection notes (optional, sent back to submitter):', '')
+    if (notes === null) return
+    try {
+      await api.put(`/blogs/${p.id}`, {
+        submitted_for_review: false,
+        review_notes: notes || null,
+      })
+      await load()
+    } catch (err) {
+      alert(`Reject failed: ${(err as Error).message}`)
     }
   }
 
@@ -90,9 +121,13 @@ export default function Blogs() {
             key={s}
             onClick={() => setFilter(s)}
             className={`px-3 py-1.5 text-xs rounded uppercase tracking-wider font-medium transition ${
-              filter === s ? 'bg-zinc-700 text-zinc-100' : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
+              filter === s
+                ? 'bg-zinc-700 text-zinc-100'
+                : s === 'pending'
+                ? 'bg-amber-950/40 text-amber-400 hover:text-amber-300'
+                : 'bg-zinc-900 text-zinc-500 hover:text-zinc-300'
             }`}
-          >{s}</button>
+          >{s === 'pending' ? 'Pending Review' : s}</button>
         ))}
       </div>
 
@@ -119,17 +154,38 @@ export default function Blogs() {
                 <td className="px-3 py-2 text-zinc-100">{p.title}</td>
                 <td className="px-3 py-2 text-zinc-500 font-mono text-xs">{p.slug}</td>
                 <td className="px-3 py-2">
-                  <span className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-mono ${
-                    p.status === 'published'
-                      ? 'bg-emerald-900/40 text-emerald-400'
-                      : p.status === 'draft'
-                      ? 'bg-zinc-800 text-zinc-400'
-                      : 'bg-zinc-900 text-zinc-600'
-                  }`}>{p.status}</span>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-mono ${
+                      p.status === 'published'
+                        ? 'bg-emerald-900/40 text-emerald-400'
+                        : p.status === 'draft'
+                        ? 'bg-zinc-800 text-zinc-400'
+                        : 'bg-zinc-900 text-zinc-600'
+                    }`}>{p.status}</span>
+                    {p.submitted_for_review && (
+                      <span className="text-[10px] px-2 py-0.5 rounded uppercase tracking-wider font-mono bg-amber-900/40 text-amber-400">
+                        review
+                      </span>
+                    )}
+                  </div>
                 </td>
                 <td className="px-3 py-2 text-zinc-500 text-xs">{new Date(p.updated_at).toLocaleDateString()}</td>
                 <td className="px-3 py-2 text-right">
                   <div className="flex justify-end gap-2">
+                    {p.submitted_for_review && (
+                      <>
+                        <button
+                          onClick={() => approve(p)}
+                          className="text-emerald-400 hover:text-emerald-300 text-xs font-medium px-2 py-0.5 rounded border border-emerald-900/60"
+                          title="Approve and publish"
+                        >Approve</button>
+                        <button
+                          onClick={() => reject(p)}
+                          className="text-amber-400 hover:text-amber-300 text-xs font-medium px-2 py-0.5 rounded border border-amber-900/60"
+                          title="Reject (clears submitted-for-review flag)"
+                        >Reject</button>
+                      </>
+                    )}
                     {p.status === 'published' && (
                       <a
                         href={`/blog/${p.slug}`}

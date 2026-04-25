@@ -34,6 +34,8 @@ class BlogPostUpdate(BaseModel):
     meta_title: Optional[str] = None
     meta_description: Optional[str] = None
     published_at: Optional[datetime] = None
+    submitted_for_review: Optional[bool] = None
+    review_notes: Optional[str] = None
 
 class BlogPost(BlogPostBase):
     id: UUID
@@ -43,6 +45,11 @@ class BlogPost(BlogPostBase):
     created_at: datetime
     updated_at: datetime
     author_name: Optional[str] = None
+    submitted_for_review: bool = False
+    submitted_at: Optional[datetime] = None
+    submitter_id: Optional[UUID] = None
+    source_project_id: Optional[UUID] = None
+    review_notes: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
