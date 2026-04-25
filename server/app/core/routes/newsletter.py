@@ -1,12 +1,13 @@
-"""Newsletter routes — public subscribe/unsubscribe + admin management."""
+"""Newsletter routes — public subscribe/confirm/unsubscribe + admin management."""
 
 import logging
+import os
+import time
 from typing import Optional
 from uuid import UUID
 
-import os
-
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, EmailStr
 
 from ..dependencies import get_current_user, require_admin
@@ -17,6 +18,39 @@ logger = logging.getLogger(__name__)
 
 public_router = APIRouter()
 admin_router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# In-process rate limit for /subscribe (mirrors client_errors.py pattern).
+# Keyed by client IP. Resets on backend restart.
+# ---------------------------------------------------------------------------
+
+_SUBSCRIBE_WINDOW_SECONDS = 60
+_SUBSCRIBE_MAX_PER_WINDOW = 10
+_subscribe_state: dict[str, list[float]] = {}
+
+
+def _subscribe_rate_limited(client_ip: str) -> bool:
+    now = time.monotonic()
+    cutoff = now - _SUBSCRIBE_WINDOW_SECONDS
+    timestamps = [t for t in _subscribe_state.get(client_ip, []) if t >= cutoff]
+    if len(timestamps) >= _SUBSCRIBE_MAX_PER_WINDOW:
+        _subscribe_state[client_ip] = timestamps
+        return True
+    timestamps.append(now)
+    _subscribe_state[client_ip] = timestamps
+    if len(_subscribe_state) > 1000:
+        for ip in list(_subscribe_state.keys()):
+            if not _subscribe_state[ip] or _subscribe_state[ip][-1] < cutoff:
+                _subscribe_state.pop(ip, None)
+    return False
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -33,53 +67,165 @@ class SubscribeRequest(BaseModel):
     utm_campaign: Optional[str] = None
 
 
+def _confirmation_url(token: str) -> str:
+    from ...config import get_settings
+    base = (get_settings().app_base_url or "https://hey-matcha.com").rstrip("/")
+    return f"{base}/api/newsletter/confirm?token={token}"
+
+
+async def _send_confirmation_email(to_email: str, to_name: Optional[str], confirm_url: str) -> None:
+    from ..services.email import get_email_service
+    html = f"""
+    <div style="max-width:600px;margin:0 auto;font-family:-apple-system,system-ui,sans-serif;
+                background:#1e1e1e;color:#d4d4d4;padding:32px 24px;">
+      <div style="text-align:center;margin-bottom:24px;">
+        <span style="font-size:20px;font-weight:700;color:#ce9178;">Matcha</span>
+      </div>
+      <h1 style="font-size:20px;color:#e4e4e7;">Confirm your subscription</h1>
+      <p style="font-size:15px;line-height:1.6;">
+        Tap the button below to confirm you want to receive the Matcha newsletter.
+        If this wasn't you, ignore this email — nothing will happen.
+      </p>
+      <p style="text-align:center;margin:32px 0;">
+        <a href="{confirm_url}" style="display:inline-block;background:#ce9178;color:#1e1e1e;
+           padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600;">
+          Confirm subscription
+        </a>
+      </p>
+      <p style="font-size:12px;color:#6a737d;">If the button doesn't work, paste this link:<br>
+        <span style="word-break:break-all;color:#569cd6;">{confirm_url}</span>
+      </p>
+    </div>
+    """
+    try:
+        await get_email_service().send_email(
+            to_email=to_email, to_name=to_name,
+            subject="Confirm your Matcha newsletter subscription",
+            html_content=html,
+        )
+    except Exception:
+        logger.exception("Failed to send confirmation email to %s", to_email)
+
+
 @public_router.post("/subscribe")
-async def subscribe(body: SubscribeRequest):
-    """Public endpoint — subscribe an email to the newsletter."""
+async def subscribe(body: SubscribeRequest, request: Request):
+    """Public subscribe — starts double-opt-in unless email already active."""
+    if _subscribe_rate_limited(_client_ip(request)):
+        raise HTTPException(status_code=429, detail="Too many subscribe attempts. Please wait a minute.")
+
     metadata = {}
-    if body.utm_source:
-        metadata["utm_source"] = body.utm_source
-    if body.utm_medium:
-        metadata["utm_medium"] = body.utm_medium
-    if body.utm_campaign:
-        metadata["utm_campaign"] = body.utm_campaign
+    if body.utm_source: metadata["utm_source"] = body.utm_source
+    if body.utm_medium: metadata["utm_medium"] = body.utm_medium
+    if body.utm_campaign: metadata["utm_campaign"] = body.utm_campaign
 
     result = await svc.subscribe(
-        email=body.email,
-        name=body.name,
-        source=body.source,
+        email=body.email, name=body.name, source=body.source,
         metadata=metadata if metadata else None,
     )
-    return {"ok": True, **result}
+
+    if result.get("confirmation_token"):
+        confirm_url = _confirmation_url(result["confirmation_token"])
+        await _send_confirmation_email(body.email, body.name, confirm_url)
+
+    # Don't return the confirmation token to the public endpoint — it's only
+    # delivered via email so an attacker who learns the email can't auto-confirm.
+    return {
+        "ok": True,
+        "id": result["id"],
+        "status": result["status"],
+        "already_subscribed": result["already_subscribed"],
+        "needs_confirmation": result["status"] == "pending",
+    }
 
 
-@public_router.get("/unsubscribe")
-async def unsubscribe(token: str = Query(...)):
-    """One-click unsubscribe via signed token. Returns HTML page."""
-    from fastapi.responses import HTMLResponse
-    success = await svc.unsubscribe(token)
-    if not success:
+@public_router.get("/confirm")
+async def confirm(token: str = Query(...)):
+    """Click target from the confirmation email — flips pending → active."""
+    row = await svc.confirm_subscription(token)
+    if not row:
         return HTMLResponse(
-            '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">'
-            '<div style="text-align:center"><h2>Invalid link</h2><p>This unsubscribe link is invalid or expired.</p></div></body></html>',
+            '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;'
+            'display:flex;align-items:center;justify-content:center;height:100vh;">'
+            '<div style="text-align:center"><h2>Already confirmed or expired</h2>'
+            '<p>This confirmation link is invalid or has already been used.</p></div></body></html>',
             status_code=400,
         )
     return HTMLResponse(
-        '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;">'
-        '<div style="text-align:center"><h2 style="color:#ce9178;">Unsubscribed</h2><p>You have been unsubscribed from Matcha newsletters.</p>'
-        '<p style="color:#6a737d;font-size:13px;margin-top:16px;">You can close this tab.</p></div></body></html>'
+        '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;'
+        'display:flex;align-items:center;justify-content:center;height:100vh;">'
+        '<div style="text-align:center"><h2 style="color:#ce9178;">Subscription confirmed</h2>'
+        '<p>Welcome aboard. You\'ll start receiving the Matcha newsletter.</p>'
+        '<p style="color:#6a737d;font-size:13px;margin-top:16px;">You can close this tab.</p>'
+        '</div></body></html>'
     )
+
+
+@public_router.get("/unsubscribe")
+async def unsubscribe_get(token: str = Query(...)):
+    success = await svc.unsubscribe(token)
+    if not success:
+        return HTMLResponse(
+            '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;'
+            'display:flex;align-items:center;justify-content:center;height:100vh;">'
+            '<div style="text-align:center"><h2>Invalid link</h2>'
+            '<p>This unsubscribe link is invalid, already used, or expired.</p></div></body></html>',
+            status_code=400,
+        )
+    return HTMLResponse(
+        '<html><body style="background:#1e1e1e;color:#d4d4d4;font-family:sans-serif;'
+        'display:flex;align-items:center;justify-content:center;height:100vh;">'
+        '<div style="text-align:center"><h2 style="color:#ce9178;">Unsubscribed</h2>'
+        '<p>You have been unsubscribed from Matcha newsletters.</p>'
+        '<p style="color:#6a737d;font-size:13px;margin-top:16px;">You can close this tab.</p>'
+        '</div></body></html>'
+    )
+
+
+@public_router.post("/unsubscribe")
+async def unsubscribe_post(token: str = Query(...)):
+    """RFC 8058 List-Unsubscribe-Post one-click endpoint. Gmail/Outlook hit
+    this directly when the user clicks the inbox unsubscribe button."""
+    await svc.unsubscribe(token)
+    return PlainTextResponse("OK")
+
+
+# ---------------------------------------------------------------------------
+# Bounce webhook — provider posts JSON; we mark the subscriber bounced.
+# ---------------------------------------------------------------------------
+
+
+class BounceEvent(BaseModel):
+    email: Optional[EmailStr] = None
+    subscriber_id: Optional[UUID] = None
+    reason: Optional[str] = None
+    type: Optional[str] = None  # "hard" | "soft" — only hard bounces auto-unsubscribe
+
+
+@public_router.post("/bounce")
+async def bounce_webhook(body: BounceEvent, request: Request):
+    """Email-provider bounce callback. Soft bounces are logged but don't
+    deactivate; hard bounces flip the subscriber to bounced."""
+    # Soft bounces — log + ack, don't flip status. Sender retries naturally.
+    if body.type == "soft":
+        logger.info("Soft bounce: %s (%s)", body.email or body.subscriber_id, body.reason)
+        return {"ok": True, "action": "logged"}
+
+    target = body.subscriber_id or body.email
+    if not target:
+        raise HTTPException(status_code=400, detail="email or subscriber_id required")
+    flipped = await svc.mark_bounced(target, reason=body.reason)
+    return {"ok": True, "action": "bounced" if flipped else "no_match"}
 
 
 @public_router.get("/view/{newsletter_id}")
 async def view_newsletter(newsletter_id: UUID):
-    """Public 'View in browser' endpoint for sent newsletters."""
-    from fastapi.responses import HTMLResponse
+    """Public 'View in browser' for sent newsletters."""
     from ...database import get_connection
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
-            "SELECT title, subject, content_html, sent_at FROM newsletters WHERE id = $1 AND status = 'sent'",
+            """SELECT title, subject, content_html, sent_at FROM newsletters
+               WHERE id = $1 AND status = 'sent' AND is_deleted = FALSE""",
             newsletter_id,
         )
     CDN = "https://cdn.jsdelivr.net/npm/@tailwindcss/cdn@4"
@@ -123,52 +269,100 @@ async def view_newsletter(newsletter_id: UUID):
 
 @admin_router.post("/subscribers/sync")
 async def sync_platform_users(
+    request: Request,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """Sync all active platform users into newsletter subscribers."""
     count = await svc.sync_platform_users()
+    await svc.log_admin_action(
+        current_user.id, "subscribers_sync", "subscribers", None,
+        {"synced": count}, _client_ip(request),
+    )
     return {"synced": count}
 
 
 @admin_router.get("/subscribers")
 async def list_subscribers(
+    request: Request,
     status: Optional[str] = None,
     source: Optional[str] = None,
     search: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    export: bool = Query(False),
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """List newsletter subscribers with filters. Auto-syncs platform users."""
-    # Auto-sync platform users on each load (idempotent, fast)
+    """List subscribers. `export=true` writes an audit row (GDPR)."""
     await svc.sync_platform_users()
-
     rows, total = await svc.get_subscribers(
         status=status, source=source, search=search, limit=limit, offset=offset,
     )
     stats = await svc.get_subscriber_stats()
+    if export:
+        await svc.log_admin_action(
+            current_user.id, "subscribers_export", "subscribers", None,
+            {"count": len(rows), "filters": {"status": status, "source": source, "search": search}},
+            _client_ip(request),
+        )
     return {"subscribers": rows, "total": total, "stats": stats}
+
+
+@admin_router.delete("/subscribers/{subscriber_id}")
+async def delete_subscriber(
+    subscriber_id: UUID,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """GDPR right-to-erasure — hard delete + audit row."""
+    deleted = await svc.delete_subscriber(subscriber_id, current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Subscriber not found")
+    return {"ok": True}
 
 
 @admin_router.post("/subscribers/import")
 async def import_subscribers(
     body: dict,
+    request: Request,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """Bulk import emails. Body: { "emails": [{"email": "...", "name": "..."}] }"""
+    """Bulk import emails. auto_confirm=True since admin vouches for the list."""
     emails = body.get("emails", [])
     if not emails:
         raise HTTPException(status_code=400, detail="No emails provided")
 
     imported = 0
-    for entry in emails[:500]:  # cap at 500
+    for entry in emails[:500]:
         email = entry.get("email", "").strip().lower() if isinstance(entry, dict) else str(entry).strip().lower()
         name = entry.get("name") if isinstance(entry, dict) else None
         if "@" in email:
-            await svc.subscribe(email=email, name=name, source="import")
+            await svc.subscribe(email=email, name=name, source="import", auto_confirm=True)
             imported += 1
 
+    await svc.log_admin_action(
+        current_user.id, "subscribers_import", "subscribers", None,
+        {"imported": imported}, _client_ip(request),
+    )
     return {"imported": imported}
+
+
+@admin_router.get("/audit")
+async def list_audit(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Read newsletter admin audit log (subscriber exports, deletes, sends)."""
+    from ...database import get_connection
+    async with get_connection() as conn:
+        rows = await conn.fetch(
+            """SELECT a.*, COALESCE(adm.name, u.email, 'Unknown') AS actor_name
+               FROM newsletter_admin_audit a
+               LEFT JOIN users u ON u.id = a.actor_id
+               LEFT JOIN admins adm ON adm.user_id = a.actor_id
+               ORDER BY a.created_at DESC
+               LIMIT $1 OFFSET $2""",
+            limit, offset,
+        )
+    return {"items": [dict(r) for r in rows]}
 
 
 class CreateNewsletterRequest(BaseModel):
@@ -189,7 +383,6 @@ async def list_newsletters(
     offset: int = Query(0, ge=0),
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """List all newsletters."""
     return await svc.list_newsletters(limit=limit, offset=offset)
 
 
@@ -198,10 +391,8 @@ async def create_newsletter(
     body: CreateNewsletterRequest,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """Create a new newsletter draft."""
     return await svc.create_newsletter(
-        title=body.title.strip(),
-        subject=body.subject.strip(),
+        title=body.title.strip(), subject=body.subject.strip(),
         created_by=current_user.id,
     )
 
@@ -211,7 +402,6 @@ async def get_newsletter(
     newsletter_id: UUID,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """Get newsletter with send stats."""
     result = await svc.get_newsletter(newsletter_id)
     if not result:
         raise HTTPException(status_code=404, detail="Newsletter not found")
@@ -224,7 +414,6 @@ async def update_newsletter(
     body: UpdateNewsletterRequest,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """Update a newsletter draft."""
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if not updates:
         raise HTTPException(status_code=400, detail="No updates provided")
@@ -234,17 +423,40 @@ async def update_newsletter(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+class TestSendRequest(BaseModel):
+    to_email: EmailStr
+    to_name: Optional[str] = None
+
+
+@admin_router.post("/newsletters/{newsletter_id}/test-send")
+async def test_send(
+    newsletter_id: UUID,
+    body: TestSendRequest,
+    current_user: CurrentUser = Depends(require_admin),
+):
+    """Render + send a single test email to a chosen address. Doesn't
+    update newsletter state or write to newsletter_sends."""
+    try:
+        ok = await svc.send_test_email(newsletter_id, body.to_email, body.to_name)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    if not ok:
+        raise HTTPException(status_code=500, detail="Email send failed (provider not configured?)")
+    return {"ok": True}
+
+
 @admin_router.post("/newsletters/{newsletter_id}/send")
 async def send_newsletter(
     newsletter_id: UUID,
+    request: Request,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """Send a newsletter to all active subscribers."""
+    """Broadcast to all active subscribers. Idempotent — second call 409s."""
     try:
-        result = await svc.send_newsletter(newsletter_id)
+        result = await svc.send_newsletter(newsletter_id, actor_id=current_user.id)
         return result
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 _ALLOWED_MEDIA_EXT = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".mp4", ".mov", ".pdf"}
@@ -256,7 +468,6 @@ async def upload_newsletter_media(
     file: UploadFile = File(...),
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """Upload an image/video/file for use in newsletter content. Returns the CDN URL."""
     from ..services.storage import get_storage
 
     file_bytes = await file.read()
@@ -279,13 +490,8 @@ async def delete_newsletter(
     newsletter_id: UUID,
     current_user: CurrentUser = Depends(require_admin),
 ):
-    """Delete a newsletter draft."""
-    from ...database import get_connection
-    async with get_connection() as conn:
-        result = await conn.execute(
-            "DELETE FROM newsletters WHERE id = $1 AND status = 'draft'",
-            newsletter_id,
-        )
-    if "DELETE 0" in result:
-        raise HTTPException(status_code=400, detail="Newsletter not found or already sent")
+    """Soft-delete (sets is_deleted=TRUE + audit row). Refuses already-sent."""
+    deleted = await svc.soft_delete_newsletter(newsletter_id, current_user.id)
+    if not deleted:
+        raise HTTPException(status_code=400, detail="Newsletter not found, already deleted, or not in draft")
     return {"ok": True}

@@ -1,15 +1,23 @@
 import { useState } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
-import { CheckCircle, Loader2, ArrowLeft } from 'lucide-react'
+import { CheckCircle, Loader2, Mail, ArrowLeft } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_URL ?? '/api'
+
+type SubscribeResponse = {
+  ok: boolean
+  id: string
+  status: 'active' | 'pending'
+  already_subscribed: boolean
+  needs_confirmation: boolean
+}
 
 export default function Subscribe() {
   const [params] = useSearchParams()
   const [email, setEmail] = useState('')
   const [name, setName] = useState('')
   const [submitting, setSubmitting] = useState(false)
-  const [done, setDone] = useState(false)
+  const [result, setResult] = useState<SubscribeResponse | null>(null)
   const [error, setError] = useState('')
 
   async function handleSubmit(e: React.FormEvent) {
@@ -30,11 +38,12 @@ export default function Subscribe() {
           utm_campaign: params.get('utm_campaign') || undefined,
         }),
       })
+      const data = await res.json().catch(() => ({}))
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
+        if (res.status === 429) throw new Error('Too many attempts. Wait a minute and try again.')
         throw new Error(data.detail || 'Failed to subscribe')
       }
-      setDone(true)
+      setResult(data as SubscribeResponse)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {
@@ -52,13 +61,35 @@ export default function Subscribe() {
           </Link>
         </div>
 
-        {done ? (
+        {result ? (
           <div className="text-center space-y-4">
-            <CheckCircle size={48} className="mx-auto text-emerald-500" />
-            <h1 className="text-xl font-semibold text-[#e4e4e7]">You're subscribed!</h1>
-            <p className="text-sm text-[#9ca3af]">
-              You'll receive HR insights, compliance updates, and industry news straight to your inbox.
-            </p>
+            {result.needs_confirmation ? (
+              <>
+                <Mail size={48} className="mx-auto text-[#ce9178]" />
+                <h1 className="text-xl font-semibold text-[#e4e4e7]">Check your email</h1>
+                <p className="text-sm text-[#9ca3af]">
+                  We sent a confirmation link to <span className="text-[#e4e4e7]">{email}</span>.
+                  Click it to start receiving the Matcha newsletter.
+                </p>
+                <p className="text-[11px] text-[#6a737d]">Don't see it? Check your spam folder.</p>
+              </>
+            ) : result.already_subscribed ? (
+              <>
+                <CheckCircle size={48} className="mx-auto text-emerald-500" />
+                <h1 className="text-xl font-semibold text-[#e4e4e7]">Already subscribed</h1>
+                <p className="text-sm text-[#9ca3af]">
+                  This email is already on our list. Watch your inbox for the next issue.
+                </p>
+              </>
+            ) : (
+              <>
+                <CheckCircle size={48} className="mx-auto text-emerald-500" />
+                <h1 className="text-xl font-semibold text-[#e4e4e7]">You're subscribed!</h1>
+                <p className="text-sm text-[#9ca3af]">
+                  You'll receive HR insights, compliance updates, and industry news straight to your inbox.
+                </p>
+              </>
+            )}
             <Link to="/" className="inline-flex items-center gap-1.5 text-sm text-[#569cd6] hover:underline mt-4">
               <ArrowLeft size={14} />
               Back to Matcha

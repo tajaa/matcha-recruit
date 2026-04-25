@@ -81,26 +81,77 @@ export default function NewsletterAdmin() {
 
   async function handleSend() {
     if (!editingId) return
+    const audience = stats?.active ?? 0
+    if (!confirm(`Send "${composeSubject}" to ${audience} active subscriber${audience === 1 ? '' : 's'}? This cannot be undone.`)) {
+      return
+    }
     setSending(true)
     try {
       await handleSave()
-      const result = await api.post<{ sent: number; failed: number }>(`/admin/newsletter/newsletters/${editingId}/send`)
-      alert(`Newsletter sent to ${result.sent} subscribers (${result.failed} failed)`)
+      const result = await api.post<{ queued: number; status: string }>(`/admin/newsletter/newsletters/${editingId}/send`)
+      alert(`Queued for ${result.queued} subscribers. Sending in the background.`)
       setEditingId(null)
       setComposeTitle('')
       setComposeSubject('')
       setComposeHtml('')
       setTab('newsletters')
       loadData()
-    } catch {}
+    } catch (err) {
+      alert(`Send failed: ${(err as Error).message}`)
+    }
     setSending(false)
   }
 
+  async function handleTestSend() {
+    if (!editingId) return
+    const to = prompt('Send test to which email?', '')
+    if (!to || !to.includes('@')) return
+    try {
+      await handleSave()
+      await api.post(`/admin/newsletter/newsletters/${editingId}/test-send`, { to_email: to.trim() })
+      alert(`Test sent to ${to}.`)
+    } catch (err) {
+      alert(`Test send failed: ${(err as Error).message}`)
+    }
+  }
+
   async function handleDelete(id: string) {
+    if (!confirm('Soft-delete this draft? It will be hidden but kept for audit.')) return
     try {
       await api.delete(`/admin/newsletter/newsletters/${id}`)
       setNewsletters((prev) => prev.filter((n) => n.id !== id))
-    } catch {}
+    } catch (err) {
+      alert(`Delete failed: ${(err as Error).message}`)
+    }
+  }
+
+  async function handleDeleteSubscriber(id: string, email: string) {
+    if (!confirm(`Permanently delete subscriber ${email}? GDPR right-to-erasure — cannot be undone.`)) return
+    try {
+      await api.delete(`/admin/newsletter/subscribers/${id}`)
+      setSubs((prev) => prev.filter((s) => s.id !== id))
+    } catch (err) {
+      alert(`Delete failed: ${(err as Error).message}`)
+    }
+  }
+
+  async function handleExport() {
+    try {
+      const res = await api.get<{ subscribers: Subscriber[] }>('/admin/newsletter/subscribers?limit=1000&export=true')
+      const csv = [
+        'email,name,source,status,subscribed_at',
+        ...res.subscribers.map((s) => `${s.email},"${(s.name || '').replace(/"/g, '""')}",${s.source},${s.status},${s.subscribed_at}`),
+      ].join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `newsletter-subscribers-${new Date().toISOString().slice(0, 10)}.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err) {
+      alert(`Export failed: ${(err as Error).message}`)
+    }
   }
 
   function startEdit(nl: Newsletter) {
@@ -162,9 +213,12 @@ export default function NewsletterAdmin() {
       {/* Subscribers tab */}
       {tab === 'subscribers' && (
         <div>
-          <div className="relative mb-4 max-w-xs">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="w-full pl-9 pr-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none" />
+          <div className="flex items-center justify-between mb-4">
+            <div className="relative max-w-xs">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search..." className="w-full pl-9 pr-3 py-2 rounded-lg border border-zinc-800 bg-zinc-900 text-sm text-zinc-200 placeholder-zinc-500 outline-none" />
+            </div>
+            <button onClick={handleExport} className="px-3 py-1.5 text-xs text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg">Export CSV</button>
           </div>
           <div className="rounded-xl border border-zinc-800 overflow-hidden">
             <table className="w-full text-xs">
@@ -175,6 +229,7 @@ export default function NewsletterAdmin() {
                   <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Source</th>
                   <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Status</th>
                   <th className="text-left px-4 py-2.5 text-zinc-400 font-medium">Subscribed</th>
+                  <th className="px-4 py-2.5"></th>
                 </tr>
               </thead>
               <tbody>
@@ -183,12 +238,26 @@ export default function NewsletterAdmin() {
                     <td className="px-4 py-2.5 text-zinc-200">{s.email}</td>
                     <td className="px-4 py-2.5 text-zinc-400">{s.name || '--'}</td>
                     <td className="px-4 py-2.5"><span className="px-1.5 py-0.5 rounded text-[10px] bg-zinc-800 text-zinc-400">{s.source}</span></td>
-                    <td className="px-4 py-2.5"><span className={`px-1.5 py-0.5 rounded text-[10px] ${s.status === 'active' ? 'bg-emerald-900/30 text-emerald-400' : 'bg-zinc-800 text-zinc-500'}`}>{s.status}</span></td>
+                    <td className="px-4 py-2.5">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] ${
+                        s.status === 'active' ? 'bg-emerald-900/30 text-emerald-400'
+                        : s.status === 'pending' ? 'bg-amber-900/30 text-amber-400'
+                        : s.status === 'bounced' ? 'bg-red-900/30 text-red-400'
+                        : 'bg-zinc-800 text-zinc-500'
+                      }`}>{s.status}</span>
+                    </td>
                     <td className="px-4 py-2.5 text-zinc-500">{new Date(s.subscribed_at).toLocaleDateString()}</td>
+                    <td className="px-4 py-2.5 text-right">
+                      <button
+                        onClick={() => handleDeleteSubscriber(s.id, s.email)}
+                        className="text-zinc-500 hover:text-red-400"
+                        title="Delete (GDPR erasure)"
+                      ><Trash2 size={13} /></button>
+                    </td>
                   </tr>
                 ))}
                 {filteredSubs.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No subscribers yet</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-500">No subscribers yet</td></tr>
                 )}
               </tbody>
             </table>
@@ -273,6 +342,9 @@ export default function NewsletterAdmin() {
               <>
                 <button onClick={handleSave} disabled={saving} className="flex items-center gap-1.5 px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg disabled:opacity-40">
                   {saving ? <Loader2 size={14} className="animate-spin" /> : null} Save Draft
+                </button>
+                <button onClick={handleTestSend} className="flex items-center gap-1.5 px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-sm font-medium rounded-lg border border-zinc-700">
+                  <Send size={14} /> Send Test
                 </button>
                 <button onClick={handleSend} disabled={sending} className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg disabled:opacity-40">
                   {sending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} Send to {stats?.active ?? 0} subscribers

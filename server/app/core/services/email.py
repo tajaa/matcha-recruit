@@ -79,10 +79,13 @@ class EmailService:
         html_content: str,
         text_content: Optional[str] = None,
         attachments: Optional[list[dict]] = None,
+        extra_headers: Optional[dict[str, str]] = None,
     ) -> bool:
         """Send an email via Gmail API.
 
         Attachments format: {"filename": "...", "content": "<base64>", "disposition": "attachment"}
+        extra_headers lets callers attach RFC headers like List-Unsubscribe so
+        Gmail/Outlook render the one-click unsubscribe button.
         """
         if not self.is_configured():
             logger.warning("Gmail not configured — token.json missing or incomplete")
@@ -93,6 +96,9 @@ class EmailService:
             msg["Subject"] = subject
             msg["From"] = f"{self.from_name} <{self.from_email}>"
             msg["To"] = f"{to_name} <{to_email}>" if to_name else to_email
+            if extra_headers:
+                for name, value in extra_headers.items():
+                    msg[name] = value
 
             if attachments:
                 alt = MIMEMultipart("alternative")
