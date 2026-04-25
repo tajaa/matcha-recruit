@@ -1101,12 +1101,31 @@ async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) ->
             raise ValueError("User not found")
         await conn.execute(
             """
-            INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role)
-            VALUES ($1, $2, $3, 'collaborator')
+            INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
+            VALUES ($1, $2, $3, 'collaborator', 'active')
             ON CONFLICT (project_id, user_id) DO UPDATE SET status = 'active'
             """,
             project_id, user_id, invited_by,
         )
+
+        project = await conn.fetchrow("SELECT title FROM mw_projects WHERE id = $1", project_id)
+        inviter = await conn.fetchrow("SELECT email FROM users WHERE id = $1", invited_by)
+        inviter_client = await conn.fetchrow("SELECT name FROM clients WHERE user_id = $1", invited_by)
+        inviter_name = (inviter_client["name"] if inviter_client and inviter_client["name"] else None) or inviter["email"].split("@")[0]
+        project_title = project["title"] if project else "a project"
+
+        msg_content = f"**{inviter_name}** has invited you to join the project **{project_title}**."
+        conversation = await conn.fetchrow(
+            """INSERT INTO inbox_conversations (title, is_group, created_by, last_message_at, last_message_preview)
+               VALUES ($1, false, $2, NOW(), $3)
+               RETURNING id""",
+            f"Project Invite: {project_title}", invited_by, msg_content[:100],
+        )
+        conv_id = conversation["id"]
+        await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, invited_by)
+        await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, user_id)
+        await conn.execute("INSERT INTO inbox_messages (conversation_id, sender_id, content) VALUES ($1, $2, $3)", conv_id, invited_by, msg_content)
+
     return await list_collaborators(project_id)
 
 
