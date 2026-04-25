@@ -68,8 +68,12 @@ def sanitize_html(html: str) -> str:
 
 
 def _get_secret() -> bytes:
+    """Secret used for HMAC signing. Reuses jwt_secret_key (always populated
+    via load_settings) — Settings has no `secret_key` attribute; the previous
+    `settings.secret_key` reference would have raised AttributeError."""
     settings = get_settings()
-    return (settings.secret_key or "matcha-newsletter-default").encode()
+    key = getattr(settings, "jwt_secret_key", None) or "matcha-newsletter-default"
+    return key.encode()
 
 
 def _sign(message: str, prefix: str) -> str:
@@ -79,16 +83,29 @@ def _sign(message: str, prefix: str) -> str:
     return hmac.new(_get_secret(), payload, hashlib.sha256).hexdigest()
 
 
+def _legacy_sign(message: str) -> str:
+    """Pre-hardening signature — first 24 hex chars of unprefixed SHA-256 HMAC.
+    Kept ONLY so unsubscribe links already in recipients' inboxes still work
+    after deploy. Remove after the legacy-token grace window (e.g. 90 days
+    past the rollout)."""
+    return hmac.new(_get_secret(), message.encode(), hashlib.sha256).hexdigest()[:24]
+
+
 def generate_unsubscribe_token(subscriber_id: UUID) -> str:
     sig = _sign(str(subscriber_id), "unsub")
     return f"{subscriber_id}:{sig}"
 
 
 def verify_unsubscribe_token(token: str) -> Optional[UUID]:
+    """Accept new (full-HMAC, namespaced) tokens AND legacy (24-char,
+    unprefixed) tokens so previously-sent emails keep working."""
     try:
         sub_id_str, sig = token.split(":", 1)
-        expected = _sign(sub_id_str, "unsub")
-        if hmac.compare_digest(sig, expected):
+        # Try new format first
+        if hmac.compare_digest(sig, _sign(sub_id_str, "unsub")):
+            return UUID(sub_id_str)
+        # Fall back to legacy 24-char format for tokens already in the wild
+        if hmac.compare_digest(sig, _legacy_sign(sub_id_str)):
             return UUID(sub_id_str)
     except (ValueError, AttributeError):
         pass
@@ -157,6 +174,20 @@ async def subscribe(
                     "confirmation_token": confirm_token,
                     "already_subscribed": False,
                 }
+            if existing["status"] == "pending" and not auto_confirm:
+                # Re-signup of a stuck pending row → rotate token so the
+                # caller can re-send the confirmation email. Without this
+                # the user can't recover (old token may be lost).
+                await conn.execute(
+                    "UPDATE newsletter_subscribers SET confirmation_token = $2, subscribed_at = NOW() WHERE id = $1",
+                    existing["id"], confirm_token,
+                )
+                return {
+                    "id": str(existing["id"]),
+                    "status": "pending",
+                    "confirmation_token": confirm_token,
+                    "already_subscribed": False,
+                }
             return {
                 "id": str(existing["id"]),
                 "status": existing["status"],
@@ -213,9 +244,16 @@ async def unsubscribe(token: str) -> bool:
 
 async def mark_bounced(email_or_id: str | UUID, reason: Optional[str] = None) -> bool:
     """Bounce-webhook entry point. Hard bounce → status='bounced' and
-    auto-unsubscribed (no further sends)."""
+    auto-unsubscribed. Idempotent — already-bounced or unknown emails return
+    True so providers don't retry endlessly."""
     async with get_connection() as conn:
         if isinstance(email_or_id, UUID):
+            existing = await conn.fetchval(
+                "SELECT status FROM newsletter_subscribers WHERE id = $1",
+                email_or_id,
+            )
+            if existing in ("bounced", "unsubscribed"):
+                return True
             row = await conn.fetchrow(
                 """UPDATE newsletter_subscribers
                    SET status = 'bounced', bounced_at = NOW(),
@@ -225,39 +263,48 @@ async def mark_bounced(email_or_id: str | UUID, reason: Optional[str] = None) ->
                 email_or_id, reason,
             )
         else:
+            email = str(email_or_id).strip().lower()
+            existing = await conn.fetchval(
+                "SELECT status FROM newsletter_subscribers WHERE email = $1",
+                email,
+            )
+            if existing in ("bounced", "unsubscribed"):
+                return True
             row = await conn.fetchrow(
                 """UPDATE newsletter_subscribers
                    SET status = 'bounced', bounced_at = NOW(),
                        bounce_reason = $2, unsubscribed_at = NOW()
                    WHERE email = $1 AND status IN ('active','pending')
                    RETURNING id""",
-                str(email_or_id).strip().lower(), reason,
+                email, reason,
             )
-    return bool(row)
+    return True if existing is None else bool(row)
 
 
 async def delete_subscriber(subscriber_id: UUID, actor_id: Optional[UUID]) -> bool:
-    """GDPR-style hard delete. Cascades to newsletter_sends via FK + writes
-    an audit row before removal."""
+    """GDPR-style hard delete. Cascades to newsletter_sends via FK. Audit row
+    is written in a separate connection AFTER the delete commits so a failed
+    delete doesn't roll the audit row back, and a failed audit insert doesn't
+    block the deletion the user requested."""
     async with get_connection() as conn:
-        async with conn.transaction():
-            row = await conn.fetchrow(
-                "SELECT email FROM newsletter_subscribers WHERE id = $1",
-                subscriber_id,
-            )
-            if not row:
-                return False
-            await conn.execute(
-                """INSERT INTO newsletter_admin_audit
-                     (actor_id, action, target_type, target_id, metadata)
-                   VALUES ($1, 'subscriber_delete', 'subscriber', $2, $3::jsonb)""",
-                actor_id, str(subscriber_id),
-                json.dumps({"email": row["email"]}),
-            )
-            await conn.execute(
-                "DELETE FROM newsletter_subscribers WHERE id = $1",
-                subscriber_id,
-            )
+        row = await conn.fetchrow(
+            "SELECT email FROM newsletter_subscribers WHERE id = $1",
+            subscriber_id,
+        )
+        if not row:
+            return False
+        await conn.execute(
+            "DELETE FROM newsletter_subscribers WHERE id = $1",
+            subscriber_id,
+        )
+    # Best-effort audit — failure here is logged but doesn't fail the request.
+    try:
+        await log_admin_action(
+            actor_id, "subscriber_delete", "subscriber",
+            str(subscriber_id), {"email": row["email"]},
+        )
+    except Exception:
+        logger.exception("Audit write failed after subscriber %s deleted", subscriber_id)
     return True
 
 
@@ -464,16 +511,26 @@ async def soft_delete_newsletter(newsletter_id: UUID, actor_id: UUID) -> bool:
 
 
 async def send_newsletter(newsletter_id: UUID, actor_id: Optional[UUID] = None) -> dict:
-    """Send a newsletter to all active subscribers. Idempotent against double-send."""
+    """Send a newsletter to all active subscribers. Idempotent against double-send.
+
+    Recovery for stuck 'sending' state: any newsletter stuck in 'sending' for
+    >1 hour (background task crashed / process restarted) is treated as
+    eligible for a new send attempt. Without this, a one-time crash strands
+    the newsletter forever.
+    """
     async with get_connection() as conn:
         async with conn.transaction():
-            # Atomic status flip — refuses anything not in draft|scheduled.
+            # Atomic status flip — refuses double-send AND auto-recovers from
+            # a stale 'sending' lock older than 1 hour.
             nl = await conn.fetchrow(
                 """UPDATE newsletters
-                   SET status = 'sending'
+                   SET status = 'sending', updated_at = NOW()
                    WHERE id = $1
                      AND is_deleted = FALSE
-                     AND status IN ('draft', 'scheduled')
+                     AND (
+                       status IN ('draft', 'scheduled')
+                       OR (status = 'sending' AND updated_at < NOW() - INTERVAL '1 hour')
+                     )
                    RETURNING *""",
                 newsletter_id,
             )

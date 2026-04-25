@@ -100,6 +100,11 @@ class Settings:
     stripe_success_url: str = "http://localhost:5174/app/matcha/work/billing?success=1"
     stripe_cancel_url: str = "http://localhost:5174/app/matcha/work/billing?canceled=1"
 
+    # Newsletter
+    # Shared secret expected in X-Bounce-Secret header on /newsletter/bounce.
+    # Empty string disables the webhook entirely (safer default than open).
+    newsletter_bounce_secret: str = ""
+
 
 # Global settings instance
 _settings: Optional[Settings] = None
@@ -203,6 +208,7 @@ def load_settings() -> Settings:
             "STRIPE_CANCEL_URL",
             "http://localhost:5174/app/matcha/work/billing?canceled=1",
         ),
+        newsletter_bounce_secret=os.getenv("NEWSLETTER_BOUNCE_SECRET", ""),
     )
     return _settings
 

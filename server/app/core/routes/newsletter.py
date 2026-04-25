@@ -22,7 +22,9 @@ admin_router = APIRouter()
 
 # ---------------------------------------------------------------------------
 # In-process rate limit for /subscribe (mirrors client_errors.py pattern).
-# Keyed by client IP. Resets on backend restart.
+# Keyed by client IP. Resets on backend restart. Per-worker — a deployment
+# with N uvicorn workers effectively allows _SUBSCRIBE_MAX_PER_WINDOW * N
+# attempts per IP per window. Move to Redis if abuse becomes real.
 # ---------------------------------------------------------------------------
 
 _SUBSCRIBE_WINDOW_SECONDS = 60
@@ -203,9 +205,26 @@ class BounceEvent(BaseModel):
 
 @public_router.post("/bounce")
 async def bounce_webhook(body: BounceEvent, request: Request):
-    """Email-provider bounce callback. Soft bounces are logged but don't
-    deactivate; hard bounces flip the subscriber to bounced."""
-    # Soft bounces — log + ack, don't flip status. Sender retries naturally.
+    """Email-provider bounce callback.
+
+    Authenticated via shared secret in the X-Bounce-Secret header — the env
+    var NEWSLETTER_BOUNCE_SECRET must match. The endpoint stays disabled
+    (always 503) when the secret is unset so an open route can't slip into
+    production by default.
+
+    Soft bounces are logged but don't deactivate; hard bounces flip the
+    subscriber to 'bounced' + auto-unsubscribed.
+    """
+    from ...config import get_settings
+    expected = (get_settings().newsletter_bounce_secret or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Bounce webhook not configured")
+    received = request.headers.get("x-bounce-secret", "")
+    # Constant-time compare to defeat timing oracles.
+    import hmac as _hmac
+    if not _hmac.compare_digest(received.encode(), expected.encode()):
+        raise HTTPException(status_code=401, detail="Bad secret")
+
     if body.type == "soft":
         logger.info("Soft bounce: %s (%s)", body.email or body.subscriber_id, body.reason)
         return {"ok": True, "action": "logged"}
