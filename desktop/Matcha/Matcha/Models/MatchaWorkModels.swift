@@ -695,6 +695,7 @@ struct MWProject: Codable, Identifiable {
     var chatCount: Int?
     var chats: [MWProjectChat]?
     var collaborators: [MWProjectCollaborator]?
+    var collaboratorRole: String?
     let createdAt: String?
     var updatedAt: String?
 
@@ -705,6 +706,7 @@ struct MWProject: Codable, Identifiable {
         case projectData = "project_data"
         case chatCount = "chat_count"
         case collaborators
+        case collaboratorRole = "collaborator_role"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }

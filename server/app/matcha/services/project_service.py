@@ -215,55 +215,48 @@ async def list_projects(
     user_id: Optional[UUID] = None,
     hiring_client_id: Optional[UUID] = None,
 ) -> list[dict]:
-    """List projects. If user_id is provided, list via collaborator table (admin path)."""
+    """List projects. If company_id and user_id are both provided, lists company projects + collaborated projects."""
     async with get_connection() as conn:
+        filters = []
+        args = []
+        
+        if company_id and user_id:
+            args.extend([company_id, user_id])
+            filters.append(f"(p.company_id = $1 OR EXISTS (SELECT 1 FROM mw_project_collaborators pc_auth WHERE pc_auth.project_id = p.id AND pc_auth.user_id = $2 AND pc_auth.status = 'active'))")
+        elif user_id:
+            args.append(user_id)
+            filters.append(f"EXISTS (SELECT 1 FROM mw_project_collaborators pc_auth WHERE pc_auth.project_id = p.id AND pc_auth.user_id = $1 AND pc_auth.status = 'active')")
+        elif company_id:
+            args.append(company_id)
+            filters.append(f"p.company_id = $1")
+            
+        if status:
+            args.append(status)
+            filters.append(f"p.status = ${len(args)}")
+            
+        if hiring_client_id is not None:
+            args.append(hiring_client_id)
+            filters.append(f"p.hiring_client_id = ${len(args)}")
+
+        where_clause = "WHERE " + " AND ".join(filters) if filters else ""
+        
+        # To get the collaborator_role for the user without breaking the query with parameterized joins,
+        # we can just select it via a subquery in the SELECT clause if user_id is provided.
+        role_subquery = ""
         if user_id:
-            # Admin collaborator-based listing — all projects the user has access to
-            if status:
-                rows = await conn.fetch(
-                    """
-                    SELECT p.*, pc.role AS collaborator_role,
-                           (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
-                    FROM mw_projects p
-                    JOIN mw_project_collaborators pc ON pc.project_id = p.id
-                    WHERE pc.user_id = $1 AND pc.status = 'active' AND p.status = $2
-                    ORDER BY p.updated_at DESC
-                    """,
-                    user_id, status,
-                )
-            else:
-                rows = await conn.fetch(
-                    """
-                    SELECT p.*, pc.role AS collaborator_role,
-                           (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
-                    FROM mw_projects p
-                    JOIN mw_project_collaborators pc ON pc.project_id = p.id
-                    WHERE pc.user_id = $1 AND pc.status = 'active'
-                    ORDER BY p.updated_at DESC
-                    """,
-                    user_id,
-                )
-        else:
-            filters = ["p.company_id = $1"]
-            args: list = [company_id]
-            if status:
-                args.append(status)
-                filters.append(f"p.status = ${len(args)}")
-            if hiring_client_id is not None:
-                args.append(hiring_client_id)
-                filters.append(f"p.hiring_client_id = ${len(args)}")
-            rows = await conn.fetch(
-                f"""
-                SELECT p.*,
-                       rc.name AS hiring_client_name,
-                       (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
-                FROM mw_projects p
-                LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
-                WHERE {' AND '.join(filters)}
-                ORDER BY p.updated_at DESC
-                """,
-                *args,
-            )
+            role_subquery = f", (SELECT role FROM mw_project_collaborators WHERE project_id = p.id AND user_id = ${1 if not company_id else 2} AND status = 'active' LIMIT 1) AS collaborator_role"
+
+        query = f"""
+            SELECT p.*,
+                   rc.name AS hiring_client_name,
+                   (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
+                   {role_subquery}
+            FROM mw_projects p
+            LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
+            {where_clause}
+            ORDER BY p.updated_at DESC
+        """
+        rows = await conn.fetch(query, *args)
     results = []
     for r in rows:
         p = _parse_project(r)

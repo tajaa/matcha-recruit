@@ -2927,7 +2927,7 @@ async def list_projects_endpoint(
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []
-    return await proj_svc.list_projects(company_id, status, hiring_client_id=hiring_client_id)
+    return await proj_svc.list_projects(company_id, status, user_id=current_user.id, hiring_client_id=hiring_client_id)
 
 
 @router.post("/projects", status_code=201)
@@ -4509,17 +4509,15 @@ async def invite_to_project(
         if existing:
             if existing["status"] == "active":
                 raise HTTPException(status_code=400, detail="User is already a collaborator")
-            if existing["status"] == "pending":
-                raise HTTPException(status_code=400, detail="Invitation already pending")
-            # Was removed — re-invite
+            # Was pending or removed — re-invite as active
             await conn.execute(
-                "UPDATE mw_project_collaborators SET status = 'pending', invited_by = $3, created_at = NOW() WHERE project_id = $1 AND user_id = $2",
+                "UPDATE mw_project_collaborators SET status = 'active', invited_by = $3, created_at = NOW() WHERE project_id = $1 AND user_id = $2",
                 project_id, invitee_id, current_user.id,
             )
         else:
             await conn.execute(
                 """INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
-                   VALUES ($1, $2, $3, 'collaborator', 'pending')""",
+                   VALUES ($1, $2, $3, 'collaborator', 'active')""",
                 project_id, invitee_id, current_user.id,
             )
 

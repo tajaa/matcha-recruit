@@ -115,6 +115,15 @@ struct ProjectListView: View {
                                     .background(Color.matcha500.opacity(0.12))
                                     .cornerRadius(3)
                             }
+                            if project.collaboratorRole == "collaborator" {
+                                Text("Collab")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundColor(.purple)
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 1)
+                                    .background(Color.purple.opacity(0.12))
+                                    .cornerRadius(3)
+                            }
                             if project.projectType == "blog" {
                                 let blogStatus = (project.projectData?["status"]?.value as? String) ?? "draft"
                                 let statusColor: Color = blogStatus == "published" ? .green : blogStatus == "scheduled" ? .orange : .secondary
