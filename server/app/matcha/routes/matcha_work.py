@@ -5467,9 +5467,22 @@ async def export_project_endpoint(
 
         try:
             from weasyprint import HTML
-            pdf_bytes = await asyncio.to_thread(lambda: HTML(string=full_html).write_pdf())
         except ImportError:
             raise HTTPException(status_code=500, detail="PDF generation not available")
+
+        try:
+            pdf_bytes = await asyncio.wait_for(
+                asyncio.to_thread(lambda: HTML(string=full_html).write_pdf()),
+                timeout=60.0,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("PDF export timed out for project %s (size=%d bytes)", project_id, len(full_html))
+            raise HTTPException(status_code=504, detail="PDF generation timed out. Try a smaller document or fewer images.")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.exception("PDF export failed for project %s", project_id)
+            raise HTTPException(status_code=500, detail=f"PDF generation failed: {type(e).__name__}")
 
         # Return raw bytes so the desktop client can write them directly to
         # the save-panel URL. A previous implementation uploaded to S3 and

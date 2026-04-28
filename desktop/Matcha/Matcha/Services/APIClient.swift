@@ -2,6 +2,7 @@ import Foundation
 
 enum APIError: Error, LocalizedError {
     case httpError(Int, String)
+    case serviceUnavailable(Int)
     case decodingError(Error)
     case unauthorized
     case invalidURL
@@ -10,20 +11,20 @@ enum APIError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .httpError(let code, let message):
-            // Server returns an HTML "Updating in progress" page during deploys
-            // (502/503/504). Don't dump raw HTML into an alert — collapse to a
-            // friendly retry message. Same for any other 5xx body that looks
-            // like HTML rather than JSON {detail: "..."}.
+            // Belt-and-suspenders: if a 5xx slipped through with an HTML body
+            // and we didn't catch it via Content-Type, still collapse here.
             if (500...599).contains(code) {
-                let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
-                if trimmed.lowercased().hasPrefix("<!doctype") || trimmed.hasPrefix("<html") {
-                    if code == 502 || code == 503 || code == 504 {
-                        return "Server is updating. Try again in 30 seconds."
-                    }
-                    return "Server error (\(code)). Try again in a moment."
+                let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if trimmed.hasPrefix("<!doctype") || trimmed.hasPrefix("<html") {
+                    return APIError.serviceUnavailable(code).errorDescription
                 }
             }
             return "HTTP \(code): \(message)"
+        case .serviceUnavailable(let code):
+            if code == 502 || code == 503 || code == 504 {
+                return "Server is updating. Try again in 30 seconds."
+            }
+            return "Server error (\(code)). Try again in a moment."
         case .decodingError(let error):
             return "Decoding error: \(error.localizedDescription)"
         case .unauthorized:
@@ -74,11 +75,25 @@ class APIClient {
         return e
     }()
 
+    /// True if the response is a transient deploy/maintenance condition we
+    /// should retry once before surfacing to the user.
+    private func _isTransientMaintenance(_ httpResponse: HTTPURLResponse, data: Data) -> Bool {
+        let code = httpResponse.statusCode
+        guard code == 502 || code == 503 || code == 504 else { return false }
+        let contentType = (httpResponse.value(forHTTPHeaderField: "Content-Type") ?? "").lowercased()
+        if contentType.contains("text/html") { return true }
+        // Body sniff fallback if Content-Type missing/wrong.
+        let snippet = String(data: data.prefix(64), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return snippet.hasPrefix("<!doctype") || snippet.hasPrefix("<html")
+    }
+
     func request<T: Decodable>(
         method: String,
         path: String,
         body: (any Encodable)? = nil,
-        retryOnUnauthorized: Bool = true
+        retryOnUnauthorized: Bool = true,
+        retryOnMaintenance: Bool = true
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else {
             throw APIError.invalidURL
@@ -120,6 +135,13 @@ class APIClient {
         }
 
         guard (200...299).contains(httpResponse.statusCode) else {
+            if _isTransientMaintenance(httpResponse, data: data) {
+                if retryOnMaintenance && method.uppercased() == "GET" {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    return try await request(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
+                }
+                throw APIError.serviceUnavailable(httpResponse.statusCode)
+            }
             let message = String(data: data, encoding: .utf8) ?? "Unknown error"
             throw APIError.httpError(httpResponse.statusCode, message)
         }
@@ -141,7 +163,8 @@ class APIClient {
         method: String,
         path: String,
         body: (any Encodable)? = nil,
-        retryOnUnauthorized: Bool = true
+        retryOnUnauthorized: Bool = true,
+        retryOnMaintenance: Bool = true
     ) async throws -> Data {
         guard let url = URL(string: baseURL + path) else {
             throw APIError.invalidURL
@@ -182,6 +205,13 @@ class APIClient {
         // body so callers display actionable errors ("403 Not a member"
         // instead of "No data received").
         guard (200...299).contains(httpResponse.statusCode) else {
+            if _isTransientMaintenance(httpResponse, data: data) {
+                if retryOnMaintenance && method.uppercased() == "GET" {
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    return try await requestData(method: method, path: path, body: body, retryOnUnauthorized: retryOnUnauthorized, retryOnMaintenance: false)
+                }
+                throw APIError.serviceUnavailable(httpResponse.statusCode)
+            }
             let message = _extractErrorMessage(from: data) ?? "HTTP \(httpResponse.statusCode)"
             throw APIError.httpError(httpResponse.statusCode, message)
         }
