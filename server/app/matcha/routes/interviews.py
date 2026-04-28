@@ -1,5 +1,6 @@
 from typing import Optional
 from uuid import UUID
+import asyncio
 import json
 
 from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect, Depends, Query
@@ -1225,8 +1226,10 @@ async def interview_websocket(
             use_alpha_api=wants_human_features,
         )
 
-        # Connect with appropriate interview prompt + new Live API features
-        await gemini_session.connect(
+        # Connect with appropriate interview prompt + new Live API features.
+        # Gemini Live occasionally throws transient 1011 INTERNAL on connect;
+        # retry once with short backoff before bubbling to the user.
+        connect_kwargs = dict(
             company_name=company_name,
             interviewer_name=interviewer_name,
             interviewer_role=interviewer_role or "HR",
@@ -1240,11 +1243,39 @@ async def interview_websocket(
             interviewee_role_for_prompt=interviewee_role_for_prompt,
             candidate_name=candidate_name_for_prompt,
             position_title=position_title_for_prompt,
-            # Investigation interviews: don't let user interrupt the investigator
             no_interruption=(interview_type == "investigation"),
             enable_affective_dialog=wants_human_features,
             enable_proactive_audio=wants_human_features,
         )
+        last_connect_error: Optional[Exception] = None
+        for attempt in range(2):
+            try:
+                await gemini_session.connect(**connect_kwargs)
+                last_connect_error = None
+                break
+            except Exception as e:
+                last_connect_error = e
+                msg = str(e)
+                is_transient = (
+                    "1011" in msg
+                    or "Internal error encountered" in msg
+                    or "INTERNAL" in msg.upper()
+                    or e.__class__.__name__ == "ServerError"
+                )
+                if not is_transient or attempt == 1:
+                    raise
+                print(f"[Interview {interview_id}] Gemini transient error on connect (attempt {attempt + 1}): {e}; retrying")
+                try:
+                    await gemini_session.close()
+                except Exception:
+                    pass
+                gemini_session = GeminiLiveSession(
+                    model=settings.live_model,
+                    voice=settings.voice,
+                    api_key=settings.gemini_api_key,
+                    use_alpha_api=wants_human_features,
+                )
+                await asyncio.sleep(0.75)
 
         await send_message(MessageType.STATUS, "Session started")
 
@@ -1370,6 +1401,13 @@ async def interview_websocket(
             friendly_error = "The AI system is currently at capacity. Please try again in a few minutes."
         elif "403" in error_msg or "permission" in error_msg.lower() or "api key" in error_msg.lower():
             friendly_error = "AI service configuration error. Please contact support."
+        elif (
+            "1011" in error_msg
+            or "Internal error encountered" in error_msg
+            or error_type == "ServerError"
+            or "INTERNAL" in error_msg.upper()
+        ):
+            friendly_error = "The AI provider had a temporary glitch. Please try again."
         elif "400" in error_msg or "invalid" in error_msg.lower() or "unsupported" in error_msg.lower():
             friendly_error = "There was a problem starting the interview configuration. Please try again."
         elif error_msg and error_msg.strip() and error_msg != "None":
