@@ -329,6 +329,8 @@ export interface MeClientProfile {
   healthcare_specialties: string[]
   enabled_features: Record<string, boolean>
   is_personal: boolean
+  signup_source?: string | null
+  ir_onboarding_completed_at?: string | null
   name: string
   phone: string | null
   job_title: string | null

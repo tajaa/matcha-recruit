@@ -111,6 +111,53 @@ async def log_audit(
     )
 
 
+async def _resolve_employee_refs(
+    conn,
+    refs: Optional[list[str]],
+    company_id: Optional[str],
+) -> Optional[list[str]]:
+    """Convert a mixed list of employee UUIDs and HR-internal UIDs to UUIDs.
+
+    IR-only customers identify involved employees by badge / employee
+    number rather than UUID. The form accepts either; persistence
+    expects UUIDs (asyncpg array binding for the existing UUID[] column).
+    UIDs are resolved per-company via employees.external_uid; unresolved
+    references are dropped silently with a warning so a typo doesn't
+    block the whole incident submission.
+    """
+    if not refs:
+        return None
+    out: list[str] = []
+    pending_uids: list[str] = []
+    for ref in refs:
+        if not ref:
+            continue
+        try:
+            UUID(str(ref))
+            out.append(str(ref))
+        except (ValueError, TypeError):
+            pending_uids.append(str(ref).strip())
+    if pending_uids and company_id:
+        try:
+            rows = await conn.fetch(
+                """
+                SELECT id::text AS id, external_uid
+                FROM employees
+                WHERE org_id = $1 AND external_uid = ANY($2::text[])
+                """,
+                company_id, pending_uids,
+            )
+            found = {r["external_uid"]: r["id"] for r in rows}
+            for uid in pending_uids:
+                if uid in found:
+                    out.append(found[uid])
+                else:
+                    logger.warning("[IR] unresolved employee UID %s for company %s", uid, company_id)
+        except Exception:
+            logger.exception("[IR] employee UID resolution failed for company %s", company_id)
+    return out or None
+
+
 def _company_filter(param_idx: int) -> str:
     """Build a company_id filter clause for SQL queries."""
     return f"i.company_id = ${param_idx}"
@@ -323,6 +370,9 @@ async def create_incident(
         occurred_at = occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
 
     async with get_connection() as conn:
+        resolved_employee_ids = await _resolve_employee_refs(
+            conn, incident.involved_employee_ids, effective_company_id
+        )
         row = await conn.fetchrow(
             """
             INSERT INTO ir_incidents (
@@ -345,7 +395,7 @@ async def create_incident(
             incident.reported_by_email,
             json.dumps([w.model_dump() for w in incident.witnesses]),
             json.dumps(incident.category_data or {}),
-            [str(uid) for uid in incident.involved_employee_ids] if incident.involved_employee_ids else None,
+            resolved_employee_ids,
             effective_company_id,
             str(incident.location_id) if incident.location_id else None,
             str(current_user.id),
@@ -512,8 +562,21 @@ async def list_incidents(
 # Anonymous Reporting Token Management
 # ===========================================
 
+def _public_report_link(request: Request, token: str) -> str:
+    """Build the public reporting URL the form lives at.
+
+    Honors the X-Forwarded-Proto / Host pair set by nginx so links work
+    behind the prod proxy as well as in local dev. Falls back to the
+    request's own scheme/host if those headers aren't present.
+    """
+    proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    return f"{proto}://{host}/report/{token}"
+
+
 @router.get("/anonymous-reporting/status")
 async def get_anonymous_reporting_status(
+    request: Request,
     current_user=Depends(require_admin_or_client),
 ):
     """Get the company's anonymous reporting token (or null if disabled)."""
@@ -526,9 +589,11 @@ async def get_anonymous_reporting_status(
             company_id,
         )
     if not row or not row["report_email_token"]:
-        return {"token": None, "enabled": False, "used": False}
+        return {"token": None, "link": None, "enabled": False, "used": False}
+    token = row["report_email_token"]
     return {
-        "token": row["report_email_token"],
+        "token": token,
+        "link": _public_report_link(request, token),
         "enabled": True,
         "used": row["report_token_used_at"] is not None,
     }
@@ -536,6 +601,7 @@ async def get_anonymous_reporting_status(
 
 @router.post("/anonymous-reporting/generate")
 async def generate_anonymous_reporting_token(
+    request: Request,
     current_user=Depends(require_admin_or_client),
 ):
     """Generate or regenerate the anonymous reporting token."""
@@ -549,7 +615,12 @@ async def generate_anonymous_reporting_token(
             token,
             company_id,
         )
-    return {"token": token, "enabled": True, "used": False}
+    return {
+        "token": token,
+        "link": _public_report_link(request, token),
+        "enabled": True,
+        "used": False,
+    }
 
 
 @router.delete("/anonymous-reporting/disable")
@@ -1055,8 +1126,11 @@ async def update_incident(
             param_idx += 1
 
         if incident.involved_employee_ids is not None:
+            resolved_ids = await _resolve_employee_refs(
+                conn, incident.involved_employee_ids, str(company_id)
+            )
             updates.append(f"involved_employee_ids = ${param_idx}")
-            params.append([str(uid) for uid in incident.involved_employee_ids])
+            params.append(resolved_ids)
             param_idx += 1
 
         if not updates:

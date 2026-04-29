@@ -80,7 +80,10 @@ class IRIncidentCreate(BaseModel):
     reported_by_email: Optional[str] = None
     witnesses: list[Witness] = []
     category_data: Optional[dict[str, Any]] = None
-    involved_employee_ids: list[UUID] = []
+    # Accepts either employee UUIDs or HR-internal UIDs (badge / employee
+    # numbers). UIDs get resolved server-side via employees.external_uid
+    # before persisting; the column itself stores UUIDs only.
+    involved_employee_ids: list[str] = []
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
 
@@ -99,7 +102,7 @@ class IRIncidentUpdate(BaseModel):
     category_data: Optional[dict[str, Any]] = None
     root_cause: Optional[str] = None
     corrective_actions: Optional[str] = None
-    involved_employee_ids: Optional[list[UUID]] = None
+    involved_employee_ids: Optional[list[str]] = None
     company_id: Optional[UUID] = None
     location_id: Optional[UUID] = None
 

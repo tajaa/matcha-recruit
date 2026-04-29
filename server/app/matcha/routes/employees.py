@@ -216,6 +216,7 @@ class EmployeeCreateRequest(BaseModel):
     work_city: Optional[str] = None
     job_title: Optional[str] = None
     department: Optional[str] = None
+    uid: Optional[str] = None  # HR-internal badge / employee number
 
     @model_validator(mode="after")
     def validate_work_email_present(self):
@@ -1015,6 +1016,43 @@ async def list_locations(
             return [{"state": r["work_state"], "city": None} for r in rows]
 
 
+@router.get("/by-uid/{uid}")
+async def get_employee_by_uid(
+    uid: str,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Resolve an HR-internal UID to an employee record (id + name + email).
+
+    Used by the IR incident form so HR admins can identify involved
+    employees by badge / employee number instead of UUID. Scoped to the
+    caller's company.
+    """
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated")
+    async with get_connection() as conn:
+        if not await _column_exists(conn, "employees", "external_uid"):
+            raise HTTPException(status_code=404, detail="Employee not found")
+        row = await conn.fetchrow(
+            """
+            SELECT id, first_name, last_name, email, external_uid
+            FROM employees
+            WHERE org_id = $1 AND external_uid = $2
+            LIMIT 1
+            """,
+            company_id, uid,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    return {
+        "employee_id": str(row["id"]),
+        "first_name": row["first_name"],
+        "last_name": row["last_name"],
+        "email": row["email"],
+        "uid": row["external_uid"],
+    }
+
+
 @router.post("", response_model=EmployeeDetailResponse)
 async def create_employee(
     request: EmployeeCreateRequest,
@@ -1083,6 +1121,10 @@ async def create_employee(
                 request.job_title.strip() if request.job_title else None,
                 request.department.strip() if request.department else None,
             ])
+
+        if request.uid and await _column_exists(conn, "employees", "external_uid"):
+            insert_cols.append("external_uid")
+            insert_vals.append(request.uid.strip())
 
         placeholders = ", ".join(f"${i}" for i in range(1, len(insert_vals) + 1))
         col_list = ", ".join(insert_cols)
@@ -1703,7 +1745,7 @@ async def download_bulk_upload_template(
     writer = csv.DictWriter(output, fieldnames=[
         'email', 'personal_email', 'first_name', 'last_name', 'work_state',
         'employment_type', 'start_date', 'manager_email', 'job_title', 'department',
-        'phone', 'pay_classification', 'pay_rate', 'work_city',
+        'phone', 'uid', 'pay_classification', 'pay_rate', 'work_city',
         'license_type', 'license_number', 'license_state', 'license_expiration',
         'npi_number', 'dea_number', 'dea_expiration',
         'board_certification', 'board_certification_expiration', 'clinical_specialty',
@@ -1725,6 +1767,7 @@ async def download_bulk_upload_template(
         'job_title': 'Registered Nurse',
         'department': 'Emergency',
         'phone': '555-1234',
+        'uid': 'EMP-001',
         'pay_classification': 'hourly',
         'pay_rate': '45.00',
         'work_city': 'San Francisco',
@@ -1818,6 +1861,7 @@ async def bulk_upload_employees_csv(
 
     async with get_connection() as conn:
         compensation_fields_available = await _employee_compensation_fields_available(conn)
+        external_uid_available = await _column_exists(conn, "employees", "external_uid")
 
         google_workspace_auto_provision = False
         slack_auto_provision = False
@@ -1973,6 +2017,11 @@ async def bulk_upload_employees_csv(
                     if manager:
                         manager_id = manager['id']
 
+                # Optional HR-internal badge/employee number for IR-only
+                # tenants. Skipped silently if column doesn't exist yet
+                # (pre-migration). Empty strings → None.
+                external_uid = (row.get('uid') or row.get('external_uid') or '').strip() or None
+
                 # Create employee record
                 bulk_cols = [
                     "org_id", "email", "personal_email", "first_name", "last_name",
@@ -1989,6 +2038,9 @@ async def bulk_upload_employees_csv(
                 if org_fields_avail:
                     bulk_cols.extend(["job_title", "department"])
                     bulk_vals.extend([job_title, department_val])
+                if external_uid is not None and external_uid_available:
+                    bulk_cols.append("external_uid")
+                    bulk_vals.append(external_uid)
                 bulk_placeholders = ", ".join(f"${i}" for i in range(1, len(bulk_vals) + 1))
                 bulk_col_list = ", ".join(bulk_cols)
                 employee = await conn.fetchrow(

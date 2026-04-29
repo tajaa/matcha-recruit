@@ -108,6 +108,11 @@ class BusinessRegister(BaseModel):
     # Broker referral slug from ?via= link
     broker_ref: Optional[str] = None
 
+    # Self-serve product tier. "ir_only" = Matcha IR free-beta signup
+    # (auto-approve, only `incidents` feature on, slim IR layout).
+    # Anything else / None = bespoke sales-led path (existing behavior).
+    tier: Optional[str] = None
+
 
 class TestAccountRegister(BaseModel):
     """

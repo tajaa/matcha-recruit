@@ -5,7 +5,10 @@ import ServicesPage from './pages/landing/ServicesPage'
 import Login from './pages/Login'
 import AppLayout from './layouts/AppLayout'
 import AdminSidebar from './components/AdminSidebar'
-import ClientSidebar from './components/ClientSidebar'
+import TenantSidebar from './components/TenantSidebar'
+import IrSignup from './pages/auth/IrSignup'
+import IrOnboardingWizard from './features/ir-onboarding/IrOnboardingWizard'
+import AnonymousReport from './pages/shared/AnonymousReport'
 import Companies from './pages/admin/Companies'
 import AdminCompanyDetail from './pages/admin/AdminCompanyDetail'
 import Features from './pages/admin/Features'
@@ -146,7 +149,10 @@ export default function App() {
         <Route path="settings" element={<BrokerSettings />} />
         <Route path="clients/:companyId" element={<BrokerClientDetail />} />
       </Route>
-      <Route path="/app" element={<AppLayout sidebar={<ClientSidebar />} />}>
+      <Route path="/ir/signup" element={<IrSignup />} />
+      <Route path="/ir/onboarding" element={<IrOnboardingWizard />} />
+      <Route path="/report/:token" element={<AnonymousReport />} />
+      <Route path="/app" element={<AppLayout sidebar={<TenantSidebar />} />}>
         <Route index element={<Dashboard />} />
         <Route path="company" element={<CompanySettings />} />
         <Route path="employees" element={<Employees />} />

@@ -1536,19 +1536,40 @@ async def register_business(request: BusinessRegister):
                 if broker_row:
                     referring_broker_id = broker_row["id"]
 
-            # Determine company status — auto-approve if invited or referred by a broker
-            company_status = "approved" if (invitation or referring_broker_id) else "pending"
+            # IR-only self-serve signup auto-approves and narrows the
+            # feature set to incidents only. Bypasses the bespoke pending
+            # queue. Other tier values fall through to standard behavior.
+            is_ir_only = request.tier == "ir_only"
+
+            if is_ir_only:
+                company_status = "approved"
+                signup_source = "ir_only_self_serve"
+                # `incidents` is the headline feature; `employees` is on too
+                # because the IR product fundamentally needs employees to
+                # report on (otherwise the /employees router 403s and the
+                # onboarding wizard can't add anyone).
+                enabled_features_json = json.dumps({"incidents": True, "employees": True})
+            else:
+                company_status = "approved" if (invitation or referring_broker_id) else "pending"
+                if invitation:
+                    signup_source = "invite"
+                elif referring_broker_id:
+                    signup_source = "broker"
+                else:
+                    signup_source = "bespoke"
+                enabled_features_json = default_company_features_json()
 
             # Step 1: Create company
             company = await conn.fetchrow(
-                """INSERT INTO companies (name, industry, size, healthcare_specialties, status, approved_at, enabled_features)
-                   VALUES ($1, $2, $3, $4::text[], $5, $6, $7::jsonb)
+                """INSERT INTO companies (name, industry, size, healthcare_specialties, status, approved_at, enabled_features, signup_source)
+                   VALUES ($1, $2, $3, $4::text[], $5, $6, $7::jsonb, $8)
                    RETURNING id, name""",
                 request.company_name, request.industry, request.company_size,
                 request.healthcare_specialties,
                 company_status,
-                datetime.utcnow() if (invitation or referring_broker_id) else None,
-                default_company_features_json(),
+                datetime.utcnow() if company_status == "approved" else None,
+                enabled_features_json,
+                signup_source,
             )
             company_id = company["id"]
 
@@ -1623,7 +1644,7 @@ async def register_business(request: BusinessRegister):
 
             # Send appropriate email
             email_service = get_email_service()
-            if invitation or referring_broker_id:
+            if is_ir_only or invitation or referring_broker_id:
                 await email_service.send_business_approved_email(
                     to_email=user["email"],
                     to_name=request.name,
@@ -1635,6 +1656,16 @@ async def register_business(request: BusinessRegister):
                     to_name=request.name,
                     company_name=request.company_name
                 )
+
+            if is_ir_only:
+                next_route = "/ir/onboarding"
+                msg = "Welcome to Matcha IR. Let's set up your team."
+            elif invitation or referring_broker_id:
+                next_route = None
+                msg = "Welcome! Your business account is approved and ready to use."
+            else:
+                next_route = None
+                msg = "Your business registration is pending approval. You will be notified once it's reviewed."
 
             return {
                 "access_token": access_token,
@@ -1649,11 +1680,9 @@ async def register_business(request: BusinessRegister):
                     "last_login": None
                 },
                 "company_status": company_status,
-                "message": (
-                    "Welcome! Your business account is approved and ready to use."
-                    if (invitation or referring_broker_id) else
-                    "Your business registration is pending approval. You will be notified once it's reviewed."
-                ),
+                "signup_source": signup_source,
+                "next": next_route,
+                "message": msg,
             }
 
 
@@ -1926,6 +1955,8 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                        comp.industry, comp.healthcare_specialties,
                        COALESCE(comp.enabled_features, $2::jsonb) as enabled_features,
                        COALESCE(comp.is_personal, false) as is_personal,
+                       comp.signup_source,
+                       comp.ir_onboarding_completed_at,
                        c.name, c.phone, c.job_title, c.created_at
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
@@ -2004,6 +2035,12 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "healthcare_specialties": list(profile["healthcare_specialties"] or []),
                     "enabled_features": merge_company_features(profile["enabled_features"]),
                     "is_personal": profile["is_personal"],
+                    "signup_source": profile["signup_source"] if "signup_source" in profile.keys() else None,
+                    "ir_onboarding_completed_at": (
+                        profile["ir_onboarding_completed_at"].isoformat()
+                        if "ir_onboarding_completed_at" in profile.keys() and profile["ir_onboarding_completed_at"]
+                        else None
+                    ),
                     "name": profile["name"],
                     "phone": profile["phone"],
                     "job_title": profile["job_title"],
