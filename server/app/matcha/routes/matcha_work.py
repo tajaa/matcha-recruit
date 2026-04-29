@@ -2923,7 +2923,12 @@ async def list_projects_endpoint(
     """List all projects for the current user."""
     from ..services import project_service as proj_svc
     if current_user.role == "admin":
-        return await proj_svc.list_projects(None, status, user_id=current_user.id)
+        # Include the admin's tenant-scoped company so they see projects
+        # owned by that company even when they're not explicitly seeded
+        # as a collaborator (e.g., legacy projects, projects created by
+        # other admins under the same tenant).
+        admin_company_id = await get_client_company_id(current_user)
+        return await proj_svc.list_projects(admin_company_id, status, user_id=current_user.id)
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return []

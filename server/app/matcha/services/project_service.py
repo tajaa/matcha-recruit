@@ -117,39 +117,60 @@ async def create_project(
             initial_project_data = _seed_blog_data(seed_extra)
         else:
             initial_project_data = {}
-        row = await conn.fetchrow(
-            """
-            INSERT INTO mw_projects (company_id, created_by, title, project_type, hiring_client_id, project_data)
-            VALUES ($1, $2, $3, $4, $5, $6::jsonb)
-            RETURNING *
-            """,
-            company_id, user_id, title, project_type, hiring_client_id,
-            json.dumps(initial_project_data),
-        )
-        # Seed initial thread state for recruiting projects so the AI
-        # infers skill="project" from the first message instead of "chat"
-        initial_state = '{}'
-        if project_type == 'recruiting':
-            initial_state = json.dumps({"project_title": title, "project_sections": []})
 
-        # Auto-create a first chat in the project
-        chat = await conn.fetchrow(
-            """
-            INSERT INTO mw_threads (company_id, created_by, title, project_id, current_state)
-            VALUES ($1, $2, $3, $4, $5::jsonb)
-            RETURNING id, title, status, created_at, updated_at
-            """,
-            company_id, user_id, "Chat 1", row["id"], initial_state,
-        )
-        # Seed the creator as project owner
-        await conn.execute(
-            """
-            INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
-            VALUES ($1, $2, $2, 'owner', 'active')
-            ON CONFLICT (project_id, user_id) DO UPDATE SET status = 'active'
-            """,
-            row["id"], user_id,
-        )
+        # Auto-name "New Project N" when caller passed a default. Counts
+        # existing projects for this company that share the "New Project"
+        # prefix and bumps the next integer. Skips numbering for blog /
+        # consultation and for any caller-supplied non-default title.
+        if title in (None, "", "Untitled Project", "New Project") and project_type not in ("blog", "consultation"):
+            existing = await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM mw_projects
+                WHERE company_id = $1
+                  AND project_type NOT IN ('blog','consultation')
+                  AND (title = 'New Project' OR title ~ '^New Project [0-9]+$')
+                """,
+                company_id,
+            )
+            title = "New Project" if not existing else f"New Project {existing + 1}"
+
+        async with conn.transaction():
+            row = await conn.fetchrow(
+                """
+                INSERT INTO mw_projects (company_id, created_by, title, project_type, hiring_client_id, project_data)
+                VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+                RETURNING *
+                """,
+                company_id, user_id, title, project_type, hiring_client_id,
+                json.dumps(initial_project_data),
+            )
+            # Seed initial thread state for recruiting projects so the AI
+            # infers skill="project" from the first message instead of "chat"
+            initial_state = '{}'
+            if project_type == 'recruiting':
+                initial_state = json.dumps({"project_title": title, "project_sections": []})
+
+            # Auto-create a first chat in the project
+            chat = await conn.fetchrow(
+                """
+                INSERT INTO mw_threads (company_id, created_by, title, project_id, current_state)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
+                RETURNING id, title, status, created_at, updated_at
+                """,
+                company_id, user_id, "Chat 1", row["id"], initial_state,
+            )
+            # Seed the creator as project owner. Critical for the admin
+            # listing path which filters projects by collaborator membership
+            # only — without this insert the admin cannot see the project
+            # they just created.
+            await conn.execute(
+                """
+                INSERT INTO mw_project_collaborators (project_id, user_id, invited_by, role, status)
+                VALUES ($1, $2, $2, 'owner', 'active')
+                ON CONFLICT (project_id, user_id) DO UPDATE SET status = 'active'
+                """,
+                row["id"], user_id,
+            )
     project = _parse_project(row)
     project["chats"] = [dict(chat)]
     project["chat_count"] = 1
