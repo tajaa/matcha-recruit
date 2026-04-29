@@ -30,6 +30,7 @@ from .newsletter import public_router as newsletter_public_router, admin_router 
 from .client_errors import router as client_errors_router
 from .server_errors import router as server_errors_router
 from .landing_media import public_router as landing_media_public_router, admin_router as landing_media_admin_router
+from .resources import router as resources_router
 from ...matcha.dependencies import require_feature
 
 # Create main core router
@@ -67,6 +68,7 @@ core_router.include_router(channel_job_postings_router, prefix="/channels", tags
 core_router.include_router(profile_resume_router, prefix="/users", tags=["profile-resume"])
 core_router.include_router(newsletter_public_router, prefix="/newsletter", tags=["newsletter-public"])
 core_router.include_router(newsletter_admin_router, prefix="/admin/newsletter", tags=["newsletter-admin"])
+core_router.include_router(resources_router, prefix="/resources", tags=["resources"])
 core_router.include_router(landing_media_public_router, tags=["landing-media-public"])
 core_router.include_router(landing_media_admin_router, prefix="/admin", tags=["landing-media-admin"])
 core_router.include_router(client_errors_router, tags=["client-errors"])

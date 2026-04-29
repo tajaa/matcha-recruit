@@ -26,6 +26,10 @@ import Blogs from './pages/admin/Blogs'
 import Subscribe from './pages/landing/Subscribe'
 import BlogIndex from './pages/landing/BlogIndex'
 import BlogPostPage from './pages/landing/BlogPost'
+import ResourcesHub from './pages/landing/ResourcesHub'
+import ResourcesTemplates from './pages/landing/resources/Templates'
+import ResourcesGlossary from './pages/landing/resources/Glossary'
+import ResourcesGlossaryTerm from './pages/landing/resources/GlossaryTerm'
 import CategoryDetailPage from './pages/admin/CategoryDetailPage'
 import PolicyDetailPage from './pages/admin/PolicyDetailPage'
 import Dashboard from './pages/app/Dashboard'
@@ -80,6 +84,10 @@ export default function App() {
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/blog" element={<BlogIndex />} />
       <Route path="/blog/:slug" element={<BlogPostPage />} />
+      <Route path="/resources" element={<ResourcesHub />} />
+      <Route path="/resources/templates" element={<ResourcesTemplates />} />
+      <Route path="/resources/glossary" element={<ResourcesGlossary />} />
+      <Route path="/resources/glossary/:slug" element={<ResourcesGlossaryTerm />} />
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/register/beta" element={<BetaRegister />} />
