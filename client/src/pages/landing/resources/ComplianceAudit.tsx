@@ -7,13 +7,12 @@ import MarketingFooter from '../MarketingFooter'
 import { PricingContactModal } from '../../../components/PricingContactModal'
 import { api } from '../../../api/client'
 import {
-  AuditAnswer,
-  Finding,
   INDUSTRIES,
   QUESTIONS,
   computeFindings,
   computeScore,
 } from './auditRules'
+import type { AuditAnswer, Finding } from './auditRules'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'

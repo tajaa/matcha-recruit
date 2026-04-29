@@ -34,7 +34,7 @@ const CATEGORIES: Category[] = [
     title: 'State Compliance Guides',
     description:
       'A page per state covering posters, min wage, sick leave, final paycheck, and pay transparency.',
-    status: 'live',
+    status: 'soon',
     icon: FileText,
   },
   {
