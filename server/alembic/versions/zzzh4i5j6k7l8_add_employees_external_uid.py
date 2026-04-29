@@ -5,14 +5,14 @@ number) rather than UUID. Stored on employees alongside email/name and
 resolved server-side when an incident's involved_employee_ids contains a
 non-UUID string.
 
-Revision ID: zzzg3h4i5j6k7
-Revises: zzzf2g3h4i5j6
+Revision ID: zzzh4i5j6k7l8
+Revises: zzzg3h4i5j6k7
 Create Date: 2026-04-29
 """
 from alembic import op
 
-revision = "zzzg3h4i5j6k7"
-down_revision = "zzzf2g3h4i5j6"
+revision = "zzzh4i5j6k7l8"
+down_revision = "zzzg3h4i5j6k7"
 branch_labels = None
 depends_on = None
 

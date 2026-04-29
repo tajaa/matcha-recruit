@@ -32,6 +32,7 @@ from ..services.auth import (
 )
 from ..dependencies import get_current_user, require_admin, require_broker, get_token_payload
 from ..feature_flags import (
+    DEFAULT_COMPANY_FEATURES,
     default_company_features_json,
     merge_company_features,
 )
@@ -1547,8 +1548,14 @@ async def register_business(request: BusinessRegister):
                 # `incidents` is the headline feature; `employees` is on too
                 # because the IR product fundamentally needs employees to
                 # report on (otherwise the /employees router 403s and the
-                # onboarding wizard can't add anyone).
-                enabled_features_json = json.dumps({"incidents": True, "employees": True})
+                # onboarding wizard can't add anyone). Every other default
+                # flag is explicitly False so merge_company_features doesn't
+                # hydrate handbooks/accommodations/risk_assessment back on
+                # for IR-only tenants.
+                ir_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
+                ir_features["incidents"] = True
+                ir_features["employees"] = True
+                enabled_features_json = json.dumps(ir_features)
             else:
                 company_status = "approved" if (invitation or referring_broker_id) else "pending"
                 if invitation:

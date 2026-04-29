@@ -8,14 +8,14 @@ shouldn't fall into the slim IR layout).
 ir_onboarding_completed_at lets the IR-only onboarding wizard track
 completion without an extra table.
 
-Revision ID: zzzf2g3h4i5j6
-Revises: zzze1f2g3h4i5
+Revision ID: zzzg3h4i5j6k7
+Revises: zzzf2g3h4i5j6
 Create Date: 2026-04-29
 """
 from alembic import op
 
-revision = "zzzf2g3h4i5j6"
-down_revision = "zzze1f2g3h4i5"
+revision = "zzzg3h4i5j6k7"
+down_revision = "zzzf2g3h4i5j6"
 branch_labels = None
 depends_on = None
 
