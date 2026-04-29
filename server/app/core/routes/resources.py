@@ -436,9 +436,23 @@ def _render_audit_email(body: AuditSubmitRequest) -> str:
     """
 
 
+# Public preview: only show 1 sample title per category, and only one
+# category gets a "preview value" so visitors see the format. Everything
+# else is gated behind signup.
+_PREVIEW_VALUE_CATEGORIES = {"minimum_wage", "overtime"}
+_MAX_SAMPLE_TITLES_PER_CATEGORY = 2
+
+
 @router.get("/state-guides/{slug}")
 async def get_state_guide(slug: str):
-    """Return all state-level compliance requirements for a given state, grouped by category."""
+    """Public state guide — TEASER ONLY.
+
+    Intentionally limited: returns category list with counts and a small
+    number of sample requirement titles per category. Full requirement
+    detail (current values, source URLs, statute citations, summaries)
+    is gated behind platform signup. This preserves SEO + lead-gen value
+    without giving away the proprietary jurisdiction dataset.
+    """
     meta = STATE_SLUGS.get(slug)
     if not meta:
         raise HTTPException(status_code=404, detail="Unknown state")
@@ -458,8 +472,7 @@ async def get_state_guide(slug: str):
 
         rows = await conn.fetch(
             """
-            SELECT category, title, summary, current_value, source_url, source_name,
-                   effective_date, last_verified_at, statute_citation, canonical_key
+            SELECT category, title, current_value
             FROM jurisdiction_requirements
             WHERE jurisdiction_id = $1
             ORDER BY category, COALESCE(sort_order, 9999), title
@@ -472,30 +485,34 @@ async def get_state_guide(slug: str):
         cat = r["category"] or "other"
         grouped.setdefault(cat, []).append({
             "title": r["title"],
-            "summary": r["summary"],
             "current_value": r["current_value"],
-            "source_url": r["source_url"],
-            "source_name": r["source_name"],
-            "effective_date": r["effective_date"].isoformat() if r["effective_date"] else None,
-            "last_verified": r["last_verified_at"].isoformat() if r["last_verified_at"] else None,
-            "statute_citation": r["statute_citation"],
-            "canonical_key": r["canonical_key"],
         })
 
-    categories = [
-        {
+    categories = []
+    for cat in sorted(grouped.keys(), key=_category_sort_key):
+        items = grouped[cat]
+        sample_titles = [it["title"] for it in items[:_MAX_SAMPLE_TITLES_PER_CATEGORY]]
+        # Show ONE preview value (anchor stat) only for headline categories.
+        preview_value = None
+        if cat in _PREVIEW_VALUE_CATEGORIES:
+            for it in items:
+                if it["current_value"]:
+                    preview_value = it["current_value"]
+                    break
+        categories.append({
             "key": cat,
             "label": _format_category(cat),
-            "requirements": grouped[cat],
-        }
-        for cat in sorted(grouped.keys(), key=_category_sort_key)
-    ]
+            "count": len(items),
+            "sample_titles": sample_titles,
+            "preview_value": preview_value,
+        })
 
     return {
         "slug": slug,
         "code": meta["code"],
         "name": meta["name"],
-        "requirement_count": sum(len(c["requirements"]) for c in categories),
+        "requirement_count": sum(c["count"] for c in categories),
+        "category_count": len(categories),
         "last_verified": jurisdiction["last_verified_at"].isoformat() if jurisdiction["last_verified_at"] else None,
         "categories": categories,
     }
