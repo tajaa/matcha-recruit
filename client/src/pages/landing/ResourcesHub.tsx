@@ -38,11 +38,11 @@ const CATEGORIES: Category[] = [
     icon: FileText,
   },
   {
-    to: '/resources',
+    to: '/resources/calculators',
     title: 'Calculators',
     description:
       'PTO accrual, salary benchmarks, turnover cost, overtime — interactive HR calculators.',
-    status: 'soon',
+    status: 'live',
     icon: FileText,
   },
   {
