@@ -15,6 +15,17 @@ enum CollabRightPanel: String, CaseIterable, Identifiable {
     }
 }
 
+enum StandardProjectMode: String, CaseIterable, Identifiable {
+    case edit, preview
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .edit: return "Edit"
+        case .preview: return "Preview"
+        }
+    }
+}
+
 struct ProjectDetailView: View {
     let projectId: String
     @State private var viewModel = ProjectDetailViewModel()
@@ -25,8 +36,20 @@ struct ProjectDetailView: View {
     @State private var showExportMenu = false
     @State private var collabPanel: CollabRightPanel = .kanban
     @State private var showCompleteConfirm = false
+    @State private var showRenameAlert = false
+    @State private var renameDraft = ""
+    @State private var standardMode: StandardProjectMode = .edit
     @AppStorage("mw-chat-theme") private var lightMode = false
     @AppStorage("mw-model") private var selectedModelId = "flash"
+
+    /// True for general-shaped projects that use `standardLayout` (sections +
+    /// chat). Used to gate the Edit/Preview tab toggle in the toolbar so it
+    /// doesn't show on recruiting / consultation / blog (which already has its
+    /// own preview tab) / collab / discipline.
+    private var isStandardLayout: Bool {
+        let t = viewModel.project?.projectType ?? ""
+        return !["recruiting", "consultation", "blog", "collab", "discipline"].contains(t)
+    }
 
     private var selectedModelValue: String? {
         mwModelOptions.first { $0.id == selectedModelId }?.value
@@ -77,9 +100,32 @@ struct ProjectDetailView: View {
         .toolbar {
             ToolbarItem(placement: .navigation) {
                 if let project = viewModel.project {
-                    Text(project.title)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
+                    Button {
+                        renameDraft = project.title
+                        showRenameAlert = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text(project.title)
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                            Image(systemName: "pencil")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help("Rename project")
+                }
+            }
+            ToolbarItemGroup(placement: .principal) {
+                if isStandardLayout {
+                    Picker("Mode", selection: $standardMode) {
+                        ForEach(StandardProjectMode.allCases) { mode in
+                            Text(mode.label).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 160)
                 }
             }
             ToolbarItemGroup(placement: .primaryAction) {
@@ -164,6 +210,15 @@ struct ProjectDetailView: View {
                 }
                 .help("Export project")
             }
+        }
+        .alert("Rename project", isPresented: $showRenameAlert) {
+            TextField("Project title", text: $renameDraft)
+            Button("Save") {
+                let trimmed = renameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                Task { await viewModel.updateTitle(trimmed) }
+            }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
@@ -468,7 +523,19 @@ struct ProjectDetailView: View {
         .background(Color.appBackground)
     }
 
+    @ViewBuilder
     private var standardLayout: some View {
+        if standardMode == .preview {
+            MarkdownPreviewView(
+                sections: viewModel.project?.sections ?? [],
+                title: viewModel.project?.title ?? ""
+            )
+        } else {
+            standardEditLayout
+        }
+    }
+
+    private var standardEditLayout: some View {
         HSplitView {
             // Sidebar: Sections + Chats
             VStack(spacing: 0) {

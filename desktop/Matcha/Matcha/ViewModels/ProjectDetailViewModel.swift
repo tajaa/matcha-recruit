@@ -109,6 +109,23 @@ class ProjectDetailViewModel {
         }
     }
 
+    /// Rename the project. Server returns the updated MWProject; we apply it
+    /// directly so the UI reflects the new title without an extra GET.
+    /// `updateProjectMeta` invalidates the project list cache, so the sidebar
+    /// shows the new title on next render too.
+    func updateTitle(_ newTitle: String) async {
+        guard let pid = project?.id else { return }
+        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        do {
+            let updated = try await service.updateProjectMeta(id: pid, title: trimmed)
+            await MainActor.run { project = updated }
+            NotificationCenter.default.post(name: .mwProjectDataChanged, object: pid)
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
     // MARK: - Recruiting
 
     var recruitingData: MWRecruitingData {
