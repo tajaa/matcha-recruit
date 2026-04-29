@@ -60,7 +60,7 @@ def upgrade():
             )
             VALUES (
                 :company_id, :created_by, :title, 'general',
-                :sections::jsonb, 'active', :created_at, :updated_at
+                CAST(:sections AS jsonb), 'active', :created_at, :updated_at
             )
             RETURNING id
         """), {
