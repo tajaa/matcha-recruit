@@ -6,15 +6,17 @@ and don't hit any of these endpoints; the gated tiles redirect anonymous
 visitors to the resources signup page.
 """
 
+import html as _html
 import logging
+import os
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...database import get_connection
 from ..models.auth import CurrentUser
-from ...matcha.dependencies import require_client
+from ...matcha.dependencies import require_client, get_client_company_id
 
 
 # ---------------------------------------------------------------------------
@@ -242,6 +244,97 @@ async def create_ir_upgrade_checkout(
 
     logger.info("IR upgrade checkout opened: company=%s session=%s", company_id, stripe_session_id)
     return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
+# ---------------------------------------------------------------------------
+# Upgrade Inquiry — in-app contact form for Cap → Matcha Platform upgrade.
+# Records a lead_captures row + emails sales (best-effort).
+# ---------------------------------------------------------------------------
+
+
+class UpgradeInquiryRequest(BaseModel):
+    message: Optional[str] = Field(default=None, max_length=2000)
+    source: str = Field(default="ir_detail_upsell", max_length=100)
+
+
+class UpgradeInquiryResponse(BaseModel):
+    ok: bool
+
+
+@router.post("/upgrade/inquiry", response_model=UpgradeInquiryResponse)
+async def submit_upgrade_inquiry(
+    body: UpgradeInquiryRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Record an in-app upgrade inquiry from a Cap-tier user.
+
+    Cap (ir_only_self_serve / resources_free) doesn't have a self-serve
+    Stripe path to the full Matcha Platform — it's contract-billed. This
+    endpoint captures the click + optional message so sales can follow
+    up, and fires a notification email if the email service is configured.
+    """
+    company_id = await get_client_company_id(current_user)
+
+    async with get_connection() as conn:
+        user_row = await conn.fetchrow(
+            "SELECT email, name FROM users WHERE id = $1",
+            current_user.id,
+        )
+        company_row = None
+        if company_id is not None:
+            company_row = await conn.fetchrow(
+                "SELECT name, signup_source FROM companies WHERE id = $1",
+                company_id,
+            )
+
+        email = user_row["email"] if user_row else None
+        user_name = (user_row["name"] if user_row else None) or None
+        company_name = company_row["name"] if company_row else None
+        signup_source = company_row["signup_source"] if company_row else None
+
+        if not email:
+            raise HTTPException(status_code=400, detail="No email on file for this user")
+
+        await conn.execute(
+            """
+            INSERT INTO lead_captures (email, name, asset_slug, source)
+            VALUES ($1, $2, 'upgrade_inquiry_to_matcha_platform', $3)
+            """,
+            email,
+            user_name,
+            body.source,
+        )
+
+    # Best-effort sales notification email — escape user-controlled content
+    try:
+        from ..services.email import get_email_service
+        sales_email = os.getenv("SALES_INQUIRY_EMAIL")
+        email_svc = get_email_service()
+        if sales_email and email_svc.is_configured():
+            safe_email = _html.escape(email)
+            safe_user_name = _html.escape(user_name or "(no name)")
+            safe_company = _html.escape(company_name or "unknown")
+            safe_signup_source = _html.escape(signup_source or "unknown tier")
+            safe_source = _html.escape(body.source)
+            safe_message = _html.escape(body.message or "(none)")
+            html_body = (
+                f"<h3>Matcha Platform upgrade inquiry</h3>"
+                f"<p><strong>From:</strong> {safe_user_name} &lt;{safe_email}&gt;</p>"
+                f"<p><strong>Company:</strong> {safe_company} ({safe_signup_source})</p>"
+                f"<p><strong>Source:</strong> {safe_source}</p>"
+                f"<p><strong>Message:</strong></p>"
+                f"<pre>{safe_message}</pre>"
+            )
+            await email_svc.send_email(
+                to_email=sales_email,
+                to_name="Matcha Sales",
+                subject="Upgrade inquiry from a Matcha tenant",
+                html_content=html_body,
+            )
+    except Exception as exc:
+        logger.warning("Sales inquiry email failed: %s", exc)
+
+    return UpgradeInquiryResponse(ok=True)
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ import { IRDocumentPanel } from '../../components/ir/IRDocumentPanel'
 import { IRInterviewScheduler } from '../../components/ir/IRInterviewScheduler'
 import { IREscalationForm } from '../../components/ir/IREscalationForm'
 import { IRCategoryDataDisplay } from '../../components/ir/IRCategoryDataDisplay'
+import { IRUpgradeUpsellCard } from '../../components/ir/IRUpgradeUpsellCard'
+import { useMe } from '../../hooks/useMe'
 import {
   typeLabel, statusLabel, severityLabel,
   SEVERITY_BADGE, STATUS_BADGE, SEVERITY_OPTIONS,
@@ -32,6 +34,10 @@ type Tab = 'overview' | 'documents' | 'analysis' | 'interviews'
 
 export default function IRDetail() {
   const { incidentId } = useParams<{ incidentId: string }>()
+  const { hasFeature } = useMe()
+  const showPolicyMapping = hasFeature('policies')
+  const showERFeatures = hasFeature('er_copilot')
+  const showUpsell = !showPolicyMapping || !showERFeatures
   const navigate = useNavigate()
   const { incident, loading, error, updateIncident, deleteIncident } = useIRIncident(incidentId!)
   const [tab, setTab] = useState<Tab>('overview')
@@ -238,11 +244,16 @@ export default function IRDetail() {
             </div>
           </Card>
 
-          <IRPolicyMappingPanel incidentId={incidentId!} />
-          <IRConsistencyGuidancePanel incidentId={incidentId!} status={incident.status} />
+          {showPolicyMapping && <IRPolicyMappingPanel incidentId={incidentId!} />}
+          {showERFeatures && (
+            <IRConsistencyGuidancePanel incidentId={incidentId!} status={incident.status} />
+          )}
+          {showUpsell && <IRUpgradeUpsellCard source="ir_detail_upsell" />}
 
           <div className="space-y-2 pt-2">
-            <IREscalationForm incidentId={incidentId!} incident={incident} onEscalated={(id) => navigate(`/app/er-copilot/${id}`)} />
+            {showERFeatures && (
+              <IREscalationForm incidentId={incidentId!} incident={incident} onEscalated={(id) => navigate(`/app/er-copilot/${id}`)} />
+            )}
             <button type="button" className="text-xs text-zinc-600 hover:text-red-400 transition-colors" onClick={handleDelete}>
               Delete incident
             </button>
