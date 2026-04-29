@@ -164,7 +164,7 @@ class ProjectDetailViewModel {
         ]
         do {
             _ = try await service.updateProjectPosting(projectId: pid, posting: payload)
-            await loadProject(id: pid)
+            await refreshProject()
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -180,7 +180,7 @@ class ProjectDetailViewModel {
                     break
                 }
             }
-            await loadProject(id: pid)
+            await refreshProject()
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -195,7 +195,7 @@ class ProjectDetailViewModel {
                 positionTitle: positionTitle,
                 customMessage: customMessage
             )
-            await loadProject(id: pid)
+            await refreshProject()
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -205,7 +205,7 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         do {
             try await service.syncProjectInterviews(projectId: pid)
-            await loadProject(id: pid)
+            await refreshProject()
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -215,7 +215,7 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         do {
             try await service.analyzeProjectCandidates(projectId: pid)
-            await loadProject(id: pid)
+            await refreshProject()
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -225,7 +225,7 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         do {
             try await service.rejectProjectCandidate(projectId: pid, candidateId: candidateId, reason: reason, sendEmail: sendEmail)
-            await loadProject(id: pid)
+            await refreshProject()
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }

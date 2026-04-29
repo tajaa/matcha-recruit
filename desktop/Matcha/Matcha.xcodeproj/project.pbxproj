@@ -28,6 +28,7 @@
 		AA11BB22CC33DD44EE550001 /* ProjectDetailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */; };
 		AA11BB22CC33DD44EE550002 /* ProjectListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660002 /* ProjectListView.swift */; };
 		AA11BB22CC33DD44EE550003 /* ProjectDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */; };
+		AA11BB22CC33DD44EE550DBB /* DisciplineWorkflowBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660DBB /* DisciplineWorkflowBar.swift */; };
 		AA11BB22CC33DD44EE550004 /* SectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */; };
 		AA11BB22CC33DD44EE550005 /* CollaboratorPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */; };
 		AA11BB22CC33DD44EE550006 /* AgentPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */; };
@@ -88,6 +89,7 @@
 		AA11BB22CC33DD44EE660001 /* ProjectDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailViewModel.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660002 /* ProjectListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectListView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProjectDetailView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660DBB /* DisciplineWorkflowBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisciplineWorkflowBar.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionEditorView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaboratorPanelView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPanelView.swift; sourceTree = "<group>"; };
@@ -201,6 +203,7 @@
 				C6D7E8F9A0B1223C4D5E6F70 /* InventoryPanelView.swift */,
 				AA11BB22CC33DD44EE660002 /* ProjectListView.swift */,
 				AA11BB22CC33DD44EE660003 /* ProjectDetailView.swift */,
+				AA11BB22CC33DD44EE660DBB /* DisciplineWorkflowBar.swift */,
 				AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */,
 				AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */,
 				AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */,
@@ -416,6 +419,7 @@
 				AA11BB22CC33DD44EE550001 /* ProjectDetailViewModel.swift in Sources */,
 				AA11BB22CC33DD44EE550002 /* ProjectListView.swift in Sources */,
 				AA11BB22CC33DD44EE550003 /* ProjectDetailView.swift in Sources */,
+				AA11BB22CC33DD44EE550DBB /* DisciplineWorkflowBar.swift in Sources */,
 				AA11BB22CC33DD44EE550004 /* SectionEditorView.swift in Sources */,
 				AA11BB22CC33DD44EE550005 /* CollaboratorPanelView.swift in Sources */,
 				AA11BB22CC33DD44EE550006 /* AgentPanelView.swift in Sources */,

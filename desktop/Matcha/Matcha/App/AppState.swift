@@ -126,13 +126,19 @@ class AppState {
                 if active {
                     do {
                         try await MatchaWorkService.shared.sendHeartbeat()
-                        let users = try await MatchaWorkService.shared.fetchOnlineUsers()
-                        await MainActor.run { self?.onlineUsers = users }
+                        // Skip the explicit poll when the channels WebSocket
+                        // is connected — it pushes `online_users` events
+                        // automatically, so the GET is redundant load.
+                        let wsConnected = await MainActor.run { ChannelsWebSocket.shared.isConnected }
+                        if !wsConnected {
+                            let users = try await MatchaWorkService.shared.fetchOnlineUsers()
+                            await MainActor.run { self?.onlineUsers = users }
+                        }
                     } catch {
                         // Non-critical — silently continue
                     }
                 }
-                try? await Task.sleep(for: .seconds(30))
+                try? await Task.sleep(for: .seconds(60))
             }
         }
     }

@@ -7,7 +7,7 @@ final class ChannelsWebSocket: NSObject {
     private var task: URLSessionWebSocketTask?
     private var session: URLSession?
     private var isConnecting = false
-    private var isConnected = false
+    private(set) var isConnected = false
     private var currentRoom: String?
     private var pingTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?

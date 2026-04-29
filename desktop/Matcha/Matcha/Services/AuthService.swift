@@ -6,9 +6,11 @@ private extension Data {
     }
 }
 
+@MainActor
 class AuthService {
     static let shared = AuthService()
     private let client = APIClient.shared
+    private var refreshTask: Task<TokenResponse, Error>?
     private init() {}
 
     func login(email: String, password: String) async throws -> TokenResponse {
@@ -22,19 +24,32 @@ class AuthService {
         return response
     }
 
+    /// Refresh the access token. Concurrent callers share a single in-flight
+    /// refresh — without this, parallel 401s fire N parallel POSTs to
+    /// /auth/refresh and the server invalidates the refresh token after the
+    /// first one completes, logging the user out spuriously.
     func refresh() async throws -> TokenResponse {
-        guard let refreshToken = KeychainHelper.load(key: KeychainHelper.Keys.refreshToken) else {
-            throw APIError.unauthorized
+        if let existing = refreshTask {
+            return try await existing.value
         }
-        let body = RefreshRequest(refresh_token: refreshToken)
-        let response: TokenResponse = try await client.request(
-            method: "POST",
-            path: "/auth/refresh",
-            body: body,
-            retryOnUnauthorized: false
-        )
-        saveTokens(response)
-        return response
+        let task = Task<TokenResponse, Error> { [weak self] in
+            guard let self = self else { throw APIError.unauthorized }
+            defer { self.refreshTask = nil }
+            guard let refreshToken = KeychainHelper.load(key: KeychainHelper.Keys.refreshToken) else {
+                throw APIError.unauthorized
+            }
+            let body = RefreshRequest(refresh_token: refreshToken)
+            let response: TokenResponse = try await self.client.request(
+                method: "POST",
+                path: "/auth/refresh",
+                body: body,
+                retryOnUnauthorized: false
+            )
+            self.saveTokens(response)
+            return response
+        }
+        refreshTask = task
+        return try await task.value
     }
 
     func logout() async throws {

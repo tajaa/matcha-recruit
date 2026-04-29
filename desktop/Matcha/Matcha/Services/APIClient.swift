@@ -63,6 +63,17 @@ class APIClient {
     private init() {
         // Restore cached token from keychain on launch
         accessToken = KeychainHelper.load(key: KeychainHelper.Keys.accessToken)
+
+        // Configure shared URLCache so GETs honor the server's Cache-Control /
+        // ETag headers automatically. Memory + disk cache shared across the
+        // whole app — also covers AsyncImage avatar loads.
+        if URLCache.shared.memoryCapacity < 20 * 1_000_000 {
+            URLCache.shared = URLCache(
+                memoryCapacity: 20 * 1_000_000,   // 20 MB
+                diskCapacity: 100 * 1_000_000,    // 100 MB
+                diskPath: nil
+            )
+        }
     }
 
     private let decoder: JSONDecoder = {
@@ -102,6 +113,13 @@ class APIClient {
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = method
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+
+        // Honor Cache-Control / ETag headers on GETs. Mutations bypass the cache.
+        if method.uppercased() == "GET" {
+            urlRequest.cachePolicy = .useProtocolCachePolicy
+        } else {
+            urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
+        }
 
         if let token = accessToken {
             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")

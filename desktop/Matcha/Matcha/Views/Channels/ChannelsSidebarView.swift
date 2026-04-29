@@ -15,11 +15,12 @@ struct ChannelsSidebarView: View {
             .background(Color.appBackground)
             .task { await load() }
             .onReceive(NotificationCenter.default.publisher(for: .mwChannelCreated)) { note in
-                Task {
-                    await load()
-                    if let newId = note.object as? String {
-                        appState.selectedChannelId = newId
-                    }
+                // Selection-only side effect. The reload is driven by the
+                // `channelsListGeneration` bump that fires alongside this
+                // notification — duplicating it here caused two concurrent
+                // GET /channels calls on every channel create.
+                if let newId = note.object as? String {
+                    appState.selectedChannelId = newId
                 }
             }
             .onChange(of: appState.channelsListGeneration) { _, _ in
@@ -202,8 +203,9 @@ struct ChannelsSidebarView: View {
             if appState.selectedChannelId == channel.id {
                 appState.selectedChannelId = nil
             }
+            // Bumping the generation counter triggers `.onChange` -> load().
+            // Don't call load() inline here too; it would fire a duplicate GET.
             appState.channelsListGeneration &+= 1
-            await load()
         } catch {
             errorMessage = error.localizedDescription
         }

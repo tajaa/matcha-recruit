@@ -25,6 +25,7 @@ class MatchaWorkService {
     private var threadDetailCache: [String: MWCacheEntry<MWThreadDetail>] = [:]
     private var versionsCache: [String: MWCacheEntry<[MWDocumentVersion]>] = [:]
     private var pdfCache: [String: MWCacheEntry<Data>] = [:]
+    private var projectListCache: [String: MWCacheEntry<[MWProject]>] = [:]
     private init() {}
 
     private func cachedValue<Value>(_ entry: MWCacheEntry<Value>?) -> Value? {
@@ -52,6 +53,13 @@ class MatchaWorkService {
         threadDetailCache.removeAll()
         versionsCache.removeAll()
         pdfCache.removeAll()
+        projectListCache.removeAll()
+    }
+
+    /// Drop cached project lists. Call when project membership in any status
+    /// bucket changes (create / delete / status change).
+    func invalidateProjectLists() {
+        projectListCache.removeAll()
     }
 
     func invalidateThread(threadId: String) {
@@ -400,17 +408,28 @@ class MatchaWorkService {
 
     // MARK: - Projects
 
-    func listProjects(status: String? = nil) async throws -> [MWProject] {
+    func listProjects(status: String? = nil, forceRefresh: Bool = false) async throws -> [MWProject] {
+        let key = status ?? "__all__"
+        if !forceRefresh, let cached = cachedValue(projectListCache[key]) {
+            return cached
+        }
         var path = "\(basePath)/projects"
         if let s = status { path += "?status=\(s)" }
-        return try await client.request(method: "GET", path: path)
+        let result: [MWProject] = try await client.request(method: "GET", path: path)
+        projectListCache[key] = MWCacheEntry(
+            value: result,
+            expiresAt: Date().addingTimeInterval(cacheTTL)
+        )
+        return result
     }
 
     func createProject(title: String, projectType: String = "general") async throws -> MWProject {
         struct Body: Codable { let title: String; let projectType: String
             enum CodingKeys: String, CodingKey { case title; case projectType = "project_type" }
         }
-        return try await client.request(method: "POST", path: "\(basePath)/projects", body: Body(title: title, projectType: projectType))
+        let project: MWProject = try await client.request(method: "POST", path: "\(basePath)/projects", body: Body(title: title, projectType: projectType))
+        invalidateProjectLists()
+        return project
     }
 
     // MARK: - Consultations (project_type == "consultation")
@@ -434,7 +453,9 @@ class MatchaWorkService {
         tags: [String]
     ) async throws -> MWProject {
         let body = ConsultationCreateBody(title: title, client: clientProfile, engagement: engagement, tags: tags)
-        return try await self.client.request(method: "POST", path: "\(basePath)/projects", body: body)
+        let project: MWProject = try await self.client.request(method: "POST", path: "\(basePath)/projects", body: body)
+        invalidateProjectLists()
+        return project
     }
 
     struct ConsultationPatchBody: Encodable {
@@ -602,7 +623,9 @@ class MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/projects/\(id)")
     }
 
+    @discardableResult
     func updateProjectMeta(id: String, title: String? = nil, isPinned: Bool? = nil, status: String? = nil) async throws -> MWProject {
+        defer { invalidateProjectLists() }
         struct Body: Codable { let title: String?; let isPinned: Bool?; let status: String?
             enum CodingKeys: String, CodingKey { case title; case isPinned = "is_pinned"; case status }
         }
@@ -611,6 +634,7 @@ class MatchaWorkService {
 
     func archiveProject(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(id)")
+        invalidateProjectLists()
     }
 
     func addProjectSection(projectId: String, title: String, content: String = "") async throws -> MWProject {
