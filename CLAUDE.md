@@ -31,7 +31,7 @@ Three products share this codebase. Differentiated at signup via
 Self-serve, Stripe-purchasable. Three sub-surfaces today:
 
 **IR (Cap)**
-- Signup: `client/src/pages/auth/IrSignup.tsx` → `POST /auth/register/business` with `tier='ir_only'`. Sets `companies.signup_source='ir_only_self_serve'` and turns on `enabled_features.incidents = true` + `employees = true`.
+- Signup: `client/src/pages/auth/IrSignup.tsx` → `POST /auth/register/business` with `tier='ir_only'`. Sets `companies.signup_source='ir_only_self_serve'` and turns on `enabled_features.incidents = true`, `employees = true`, `discipline = true` (the Cap bundle).
 - Sidebar: `IrSidebar` (incidents / employees / company only) selected by `isIrOnlyTier()` in `client/src/utils/tier.ts`.
 - Onboarding: `client/src/features/ir-onboarding/IrOnboardingWizard.tsx` (4 steps); completion stamps `companies.ir_onboarding_completed_at`.
 - Backend routes: `ir_incidents_router` (`/ir/incidents/*`) and `ir_onboarding_router` (`/ir-onboarding/*`) in `server/app/matcha/routes/__init__.py`.
@@ -51,12 +51,12 @@ Self-serve, Stripe-purchasable. Three sub-surfaces today:
 - Backend: `server/app/core/routes/resources.py`. Public landing pages + business-gated tools (templates, state guides, calculators, audit, glossary, job descriptions).
 
 **Current vs intended (gap callout)**:
-Matcha Cap is described as a single Stripe-purchasable bundle of IR + Discipline + Resources. Today the code ships them as three separate self-serve tiers gated independently:
-- `ir_only_self_serve` enables `incidents` + `employees` only (not `discipline`).
-- `resources_free` enables nothing (free upsell funnel into IR upgrade).
-- `discipline` is a per-company feature flag, currently default `False` for everyone — not auto-enabled by either Cap signup path.
+Matcha Cap is described as a single Stripe-purchasable bundle of IR + Discipline + Resources.
+- `ir_only_self_serve` signup now enables `incidents` + `employees` + `discipline` (the IR + Discipline half of the bundle), and `IrSidebar` exposes a Discipline nav entry gated by the flag.
+- `resources_free` is still a distinct signup tier with its own `ResourcesFreeSidebar` and no overlap with `ir_only_self_serve` — the two halves of "Cap" don't share a tenant. Future work: pair Resources access into Cap signups so the bundle is a single tier rather than two.
+- The `discipline` flag itself is still default `False` in `DEFAULT_COMPANY_FEATURES`; bespoke companies opt in via the admin Features page.
 
-Bundling Cap = IR + Discipline + Resources is a future change to the IR signup flow (turn on `discipline` automatically) and probably to the Resources signup flow (auto-pair into IR after first Stripe purchase). Treat references to "Matcha Cap" as that intended bundle; treat code as the current per-tier reality.
+When a Cap user URL-hops to a feature they don't have (e.g. `/app/policies`, `/app/er-copilot`), `<FeatureGate>` (`client/src/components/FeatureGate.tsx`) renders `<UpgradeUpsellCard>` with an in-app "Talk to sales" inquiry form (`POST /api/resources/upgrade/inquiry`) instead of a 403 or empty page.
 
 ### Auxiliary surfaces (share codebase, not products)
 - **Admin** — `AdminSidebar`, `/admin/*` routes; internal tooling (companies, jurisdiction data, payer data, broker mgmt).
