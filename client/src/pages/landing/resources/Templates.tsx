@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight, Download, FileText } from 'lucide-react'
+import { ArrowUpRight, Bell, ChevronRight, Download, FileText } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
@@ -14,22 +14,16 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-type Asset = { slug: string; path: string; name: string }
+type Asset = { slug: string; path: string; name: string; available: boolean }
 type AssetList = { assets: Asset[] }
 
 const TEMPLATE_DESCRIPTIONS: Record<string, string> = {
-  'offer-letter-docx':
+  'offer-letter':
     'Editable offer letter covering compensation, start date, contingencies, and at-will language.',
-  'offer-letter-pdf':
-    'PDF version of the standard offer letter — print-ready, locked formatting.',
-  'job-descriptions-library':
-    '50+ ready-to-edit job descriptions across hospitality, healthcare, retail, and corporate roles.',
   'pip':
     'Performance Improvement Plan template with goals, metrics, and review cadence — vetted for legal defensibility.',
   'termination-checklist':
     'Step-by-step termination checklist covering offboarding, final pay, equipment return, and unemployment filings.',
-  'i9-w4-packet':
-    'New-hire compliance packet — I-9 + W-4 with completion guidance for HR.',
   'interview-scorecard':
     'Structured interview scorecard with competency rubrics — reduces bias claims and improves hiring quality.',
   'interview-guide':
@@ -38,6 +32,20 @@ const TEMPLATE_DESCRIPTIONS: Record<string, string> = {
     'PTO policy template — accrual schedule, carryover, payout-on-termination, with state-specific notes.',
   'workplace-investigation-report':
     'Investigation report template — intake, witness interviews, findings, and recommended actions.',
+  'performance-review':
+    'Annual + quarterly review template — goal scoring, competency ratings, manager + self-review sections, development plan.',
+  'disciplinary-action':
+    'Documented warning template — incident facts, policy violated, prior coaching, expectations, consequences. Builds the paper trail you need.',
+  'remote-work-agreement':
+    'Remote work agreement covering equipment, expenses, work hours, data security, workers\' comp scope, multi-state tax implications, and at-will revocation.',
+  'expense-reimbursement':
+    'Expense reimbursement form + policy — categories, receipts, per-diem rules, IRS-compliant accountable plan structure.',
+  'severance-agreement':
+    'Severance + release template with OWBPA-compliant ADEA waiver language, 21/45-day consideration period, and 7-day revocation. Customizable by tenure tier.',
+  'i9-form':
+    'Official Form I-9 (USCIS) — required for every new U.S. hire. Section 1 by employee on day 1; Section 2 by employer within 3 business days. Direct link to the latest USCIS edition.',
+  'w4-form':
+    'Official Form W-4 (IRS) — federal income tax withholding certificate. Direct link to the current IRS edition with One Big Beautiful Bill Act updates.',
 }
 
 const FORMAT_LABEL: Record<string, string> = {
@@ -87,51 +95,99 @@ export default function Templates() {
           </p>
         </header>
 
+        {/* Job Descriptions Library — separate browse page (50+ roles) */}
+        <Link
+          to="/resources/templates/job-descriptions"
+          className="block mb-6 p-6 rounded-2xl transition-opacity hover:opacity-80"
+          style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(15,15,15,0.03)' }}
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-wider mb-2" style={{ color: MUTED }}>Library</p>
+              <h2 className="text-2xl mb-1" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+                Job Descriptions Library
+              </h2>
+              <p className="text-sm" style={{ color: MUTED }}>
+                Browse 50+ ready-to-edit job descriptions across hospitality,
+                healthcare, retail, corporate, and more. Pick the one you
+                need — no bulk download.
+              </p>
+            </div>
+            <ArrowUpRight className="w-5 h-5 mt-1 flex-shrink-0" style={{ color: INK }} />
+          </div>
+        </Link>
+
         {loading ? (
           <p style={{ color: MUTED }}>Loading templates…</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {assets.map(asset => (
-              <article
-                key={asset.slug}
-                className="p-6 rounded-2xl flex flex-col"
-                style={{ border: `1px solid ${LINE}` }}
-              >
-                <div className="flex items-start justify-between mb-4">
-                  <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center"
-                    style={{ backgroundColor: 'rgba(15,15,15,0.05)' }}
-                  >
-                    <FileText className="w-5 h-5" style={{ color: INK }} />
+            {assets.map(asset => {
+              const available = asset.available
+              return (
+                <article
+                  key={asset.slug}
+                  className="p-6 rounded-2xl flex flex-col"
+                  style={{ border: `1px solid ${LINE}`, opacity: available ? 1 : 0.92 }}
+                >
+                  <div className="flex items-start justify-between mb-4">
+                    <div
+                      className="w-10 h-10 rounded-lg flex items-center justify-center"
+                      style={{ backgroundColor: 'rgba(15,15,15,0.05)' }}
+                    >
+                      <FileText className="w-5 h-5" style={{ color: INK }} />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!available && (
+                        <span
+                          className="text-[10px] tracking-wider px-2 py-1 rounded"
+                          style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                        >
+                          COMING SOON
+                        </span>
+                      )}
+                      <span
+                        className="text-[10px] tracking-wider px-2 py-1 rounded"
+                        style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                      >
+                        {formatFor(asset.path)}
+                      </span>
+                    </div>
                   </div>
-                  <span
-                    className="text-[10px] tracking-wider px-2 py-1 rounded"
-                    style={{ border: `1px solid ${LINE}`, color: MUTED }}
+
+                  <h3
+                    className="text-lg mb-2"
+                    style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
                   >
-                    {formatFor(asset.path)}
-                  </span>
-                </div>
+                    {asset.name}
+                  </h3>
+                  <p className="text-sm mb-6 flex-1" style={{ color: MUTED }}>
+                    {TEMPLATE_DESCRIPTIONS[asset.slug] ?? ''}
+                  </p>
 
-                <h3
-                  className="text-lg mb-2"
-                  style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
-                >
-                  {asset.name}
-                </h3>
-                <p className="text-sm mb-6 flex-1" style={{ color: MUTED }}>
-                  {TEMPLATE_DESCRIPTIONS[asset.slug] ?? ''}
-                </p>
-
-                <button
-                  onClick={() => setActiveAsset(asset)}
-                  className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-full text-sm font-medium transition-opacity hover:opacity-90"
-                  style={{ backgroundColor: INK, color: BG }}
-                >
-                  <Download className="w-4 h-4" />
-                  Download
-                </button>
-              </article>
-            ))}
+                  <button
+                    onClick={() => setActiveAsset(asset)}
+                    className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-full text-sm font-medium transition-opacity hover:opacity-90"
+                    style={{
+                      backgroundColor: available ? INK : 'transparent',
+                      color: available ? BG : INK,
+                      border: available ? 'none' : `1px solid ${LINE}`,
+                    }}
+                  >
+                    {available ? (
+                      <>
+                        <Download className="w-4 h-4" />
+                        Download
+                      </>
+                    ) : (
+                      <>
+                        <Bell className="w-4 h-4" />
+                        Notify me when ready
+                      </>
+                    )}
+                  </button>
+                </article>
+              )
+            })}
           </div>
         )}
 

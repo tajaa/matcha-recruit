@@ -12,12 +12,13 @@ const DISPLAY = 'var(--font-display)'
 interface Props {
   open: boolean
   onClose: () => void
-  asset: { slug: string; name: string } | null
+  asset: { slug: string; name: string; available?: boolean } | null
 }
 
 type LeadResponse = {
   ok: boolean
-  download_url: string
+  status: 'download' | 'notify'
+  download_url?: string
   asset_name: string
 }
 
@@ -26,19 +27,21 @@ export default function EmailGateModal({ open, onClose, asset }: Props) {
   const [name, setName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [done, setDone] = useState(false)
+  const [done, setDone] = useState<null | 'download' | 'notify'>(null)
 
   useEffect(() => {
     if (open) {
       setEmail('')
       setName('')
       setError(null)
-      setDone(false)
+      setDone(null)
       setSubmitting(false)
     }
   }, [open, asset?.slug])
 
   if (!open || !asset) return null
+
+  const isNotifyMode = asset.available === false
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -53,21 +56,29 @@ export default function EmailGateModal({ open, onClose, asset }: Props) {
         email: email.trim(),
         name: name.trim() || undefined,
         asset_slug: asset.slug,
-        source: 'resources_templates',
+        source: isNotifyMode ? 'notify_when_ready' : 'resources_templates',
       })
-      const a = document.createElement('a')
-      a.href = res.download_url
-      a.download = res.download_url.split('/').pop() ?? asset.slug
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-      setDone(true)
+      if (res.status === 'download' && res.download_url) {
+        // Cross-origin downloads (S3/CloudFront, government sites) ignore
+        // the `download` attribute, so open in a new tab — the browser
+        // will save DOCX automatically and render PDFs inline.
+        window.open(res.download_url, '_blank', 'noopener,noreferrer')
+        setDone('download')
+      } else {
+        setDone('notify')
+      }
     } catch (err: any) {
       setError(err?.message ?? 'Something went wrong. Try again.')
     } finally {
       setSubmitting(false)
     }
   }
+
+  const headline = isNotifyMode ? `Notify me when ${asset.name} is ready` : `Get ${asset.name}`
+  const blurb = isNotifyMode
+    ? "We're polishing this template. Drop your email and we'll send it the moment it's published."
+    : "Enter your email and we'll send the file straight to your downloads. No spam — just occasional HR resources."
+  const button = isNotifyMode ? 'Notify me' : 'Download'
 
   return (
     <div
@@ -89,7 +100,7 @@ export default function EmailGateModal({ open, onClose, asset }: Props) {
           <X className="w-5 h-5" />
         </button>
 
-        {done ? (
+        {done === 'download' ? (
           <div className="text-center py-4">
             <h3 className="text-2xl mb-3" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
               Download started
@@ -106,14 +117,29 @@ export default function EmailGateModal({ open, onClose, asset }: Props) {
               Browse more templates
             </button>
           </div>
+        ) : done === 'notify' ? (
+          <div className="text-center py-4">
+            <h3 className="text-2xl mb-3" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+              You're on the list
+            </h3>
+            <p className="text-sm mb-6" style={{ color: MUTED }}>
+              We'll email <strong style={{ color: INK }}>{email}</strong> the moment <strong style={{ color: INK }}>{asset.name}</strong> ships.
+            </p>
+            <button
+              onClick={onClose}
+              className="px-5 h-10 rounded-full text-sm font-medium"
+              style={{ backgroundColor: INK, color: BG }}
+            >
+              Browse more
+            </button>
+          </div>
         ) : (
           <>
             <h3 className="text-2xl mb-2" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
-              Get {asset.name}
+              {headline}
             </h3>
             <p className="text-sm mb-6" style={{ color: MUTED }}>
-              Enter your email and we'll send the file straight to your downloads.
-              No spam — just occasional HR resources.
+              {blurb}
             </p>
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-3">
@@ -125,11 +151,7 @@ export default function EmailGateModal({ open, onClose, asset }: Props) {
                 required
                 autoFocus
                 className="px-4 h-11 rounded-lg text-sm outline-none"
-                style={{
-                  backgroundColor: 'transparent',
-                  border: `1px solid ${LINE}`,
-                  color: INK,
-                }}
+                style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
               />
               <input
                 type="text"
@@ -137,11 +159,7 @@ export default function EmailGateModal({ open, onClose, asset }: Props) {
                 value={name}
                 onChange={e => setName(e.target.value)}
                 className="px-4 h-11 rounded-lg text-sm outline-none"
-                style={{
-                  backgroundColor: 'transparent',
-                  border: `1px solid ${LINE}`,
-                  color: INK,
-                }}
+                style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
               />
               {error && (
                 <p className="text-sm" style={{ color: '#c1543a' }}>{error}</p>
@@ -152,10 +170,12 @@ export default function EmailGateModal({ open, onClose, asset }: Props) {
                 className="mt-2 h-11 rounded-full text-sm font-medium transition-opacity disabled:opacity-50"
                 style={{ backgroundColor: INK, color: BG }}
               >
-                {submitting ? 'Sending…' : 'Download'}
+                {submitting ? 'Sending…' : button}
               </button>
               <p className="text-xs mt-2" style={{ color: MUTED }}>
-                By downloading you agree to receive resource emails from Matcha.
+                {isNotifyMode
+                  ? "We'll only email you about this template + occasional new HR resources."
+                  : 'By downloading you agree to receive resource emails from Matcha.'}
               </p>
             </form>
           </>

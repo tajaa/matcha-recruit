@@ -151,17 +151,26 @@ router = APIRouter()
 # from the site root.
 # ---------------------------------------------------------------------------
 
-ASSETS: dict[str, dict[str, str]] = {
-    "offer-letter-docx": {"path": "/templates/offer-letter.docx", "name": "Offer Letter (DOCX)"},
-    "offer-letter-pdf": {"path": "/templates/offer-letter.pdf", "name": "Offer Letter (PDF)"},
-    "job-descriptions-library": {"path": "/templates/job-descriptions-library.docx", "name": "Job Descriptions Library"},
-    "pip": {"path": "/templates/pip.docx", "name": "Performance Improvement Plan"},
-    "termination-checklist": {"path": "/templates/termination-checklist.pdf", "name": "Termination Checklist"},
-    "i9-w4-packet": {"path": "/templates/i9-w4-packet.pdf", "name": "I-9 / W-4 Packet"},
-    "interview-scorecard": {"path": "/templates/interview-scorecard.docx", "name": "Interview Scorecard"},
-    "interview-guide": {"path": "/templates/interview-guide.docx", "name": "Interview Guide — What You Can & Can't Ask"},
-    "pto-policy": {"path": "/templates/pto-policy.docx", "name": "PTO Policy Template"},
-    "workplace-investigation-report": {"path": "/templates/workplace-investigation-report.docx", "name": "Workplace Investigation Report"},
+# Each asset has `available` — when False, the UI shows a "Notify me when
+# ready" capture instead of a download button. DOCXs hosted on CloudFront
+# (S3 origin), generated via scripts/generate_resource_templates.py.
+# I-9 / W-4 link out to authoritative government sources (kept current
+# by USCIS/IRS, public-domain).
+ASSETS: dict[str, dict] = {
+    "offer-letter": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/c093d74d2fcc48d7b3d160c083e2773a.docx", "name": "Offer Letter", "available": True},
+    "pip": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/2cad0579c92b4835857549c42ab59195.docx", "name": "Performance Improvement Plan", "available": True},
+    "termination-checklist": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/62c51d1ad2534c179e4195bd15fce47f.docx", "name": "Termination Checklist", "available": True},
+    "interview-scorecard": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/d0b6efa9cfb64530a7e34ece13ecbbec.docx", "name": "Interview Scorecard", "available": True},
+    "interview-guide": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/2a7e7ebbd7c04e7d8ab01bcbcf72ce2c.docx", "name": "Interview Guide — What You Can & Can't Ask", "available": True},
+    "pto-policy": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/40a74d49dbe340d9aca6c55c64382470.docx", "name": "PTO Policy Template", "available": True},
+    "workplace-investigation-report": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/a3d51b0794074aadba31cc3624c0ebc3.docx", "name": "Workplace Investigation Report", "available": True},
+    "performance-review": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/cf44966c6c21473f94d8ad933b12ad05.docx", "name": "Performance Review Template", "available": True},
+    "disciplinary-action": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/1cc56d1056a14b45ac1f723edd8dff08.docx", "name": "Disciplinary Action Form", "available": True},
+    "remote-work-agreement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/fc9340721c1c4011b74081442c9fc809.docx", "name": "Remote Work Agreement", "available": True},
+    "expense-reimbursement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/b23c734a36da4089a86b5f448dd785ab.docx", "name": "Expense Reimbursement Form", "available": True},
+    "severance-agreement": {"path": "https://d1ri804v59kjwh.cloudfront.net/resources/templates/75854b4bc58845d4889a7dd59affc9d7.docx", "name": "Severance Agreement", "available": True},
+    "i9-form": {"path": "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf", "name": "Form I-9 — Employment Eligibility Verification (USCIS)", "available": True},
+    "w4-form": {"path": "https://www.irs.gov/pub/irs-pdf/fw4.pdf", "name": "Form W-4 — Employee's Withholding Certificate (IRS)", "available": True},
 }
 
 
@@ -222,9 +231,16 @@ async def lead_capture(body: LeadCaptureRequest, request: Request):
     if _rate_limited(_client_ip(request)):
         raise HTTPException(status_code=429, detail="Too many requests. Please wait a minute.")
 
+    # Allow capturing a lead for any registered slug, even pseudo-slugs like
+    # "job-description:bartender" used by the Job Descriptions browse page.
     asset = ASSETS.get(body.asset_slug)
-    if not asset:
+    is_available = bool(asset and asset.get("available"))
+
+    # Reject totally unknown slugs only if they don't look like a job-desc slug.
+    if not asset and not body.asset_slug.startswith("job-description:"):
         raise HTTPException(status_code=404, detail="Unknown asset")
+
+    source = body.source or ("notify_when_ready" if not is_available else "resources")
 
     async with get_connection() as conn:
         await conn.execute(
@@ -234,25 +250,32 @@ async def lead_capture(body: LeadCaptureRequest, request: Request):
             body.email.lower().strip(),
             body.name.strip() if body.name else None,
             body.asset_slug,
-            body.source or "resources",
+            source,
             body.utm_source,
             body.utm_medium,
             body.utm_campaign,
             _client_ip(request),
         )
 
-    logger.info("Lead capture: %s -> %s", body.email, body.asset_slug)
+    logger.info("Lead capture: %s -> %s (%s)", body.email, body.asset_slug, source)
 
+    if is_available and asset:
+        return {
+            "ok": True,
+            "status": "download",
+            "download_url": asset["path"],
+            "asset_name": asset["name"],
+        }
     return {
         "ok": True,
-        "download_url": asset["path"],
-        "asset_name": asset["name"],
+        "status": "notify",
+        "asset_name": asset["name"] if asset else body.asset_slug,
     }
 
 
 @router.get("/assets")
 async def list_assets():
-    """List available downloadable assets — used by the frontend Templates page."""
+    """List downloadable assets (with `available` flag) — used by Templates page."""
     return {"assets": [{"slug": k, **v} for k, v in ASSETS.items()]}
 
 
