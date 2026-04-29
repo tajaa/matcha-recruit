@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
-  BadgeCheck, MessageSquareWarning, Mail, Bell,
+  BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -17,6 +17,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/employees', icon: Users, label: 'Employees' },
       { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding' },
       { to: '/app/accommodations', icon: Accessibility, label: 'Accommodations' },
+      { to: '/app/discipline', icon: Gavel, label: 'Discipline', feature: 'discipline' },
     ],
   },
   {
@@ -63,8 +64,24 @@ const personalNav: (NavItem | NavGroup)[] = [
 ]
 
 export default function ClientSidebar() {
-  const { me, loading, isPersonal } = useMe()
+  const { me, loading, isPersonal, hasFeature } = useMe()
   const { badges, markSeen } = useSidebarBadges()
+
+  function filterByFeatures(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {
+    const out: (NavItem | NavGroup)[] = []
+    for (const item of items) {
+      if ('items' in item) {
+        if (item.feature && !hasFeature(item.feature)) continue
+        const filteredItems = item.items.filter((child) => !child.feature || hasFeature(child.feature))
+        if (filteredItems.length === 0) continue
+        out.push({ ...item, items: filteredItems })
+      } else {
+        if (item.feature && !hasFeature(item.feature)) continue
+        out.push(item)
+      }
+    }
+    return out
+  }
 
   function withBadges(items: (NavItem | NavGroup)[]): (NavItem | NavGroup)[] {
     return items.map((item) => {
@@ -91,7 +108,7 @@ export default function ClientSidebar() {
     <SidebarShell
       logoTo={isPersonal ? '/work' : '/app'}
       logoLabel="Matcha"
-      nav={loading ? [] : isPersonal ? personalNav : withBadges(nav)}
+      nav={loading ? [] : isPersonal ? personalNav : withBadges(filterByFeatures(nav))}
       user={footerName ? {
         name: footerName,
         avatarUrl: me?.user?.avatar_url,

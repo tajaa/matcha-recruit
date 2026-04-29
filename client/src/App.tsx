@@ -66,6 +66,9 @@ import EscalatedQueries from './pages/app/EscalatedQueries'
 import Accommodations from './pages/app/Accommodations'
 import AccommodationDetail from './pages/app/AccommodationDetail'
 import CompanySettings from './pages/app/CompanySettings'
+import Discipline from './pages/app/Discipline'
+import DisciplineDetail from './pages/app/DisciplineDetail'
+import DisciplineSettings from './pages/app/DisciplineSettings'
 import BrokerSidebar from './components/BrokerSidebar'
 import BrokerDashboard from './pages/broker/BrokerDashboard'
 import BrokerClients from './pages/broker/BrokerClients'
@@ -171,6 +174,9 @@ export default function App() {
         <Route path="escalated-queries" element={<EscalatedQueries />} />
         <Route path="accommodations" element={<Accommodations />} />
         <Route path="accommodations/:caseId" element={<AccommodationDetail />} />
+        <Route path="discipline" element={<Discipline />} />
+        <Route path="discipline/:recordId" element={<DisciplineDetail />} />
+        <Route path="discipline-settings" element={<DisciplineSettings />} />
         <Route path="policies" element={<Policies />} />
         <Route path="handbooks" element={<Handbooks />} />
         <Route path="handbook/new" element={<HandbookForm />} />

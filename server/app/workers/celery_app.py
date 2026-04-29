@@ -33,6 +33,7 @@ celery_app = Celery(
         "app.workers.tasks.risk_assessment",
         "app.workers.tasks.healthcare_research",
         "app.workers.tasks.research_browse",
+        "app.workers.tasks.discipline_expiry",
     ],
 )
 
@@ -171,6 +172,13 @@ def on_worker_ready(**kwargs):
         enqueue_scheduled_risk_assessments.delay()
     else:
         print("[Worker] Risk assessment scheduler is disabled, skipping.")
+
+    from app.workers.tasks.discipline_expiry import run_discipline_expiry
+
+    if _is_scheduler_enabled("discipline_expiry"):
+        run_discipline_expiry.delay()
+    else:
+        print("[Worker] Discipline expiry scheduler is disabled, skipping.")
 
 
 # ── Server error reporter integration ───────────────────────────────────────

@@ -21,6 +21,7 @@ from .billing import router as matcha_work_billing_router, admin_router as match
 from .notifications import router as mw_notifications_router
 from .risk_assessment import router as risk_assessment_router
 from .pre_termination import router as pre_termination_router
+from .discipline import router as discipline_router, public_router as discipline_public_router
 from .flight_risk import router as flight_risk_router
 from .inbound_email import router as anonymous_report_router
 from .training import router as training_router
@@ -109,6 +110,17 @@ matcha_router.include_router(
     prefix="/pre-termination",
     tags=["pre-termination"],
     dependencies=[Depends(require_feature("employees"))],
+)
+matcha_router.include_router(
+    discipline_router,
+    prefix="/discipline",
+    tags=["discipline"],
+    dependencies=[Depends(require_feature("discipline"))],
+)
+matcha_router.include_router(
+    discipline_public_router,
+    prefix="/discipline",
+    tags=["discipline-webhook"],
 )
 matcha_router.include_router(
     flight_risk_router,

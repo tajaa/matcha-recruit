@@ -65,7 +65,7 @@ KNOWN_PLATFORM_ITEMS = {
     "onboarding", "employees", "policies", "handbooks", "time_off",
     "accommodations", "er_copilot", "incidents", "risk_assessment",
     "compliance", "jurisdictions", "blog", "hr_news", "matcha_work",
-    "offer_letters",
+    "offer_letters", "discipline",
 }
 
 class PlatformFeaturesUpdate(BaseModel):

@@ -13,11 +13,15 @@ export type NavItem = {
   label: string
   badge?: number
   onSeen?: () => void
+  /** Optional company feature flag — item is hidden when the flag is false. */
+  feature?: string
 }
 
 export type NavGroup = {
   label: string
   items: NavItem[]
+  /** Optional company feature flag — group is hidden when the flag is false. */
+  feature?: string
 }
 
 type SidebarShellProps = {

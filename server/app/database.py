@@ -1640,9 +1640,22 @@ async def init_db():
                 description TEXT,
                 expected_improvement TEXT,
                 review_date DATE,
-                status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'expired', 'escalated')),
+                status VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'pending_meeting', 'pending_signature', 'active', 'completed', 'expired', 'escalated')),
                 outcome_notes TEXT,
                 documents JSONB DEFAULT '[]',
+                infraction_type VARCHAR(64) NOT NULL DEFAULT 'unspecified',
+                severity VARCHAR(20) NOT NULL DEFAULT 'moderate' CHECK (severity IN ('minor', 'moderate', 'severe', 'immediate_written')),
+                lookback_months INTEGER NOT NULL DEFAULT 6,
+                expires_at TIMESTAMPTZ,
+                escalated_from_id UUID REFERENCES progressive_discipline(id) ON DELETE SET NULL,
+                override_level BOOLEAN NOT NULL DEFAULT FALSE,
+                override_reason TEXT,
+                signature_status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (signature_status IN ('pending', 'requested', 'signed', 'refused', 'physical_uploaded')),
+                signature_requested_at TIMESTAMPTZ,
+                signature_completed_at TIMESTAMPTZ,
+                signature_envelope_id VARCHAR(255),
+                signed_pdf_storage_path VARCHAR(500),
+                meeting_held_at TIMESTAMPTZ,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -1654,6 +1667,55 @@ async def init_db():
         await conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_progressive_discipline_company
             ON progressive_discipline(company_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_progressive_discipline_expires_active
+            ON progressive_discipline(expires_at) WHERE status = 'active'
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_progressive_discipline_signature_envelope
+            ON progressive_discipline(signature_envelope_id)
+            WHERE signature_envelope_id IS NOT NULL
+        """)
+
+        # Discipline Policy Mapping (per-company config powering escalation engine)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS discipline_policy_mapping (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                company_id UUID NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+                infraction_type VARCHAR(64) NOT NULL,
+                label VARCHAR(255) NOT NULL,
+                default_severity VARCHAR(20) NOT NULL DEFAULT 'moderate'
+                    CHECK (default_severity IN ('minor', 'moderate', 'severe', 'immediate_written')),
+                lookback_months_minor INTEGER NOT NULL DEFAULT 6,
+                lookback_months_moderate INTEGER NOT NULL DEFAULT 9,
+                lookback_months_severe INTEGER NOT NULL DEFAULT 12,
+                auto_to_written BOOLEAN NOT NULL DEFAULT FALSE,
+                notify_grandparent_manager BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW(),
+                UNIQUE (company_id, infraction_type)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_discipline_policy_mapping_company
+            ON discipline_policy_mapping(company_id)
+        """)
+
+        # Discipline Audit Log
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS discipline_audit_log (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                discipline_id UUID NOT NULL REFERENCES progressive_discipline(id) ON DELETE CASCADE,
+                actor_user_id UUID REFERENCES users(id),
+                action VARCHAR(40) NOT NULL,
+                details JSONB DEFAULT '{}'::jsonb,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_discipline_audit_log_discipline
+            ON discipline_audit_log(discipline_id, created_at DESC)
         """)
 
         # Agency Charges table
@@ -3297,7 +3359,8 @@ async def init_db():
                 ('compliance_checks', 'Compliance Auto-Checks', 'Automated compliance checks for business locations on a recurring schedule.', false, 2),
                 ('deadline_escalation', 'Deadline Escalation', 'Re-evaluate deadline severities for upcoming legislation based on proximity to effective dates.', false, 0),
                 ('legislation_watch', 'Legislation Watch (RSS)', 'Monitor RSS feeds from state DOL/legislature sites for upcoming legislation.', false, 0),
-                ('pattern_recognition', 'Pattern Recognition', 'Detect coordinated legislative changes across jurisdictions.', false, 0)
+                ('pattern_recognition', 'Pattern Recognition', 'Detect coordinated legislative changes across jurisdictions.', false, 0),
+                ('discipline_expiry', 'Discipline Expiry Sweep', 'Flips active discipline records past expires_at to expired and writes audit rows.', false, 10000)
             ON CONFLICT (task_key) DO NOTHING
         """)
 

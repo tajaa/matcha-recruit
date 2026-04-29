@@ -29,6 +29,11 @@ TYPES = {
     "job_application_received": "Application Received",
     "job_application_status_changed": "Application Updated",
     "job_posting_payment_failed": "Job Posting Payment Failed",
+    "discipline_issued": "Discipline Record Issued",
+    "discipline_signature_requested": "Discipline Signature Requested",
+    "discipline_signed": "Discipline Signed",
+    "discipline_refused": "Discipline Signature Refused",
+    "discipline_physical_uploaded": "Discipline Signature Uploaded",
 }
 
 

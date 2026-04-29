@@ -239,7 +239,13 @@ async def create_discipline_record(
     request: DisciplineCreateRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Create a progressive discipline record for an employee."""
+    """Create a progressive discipline record for an employee.
+
+    Legacy shim: forwards to the new discipline engine so the supersede
+    flip + audit log + expires_at math run for free. Defaults
+    `infraction_type='unspecified'` and `severity='moderate'` because
+    the legacy payload doesn't carry that detail.
+    """
     if request.discipline_type not in VALID_DISCIPLINE_TYPES:
         raise HTTPException(
             status_code=400,
@@ -247,9 +253,10 @@ async def create_discipline_record(
         )
 
     company_id = await get_client_company_id(current_user)
+    if not company_id:
+        raise HTTPException(status_code=403, detail="No company associated with this account")
 
     async with get_connection() as conn:
-        # Verify employee belongs to company
         employee = await conn.fetchrow(
             "SELECT id FROM employees WHERE id = $1 AND org_id = $2",
             request.employee_id,
@@ -258,25 +265,24 @@ async def create_discipline_record(
         if not employee:
             raise HTTPException(status_code=404, detail="Employee not found")
 
-        row = await conn.fetchrow(
-            """
-            INSERT INTO progressive_discipline (
-                employee_id, company_id, discipline_type, issued_date, issued_by,
-                description, expected_improvement, review_date
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING *
-            """,
-            request.employee_id,
-            company_id,
-            request.discipline_type,
-            request.issued_date,
-            current_user.id,
-            request.description,
-            request.expected_improvement,
-            request.review_date,
+    from ..services import discipline_engine
+    try:
+        record = await discipline_engine.issue_discipline_with_supersede(
+            actor_user_id=current_user.id,
+            company_id=company_id,
+            employee_id=request.employee_id,
+            infraction_type="unspecified",
+            severity="moderate",
+            discipline_type=request.discipline_type,
+            issued_date=request.issued_date,
+            description=request.description,
+            expected_improvement=request.expected_improvement,
+            review_date=request.review_date,
         )
-        return _to_discipline_response(row)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return _to_discipline_response(record)
 
 
 @router.get("/discipline/employee/{employee_id}", response_model=List[DisciplineResponse])
@@ -360,7 +366,12 @@ async def update_discipline_record(
     request: DisciplineUpdateRequest,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Update a progressive discipline record (status, notes, review_date, description)."""
+    """Update a progressive discipline record (status, notes, review_date, description).
+
+    Legacy shim: writes a discipline_audit_log row when status changes so
+    the new engine sees the transition. Field updates still go through a
+    direct UPDATE to preserve response shape.
+    """
     company_id = await get_client_company_id(current_user)
 
     async with get_connection() as conn:
@@ -416,6 +427,19 @@ async def update_discipline_record(
             """,
             *values,
         )
+
+        if request.status is not None and request.status != existing["status"]:
+            from ..services import discipline_engine
+            await discipline_engine.write_audit(
+                conn, record_id, current_user.id,
+                "status_changed",
+                details={
+                    "from": existing["status"],
+                    "to": request.status,
+                    "via": "legacy_pre_termination_endpoint",
+                },
+            )
+
         return _to_discipline_response(row)
 
 
