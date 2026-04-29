@@ -241,6 +241,58 @@ class ProjectDetailViewModel {
         }
     }
 
+    // MARK: - Discipline
+
+    func patchDiscipline(_ patch: MatchaWorkService.MWDisciplinePatch) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.patchDiscipline(projectId: pid, patch: patch)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func confirmDisciplineMeetingHeld() async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.markDisciplineMeetingHeld(projectId: pid)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func requestDisciplineSignature(employeeEmail: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.requestDisciplineSignature(projectId: pid, employeeEmail: employeeEmail)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func refuseDisciplineSignature(notes: String) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.refuseDisciplineSignature(projectId: pid, notes: notes)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func uploadDisciplinePhysicalSignature(fileURL: URL) async {
+        guard let pid = project?.id else { return }
+        do {
+            let updated = try await service.uploadDisciplinePhysicalSignature(projectId: pid, fileURL: fileURL)
+            await MainActor.run { project = updated }
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
+
     // MARK: - Consultation
 
     var consultationData: MWConsultationData {

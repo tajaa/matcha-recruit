@@ -47,6 +47,11 @@ struct ProjectDetailView: View {
                 )
             } else if viewModel.project?.projectType == "collab" {
                 collabLayout
+            } else if viewModel.project?.projectType == "discipline" {
+                VStack(spacing: 0) {
+                    DisciplineWorkflowBar(viewModel: viewModel)
+                    standardLayout
+                }
             } else {
                 standardLayout
             }

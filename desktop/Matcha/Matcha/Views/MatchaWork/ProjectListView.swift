@@ -32,7 +32,7 @@ struct ProjectListView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
                                 .padding(.bottom, 4)
-                            ForEach(["general", "presentation", "recruiting", "collab"], id: \.self) { type in
+                            ForEach(["general", "presentation", "recruiting", "collab", "discipline"], id: \.self) { type in
                                 Button {
                                     showTypePicker = false
                                     createProject(type: type)
@@ -219,6 +219,7 @@ struct ProjectListView: View {
         case "presentation": return "rectangle.on.rectangle"
         case "recruiting": return "person.3"
         case "collab": return "person.2.crop.square.stack"
+        case "discipline": return "exclamationmark.shield"
         default: return "doc.text"
         }
     }
@@ -226,6 +227,7 @@ struct ProjectListView: View {
     private func labelForType(_ type: String) -> String {
         switch type {
         case "collab": return "Collab"
+        case "discipline": return "Disciplinary Action"
         default: return type.capitalized
         }
     }

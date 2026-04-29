@@ -649,6 +649,87 @@ class MatchaWorkService {
         try await client.requestData(method: "GET", path: "\(basePath)/projects/\(projectId)/export/\(format)")
     }
 
+    // MARK: - Discipline workflow
+
+    struct MWDisciplineEmployeePatch: Codable {
+        var name: String?
+        var title: String?
+        var department: String?
+        var manager_name: String?
+        var manager_email: String?
+        var employee_email: String?
+    }
+
+    struct MWDisciplineInfractionPatch: Codable {
+        var category: String?
+        var category_label: String?
+        var occurred_on: String?
+        var summary: String?
+        var severity: String?
+    }
+
+    struct MWDisciplinePatch: Codable {
+        var employee: MWDisciplineEmployeePatch?
+        var infraction: MWDisciplineInfractionPatch?
+        var level: String?
+    }
+
+    func patchDiscipline(projectId: String, patch: MWDisciplinePatch) async throws -> MWProject {
+        try await client.request(method: "PATCH", path: "\(basePath)/projects/\(projectId)/discipline", body: patch)
+    }
+
+    func markDisciplineMeetingHeld(projectId: String) async throws -> MWProject {
+        try await client.request(method: "POST", path: "\(basePath)/projects/\(projectId)/discipline/meeting-held")
+    }
+
+    func requestDisciplineSignature(projectId: String, employeeEmail: String) async throws -> MWProject {
+        struct Body: Codable { let employee_email: String }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/discipline/signature/request",
+            body: Body(employee_email: employeeEmail),
+        )
+    }
+
+    func refuseDisciplineSignature(projectId: String, notes: String) async throws -> MWProject {
+        struct Body: Codable { let notes: String }
+        return try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/discipline/signature/refuse",
+            body: Body(notes: notes),
+        )
+    }
+
+    func uploadDisciplinePhysicalSignature(projectId: String, fileURL: URL) async throws -> MWProject {
+        let data = try Data(contentsOf: fileURL)
+        let filename = fileURL.lastPathComponent
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        body.append("--\(boundary)\r\n")
+        body.append("Content-Disposition: form-data; name=\"file\"; filename=\"\(filename)\"\r\n")
+        body.append("Content-Type: application/pdf\r\n\r\n")
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n")
+
+        guard let url = URL(string: "\(client.baseURL)\(basePath)/projects/\(projectId)/discipline/signature/upload-physical") else {
+            throw APIError.invalidURL
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        if let token = client.accessToken {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+            let code = (response as? HTTPURLResponse)?.statusCode ?? 0
+            throw APIError.httpError(code, "Upload failed")
+        }
+        return try JSONDecoder().decode(MWProject.self, from: responseData)
+    }
+
     // MARK: - Collaborators
 
     func listCollaborators(projectId: String) async throws -> [MWProjectCollaborator] {

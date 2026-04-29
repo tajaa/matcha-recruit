@@ -3140,6 +3140,220 @@ async def patch_consultation_endpoint(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ── Discipline project endpoints ───────────────────────────────────
+
+@router.patch("/projects/{project_id}/discipline")
+async def patch_discipline_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Update discipline project_data (employee, infraction, level)."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    try:
+        return await proj_svc.patch_discipline(project_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/projects/{project_id}/discipline/meeting-held")
+async def discipline_meeting_held_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Stamp meeting_held_at. Required gate before signature can be requested."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    return await proj_svc.mark_discipline_meeting_held(project_id)
+
+
+@router.post("/projects/{project_id}/discipline/signature/request")
+async def discipline_request_signature_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Send the discipline document for digital signature.
+
+    Renders the project's current sections to PDF, hands the bytes to
+    the configured SignatureProvider, and records the envelope id +
+    requested_at on the project's signature blob. The webhook handler
+    flips draft_status to 'signed' once the recipient signs.
+    """
+    from ..services import project_service as proj_svc
+    from ..services.signature_provider import get_signature_provider
+
+    project, _ = await _verify_project_access(project_id, current_user)
+
+    recipient_email = (body.get("employee_email") or body.get("recipient_email") or "").strip()
+    if not recipient_email:
+        raise HTTPException(status_code=400, detail="employee_email is required")
+
+    if project.get("project_type") != "discipline":
+        raise HTTPException(status_code=400, detail="Not a discipline project")
+
+    pdata = project.get("project_data") or {}
+    if not pdata.get("meeting_held_at"):
+        raise HTTPException(status_code=400, detail="Confirm the disciplinary meeting was held before sending for signature.")
+
+    pdf_bytes = await _render_project_pdf(project)
+
+    provider = get_signature_provider()
+    employee = pdata.get("employee") or {}
+    result = await provider.send(
+        recipient_email=recipient_email,
+        recipient_name=employee.get("name"),
+        document_pdf=pdf_bytes,
+        subject=f"Disciplinary action: {project.get('title') or 'Document'}",
+        metadata={"project_id": str(project_id), "kind": "discipline"},
+    )
+
+    return await proj_svc.record_discipline_signature_request(
+        project_id,
+        envelope_id=result.envelope_id,
+        method="digital",
+        recipient_email=recipient_email,
+    )
+
+
+@router.post("/projects/{project_id}/discipline/signature/refuse")
+async def discipline_refuse_signature_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Mark the project as Employee Refused to Sign. Closes the workflow."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    notes = (body.get("notes") or "").strip()
+    if len(notes) < 20:
+        raise HTTPException(status_code=400, detail="Refusal notes must be at least 20 characters.")
+    return await proj_svc.record_discipline_refused(project_id, notes=notes)
+
+
+@router.post("/projects/{project_id}/discipline/signature/upload-physical")
+async def discipline_upload_physical_endpoint(
+    project_id: UUID,
+    file: UploadFile = File(..., description="Scanned signed PDF"),
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Accept a scan of a physically-signed discipline document.
+
+    Stores the scan via the existing storage service and records the
+    storage path on the project's signature blob. Closes the workflow.
+    """
+    from ..services import project_service as proj_svc
+    project_record, _ = await _verify_project_access(project_id, current_user)
+    company_id = project_record.get("company_id") if isinstance(project_record, dict) else None
+    if not company_id:
+        company_id = await get_client_company_id(current_user)
+    if not company_id:
+        raise HTTPException(status_code=400, detail="No company associated")
+
+    contents = await file.read()
+    if len(contents) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File too large (max 25MB)")
+
+    storage = get_storage()
+    filename = file.filename or f"signed-{project_id}.pdf"
+    storage_path = await storage.upload_file(
+        contents,
+        filename,
+        prefix=f"matcha-work/{company_id}/{project_id}/discipline-signed",
+        content_type="application/pdf",
+    )
+
+    # Surface in the project's Files panel so HR can find it the same
+    # way they find any other project attachment.
+    from ..services import project_file_service as file_svc
+    await file_svc.add_project_file(
+        project_id=project_id,
+        uploaded_by=current_user.id,
+        filename=filename,
+        storage_url=storage_path,
+        content_type="application/pdf",
+        file_size=len(contents),
+    )
+
+    return await proj_svc.record_discipline_signed(
+        project_id,
+        signed_pdf_storage_path=storage_path,
+        method="physical",
+    )
+
+
+@router.post("/signature/webhook")
+async def signature_webhook(body: dict):
+    """Provider webhook fan-in for completed e-signatures.
+
+    Provider-specific request shape varies; for v1 we accept the stub
+    provider's shape: {envelope_id, project_id, status='completed'}.
+    Concrete providers add header signature verification before this
+    body is trusted.
+    """
+    from ..services import project_service as proj_svc
+    from ..services.signature_provider import get_signature_provider
+
+    envelope_id = body.get("envelope_id")
+    project_id_raw = body.get("project_id")
+    status_value = body.get("status") or "completed"
+    if not envelope_id or not project_id_raw:
+        raise HTTPException(status_code=400, detail="envelope_id and project_id required")
+    if status_value != "completed":
+        return {"ok": True, "ignored": True}
+
+    project_id = UUID(project_id_raw)
+
+    # Integrity check: only honor a webhook for an envelope that we
+    # actually issued from this project. Without this anyone with the
+    # endpoint could mark any project signed by sending a bogus body.
+    # Concrete providers should also verify the request signature
+    # via the SignatureProvider.webhook_secret() — that work lands
+    # when a real provider replaces the stub.
+    project = await proj_svc.get_project_raw(project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    pdata = project.get("project_data") or {}
+    expected_envelope = ((pdata.get("signature") or {}).get("envelope_id"))
+    if not expected_envelope or expected_envelope != envelope_id:
+        raise HTTPException(status_code=403, detail="Envelope does not match this project")
+
+    provider = get_signature_provider()
+    signed_bytes = await provider.fetch_signed_pdf(envelope_id)
+    storage_path: Optional[str] = None
+    if signed_bytes:
+        company_id = project.get("company_id")
+        uploaded_by = project.get("created_by")
+        if company_id:
+            storage = get_storage()
+            filename = f"signed-{envelope_id}.pdf"
+            storage_path = await storage.upload_file(
+                signed_bytes,
+                filename,
+                prefix=f"matcha-work/{company_id}/{project_id}/discipline-signed",
+                content_type="application/pdf",
+            )
+            # No authenticated user on a webhook — attribute to the
+            # project creator so the file row has a valid uploaded_by.
+            if uploaded_by:
+                from ..services import project_file_service as file_svc
+                await file_svc.add_project_file(
+                    project_id=project_id,
+                    uploaded_by=uploaded_by,
+                    filename=filename,
+                    storage_url=storage_path,
+                    content_type="application/pdf",
+                    file_size=len(signed_bytes),
+                )
+    await proj_svc.record_discipline_signed(
+        project_id,
+        signed_pdf_storage_path=storage_path,
+        method="digital",
+    )
+    return {"ok": True}
+
+
 @router.post("/projects/{project_id}/sessions")
 async def add_session_endpoint(
     project_id: UUID,
@@ -5342,6 +5556,109 @@ async def sync_project_interviews(
         await proj_svc.update_project_data(project_id, {"candidates": updated_candidates})
 
     return {"updated": updated}
+
+
+async def _render_project_pdf(project: dict) -> bytes:
+    """Render a project's title + sections to PDF bytes.
+
+    Mirrors the inline render in `/projects/{id}/export/pdf`. Used by
+    the discipline signature-request flow to hand a freshly-rendered
+    PDF to the SignatureProvider without re-issuing the export
+    endpoint.
+    """
+    import html as _html
+    import re as _re
+    import base64
+
+    title = project.get("title") or "Document"
+    sections = project.get("sections") or []
+
+    storage = get_storage()
+    img_pattern = _re.compile(r'<img\s+[^>]*src="([^"]+)"', _re.IGNORECASE)
+
+    async def _inline_images(html_str: str) -> str:
+        result = html_str
+        for match in reversed(list(img_pattern.finditer(result))):
+            src = match.group(1)
+            if not storage.is_supported_storage_path(src):
+                continue
+            try:
+                data = await storage.download_file(src)
+                ext = src.rsplit(".", 1)[-1].lower() if "." in src else "png"
+                mime = {"svg": "image/svg+xml", "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "webp": "image/webp"}.get(ext, "image/png")
+                b64 = base64.b64encode(data).decode()
+                data_uri = f"data:{mime};base64,{b64}"
+                result = result[:match.start(1)] + data_uri + result[match.end(1):]
+            except Exception:
+                pass
+        return result
+
+    sections_html = []
+    for idx, s in enumerate(sections):
+        heading = ""
+        if s.get("title"):
+            heading = f'<h2><span class="section-num">{idx + 1}.</span> {_html.escape(s["title"])}</h2>'
+        content = s.get("content", "") or ""
+        content = await _inline_images(content)
+        if content.lstrip().startswith("<"):
+            content_html = content
+        else:
+            try:
+                import markdown as _md
+                content_html = _md.markdown(content, extensions=["tables", "fenced_code", "nl2br"])
+            except ImportError:
+                content_html = f"<p>{_html.escape(content)}</p>"
+        sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
+
+    body_html = "\n".join(sections_html)
+    full_html = f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<style>
+  @page {{ size: A4; margin: 50px 60px; }}
+  * {{ box-sizing: border-box; }}
+  body {{ font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; margin: 0; }}
+  h1 {{ font-size: 22pt; font-weight: 700; color: #0f172a; margin: 0 0 6px 0; }}
+  .title-rule {{ border: none; border-top: 3px solid #22c55e; margin: 0 0 30px 0; }}
+  h2 {{ font-size: 14pt; font-weight: 600; color: #0f172a; margin: 28px 0 10px 0; padding-bottom: 6px; border-bottom: 1px solid #e2e8f0; }}
+  .section-num {{ color: #22c55e; font-weight: 700; }}
+  img {{ max-width: 100%; height: auto; page-break-inside: avoid; margin: 12px 0; border-radius: 4px; }}
+  .section-body {{ margin-bottom: 16px; }}
+  .section-body p {{ margin: 6px 0; color: #334155; }}
+  .section-body ul, .section-body ol {{ margin: 6px 0; padding-left: 22px; color: #334155; }}
+  .section-body li {{ margin: 3px 0; }}
+  .section-body strong {{ color: #0f172a; }}
+  pre {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px; font-size: 9pt; white-space: pre-wrap; overflow-wrap: break-word; }}
+  code {{ background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 9pt; color: #b45309; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 9.5pt; }}
+  th, td {{ border: 1px solid #e2e8f0; padding: 6px 10px; text-align: left; }}
+  th {{ background: #f8fafc; font-weight: 600; color: #0f172a; }}
+  a {{ color: #2563eb; text-decoration: none; }}
+  .footer {{ margin-top: 40px; padding-top: 12px; border-top: 1px solid #e2e8f0; font-size: 8pt; color: #94a3b8; text-align: center; }}
+</style>
+</head><body>
+<h1>{_html.escape(title)}</h1>
+<hr class="title-rule">
+{body_html}
+<div class="footer">Generated with Matcha Work</div>
+</body></html>"""
+
+    try:
+        from weasyprint import HTML
+    except ImportError:
+        raise HTTPException(status_code=500, detail="PDF generation not available")
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(lambda: HTML(string=full_html).write_pdf()),
+            timeout=60.0,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="PDF generation timed out. Try a smaller document or fewer images.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("PDF render failed for project %s", project.get("id"))
+        raise HTTPException(status_code=500, detail=f"PDF generation failed: {type(e).__name__}")
 
 
 @router.get("/projects/{project_id}/export/{fmt}")

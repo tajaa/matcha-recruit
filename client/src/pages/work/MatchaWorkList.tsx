@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Pin, Archive, Loader2, FileText, Presentation, Users, X, Hash, Compass } from 'lucide-react'
+import { Plus, Pin, Archive, Loader2, FileText, Presentation, Users, X, Hash, Compass, ShieldAlert } from 'lucide-react'
 import type { MWThread } from '../../types/matcha-work'
 import { listChannels } from '../../api/channels'
 import type { ChannelSummary } from '../../api/channels'
@@ -94,13 +94,14 @@ export default function MatchaWorkList() {
     }
   }
 
-  async function handleCreateProject(type: 'general' | 'presentation' | 'recruiting') {
+  async function handleCreateProject(type: 'general' | 'presentation' | 'recruiting' | 'discipline') {
     setShowTypePicker(false)
     setCreating(true)
     const titles: Record<string, string> = {
       general: 'New Project',
       presentation: 'New Presentation',
       recruiting: 'New Job Posting',
+      discipline: 'New Disciplinary Action',
     }
     try {
       const res = await createProjectNew(titles[type], type)
@@ -353,6 +354,7 @@ export default function MatchaWorkList() {
                 { type: 'general' as const, icon: FileText, label: 'Research / Report', desc: 'Build documents and plans from chat' },
                 { type: 'presentation' as const, icon: Presentation, label: 'Presentation', desc: 'Create slide decks and pitch materials' },
                 { type: 'recruiting' as const, icon: Users, label: 'Job Posting', desc: 'Recruiting pipeline with resumes and interviews' },
+                { type: 'discipline' as const, icon: ShieldAlert, label: 'Disciplinary Action', desc: 'Draft, sign, and close a written warning' },
               ].map((opt) => (
                 <button
                   key={opt.type}
