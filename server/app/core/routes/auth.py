@@ -1546,16 +1546,20 @@ async def register_business(request: BusinessRegister):
             if is_ir_only:
                 company_status = "approved"
                 signup_source = "ir_only_self_serve"
-                # `incidents` is the headline feature; `employees` is on too
-                # because the IR product fundamentally needs employees to
-                # report on (otherwise the /employees router 403s and the
-                # onboarding wizard can't add anyone). Every other default
-                # flag is explicitly False so merge_company_features doesn't
-                # hydrate handbooks/accommodations/risk_assessment back on
-                # for IR-only tenants.
+                # Matcha Cap bundle: incidents + employees + discipline.
+                # `incidents` is the headline feature; `employees` is on
+                # because IR fundamentally needs employees to report on
+                # (otherwise /employees 403s and onboarding can't add
+                # anyone). `discipline` ships as part of Cap so the
+                # progressive-warning + signature workflow is available
+                # alongside incident tracking. Every other default flag
+                # is explicitly False so merge_company_features doesn't
+                # hydrate handbooks/accommodations/risk_assessment back
+                # on for Cap tenants.
                 ir_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 ir_features["incidents"] = True
                 ir_features["employees"] = True
+                ir_features["discipline"] = True
                 enabled_features_json = json.dumps(ir_features)
             elif is_resources_free:
                 # Resources-tier signup: auto-approved so they can immediately

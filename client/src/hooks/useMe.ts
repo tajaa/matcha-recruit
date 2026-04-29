@@ -3,6 +3,7 @@ import { api } from '../api/client'
 import type { MeResponse } from '../types/dashboard'
 
 let _cache: MeResponse | null = null
+let _cacheAt = 0
 let _promise: Promise<MeResponse> | null = null
 
 function _fetch(): Promise<MeResponse> {
@@ -10,6 +11,7 @@ function _fetch(): Promise<MeResponse> {
   if (_promise) return _promise
   _promise = api.get<MeResponse>('/auth/me').then((data) => {
     _cache = data
+    _cacheAt = Date.now()
     _promise = null
     return data
   }).catch((err) => {
@@ -21,7 +23,13 @@ function _fetch(): Promise<MeResponse> {
 
 export function invalidateMeCache() {
   _cache = null
+  _cacheAt = 0
   _promise = null
+}
+
+/** Read-only accessor for callers that want to decide whether to revalidate. */
+export function getMeCacheAgeMs(): number {
+  return _cacheAt === 0 ? Number.POSITIVE_INFINITY : Date.now() - _cacheAt
 }
 
 export function useMe() {

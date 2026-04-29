@@ -1,13 +1,41 @@
-import { useState } from 'react'
-import { Button, Card, Textarea } from '../ui'
+import { useState, type ReactNode } from 'react'
+import { Button, Card, Textarea } from './ui'
 import { CheckCircle2, Loader2, Sparkles } from 'lucide-react'
-import { api } from '../../api/client'
+import { api } from '../api/client'
+
+type Variant = 'sidebar' | 'page'
 
 type Props = {
-  source?: string
+  /** Tag describing where the user clicked from (recorded in lead_captures.source). */
+  source: string
+  /** Headline copy in the card header. */
+  title?: string
+  /** One-paragraph pitch above the bullets. */
+  pitch?: ReactNode
+  /** Bullet list of unlocked features. */
+  bullets?: string[]
+  /**
+   * `sidebar` (default) — narrow card sized to fit the IR-detail-style right
+   * column. `page` — wider centered card for full-page replacements where
+   * a Cap-tier user URL-hops to a feature they haven't unlocked.
+   */
+  variant?: Variant
 }
 
-export function IRUpgradeUpsellCard({ source = 'ir_detail_upsell' }: Props) {
+const DEFAULT_BULLETS = [
+  'Policies + handbook mapping',
+  'ER Copilot case management',
+  'Progressive discipline + e-signature',
+  'Compliance monitoring + risk assessment',
+]
+
+export function UpgradeUpsellCard({
+  source,
+  title = 'Upgrade to Matcha Platform',
+  pitch,
+  bullets = DEFAULT_BULLETS,
+  variant = 'sidebar',
+}: Props) {
   const [open, setOpen] = useState(false)
   const [message, setMessage] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -27,12 +55,17 @@ export function IRUpgradeUpsellCard({ source = 'ir_detail_upsell' }: Props) {
     }
   }
 
+  const cardClass =
+    variant === 'page'
+      ? 'p-0 overflow-hidden border-emerald-900/30 max-w-2xl mx-auto mt-12'
+      : 'p-0 overflow-hidden border-emerald-900/30'
+
   return (
-    <Card className="p-0 overflow-hidden border-emerald-900/30">
+    <Card className={cardClass}>
       <div className="px-5 py-3 border-b border-zinc-800/60 bg-emerald-900/10 flex items-center gap-2">
         <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
         <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-300">
-          Upgrade to Matcha Platform
+          {title}
         </h3>
       </div>
       <div className="px-5 py-4 space-y-3">
@@ -48,14 +81,15 @@ export function IRUpgradeUpsellCard({ source = 'ir_detail_upsell' }: Props) {
           </div>
         ) : (
           <>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              Auto-map this incident against your handbook policies, escalate to
-              ER Copilot, and trigger progressive discipline workflows.
-            </p>
-            <ul className="text-xs text-zinc-500 space-y-1 list-disc list-inside">
-              <li>Policies + handbook mapping</li>
-              <li>ER Copilot case management</li>
-              <li>Progressive discipline + e-signature</li>
+            {pitch && (
+              <p className={`${variant === 'page' ? 'text-sm' : 'text-xs'} text-zinc-400 leading-relaxed`}>
+                {pitch}
+              </p>
+            )}
+            <ul className={`${variant === 'page' ? 'text-sm' : 'text-xs'} text-zinc-500 space-y-1 list-disc list-inside`}>
+              {bullets.map((b) => (
+                <li key={b}>{b}</li>
+              ))}
             </ul>
 
             {open && (

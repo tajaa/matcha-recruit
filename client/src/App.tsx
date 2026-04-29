@@ -69,6 +69,7 @@ import CompanySettings from './pages/app/CompanySettings'
 import Discipline from './pages/app/Discipline'
 import DisciplineDetail from './pages/app/DisciplineDetail'
 import DisciplineSettings from './pages/app/DisciplineSettings'
+import { FeatureGate } from './components/FeatureGate'
 import BrokerSidebar from './components/BrokerSidebar'
 import BrokerDashboard from './pages/broker/BrokerDashboard'
 import BrokerClients from './pages/broker/BrokerClients'
@@ -166,24 +167,24 @@ export default function App() {
         <Route path="employees" element={<Employees />} />
         <Route path="employees/:employeeId" element={<EmployeeDetail />} />
         <Route path="onboarding" element={<Onboarding />} />
-        <Route path="er-copilot" element={<ERCopilot />} />
-        <Route path="er-copilot/:caseId" element={<ERCaseDetail />} />
-        <Route path="compliance" element={<Compliance />} />
+        <Route path="er-copilot" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCopilot /></FeatureGate>} />
+        <Route path="er-copilot/:caseId" element={<FeatureGate feature="er_copilot" label="ER Copilot"><ERCaseDetail /></FeatureGate>} />
+        <Route path="compliance" element={<FeatureGate feature="compliance" label="Compliance"><Compliance /></FeatureGate>} />
         <Route path="ir" element={<IRList />} />
         <Route path="ir/:incidentId" element={<IRDetail />} />
         <Route path="escalated-queries" element={<EscalatedQueries />} />
-        <Route path="accommodations" element={<Accommodations />} />
-        <Route path="accommodations/:caseId" element={<AccommodationDetail />} />
-        <Route path="discipline" element={<Discipline />} />
-        <Route path="discipline/:recordId" element={<DisciplineDetail />} />
-        <Route path="discipline-settings" element={<DisciplineSettings />} />
-        <Route path="policies" element={<Policies />} />
-        <Route path="handbooks" element={<Handbooks />} />
-        <Route path="handbook/new" element={<HandbookForm />} />
-        <Route path="handbook/:id" element={<HandbookDetail />} />
-        <Route path="handbook/:id/edit" element={<HandbookForm />} />
-        <Route path="risk-assessment" element={<RiskAssessment />} />
-        <Route path="credential-templates" element={<CredentialTemplates />} />
+        <Route path="accommodations" element={<FeatureGate feature="accommodations" label="Accommodations"><Accommodations /></FeatureGate>} />
+        <Route path="accommodations/:caseId" element={<FeatureGate feature="accommodations" label="Accommodations"><AccommodationDetail /></FeatureGate>} />
+        <Route path="discipline" element={<FeatureGate feature="discipline" label="Discipline"><Discipline /></FeatureGate>} />
+        <Route path="discipline/:recordId" element={<FeatureGate feature="discipline" label="Discipline"><DisciplineDetail /></FeatureGate>} />
+        <Route path="discipline-settings" element={<FeatureGate feature="discipline" label="Discipline"><DisciplineSettings /></FeatureGate>} />
+        <Route path="policies" element={<FeatureGate feature="policies" label="Policies"><Policies /></FeatureGate>} />
+        <Route path="handbooks" element={<FeatureGate feature="handbooks" label="Handbooks"><Handbooks /></FeatureGate>} />
+        <Route path="handbook/new" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookForm /></FeatureGate>} />
+        <Route path="handbook/:id" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookDetail /></FeatureGate>} />
+        <Route path="handbook/:id/edit" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookForm /></FeatureGate>} />
+        <Route path="risk-assessment" element={<FeatureGate feature="risk_assessment" label="Risk Assessment"><RiskAssessment /></FeatureGate>} />
+        <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />
         <Route path="inbox" element={<Inbox />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<UserSettings />} />

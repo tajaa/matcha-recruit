@@ -12,7 +12,7 @@ import { IRDocumentPanel } from '../../components/ir/IRDocumentPanel'
 import { IRInterviewScheduler } from '../../components/ir/IRInterviewScheduler'
 import { IREscalationForm } from '../../components/ir/IREscalationForm'
 import { IRCategoryDataDisplay } from '../../components/ir/IRCategoryDataDisplay'
-import { IRUpgradeUpsellCard } from '../../components/ir/IRUpgradeUpsellCard'
+import { UpgradeUpsellCard } from '../../components/UpgradeUpsellCard'
 import { useMe } from '../../hooks/useMe'
 import {
   typeLabel, statusLabel, severityLabel,
@@ -248,7 +248,17 @@ export default function IRDetail() {
           {showERFeatures && (
             <IRConsistencyGuidancePanel incidentId={incidentId!} status={incident.status} />
           )}
-          {showUpsell && <IRUpgradeUpsellCard source="ir_detail_upsell" />}
+          {showUpsell && (
+            <UpgradeUpsellCard
+              source="ir_detail_upsell"
+              pitch="Auto-map this incident against your handbook policies, escalate to ER Copilot, and trigger progressive discipline workflows."
+              bullets={[
+                'Policies + handbook mapping',
+                'ER Copilot case management',
+                'Progressive discipline + e-signature',
+              ]}
+            />
+          )}
 
           <div className="space-y-2 pt-2">
             {showERFeatures && (
