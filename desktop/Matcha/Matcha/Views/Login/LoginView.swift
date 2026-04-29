@@ -219,7 +219,7 @@ struct LoginView: View {
             || lowered.contains("offline")
             || lowered.contains("timed out")
             || lowered.contains("not connect to the server") {
-            return "Can't reach the server at \(APIClient.shared.baseURL). Start the backend (e.g. `./scripts/dev.sh`) and try again — the app will retry automatically when you focus it."
+            return "Can't reach the server at \(APIClient.shared.baseURL). Start the backend (e.g. `./scripts/dev-remote.sh`) and try again — the app will retry automatically when you focus it."
         }
         return raw
     }
