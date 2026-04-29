@@ -759,6 +759,24 @@ struct MWProjectSection: Codable, Identifiable {
         case contentSource = "content_source"
         case contentUpdatedAt = "content_updated_at"
     }
+
+    // Tolerate `title: null` in legacy section data — historical AI output
+    // wrote untitled sections that way. A non-optional `String` decode of
+    // null would otherwise fail the entire mw_projects list and present
+    // as "No projects yet". Treat null/missing as empty string so call
+    // sites (Text, isEmpty checks) keep working unchanged.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        title = (try? c.decodeIfPresent(String.self, forKey: .title)) ?? ""
+        content = try c.decodeIfPresent(String.self, forKey: .content)
+        sourceMessageId = try c.decodeIfPresent(String.self, forKey: .sourceMessageId)
+        pendingRevision = try c.decodeIfPresent(String.self, forKey: .pendingRevision)
+        pendingChangeSummary = try c.decodeIfPresent(String.self, forKey: .pendingChangeSummary)
+        contentSource = try c.decodeIfPresent(String.self, forKey: .contentSource)
+        contentUpdatedAt = try c.decodeIfPresent(String.self, forKey: .contentUpdatedAt)
+        history = try c.decodeIfPresent([MWSectionHistoryEntry].self, forKey: .history)
+    }
 }
 
 struct MWProjectCollaborator: Codable, Identifiable {
