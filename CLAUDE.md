@@ -1,11 +1,67 @@
 # Matcha Recruit
 
-## What This Is
+## Products
 
-AI-powered recruiting and HR platform. Two domains:
+Three products share this codebase. Differentiated at signup via
+`companies.signup_source` and routed in the UI by
+`client/src/utils/tier.ts` + `client/src/components/TenantSidebar.tsx`.
 
-- **Matcha** — Recruiting (candidates, interviews, matching, offer letters) and HR ops (employees, onboarding, PTO, experience analytics)
-- **Core** — Auth, admin, compliance monitoring, AI chat, policies, leads agent
+| Product             | Billing             | Signup path                                    | `signup_source`        | Sidebar variant       |
+|---------------------|---------------------|------------------------------------------------|------------------------|-----------------------|
+| **Matcha**          | Contract / invoice  | Bespoke sales → `BetaRegister` invite token    | `bespoke` (default)    | `ClientSidebar` (full)|
+| **Matcha Work**     | Stripe (subs/tokens)| `BetaRegister` (personal) or inside Matcha     | `bespoke` or personal  | `ClientSidebar` AI group / desktop app |
+| **Matcha Cap**      | Stripe (one-time + free) | `IrSignup` or `ResourcesSignup`           | `ir_only_self_serve` / `resources_free` | `IrSidebar` / `ResourcesFreeSidebar` |
+
+### Matcha — full platform
+- Surface: full `ClientSidebar` nav (Dashboard, Company, HR Ops, Compliance, Communication, Safety, AI).
+- Routes: `/app/*` registered in `client/src/App.tsx`.
+- Backend: everything under `server/app/matcha/` plus `server/app/core/`.
+- Companies created with `signup_source='bespoke'` (default) by admins after a sales call. Approved → all platform features available, gated per-company by `companies.enabled_features` JSONB.
+- Discipline is an opt-in feature flag here: `enabled_features.discipline=true` per company.
+
+### Matcha Work — collaborative workspace
+- Surface: `client/src/pages/work/*` + `client/src/layouts/WorkLayout.tsx`. Mounted at `/work/*` in `App.tsx`.
+- Backend: `server/app/matcha/routes/matcha_work.py`, `server/app/matcha/services/project_service.py`, tables prefixed `mw_*`.
+- macOS desktop client: `desktop/Matcha/` (SwiftUI). `AppState.isPlusActive` from `Subscription.isPersonalPlus` controls Plus features.
+- **Personal mode**: user `role='individual'`. Signup via `BetaRegister.tsx` (`/auth/beta?token=…`) → redirected to `/work`. Stripe subscription `matcha_work_personal` ($20/mo) via `POST /api/checkout/personal` (`server/app/matcha/routes/billing.py`).
+- **Business mode**: user `role='client'` inside an existing Matcha company. Token packs purchased via `POST /api/checkout`. Sidebar entry in `ClientSidebar.tsx` AI group → `/work`.
+- Stripe-gated sub-features: `paid_channel_creator`, `channel_job_postings` in `server/app/core/feature_flags.py`.
+
+### Matcha Cap — lite self-serve bundle
+Self-serve, Stripe-purchasable. Three sub-surfaces today:
+
+**IR (Cap)**
+- Signup: `client/src/pages/auth/IrSignup.tsx` → `POST /auth/register/business` with `tier='ir_only'`. Sets `companies.signup_source='ir_only_self_serve'` and turns on `enabled_features.incidents = true` + `employees = true`.
+- Sidebar: `IrSidebar` (incidents / employees / company only) selected by `isIrOnlyTier()` in `client/src/utils/tier.ts`.
+- Onboarding: `client/src/features/ir-onboarding/IrOnboardingWizard.tsx` (4 steps); completion stamps `companies.ir_onboarding_completed_at`.
+- Backend routes: `ir_incidents_router` (`/ir/incidents/*`) and `ir_onboarding_router` (`/ir-onboarding/*`) in `server/app/matcha/routes/__init__.py`.
+- Stripe upgrade: `POST /resources/upgrade/ir/checkout` (`server/app/core/routes/resources.py`) for the IR-upgrade one-time charge.
+
+**Discipline (Cap, just shipped)**
+- Sidebar entry feature-gated via `NavItem.feature='discipline'` in `client/src/components/ClientSidebar.tsx` HR Ops group.
+- Backend: `server/app/matcha/routes/discipline.py`, engine in `server/app/matcha/services/discipline_engine.py`, signature provider abstraction (DocuSeal) in `server/app/matcha/services/signature_provider.py`.
+- Tables: `progressive_discipline`, `discipline_policy_mapping`, `discipline_audit_log`.
+- Feature flag: `enabled_features.discipline` (default `False`); `KNOWN_PLATFORM_ITEMS` in `server/app/core/routes/admin.py` includes `discipline`.
+- Daily expiry sweep: `server/app/workers/tasks/discipline_expiry.py` gated by `scheduler_settings.task_key='discipline_expiry'`.
+
+**Resources (Cap)**
+- Signup: `client/src/pages/auth/ResourcesSignup.tsx` → `tier='resources_free'`. Sets `signup_source='resources_free'`, no enabled features.
+- Sidebar: `ResourcesFreeSidebar` (with upgrade panel) selected by `isResourcesFreeTier()`.
+- Frontend routes: `/resources/*` in `client/src/App.tsx`. Most are gated by `<RequireBusinessAccount>` so a non-business user is bounced to `/auth/resources-signup`.
+- Backend: `server/app/core/routes/resources.py`. Public landing pages + business-gated tools (templates, state guides, calculators, audit, glossary, job descriptions).
+
+**Current vs intended (gap callout)**:
+Matcha Cap is described as a single Stripe-purchasable bundle of IR + Discipline + Resources. Today the code ships them as three separate self-serve tiers gated independently:
+- `ir_only_self_serve` enables `incidents` + `employees` only (not `discipline`).
+- `resources_free` enables nothing (free upsell funnel into IR upgrade).
+- `discipline` is a per-company feature flag, currently default `False` for everyone — not auto-enabled by either Cap signup path.
+
+Bundling Cap = IR + Discipline + Resources is a future change to the IR signup flow (turn on `discipline` automatically) and probably to the Resources signup flow (auto-pair into IR after first Stripe purchase). Treat references to "Matcha Cap" as that intended bundle; treat code as the current per-tier reality.
+
+### Auxiliary surfaces (share codebase, not products)
+- **Admin** — `AdminSidebar`, `/admin/*` routes; internal tooling (companies, jurisdiction data, payer data, broker mgmt).
+- **Broker** — `BrokerSidebar`, `/broker/*` routes; for HR brokers managing multiple client companies.
+- **Candidate / Employee portals** — public-token routes (`/candidate-interview/:token`, `/s/:token`); employee self-service through `employee_portal_router`.
 
 ## Stack
 
