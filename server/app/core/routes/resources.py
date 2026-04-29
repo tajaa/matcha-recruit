@@ -306,6 +306,136 @@ def _category_sort_key(key: str) -> tuple[int, str]:
         return (len(CATEGORY_PRIORITY) + 1, key)
 
 
+class AuditFinding(BaseModel):
+    severity: str  # "high" | "medium" | "low"
+    category: str
+    title: str
+    detail: str
+
+
+class AuditSubmitRequest(BaseModel):
+    email: Optional[EmailStr] = None
+    name: Optional[str] = None
+    state_slug: Optional[str] = None
+    headcount: Optional[int] = None
+    industry: Optional[str] = None
+    findings: list[AuditFinding] = []
+    score: Optional[int] = None  # 0-100
+    answered: Optional[int] = None
+    total: Optional[int] = None
+
+
+@router.post("/audit")
+async def submit_audit(body: AuditSubmitRequest, request: Request):
+    """Compliance-audit submission. Captures lead + emails the gap report.
+
+    Findings are computed client-side from a static rule set (frontend
+    owns the quiz logic). This endpoint persists the submission and
+    delivers an HTML email summary so the user has a copy in their inbox.
+    """
+    if _rate_limited(_client_ip(request)):
+        raise HTTPException(status_code=429, detail="Too many requests. Please wait a minute.")
+
+    # Persist as a lead capture so leads show up in the same table.
+    if body.email:
+        async with get_connection() as conn:
+            await conn.execute(
+                """INSERT INTO lead_captures
+                   (email, name, asset_slug, source, ip_address)
+                   VALUES ($1, $2, $3, $4, $5)""",
+                body.email.lower().strip(),
+                body.name.strip() if body.name else None,
+                "compliance-audit",
+                "resources_audit",
+                _client_ip(request),
+            )
+
+        # Fire-and-forget email (best-effort; don't fail the request).
+        try:
+            from ..services.email import get_email_service
+            html = _render_audit_email(body)
+            await get_email_service().send_email(
+                to_email=body.email,
+                to_name=body.name,
+                subject="Your HR Compliance Gap Report",
+                html_content=html,
+            )
+        except Exception:
+            logger.exception("Failed to send audit email to %s", body.email)
+
+    logger.info(
+        "Audit submission: %s findings=%d score=%s state=%s",
+        body.email or "anonymous",
+        len(body.findings),
+        body.score,
+        body.state_slug,
+    )
+
+    return {"ok": True, "delivered": bool(body.email)}
+
+
+def _sev_color(sev: str) -> str:
+    return {"high": "#c1543a", "medium": "#c19f3a", "low": "#5a8c5a"}.get(sev, "#6a737d")
+
+
+def _render_audit_email(body: AuditSubmitRequest) -> str:
+    state_name = ""
+    if body.state_slug and body.state_slug in STATE_SLUGS:
+        state_name = STATE_SLUGS[body.state_slug]["name"]
+    score_str = f"{body.score}/100" if body.score is not None else "—"
+
+    findings_html = ""
+    for f in body.findings:
+        color = _sev_color(f.severity)
+        findings_html += f"""
+        <div style="border-left:3px solid {color};padding:12px 16px;margin-bottom:12px;background:#1a1a1a;border-radius:4px;">
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+            <strong style="color:#e4e4e7;font-size:14px;">{f.title}</strong>
+            <span style="color:{color};font-size:11px;text-transform:uppercase;letter-spacing:0.05em;">{f.severity}</span>
+          </div>
+          <div style="color:#a1a1aa;font-size:12px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:6px;">{f.category}</div>
+          <div style="color:#d4d4d8;font-size:13px;line-height:1.5;">{f.detail}</div>
+        </div>
+        """
+
+    if not findings_html:
+        findings_html = '<p style="color:#86efac;">No gaps flagged from your responses. Nice work.</p>'
+
+    state_block = f"<p style='color:#a1a1aa;'>State: <strong style='color:#e4e4e7;'>{state_name}</strong></p>" if state_name else ""
+
+    return f"""
+    <div style="max-width:640px;margin:0 auto;font-family:-apple-system,system-ui,sans-serif;
+                background:#0f0f0f;color:#d4d4d8;padding:32px 24px;">
+      <div style="text-align:center;margin-bottom:24px;">
+        <span style="font-size:22px;font-weight:600;color:#86efac;letter-spacing:0.05em;">MATCHA</span>
+      </div>
+      <h1 style="font-size:22px;color:#fafafa;margin:0 0 4px;">Your HR Compliance Gap Report</h1>
+      <p style="color:#a1a1aa;margin:0 0 24px;">Score: <strong style="color:#fafafa;">{score_str}</strong> &middot; {len(body.findings)} gaps flagged</p>
+      {state_block}
+
+      <h2 style="font-size:16px;color:#fafafa;margin:24px 0 12px;border-bottom:1px solid #27272a;padding-bottom:8px;">Findings</h2>
+      {findings_html}
+
+      <div style="margin-top:32px;padding:20px;background:#1a1a1a;border-radius:8px;">
+        <h3 style="color:#fafafa;margin:0 0 8px;font-size:15px;">Want help closing these gaps?</h3>
+        <p style="color:#a1a1aa;font-size:13px;margin:0 0 12px;">
+          Matcha tracks every state and local rule, generates the missing
+          policies, and flags new gaps as laws change.
+        </p>
+        <a href="https://hey-matcha.com" style="display:inline-block;background:#86efac;color:#0f0f0f;
+           padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;">
+          See Matcha →
+        </a>
+      </div>
+
+      <p style="color:#52525b;font-size:11px;margin-top:32px;text-align:center;">
+        This report is informational only and not legal advice.
+        Consult employment counsel for your specific situation.
+      </p>
+    </div>
+    """
+
+
 @router.get("/state-guides/{slug}")
 async def get_state_guide(slug: str):
     """Return all state-level compliance requirements for a given state, grouped by category."""

@@ -35,6 +35,7 @@ import ResourcesStateGuide from './pages/landing/resources/StateGuide'
 import ResourcesCalculators from './pages/landing/resources/Calculators'
 import CalcPtoAccrual from './pages/landing/resources/calculators/PtoAccrual'
 import CalcTurnoverCost from './pages/landing/resources/calculators/TurnoverCost'
+import ResourcesComplianceAudit from './pages/landing/resources/ComplianceAudit'
 import CategoryDetailPage from './pages/admin/CategoryDetailPage'
 import PolicyDetailPage from './pages/admin/PolicyDetailPage'
 import Dashboard from './pages/app/Dashboard'
@@ -98,6 +99,7 @@ export default function App() {
       <Route path="/resources/calculators" element={<ResourcesCalculators />} />
       <Route path="/resources/calculators/pto-accrual" element={<CalcPtoAccrual />} />
       <Route path="/resources/calculators/turnover-cost" element={<CalcTurnoverCost />} />
+      <Route path="/resources/audit" element={<ResourcesComplianceAudit />} />
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/register/beta" element={<BetaRegister />} />

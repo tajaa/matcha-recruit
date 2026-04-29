@@ -54,11 +54,11 @@ const CATEGORIES: Category[] = [
     icon: FileText,
   },
   {
-    to: '/resources',
+    to: '/resources/audit',
     title: 'Compliance Audit',
     description:
-      '10 questions → a tailored compliance gap report for your state, headcount, and industry.',
-    status: 'soon',
+      '12 questions → a tailored compliance gap report for your state, headcount, and industry.',
+    status: 'live',
     icon: FileText,
   },
   {
