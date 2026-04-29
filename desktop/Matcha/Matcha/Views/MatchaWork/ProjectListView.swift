@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ProjectListView: View {
     @Environment(AppState.self) private var appState
@@ -195,10 +196,19 @@ struct ProjectListView: View {
                     projects.insert(proj, at: 0)
                     appState.selectedProjectId = proj.id
                     appState.selectedThreadId = nil
+                    appState.projectsListGeneration &+= 1
                     isCreating = false
                 }
             } catch {
-                await MainActor.run { isCreating = false }
+                print("[ProjectListView] create failed: \(error)")
+                await MainActor.run {
+                    isCreating = false
+                    let alert = NSAlert()
+                    alert.messageText = "Couldn't create project"
+                    alert.informativeText = error.localizedDescription
+                    alert.alertStyle = .warning
+                    alert.runModal()
+                }
             }
         }
     }
