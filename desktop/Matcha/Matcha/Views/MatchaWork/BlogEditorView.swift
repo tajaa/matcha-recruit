@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct BlogEditorView: View {
     @Bindable var viewModel: ProjectDetailViewModel
@@ -65,6 +66,9 @@ struct BlogEditorView: View {
                 .menuStyle(.borderlessButton)
 
                 Menu {
+                    Button("PDF") { exportBlog(format: "pdf") }
+                    Button("DOCX") { exportBlog(format: "docx") }
+                    Divider()
                     Button("Markdown + Frontmatter") { exportMd() }
                     Button("Markdown") { exportMd(format: "md") }
                 } label: {
@@ -434,14 +438,74 @@ struct BlogEditorView: View {
     }
 
     private func exportMd(format: String = "md_frontmatter") {
-        Task {
-            guard let data = await viewModel.exportBlogMarkdown() else { return }
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = "\(viewModel.project?.title ?? "post").md"
-            panel.begin { response in
-                guard response == .OK, let url = panel.url else { return }
-                try? data.write(to: url)
+        Task { @MainActor in
+            guard let data = await viewModel.exportBlogMarkdown() else {
+                if let msg = viewModel.errorMessage {
+                    surfaceExportError("Markdown export failed", detail: msg)
+                }
+                return
+            }
+            presentSavePanel(
+                data: data,
+                fileName: "\(viewModel.project?.title ?? "post").md",
+                contentType: UTType(filenameExtension: "md") ?? .plainText,
+            )
+        }
+    }
+
+    /// PDF / DOCX export. Mirrors the post-fix ProjectDetailView flow:
+    /// runs on @MainActor so NSSavePanel creation happens on the main
+    /// thread, attaches the panel as a sheet on the key window so it's
+    /// guaranteed visible, and surfaces errors via NSAlert instead of
+    /// silently noop'ing.
+    private func exportBlog(format: String) {
+        Task { @MainActor in
+            guard let data = await viewModel.exportProject(format: format) else {
+                if let msg = viewModel.errorMessage {
+                    surfaceExportError("Export failed", detail: msg)
+                }
+                return
+            }
+            let contentType: UTType
+            switch format {
+            case "pdf": contentType = .pdf
+            case "docx": contentType = UTType(filenameExtension: "docx") ?? .data
+            default: contentType = UTType(filenameExtension: format) ?? .data
+            }
+            presentSavePanel(
+                data: data,
+                fileName: "\(viewModel.project?.title ?? "post").\(format)",
+                contentType: contentType,
+            )
+        }
+    }
+
+    private func presentSavePanel(data: Data, fileName: String, contentType: UTType) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = fileName
+        panel.allowedContentTypes = [contentType]
+        let window = NSApp.keyWindow ?? NSApp.mainWindow
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try data.write(to: url)
+            } catch {
+                print("[BlogEditor] write failed: \(error)")
+                surfaceExportError("Couldn't save file", detail: error.localizedDescription)
             }
         }
+        if let window {
+            panel.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            panel.begin(completionHandler: handler)
+        }
+    }
+
+    private func surfaceExportError(_ title: String, detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 }
