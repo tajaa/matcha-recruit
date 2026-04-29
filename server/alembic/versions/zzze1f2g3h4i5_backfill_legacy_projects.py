@@ -15,6 +15,8 @@ Revision ID: zzze1f2g3h4i5
 Revises: zzzd0e1f2g3h4
 Create Date: 2026-04-28
 """
+import json
+
 from alembic import op
 from sqlalchemy import text
 
@@ -27,10 +29,16 @@ depends_on = None
 def upgrade():
     bind = op.get_bind()
 
+    # Cast new_sections to text in the SELECT so asyncpg returns a JSON
+    # string we can re-encode and pass back through a :sections::jsonb
+    # cast on the INSERT. Without the round-trip cast asyncpg pulls the
+    # JSONB column back as a Python list, then refuses to encode the
+    # list when bound as a parameter ("'list' object has no attribute
+    # 'encode'").
     candidates = bind.execute(text("""
         SELECT id, company_id, created_by, title,
                COALESCE(NULLIF(current_state->>'project_title', ''), title, 'Untitled Project') AS new_title,
-               COALESCE(current_state->'project_sections', '[]'::jsonb) AS new_sections,
+               COALESCE(current_state->'project_sections', '[]'::jsonb)::text AS new_sections,
                created_at, updated_at
         FROM mw_threads
         WHERE project_id IS NULL
@@ -38,6 +46,13 @@ def upgrade():
     """)).fetchall()
 
     for row in candidates:
+        # new_sections is a JSON-encoded string from the SELECT cast.
+        # If somehow it came back as a list (e.g. driver auto-decoded),
+        # re-encode defensively.
+        sections_json = row.new_sections
+        if not isinstance(sections_json, str):
+            sections_json = json.dumps(sections_json or [])
+
         new_project_id = bind.execute(text("""
             INSERT INTO mw_projects (
                 company_id, created_by, title, project_type,
@@ -45,14 +60,14 @@ def upgrade():
             )
             VALUES (
                 :company_id, :created_by, :title, 'general',
-                :sections, 'active', :created_at, :updated_at
+                :sections::jsonb, 'active', :created_at, :updated_at
             )
             RETURNING id
         """), {
             "company_id": row.company_id,
             "created_by": row.created_by,
             "title": row.new_title,
-            "sections": row.new_sections,
+            "sections": sections_json,
             "created_at": row.created_at,
             "updated_at": row.updated_at,
         }).scalar()
