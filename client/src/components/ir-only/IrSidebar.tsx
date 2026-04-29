@@ -1,4 +1,4 @@
-import { AlertTriangle, Users, Settings, Building2 } from 'lucide-react'
+import { AlertTriangle, Users, Building2 } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
