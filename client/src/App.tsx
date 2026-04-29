@@ -31,6 +31,7 @@ import BlogIndex from './pages/landing/BlogIndex'
 import BlogPostPage from './pages/landing/BlogPost'
 import ResourcesHub from './pages/landing/ResourcesHub'
 import ResourcesTemplates from './pages/landing/resources/Templates'
+import ResourcesJobDescriptions from './pages/landing/resources/JobDescriptions'
 import ResourcesGlossary from './pages/landing/resources/Glossary'
 import ResourcesGlossaryTerm from './pages/landing/resources/GlossaryTerm'
 import ResourcesStateGuides from './pages/landing/resources/StateGuides'
@@ -95,6 +96,7 @@ export default function App() {
       <Route path="/blog/:slug" element={<BlogPostPage />} />
       <Route path="/resources" element={<ResourcesHub />} />
       <Route path="/resources/templates" element={<ResourcesTemplates />} />
+      <Route path="/resources/templates/job-descriptions" element={<ResourcesJobDescriptions />} />
       <Route path="/resources/glossary" element={<ResourcesGlossary />} />
       <Route path="/resources/glossary/:slug" element={<ResourcesGlossaryTerm />} />
       <Route path="/resources/states" element={<ResourcesStateGuides />} />
