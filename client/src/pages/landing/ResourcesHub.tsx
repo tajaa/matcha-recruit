@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, FileText } from 'lucide-react'
+import { ArrowUpRight, FileText, Lock } from 'lucide-react'
 
 import MarketingNav from './MarketingNav'
 import MarketingFooter from './MarketingFooter'
 import { PricingContactModal } from '../../components/PricingContactModal'
+import { useMe } from '../../hooks/useMe'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
@@ -17,24 +18,27 @@ type Category = {
   title: string
   description: string
   status: 'live' | 'soon'
+  gated: boolean
   icon: React.ComponentType<{ className?: string; style?: React.CSSProperties }>
 }
 
 const CATEGORIES: Category[] = [
   {
-    to: '/resources/templates',
-    title: 'Templates',
+    to: '/resources/glossary',
+    title: 'HR Glossary',
     description:
-      'Free editable HR templates — offer letters, PIPs, termination checklists, interview scorecards, and more.',
+      'Plain-English definitions for FLSA, ACA, FMLA, COBRA, and the alphabet soup of HR.',
     status: 'live',
+    gated: false,
     icon: FileText,
   },
   {
-    to: '/resources/states',
-    title: 'State Compliance Guides',
+    to: '/resources/templates',
+    title: 'Templates',
     description:
-      'A page per state covering posters, min wage, sick leave, final paycheck, and pay transparency.',
-    status: 'soon',
+      '14 editable HR templates — offer letters, PIPs, termination checklists, interview scorecards, and more.',
+    status: 'live',
+    gated: true,
     icon: FileText,
   },
   {
@@ -43,14 +47,7 @@ const CATEGORIES: Category[] = [
     description:
       'PTO accrual, salary benchmarks, turnover cost, overtime — interactive HR calculators.',
     status: 'live',
-    icon: FileText,
-  },
-  {
-    to: '/resources/glossary',
-    title: 'HR Glossary',
-    description:
-      'Plain-English definitions for FLSA, ACA, FMLA, COBRA, and the alphabet soup of HR.',
-    status: 'live',
+    gated: true,
     icon: FileText,
   },
   {
@@ -59,6 +56,16 @@ const CATEGORIES: Category[] = [
     description:
       '12 questions → a tailored compliance gap report for your state, headcount, and industry.',
     status: 'live',
+    gated: true,
+    icon: FileText,
+  },
+  {
+    to: '/resources/states',
+    title: 'State Compliance Guides',
+    description:
+      'A page per state covering posters, min wage, sick leave, final paycheck, and pay transparency.',
+    status: 'soon',
+    gated: true,
     icon: FileText,
   },
   {
@@ -67,12 +74,18 @@ const CATEGORIES: Category[] = [
     description:
       'Field notes from the practice — HR, compliance, GRC, and people-ops.',
     status: 'live',
+    gated: false,
     icon: FileText,
   },
 ]
 
 export default function ResourcesHub() {
   const [showPricing, setShowPricing] = useState(false)
+  const { me, loading } = useMe()
+  const isSignedIn = !!me && me.user.role === 'client'
+  // While auth resolves, render gated cards as locked-but-pending — no badge yet.
+  // Avoids a brief LOCK flash for already-signed-in visitors.
+  const showLock = !loading && !isSignedIn
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
@@ -87,8 +100,14 @@ export default function ResourcesHub() {
             HR Resource Center
           </h1>
           <p className="mt-4 text-base" style={{ color: MUTED }}>
-            Free templates, state compliance guides, calculators, and answers
+            Free templates, calculators, the compliance audit, and answers
             to the questions HR teams Google a hundred times a year.
+            {showLock && (
+              <>
+                {' '}A free business account unlocks everything beyond the glossary —{' '}
+                <Link to="/auth/resources-signup" className="underline" style={{ color: INK }}>sign up</Link>.
+              </>
+            )}
           </p>
         </header>
 
@@ -96,6 +115,30 @@ export default function ResourcesHub() {
           {CATEGORIES.map(cat => {
             const Icon = cat.icon
             const live = cat.status === 'live'
+            const locked = live && cat.gated && showLock
+            const target = locked
+              ? `/auth/resources-signup?next=${encodeURIComponent(cat.to)}`
+              : cat.to
+
+            const cornerBadge = !live ? (
+              <span
+                className="text-[10px] tracking-wider px-2 py-1 rounded"
+                style={{ border: `1px solid ${LINE}`, color: MUTED }}
+              >
+                COMING SOON
+              </span>
+            ) : locked ? (
+              <span
+                className="inline-flex items-center gap-1 text-[10px] tracking-wider px-2 py-1 rounded"
+                style={{ border: `1px solid ${LINE}`, color: MUTED }}
+              >
+                <Lock className="w-3 h-3" />
+                SIGN IN
+              </span>
+            ) : (
+              <ArrowUpRight className="w-4 h-4" style={{ color: MUTED }} />
+            )
+
             const Card = (
               <article
                 className="p-6 rounded-2xl flex flex-col h-full transition-opacity"
@@ -111,16 +154,7 @@ export default function ResourcesHub() {
                   >
                     <Icon className="w-5 h-5" style={{ color: INK }} />
                   </div>
-                  {live ? (
-                    <ArrowUpRight className="w-4 h-4" style={{ color: MUTED }} />
-                  ) : (
-                    <span
-                      className="text-[10px] tracking-wider px-2 py-1 rounded"
-                      style={{ border: `1px solid ${LINE}`, color: MUTED }}
-                    >
-                      COMING SOON
-                    </span>
-                  )}
+                  {cornerBadge}
                 </div>
                 <h3
                   className="text-xl mb-2"
@@ -138,7 +172,7 @@ export default function ResourcesHub() {
               return <div key={cat.title}>{Card}</div>
             }
             return (
-              <Link key={cat.title} to={cat.to} className="block hover:opacity-80 transition-opacity">
+              <Link key={cat.title} to={target} className="block hover:opacity-80 transition-opacity">
                 {Card}
               </Link>
             )

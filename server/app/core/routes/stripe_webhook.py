@@ -107,6 +107,44 @@ async def stripe_webhook(request: Request):
                     fulfillment.get("session", {}).get("company_id", "?"),
                 )
 
+        elif session_mode == "subscription" and meta.get("type") == "matcha_ir_upgrade":
+            # ── Resources_free → Matcha IR upgrade ────────────────────────
+            company_id_str = meta.get("company_id") or ""
+            stripe_sub_id = str(event_object.get("subscription") or "")
+            if company_id_str:
+                try:
+                    import json as _json
+                    from ...database import get_connection as _gc
+                    company_id = UUID(company_id_str)
+                    async with _gc() as conn:
+                        # Promote feature flags: incidents + employees ON,
+                        # signup_source flips so TenantSidebar routes to IR.
+                        existing = await conn.fetchval(
+                            "SELECT enabled_features FROM companies WHERE id = $1",
+                            company_id,
+                        )
+                        features = existing if isinstance(existing, dict) else (
+                            _json.loads(existing) if existing else {}
+                        )
+                        features["incidents"] = True
+                        features["employees"] = True
+                        await conn.execute(
+                            """
+                            UPDATE companies
+                            SET enabled_features = $1::jsonb,
+                                signup_source = 'ir_only_self_serve'
+                            WHERE id = $2
+                            """,
+                            _json.dumps(features),
+                            company_id,
+                        )
+                    logger.info(
+                        "IR upgrade fulfilled: company=%s sub=%s",
+                        company_id_str, stripe_sub_id,
+                    )
+                except Exception as exc:
+                    logger.error("Failed to fulfill IR upgrade for %s: %s", company_id_str, exc)
+
         elif session_mode == "subscription" and is_channel_event:
             # ── Channel subscription checkout ────────────────────────────
             channel_id_str = meta.get("channel_id") or ""

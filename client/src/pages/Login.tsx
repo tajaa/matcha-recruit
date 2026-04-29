@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useNavigate, Link } from 'react-router-dom'
+import { useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { PricingContactModal } from '../components/PricingContactModal'
 import { api } from '../api/client'
 import { invalidateMeCache } from '../hooks/useMe'
@@ -58,6 +58,8 @@ export default function Login() {
   const [ssoLoading, setSsoLoading] = useState(false)
   const [contactOpen, setContactOpen] = useState(false)
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const nextParam = searchParams.get('next')
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -68,7 +70,7 @@ export default function Login() {
       localStorage.setItem('matcha_access_token', res.access_token)
       localStorage.setItem('matcha_refresh_token', res.refresh_token)
       invalidateMeCache()
-      navigate(roleRoutes[res.user.role] ?? '/app')
+      navigate(nextParam || roleRoutes[res.user.role] || '/app')
     } catch {
       setError('Invalid email or password')
     } finally {

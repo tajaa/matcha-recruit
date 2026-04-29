@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bell, ChevronRight, FileText, Search } from 'lucide-react'
+import { ChevronRight, FileText, Search } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
 import { PricingContactModal } from '../../../components/PricingContactModal'
-import EmailGateModal from './EmailGateModal'
 import { INDUSTRIES, JOB_DESCRIPTIONS, type Industry, type JobDescription } from './jobDescriptionsData'
 
 const INK = 'var(--color-ivory-ink)'
@@ -14,13 +13,10 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-type ActiveAsset = { slug: string; name: string; available: boolean }
-
 export default function JobDescriptions() {
   const [showPricing, setShowPricing] = useState(false)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Industry | 'all'>('all')
-  const [activeAsset, setActiveAsset] = useState<ActiveAsset | null>(null)
 
   useEffect(() => {
     document.title = 'Job Descriptions Library — Matcha'
@@ -44,14 +40,6 @@ export default function JobDescriptions() {
     }
     return m
   }, [filtered])
-
-  const handleClick = (j: JobDescription) => {
-    setActiveAsset({
-      slug: `job-description:${j.slug}`,
-      name: `${j.title} — Job Description`,
-      available: false,
-    })
-  }
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
@@ -152,14 +140,6 @@ export default function JobDescriptions() {
                         >
                           COMING SOON
                         </span>
-                        <button
-                          onClick={() => handleClick(j)}
-                          className="inline-flex items-center gap-1.5 text-xs font-medium px-3 h-8 rounded-full transition-opacity hover:opacity-80"
-                          style={{ border: `1px solid ${INK}`, color: INK }}
-                        >
-                          <Bell className="w-3 h-3" />
-                          Notify me
-                        </button>
                       </div>
                     </article>
                   ))}
@@ -192,11 +172,6 @@ export default function JobDescriptions() {
       </main>
 
       <MarketingFooter />
-      <EmailGateModal
-        open={!!activeAsset}
-        onClose={() => setActiveAsset(null)}
-        asset={activeAsset}
-      />
       <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
     </div>
   )

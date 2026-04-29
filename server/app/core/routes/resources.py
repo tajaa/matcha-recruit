@@ -1,13 +1,20 @@
-"""Resources hub — public endpoints for HR resource downloads + lead capture."""
+"""Resources hub — gated endpoints for HR resource downloads + audit.
+
+All endpoints require an authenticated `client` user (business account).
+The marketing /resources hub + glossary remain public on the frontend
+and don't hit any of these endpoints; the gated tiles redirect anonymous
+visitors to the resources signup page.
+"""
 
 import logging
-import time
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, EmailStr
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from ...database import get_connection
+from ..models.auth import CurrentUser
+from ...matcha.dependencies import require_client
 
 
 # ---------------------------------------------------------------------------
@@ -175,108 +182,66 @@ ASSETS: dict[str, dict] = {
 
 
 # ---------------------------------------------------------------------------
-# In-process rate limit per IP. Mirrors newsletter.py pattern.
-# ---------------------------------------------------------------------------
-
-_LEAD_WINDOW_SECONDS = 60
-_LEAD_MAX_PER_WINDOW = 15
-_lead_state: dict[str, list[float]] = {}
-
-
-def _rate_limited(client_ip: str) -> bool:
-    now = time.monotonic()
-    cutoff = now - _LEAD_WINDOW_SECONDS
-    timestamps = [t for t in _lead_state.get(client_ip, []) if t >= cutoff]
-    if len(timestamps) >= _LEAD_MAX_PER_WINDOW:
-        _lead_state[client_ip] = timestamps
-        return True
-    timestamps.append(now)
-    _lead_state[client_ip] = timestamps
-    if len(_lead_state) > 1000:
-        for ip in list(_lead_state.keys()):
-            if not _lead_state[ip] or _lead_state[ip][-1] < cutoff:
-                _lead_state.pop(ip, None)
-    return False
-
-
-def _client_ip(request: Request) -> str:
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
-
-
-# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 
-class LeadCaptureRequest(BaseModel):
-    email: EmailStr
-    name: Optional[str] = None
-    asset_slug: str
-    source: Optional[str] = "resources"
-    utm_source: Optional[str] = None
-    utm_medium: Optional[str] = None
-    utm_campaign: Optional[str] = None
-
-
-@router.post("/lead-capture")
-async def lead_capture(body: LeadCaptureRequest, request: Request):
-    """Capture an email in exchange for a download URL.
-
-    Single-step (no double opt-in) — these are template downloads, not
-    newsletter subscriptions. Returns the public download URL on success.
-    """
-    if _rate_limited(_client_ip(request)):
-        raise HTTPException(status_code=429, detail="Too many requests. Please wait a minute.")
-
-    # Allow capturing a lead for any registered slug, even pseudo-slugs like
-    # "job-description:bartender" used by the Job Descriptions browse page.
-    asset = ASSETS.get(body.asset_slug)
-    is_available = bool(asset and asset.get("available"))
-
-    # Reject totally unknown slugs only if they don't look like a job-desc slug.
-    if not asset and not body.asset_slug.startswith("job-description:"):
-        raise HTTPException(status_code=404, detail="Unknown asset")
-
-    source = body.source or ("notify_when_ready" if not is_available else "resources")
-
-    async with get_connection() as conn:
-        await conn.execute(
-            """INSERT INTO lead_captures
-               (email, name, asset_slug, source, utm_source, utm_medium, utm_campaign, ip_address)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)""",
-            body.email.lower().strip(),
-            body.name.strip() if body.name else None,
-            body.asset_slug,
-            source,
-            body.utm_source,
-            body.utm_medium,
-            body.utm_campaign,
-            _client_ip(request),
-        )
-
-    logger.info("Lead capture: %s -> %s (%s)", body.email, body.asset_slug, source)
-
-    if is_available and asset:
-        return {
-            "ok": True,
-            "status": "download",
-            "download_url": asset["path"],
-            "asset_name": asset["name"],
-        }
-    return {
-        "ok": True,
-        "status": "notify",
-        "asset_name": asset["name"] if asset else body.asset_slug,
-    }
-
-
 @router.get("/assets")
-async def list_assets():
-    """List downloadable assets (with `available` flag) — used by Templates page."""
+async def list_assets(current_user: CurrentUser = Depends(require_client)):
+    """List downloadable assets — gated to signed-in business accounts."""
     return {"assets": [{"slug": k, **v} for k, v in ASSETS.items()]}
+
+
+# ---------------------------------------------------------------------------
+# Upgrade — Stripe checkout to convert resources_free → Matcha IR
+# ---------------------------------------------------------------------------
+
+
+class UpgradeCheckoutRequest(BaseModel):
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
+class UpgradeCheckoutResponse(BaseModel):
+    checkout_url: str
+    stripe_session_id: str
+
+
+@router.post("/upgrade/ir/checkout", response_model=UpgradeCheckoutResponse)
+async def create_ir_upgrade_checkout(
+    body: UpgradeCheckoutRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Open a Stripe checkout for upgrading the caller's company to Matcha IR.
+
+    The webhook handler (in stripe_webhook.py) listens for
+    `checkout.session.completed` with `metadata.type == 'matcha_ir_upgrade'`
+    and flips the company features so the slim IR sidebar takes over.
+    """
+    from ...matcha.dependencies import get_client_company_id
+    from ..services.stripe_service import StripeService, StripeServiceError
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    stripe_service = StripeService()
+    try:
+        session = await stripe_service.create_ir_upgrade_checkout(
+            company_id=company_id,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stripe_session_id = str(getattr(session, "id", "") or "")
+    checkout_url = str(getattr(session, "url", "") or "")
+    if not stripe_session_id or not checkout_url:
+        raise HTTPException(status_code=502, detail="Stripe checkout did not return expected fields")
+
+    logger.info("IR upgrade checkout opened: company=%s session=%s", company_id, stripe_session_id)
+    return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
 
 
 # ---------------------------------------------------------------------------
@@ -285,7 +250,7 @@ async def list_assets():
 
 
 @router.get("/state-guides")
-async def list_state_guides():
+async def list_state_guides(current_user: CurrentUser = Depends(require_client)):
     """List US states with state-level compliance data available."""
     async with get_connection() as conn:
         rows = await conn.fetch(
@@ -337,8 +302,6 @@ class AuditFinding(BaseModel):
 
 
 class AuditSubmitRequest(BaseModel):
-    email: Optional[EmailStr] = None
-    name: Optional[str] = None
     state_slug: Optional[str] = None
     headcount: Optional[int] = None
     industry: Optional[str] = None
@@ -349,52 +312,39 @@ class AuditSubmitRequest(BaseModel):
 
 
 @router.post("/audit")
-async def submit_audit(body: AuditSubmitRequest, request: Request):
-    """Compliance-audit submission. Captures lead + emails the gap report.
+async def submit_audit(
+    body: AuditSubmitRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Compliance-audit submission. Emails the gap report to the signed-in user.
 
-    Findings are computed client-side from a static rule set (frontend
-    owns the quiz logic). This endpoint persists the submission and
-    delivers an HTML email summary so the user has a copy in their inbox.
+    Findings are computed client-side from a static rule set (frontend owns
+    the quiz logic). This endpoint emails the user an HTML summary.
     """
-    if _rate_limited(_client_ip(request)):
-        raise HTTPException(status_code=429, detail="Too many requests. Please wait a minute.")
-
-    # Persist as a lead capture so leads show up in the same table.
-    if body.email:
-        async with get_connection() as conn:
-            await conn.execute(
-                """INSERT INTO lead_captures
-                   (email, name, asset_slug, source, ip_address)
-                   VALUES ($1, $2, $3, $4, $5)""",
-                body.email.lower().strip(),
-                body.name.strip() if body.name else None,
-                "compliance-audit",
-                "resources_audit",
-                _client_ip(request),
-            )
-
-        # Fire-and-forget email (best-effort; don't fail the request).
-        try:
-            from ..services.email import get_email_service
-            html = _render_audit_email(body)
-            await get_email_service().send_email(
-                to_email=body.email,
-                to_name=body.name,
-                subject="Your HR Compliance Gap Report",
-                html_content=html,
-            )
-        except Exception:
-            logger.exception("Failed to send audit email to %s", body.email)
+    # Best-effort email — don't fail the request if delivery breaks.
+    try:
+        from ..services.email import get_email_service
+        html = _render_audit_email(body)
+        await get_email_service().send_email(
+            to_email=current_user.email,
+            to_name=None,
+            subject="Your HR Compliance Gap Report",
+            html_content=html,
+        )
+        delivered = True
+    except Exception:
+        logger.exception("Failed to send audit email to %s", current_user.email)
+        delivered = False
 
     logger.info(
-        "Audit submission: %s findings=%d score=%s state=%s",
-        body.email or "anonymous",
+        "Audit submission: user=%s findings=%d score=%s state=%s",
+        current_user.email,
         len(body.findings),
         body.score,
         body.state_slug,
     )
 
-    return {"ok": True, "delivered": bool(body.email)}
+    return {"ok": True, "delivered": delivered}
 
 
 def _sev_color(sev: str) -> str:
@@ -467,7 +417,7 @@ _MAX_SAMPLE_TITLES_PER_CATEGORY = 2
 
 
 @router.get("/state-guides/{slug}")
-async def get_state_guide(slug: str):
+async def get_state_guide(slug: str, current_user: CurrentUser = Depends(require_client)):
     """Public state guide — TEASER ONLY.
 
     Intentionally limited: returns category list with counts and a small

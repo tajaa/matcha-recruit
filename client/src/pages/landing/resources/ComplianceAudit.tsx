@@ -60,9 +60,7 @@ export default function ComplianceAudit() {
   const [questionIdx, setQuestionIdx] = useState(0)
   const [showPricing, setShowPricing] = useState(false)
 
-  // Email step (post-results)
-  const [email, setEmail] = useState('')
-  const [name, setName] = useState('')
+  // Email-me-a-copy (post-results) — user is signed in, so server uses their email.
   const [emailing, setEmailing] = useState(false)
   const [emailDone, setEmailDone] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
@@ -83,16 +81,10 @@ export default function ComplianceAudit() {
   }
 
   const submitEmail = async () => {
-    if (!email.includes('@')) {
-      setEmailError('Enter a valid email.')
-      return
-    }
     setEmailing(true)
     setEmailError(null)
     try {
       await api.post('/resources/audit', {
-        email: email.trim(),
-        name: name.trim() || undefined,
         state_slug: stateSlug || undefined,
         headcount: typeof headcount === 'number' ? headcount : undefined,
         industry,
@@ -151,10 +143,6 @@ export default function ComplianceAudit() {
             score={score.score}
             findings={findings}
             stateSlug={stateSlug}
-            email={email}
-            setEmail={setEmail}
-            name={name}
-            setName={setName}
             emailing={emailing}
             emailError={emailError}
             emailDone={emailDone}
@@ -163,8 +151,6 @@ export default function ComplianceAudit() {
               setStep('intro')
               setAnswers({})
               setQuestionIdx(0)
-              setEmail('')
-              setName('')
               setEmailDone(false)
               setEmailError(null)
             }}
@@ -223,9 +209,8 @@ function Intro({ onStart }: { onStart: () => void }) {
       </button>
 
       <p className="text-xs mt-6" style={{ color: MUTED }}>
-        No login required. We don't collect your responses unless you
-        choose to email yourself the gap report. Informational only —
-        not legal advice.
+        Responses stay in your browser. Email yourself the gap report
+        from the results screen. Informational only — not legal advice.
       </p>
     </>
   )
@@ -410,8 +395,6 @@ function Results(props: {
   score: number
   findings: Finding[]
   stateSlug: string
-  email: string; setEmail: (s: string) => void
-  name: string; setName: (s: string) => void
   emailing: boolean; emailError: string | null; emailDone: boolean
   onEmail: () => void
   onRestart: () => void
@@ -515,41 +498,23 @@ function Results(props: {
           Email yourself a copy
         </h3>
         <p className="text-sm mb-5" style={{ color: MUTED }}>
-          We'll send the full gap report so you can share with your team
-          or revisit later.
+          We'll send the full gap report to your account email so you can
+          share with your team or revisit later.
         </p>
         {props.emailDone ? (
           <p className="text-sm" style={{ color: '#5a8c5a' }}>
-            Sent to {props.email}. Check your inbox.
+            Sent. Check your inbox.
           </p>
         ) : (
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="email"
-              placeholder="you@company.com"
-              value={props.email}
-              onChange={e => props.setEmail(e.target.value)}
-              className="flex-1 px-4 h-11 rounded-lg text-sm outline-none"
-              style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
-            />
-            <input
-              type="text"
-              placeholder="Name (optional)"
-              value={props.name}
-              onChange={e => props.setName(e.target.value)}
-              className="px-4 h-11 rounded-lg text-sm outline-none w-full sm:w-44"
-              style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
-            />
-            <button
-              onClick={props.onEmail}
-              disabled={props.emailing}
-              className="inline-flex items-center justify-center gap-2 px-5 h-11 rounded-full text-sm font-medium disabled:opacity-50"
-              style={{ backgroundColor: INK, color: BG }}
-            >
-              <Mail className="w-4 h-4" />
-              {props.emailing ? 'Sending…' : 'Email me'}
-            </button>
-          </div>
+          <button
+            onClick={props.onEmail}
+            disabled={props.emailing}
+            className="inline-flex items-center justify-center gap-2 px-5 h-11 rounded-full text-sm font-medium disabled:opacity-50"
+            style={{ backgroundColor: INK, color: BG }}
+          >
+            <Mail className="w-4 h-4" />
+            {props.emailing ? 'Sending…' : 'Email me a copy'}
+          </button>
         )}
         {props.emailError && (
           <p className="text-sm mt-2" style={{ color: '#c1543a' }}>{props.emailError}</p>

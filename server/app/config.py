@@ -99,6 +99,9 @@ class Settings:
     stripe_webhook_secret: Optional[str] = None
     stripe_success_url: str = "http://localhost:5174/app/matcha/work/billing?success=1"
     stripe_cancel_url: str = "http://localhost:5174/app/matcha/work/billing?canceled=1"
+    # Monthly price (USD cents) for the Matcha IR upgrade offered to
+    # resources_free tenants. Override with MATCHA_IR_PRICE_CENTS.
+    matcha_ir_price_cents: int = 4900
 
     # Newsletter
     # Shared secret expected in X-Bounce-Secret header on /newsletter/bounce.
@@ -208,6 +211,7 @@ def load_settings() -> Settings:
             "STRIPE_CANCEL_URL",
             "http://localhost:5174/app/matcha/work/billing?canceled=1",
         ),
+        matcha_ir_price_cents=int(os.getenv("MATCHA_IR_PRICE_CENTS", "4900")),
         newsletter_bounce_secret=os.getenv("NEWSLETTER_BOUNCE_SECRET", ""),
     )
     return _settings

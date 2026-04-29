@@ -7,6 +7,8 @@ import AppLayout from './layouts/AppLayout'
 import AdminSidebar from './components/AdminSidebar'
 import TenantSidebar from './components/TenantSidebar'
 import IrSignup from './pages/auth/IrSignup'
+import ResourcesSignup from './pages/auth/ResourcesSignup'
+import RequireBusinessAccount from './components/auth/RequireBusinessAccount'
 import IrOnboardingWizard from './features/ir-onboarding/IrOnboardingWizard'
 import AnonymousReport from './pages/shared/AnonymousReport'
 import Companies from './pages/admin/Companies'
@@ -95,16 +97,17 @@ export default function App() {
       <Route path="/blog" element={<BlogIndex />} />
       <Route path="/blog/:slug" element={<BlogPostPage />} />
       <Route path="/resources" element={<ResourcesHub />} />
-      <Route path="/resources/templates" element={<ResourcesTemplates />} />
-      <Route path="/resources/templates/job-descriptions" element={<ResourcesJobDescriptions />} />
       <Route path="/resources/glossary" element={<ResourcesGlossary />} />
       <Route path="/resources/glossary/:slug" element={<ResourcesGlossaryTerm />} />
-      <Route path="/resources/states" element={<ResourcesStateGuides />} />
-      <Route path="/resources/states/:slug" element={<ResourcesStateGuide />} />
-      <Route path="/resources/calculators" element={<ResourcesCalculators />} />
-      <Route path="/resources/calculators/pto-accrual" element={<CalcPtoAccrual />} />
-      <Route path="/resources/calculators/turnover-cost" element={<CalcTurnoverCost />} />
-      <Route path="/resources/audit" element={<ResourcesComplianceAudit />} />
+      <Route path="/resources/templates" element={<RequireBusinessAccount><ResourcesTemplates /></RequireBusinessAccount>} />
+      <Route path="/resources/templates/job-descriptions" element={<RequireBusinessAccount><ResourcesJobDescriptions /></RequireBusinessAccount>} />
+      <Route path="/resources/states" element={<RequireBusinessAccount><ResourcesStateGuides /></RequireBusinessAccount>} />
+      <Route path="/resources/states/:slug" element={<RequireBusinessAccount><ResourcesStateGuide /></RequireBusinessAccount>} />
+      <Route path="/resources/calculators" element={<RequireBusinessAccount><ResourcesCalculators /></RequireBusinessAccount>} />
+      <Route path="/resources/calculators/pto-accrual" element={<RequireBusinessAccount><CalcPtoAccrual /></RequireBusinessAccount>} />
+      <Route path="/resources/calculators/turnover-cost" element={<RequireBusinessAccount><CalcTurnoverCost /></RequireBusinessAccount>} />
+      <Route path="/resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit /></RequireBusinessAccount>} />
+      <Route path="/auth/resources-signup" element={<ResourcesSignup />} />
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
       <Route path="/register/beta" element={<BetaRegister />} />

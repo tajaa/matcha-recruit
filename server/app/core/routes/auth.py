@@ -1541,6 +1541,7 @@ async def register_business(request: BusinessRegister):
             # feature set to incidents only. Bypasses the bespoke pending
             # queue. Other tier values fall through to standard behavior.
             is_ir_only = request.tier == "ir_only"
+            is_resources_free = request.tier == "resources_free"
 
             if is_ir_only:
                 company_status = "approved"
@@ -1556,6 +1557,14 @@ async def register_business(request: BusinessRegister):
                 ir_features["incidents"] = True
                 ir_features["employees"] = True
                 enabled_features_json = json.dumps(ir_features)
+            elif is_resources_free:
+                # Resources-tier signup: auto-approved so they can immediately
+                # download templates / run the audit / use calculators.
+                # No paid features enabled — gating on `client` role alone.
+                company_status = "approved"
+                signup_source = "resources_free"
+                rf_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
+                enabled_features_json = json.dumps(rf_features)
             else:
                 company_status = "approved" if (invitation or referring_broker_id) else "pending"
                 if invitation:
@@ -1651,7 +1660,7 @@ async def register_business(request: BusinessRegister):
 
             # Send appropriate email
             email_service = get_email_service()
-            if is_ir_only or invitation or referring_broker_id:
+            if is_ir_only or is_resources_free or invitation or referring_broker_id:
                 await email_service.send_business_approved_email(
                     to_email=user["email"],
                     to_name=request.name,
@@ -1667,6 +1676,9 @@ async def register_business(request: BusinessRegister):
             if is_ir_only:
                 next_route = "/ir/onboarding"
                 msg = "Welcome to Matcha IR. Let's set up your team."
+            elif is_resources_free:
+                next_route = "/resources"
+                msg = "Account created. Resources unlocked."
             elif invitation or referring_broker_id:
                 next_route = None
                 msg = "Welcome! Your business account is approved and ready to use."

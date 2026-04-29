@@ -6,7 +6,6 @@ import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
 import { PricingContactModal } from '../../../components/PricingContactModal'
 import { api } from '../../../api/client'
-import EmailGateModal from './EmailGateModal'
 
 const INK = 'var(--color-ivory-ink)'
 const BG = 'var(--color-ivory-bg)'
@@ -62,7 +61,6 @@ export default function Templates() {
   const [assets, setAssets] = useState<Asset[]>([])
   const [loading, setLoading] = useState(true)
   const [showPricing, setShowPricing] = useState(false)
-  const [activeAsset, setActiveAsset] = useState<Asset | null>(null)
 
   useEffect(() => {
     api.get<AssetList>('/resources/assets')
@@ -70,6 +68,14 @@ export default function Templates() {
       .catch(() => setAssets([]))
       .finally(() => setLoading(false))
   }, [])
+
+  const handleDownload = (asset: Asset) => {
+    if (!asset.available) return
+    // Cross-origin downloads (S3/CloudFront, government sites) ignore the
+    // `download` attribute — open in a new tab so the browser saves DOCX
+    // automatically and renders PDFs inline.
+    window.open(asset.path, '_blank', 'noopener,noreferrer')
+  }
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
@@ -165,8 +171,9 @@ export default function Templates() {
                   </p>
 
                   <button
-                    onClick={() => setActiveAsset(asset)}
-                    className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-full text-sm font-medium transition-opacity hover:opacity-90"
+                    onClick={() => handleDownload(asset)}
+                    disabled={!available}
+                    className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-full text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-60"
                     style={{
                       backgroundColor: available ? INK : 'transparent',
                       color: available ? BG : INK,
@@ -216,11 +223,6 @@ export default function Templates() {
 
       <MarketingFooter />
 
-      <EmailGateModal
-        open={!!activeAsset}
-        onClose={() => setActiveAsset(null)}
-        asset={activeAsset}
-      />
       <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
     </div>
   )

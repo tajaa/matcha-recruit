@@ -25,6 +25,8 @@ type SidebarShellProps = {
   logoLabel: string
   nav: (NavItem | NavGroup)[]
   user?: { name: string; avatarUrl?: string | null; settingsTo?: string }
+  /** Renders above the user/logout footer — e.g. an upgrade panel. */
+  upgradeFooter?: React.ReactNode
 }
 
 function isGroup(item: NavItem | NavGroup): item is NavGroup {
@@ -102,7 +104,7 @@ function NavGroupSection({ group, location }: { group: NavGroup; location: Retur
   )
 }
 
-export default function SidebarShell({ logoTo, logoLabel, nav, user }: SidebarShellProps) {
+export default function SidebarShell({ logoTo, logoLabel, nav, user, upgradeFooter }: SidebarShellProps) {
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -138,6 +140,10 @@ export default function SidebarShell({ logoTo, logoLabel, nav, user }: SidebarSh
           )
         )}
       </nav>
+
+      {upgradeFooter && (
+        <div className="px-2.5 pt-3 pb-2">{upgradeFooter}</div>
+      )}
 
       {/* Footer */}
       <div className="px-2.5 py-3 border-t border-zinc-800/30 space-y-1">

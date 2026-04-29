@@ -236,6 +236,61 @@ class StripeService:
         except Exception as exc:
             raise StripeServiceError(f"Failed to create Personal subscription session: {exc}") from exc
 
+    async def create_ir_upgrade_checkout(
+        self,
+        company_id: UUID,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+    ):
+        """Subscription checkout for upgrading a resources_free tenant to Matcha IR.
+
+        Webhook (`stripe_webhook.py`) catches the `checkout.session.completed`
+        event with `metadata.type == 'matcha_ir_upgrade'` and flips the
+        company to incidents=true + employees=true + signup_source=
+        ir_only_self_serve so the slim IR sidebar takes over on next refresh.
+        """
+        self._ensure_secret_key()
+
+        amount_cents = getattr(self.settings, "matcha_ir_price_cents", None) or 4900
+
+        resolved_success_url = success_url or self.settings.stripe_success_url
+        resolved_cancel_url = cancel_url or self.settings.stripe_cancel_url
+
+        metadata = {
+            "company_id": str(company_id),
+            "type": "matcha_ir_upgrade",
+            "mode": "subscription",
+        }
+
+        def _create():
+            return stripe.checkout.Session.create(
+                mode="subscription",
+                success_url=resolved_success_url,
+                cancel_url=resolved_cancel_url,
+                payment_method_types=["card"],
+                metadata=metadata,
+                subscription_data={"metadata": metadata},
+                line_items=[
+                    {
+                        "price_data": {
+                            "currency": "usd",
+                            "unit_amount": int(amount_cents),
+                            "recurring": {"interval": "month"},
+                            "product_data": {
+                                "name": "Matcha IR",
+                                "description": "Incident reporting + employee management. Auto-renews monthly.",
+                            },
+                        },
+                        "quantity": 1,
+                    }
+                ],
+            )
+
+        try:
+            return await asyncio.to_thread(_create)
+        except Exception as exc:
+            raise StripeServiceError(f"Failed to create Matcha IR checkout: {exc}") from exc
+
     async def create_recruiter_tier_checkout(
         self,
         user_id: UUID,
