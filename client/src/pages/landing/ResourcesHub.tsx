@@ -30,11 +30,11 @@ const CATEGORIES: Category[] = [
     icon: FileText,
   },
   {
-    to: '/resources',
+    to: '/resources/states',
     title: 'State Compliance Guides',
     description:
       'A page per state covering posters, min wage, sick leave, final paycheck, and pay transparency.',
-    status: 'soon',
+    status: 'live',
     icon: FileText,
   },
   {
