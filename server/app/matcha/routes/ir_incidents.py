@@ -48,6 +48,11 @@ from ..models.ir_incident import (
     TrendDataPoint,
     LocationAnalysis,
     LocationHotspot,
+    RiskMatrixCell,
+    RiskMatrixRow,
+    RiskMatrixResponse,
+    RiskTheme,
+    RiskInsightsResponse,
     IRAuditLogEntry,
     IRAuditLogResponse,
     Witness,
@@ -1774,60 +1779,451 @@ async def get_analytics_locations(
     limit: int = Query(10, ge=1, le=50),
     current_user=Depends(require_admin_or_client),
 ):
-    """Get incident hotspots by location."""
+    """Get incident hotspots by location.
+
+    Now groups by `location_id` (joined to business_locations) so the
+    same physical site doesn't double-count when its free-text label
+    drifted across edits. Legacy rows with NULL location_id roll up
+    under a single "Unassigned (legacy)" bucket; rows whose location_id
+    points at a deleted location use the legacy free-text label as
+    fallback.
+    """
     company_id = await get_client_company_id(current_user)
     if company_id is None:
         return LocationAnalysis(hotspots=[], total_locations=0)
-    co_filter = "company_id = $1"
 
     async with get_connection() as conn:
         rows = await conn.fetch(
-            f"""
+            """
             SELECT
-                location,
-                COUNT(*) as count,
-                incident_type,
+                i.location_id,
+                i.location AS legacy_location,
+                bl.name AS bl_name,
+                bl.city AS bl_city,
+                bl.state AS bl_state,
+                COUNT(*) AS cnt,
+                i.incident_type,
                 AVG(CASE
-                    WHEN severity = 'critical' THEN 4
-                    WHEN severity = 'high' THEN 3
-                    WHEN severity = 'medium' THEN 2
+                    WHEN i.severity = 'critical' THEN 4
+                    WHEN i.severity = 'high' THEN 3
+                    WHEN i.severity = 'medium' THEN 2
                     ELSE 1
-                END) as severity_score
-            FROM ir_incidents
-            WHERE {co_filter} AND location IS NOT NULL AND location != ''
-            GROUP BY location, incident_type
-            ORDER BY count DESC
+                END) AS severity_score
+            FROM ir_incidents i
+            LEFT JOIN business_locations bl ON bl.id = i.location_id
+            WHERE i.company_id = $1
+            GROUP BY i.location_id, i.location, bl.name, bl.city, bl.state, i.incident_type
             """,
             company_id,
         )
 
-        # Aggregate by location
-        location_map = {}
+        # Aggregate by location: prefer location_id grouping; fall back to
+        # free-text under a single "Unassigned" bucket for legacy rows.
+        location_map: dict = {}
         for row in rows:
-            loc = row["location"]
-            if loc not in location_map:
-                location_map[loc] = {"count": 0, "by_type": {}, "severity_scores": []}
-            location_map[loc]["count"] += row["count"]
-            location_map[loc]["by_type"][row["incident_type"]] = row["count"]
-            location_map[loc]["severity_scores"].append(row["severity_score"])
+            loc_id = row["location_id"]
+            if loc_id is None:
+                key = ("__unassigned__", UNASSIGNED_LOCATION_LABEL)
+            else:
+                label = (row["bl_name"] or "").strip()
+                if not label:
+                    place = ", ".join([p for p in (row["bl_city"], row["bl_state"]) if p])
+                    label = place or (row["legacy_location"] or str(loc_id)[:8])
+                key = (str(loc_id), label)
 
-        # Sort by count and limit
-        sorted_locations = sorted(location_map.items(), key=lambda x: x[1]["count"], reverse=True)[:limit]
+            bucket = location_map.setdefault(
+                key, {"count": 0, "by_type": {}, "severity_scores": []},
+            )
+            cnt = int(row["cnt"] or 0)
+            bucket["count"] += cnt
+            bucket["by_type"][row["incident_type"]] = bucket["by_type"].get(row["incident_type"], 0) + cnt
+            bucket["severity_scores"].append(float(row["severity_score"] or 0))
+
+        sorted_locations = sorted(
+            location_map.items(), key=lambda x: x[1]["count"], reverse=True,
+        )[:limit]
 
         hotspots = [
             LocationHotspot(
-                location=loc,
+                location=label,
                 count=info["count"],
                 by_type=info["by_type"],
-                avg_severity_score=round(sum(info["severity_scores"]) / len(info["severity_scores"]), 2),
+                avg_severity_score=round(
+                    sum(info["severity_scores"]) / len(info["severity_scores"]), 2,
+                ) if info["severity_scores"] else 0.0,
             )
-            for loc, info in sorted_locations
+            for (_, label), info in sorted_locations
         ]
 
         return LocationAnalysis(
             hotspots=hotspots,
             total_locations=len(location_map),
         )
+
+
+# ===========================================
+# Risk Insights — locations × type matrix + Gemini themes
+#
+# Cross-tier: gated by the `incidents` feature flag (the existing IR gate),
+# so both Matcha Cap (ir_only_self_serve) and full Matcha (bespoke) tenants
+# get this. Auto-derived business_locations rows from compliance only show
+# up here when they have ≥1 incident — they fall out naturally via JOIN.
+# ===========================================
+
+
+SEVERITY_WEIGHT = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
+
+INCIDENT_TYPES_ORDER = ["safety", "behavioral", "property", "near_miss", "other"]
+
+UNASSIGNED_LOCATION_LABEL = "Unassigned (legacy)"
+
+
+def _build_risk_scope_key(location_id: Optional[UUID], period_days: int) -> str:
+    """Deterministic cache key for ir_company_analysis.scope_key."""
+    loc_part = str(location_id) if location_id else "all"
+    return f"loc={loc_part}:days={period_days}"
+
+
+@router.get("/analytics/risk-matrix", response_model=RiskMatrixResponse)
+async def get_analytics_risk_matrix(
+    days: int = Query(90, ge=7, le=365),
+    location_id: Optional[UUID] = Query(None),
+    current_user=Depends(require_admin_or_client),
+):
+    """SQL-driven Risk Matrix: locations × incident_type with deviation flags."""
+    company_id = await get_client_company_id(current_user)
+    generated_at_iso = _utc_now_naive().isoformat()
+    if company_id is None:
+        return RiskMatrixResponse(
+            period_days=days, generated_at=generated_at_iso,
+            company_total=0, location_count=0, rows=[],
+        )
+
+    start_date = _utc_now_naive() - timedelta(days=days)
+
+    async with get_connection() as conn:
+        # Optional location-scope check — if the caller filtered to a specific
+        # location, ensure it belongs to their company before any query work.
+        if location_id is not None:
+            owns = await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+                location_id, company_id,
+            )
+            if not owns:
+                raise HTTPException(status_code=404, detail="Location not found")
+
+        loc_filter = "AND i.location_id = $3" if location_id else ""
+        params: list = [company_id, start_date]
+        if location_id:
+            params.append(location_id)
+
+        rows = await conn.fetch(
+            f"""
+            SELECT
+                i.location_id,
+                i.location AS legacy_location,
+                bl.name AS bl_name,
+                bl.city AS bl_city,
+                bl.state AS bl_state,
+                i.incident_type,
+                COUNT(*) AS cnt,
+                AVG(CASE
+                    WHEN i.severity = 'critical' THEN 4
+                    WHEN i.severity = 'high' THEN 3
+                    WHEN i.severity = 'medium' THEN 2
+                    ELSE 1
+                END) AS severity_score
+            FROM ir_incidents i
+            LEFT JOIN business_locations bl ON bl.id = i.location_id
+            WHERE i.company_id = $1
+              AND i.occurred_at >= $2
+              {loc_filter}
+            GROUP BY i.location_id, i.location, bl.name, bl.city, bl.state, i.incident_type
+            """,
+            *params,
+        )
+
+    # Aggregate per (location_id-or-Unassigned) and per incident_type.
+    per_location: dict = {}  # key: (loc_id_str_or_None, label) -> {totals, by_type}
+    company_by_type: dict = {t: 0 for t in INCIDENT_TYPES_ORDER}
+    company_total = 0
+
+    for row in rows:
+        loc_id = row["location_id"]
+        if loc_id is None:
+            # Legacy free-text fallback. Roll all NULL-location_id rows under
+            # one synthesized bucket so the matrix stays compact.
+            key = (None, UNASSIGNED_LOCATION_LABEL)
+        else:
+            label = (row["bl_name"] or "").strip()
+            if not label:
+                place = ", ".join([p for p in (row["bl_city"], row["bl_state"]) if p])
+                label = place or str(loc_id)[:8]
+            key = (str(loc_id), label)
+
+        bucket = per_location.setdefault(key, {"total": 0, "by_type": {}})
+        cnt = int(row["cnt"] or 0)
+        itype = row["incident_type"] or "other"
+        bucket["total"] += cnt
+        # Multiple severity buckets can exist per type — aggregate weighted score.
+        prev = bucket["by_type"].get(itype, {"count": 0, "score_sum": 0.0})
+        prev["count"] += cnt
+        prev["score_sum"] += float(row["severity_score"] or 0) * cnt
+        bucket["by_type"][itype] = prev
+
+        company_by_type[itype] = company_by_type.get(itype, 0) + cnt
+        company_total += cnt
+
+    # Baseline rates compare a single location to the average location. When the
+    # caller has filtered to one location, the company total still includes only
+    # that location's incidents (because of loc_filter) — so deviation in that
+    # case is always 1.0 and the matrix reads as a single-location report.
+    location_count = len(per_location) or 1
+
+    matrix_rows: list[RiskMatrixRow] = []
+    for (loc_id_str, label), info in sorted(per_location.items(), key=lambda kv: -kv[1]["total"]):
+        cells: list[RiskMatrixCell] = []
+        for itype in INCIDENT_TYPES_ORDER:
+            agg = info["by_type"].get(itype, {"count": 0, "score_sum": 0.0})
+            count = int(agg["count"])
+            severity_score = round(agg["score_sum"] / count, 2) if count else 0.0
+            company_count = company_by_type.get(itype, 0)
+            baseline_rate = (company_count / location_count / days) if days > 0 else 0.0
+            location_rate = (count / days) if days > 0 else 0.0
+            deviation_ratio = (location_rate / baseline_rate) if baseline_rate > 0 else (0.0 if count == 0 else float("inf"))
+            # Cap infinite ratios for JSON safety; a value > 999 is functionally "way above baseline".
+            if deviation_ratio == float("inf") or deviation_ratio > 999.0:
+                deviation_ratio = 999.0
+            flagged = bool(deviation_ratio >= 2.0 and count >= 3)
+            cells.append(RiskMatrixCell(
+                incident_type=itype,
+                count=count,
+                severity_score=severity_score,
+                baseline_rate=round(baseline_rate, 4),
+                location_rate=round(location_rate, 4),
+                deviation_ratio=round(deviation_ratio, 2),
+                flagged=flagged,
+            ))
+        matrix_rows.append(RiskMatrixRow(
+            location_id=UUID(loc_id_str) if loc_id_str else None,
+            location_name=label,
+            total_incidents=info["total"],
+            cells=cells,
+        ))
+
+    return RiskMatrixResponse(
+        period_days=days,
+        generated_at=generated_at_iso,
+        company_total=company_total,
+        location_count=len(per_location),
+        rows=matrix_rows,
+    )
+
+
+@router.get("/analytics/risk-insights", response_model=RiskInsightsResponse)
+async def get_analytics_risk_insights(
+    days: int = Query(30, ge=7, le=180),
+    location_id: Optional[UUID] = Query(None),
+    regenerate: bool = Query(False),
+    current_user=Depends(require_admin_or_client),
+):
+    """Gemini-driven theme detection across recent IR corpus. 24h cache."""
+    from ..services.ir_analysis import get_ir_analyzer
+
+    company_id = await get_client_company_id(current_user)
+    generated_at_iso = _utc_now_naive().isoformat()
+    if company_id is None:
+        return RiskInsightsResponse(
+            period_days=days, generated_at=generated_at_iso,
+            location_id=None, themes=[], from_cache=False,
+        )
+
+    scope_key = _build_risk_scope_key(location_id, days)
+    start_date = _utc_now_naive() - timedelta(days=days)
+
+    async with get_connection() as conn:
+        if location_id is not None:
+            owns = await conn.fetchval(
+                "SELECT 1 FROM business_locations WHERE id = $1 AND company_id = $2",
+                location_id, company_id,
+            )
+            if not owns:
+                raise HTTPException(status_code=404, detail="Location not found")
+
+        # Cache check (24h TTL) unless caller asked to regenerate.
+        if not regenerate:
+            cached = await conn.fetchrow(
+                """
+                SELECT analysis_data, generated_at FROM ir_company_analysis
+                WHERE company_id = $1 AND analysis_type = 'risk_insights' AND scope_key = $2
+                """,
+                company_id, scope_key,
+            )
+            if cached and (_utc_now_naive() - cached["generated_at"]) < timedelta(hours=24):
+                payload = _safe_json_loads(cached["analysis_data"])
+                payload["from_cache"] = True
+                payload["generated_at"] = cached["generated_at"].isoformat()
+                return RiskInsightsResponse(**payload)
+
+        # Pull the corpus. Cap at 200 most recent so the prompt stays focused.
+        loc_clause = "AND i.location_id = $3" if location_id else ""
+        params: list = [company_id, start_date]
+        if location_id:
+            params.append(location_id)
+
+        incident_rows = await conn.fetch(
+            f"""
+            SELECT i.id, i.occurred_at, i.incident_type, i.severity, i.location_id,
+                   i.description, i.root_cause, i.witnesses, i.involved_employee_ids,
+                   i.er_case_id
+            FROM ir_incidents i
+            WHERE i.company_id = $1 AND i.occurred_at >= $2 {loc_clause}
+            ORDER BY i.occurred_at DESC
+            LIMIT 200
+            """,
+            *params,
+        )
+
+        # Locations registry — every active location for this company so themes
+        # can attribute patterns by location name even if a location had zero
+        # incidents in the window (Gemini picks from this registry).
+        location_rows = await conn.fetch(
+            """
+            SELECT id, name, city, state
+            FROM business_locations
+            WHERE company_id = $1 AND is_active = true
+            """,
+            company_id,
+        )
+        location_lookup: dict[str, str] = {}
+        for lr in location_rows:
+            label = (lr["name"] or "").strip()
+            if not label:
+                place = ", ".join([p for p in (lr["city"], lr["state"]) if p])
+                label = place or str(lr["id"])[:8]
+            location_lookup[str(lr["id"])] = label
+
+        # Employees registry — only when full-platform tenant has employees data.
+        # Resolve names for IDs that appear in the corpus' involved_employee_ids;
+        # if `employees` table is unreachable or empty for this tenant we just
+        # pass None and the prompt degrades gracefully.
+        employee_lookup: Optional[dict[str, str]] = None
+        involved_ids: set[str] = set()
+        for ir in incident_rows:
+            for eid in (ir["involved_employee_ids"] or []):
+                involved_ids.add(str(eid))
+        if involved_ids:
+            try:
+                emp_rows = await conn.fetch(
+                    """
+                    SELECT id, first_name, last_name
+                    FROM employees
+                    WHERE org_id = $1 AND id = ANY($2::uuid[])
+                    """,
+                    company_id, list(involved_ids),
+                )
+                if emp_rows:
+                    employee_lookup = {}
+                    for er in emp_rows:
+                        name = " ".join([s for s in (er["first_name"], er["last_name"]) if s]).strip()
+                        employee_lookup[str(er["id"])] = name or str(er["id"])[:8]
+            except Exception as e:
+                # Cap tenants don't have employees populated; the table may exist
+                # but the org_id filter returns empty. Don't fail the analysis.
+                logger.info("[IR risk-insights] employees lookup skipped: %s", e)
+                employee_lookup = None
+
+        company_row = await conn.fetchrow(
+            "SELECT name, industry FROM companies WHERE id = $1",
+            company_id,
+        )
+
+    company_context = None
+    if company_row:
+        bits = [company_row["name"]]
+        if company_row["industry"]:
+            bits.append(f"Industry: {company_row['industry']}")
+        company_context = " — ".join(bits)
+
+    # Empty corpus short-circuit — don't burn a Gemini call.
+    incidents_payload = [dict(r) for r in incident_rows]
+    if not incidents_payload:
+        empty = RiskInsightsResponse(
+            period_days=days,
+            generated_at=generated_at_iso,
+            location_id=location_id,
+            themes=[],
+            from_cache=False,
+        )
+        async with get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO ir_company_analysis (company_id, analysis_type, scope_key, analysis_data)
+                VALUES ($1, 'risk_insights', $2, $3)
+                ON CONFLICT (company_id, analysis_type, scope_key)
+                DO UPDATE SET analysis_data = $3, generated_at = NOW()
+                """,
+                company_id, scope_key,
+                json.dumps(empty.model_dump(mode="json"), default=str),
+            )
+        return empty
+
+    analyzer = get_ir_analyzer()
+    gemini_failed = False
+    try:
+        themes_result = await analyzer.detect_risk_themes(
+            incidents=incidents_payload,
+            location_lookup=location_lookup,
+            employee_lookup=employee_lookup,
+            company_context=company_context,
+        )
+    except Exception as e:
+        logger.warning("[IR risk-insights] Gemini theme detection failed: %s", e)
+        themes_result = {"themes": []}
+        gemini_failed = True
+
+    themes: list[RiskTheme] = []
+    for t in themes_result.get("themes", []):
+        loc_id_str = t.get("location_id")
+        loc_name = location_lookup.get(loc_id_str) if loc_id_str else None
+        try:
+            themes.append(RiskTheme(
+                label=t["label"],
+                severity=t["severity"],
+                location_id=UUID(loc_id_str) if loc_id_str else None,
+                location_name=loc_name,
+                incident_count=int(t["incident_count"]),
+                evidence_incident_ids=[UUID(eid) for eid in t.get("evidence_incident_ids", [])],
+                insight=t["insight"],
+                recommendation=t["recommendation"],
+            ))
+        except (KeyError, ValueError, TypeError) as e:
+            # Skip malformed theme rather than 500 the whole response.
+            logger.info("[IR risk-insights] dropping malformed theme: %s", e)
+
+    response = RiskInsightsResponse(
+        period_days=days,
+        generated_at=generated_at_iso,
+        location_id=location_id,
+        themes=themes,
+        from_cache=False,
+    )
+
+    # Only cache on success. A Gemini outage shouldn't pin "no themes" for 24h.
+    if not gemini_failed:
+        async with get_connection() as conn:
+            await conn.execute(
+                """
+                INSERT INTO ir_company_analysis (company_id, analysis_type, scope_key, analysis_data)
+                VALUES ($1, 'risk_insights', $2, $3)
+                ON CONFLICT (company_id, analysis_type, scope_key)
+                DO UPDATE SET analysis_data = $3, generated_at = NOW()
+                """,
+                company_id, scope_key,
+                json.dumps(response.model_dump(mode="json"), default=str),
+            )
+
+    return response
 
 
 @router.get("/analytics/consistency", response_model=ConsistencyAnalytics)

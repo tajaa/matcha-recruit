@@ -6,6 +6,7 @@ import { IRCreateIncidentModal } from '../../components/ir/IRCreateIncidentModal
 import { IRDashboardTab } from '../../components/ir/IRDashboardTab'
 import { IRConsistencyAnalyticsPanel } from '../../components/ir/IRConsistencyAnalyticsPanel'
 import { IRAnonymousReportingPanel } from '../../components/ir/IRAnonymousReportingPanel'
+import { IRRiskInsightsTab } from '../../components/ir/IRRiskInsightsTab'
 import { OshaLogsPanel } from '../../components/ir/OshaLogsPanel'
 import type { IRIncident, IRIncidentType, IRAnalyticsSummary } from '../../types/ir'
 import {
@@ -13,7 +14,7 @@ import {
   SEVERITY_BADGE, STATUS_BADGE, INCIDENT_TYPE_OPTIONS,
 } from '../../types/ir'
 
-type Tab = 'dashboard' | 'incidents' | 'analytics' | 'osha'
+type Tab = 'dashboard' | 'incidents' | 'risk' | 'analytics' | 'osha'
 type SeverityFilter = 'all' | 'low' | 'medium' | 'high' | 'critical'
 type StatusFilter = 'all' | 'needs_attention' | 'reported' | 'investigating' | 'action_required' | 'resolved' | 'closed'
 type TypeFilter = 'all' | IRIncidentType
@@ -94,9 +95,9 @@ export default function IRList() {
 
       {/* Tab nav */}
       <div className="flex items-center gap-1 mt-4 mb-5">
-        {(['dashboard', 'incidents', 'osha', 'analytics'] as const).map((t) => (
+        {(['dashboard', 'incidents', 'risk', 'osha', 'analytics'] as const).map((t) => (
           <Button key={t} variant={tab === t ? 'secondary' : 'ghost'} size="sm" onClick={() => setTab(t)}>
-            {t === 'osha' ? 'OSHA Logs' : t.charAt(0).toUpperCase() + t.slice(1)}
+            {t === 'osha' ? 'OSHA Logs' : t === 'risk' ? 'Risk Insights' : t.charAt(0).toUpperCase() + t.slice(1)}
           </Button>
         ))}
       </div>
@@ -210,6 +211,10 @@ export default function IRList() {
 
           <IRAnonymousReportingPanel />
         </div>
+      )}
+
+      {tab === 'risk' && (
+        <IRRiskInsightsTab onNavigateIncident={(id) => navigate(`/app/ir/${id}`)} />
       )}
 
       {tab === 'osha' && <OshaLogsPanel />}

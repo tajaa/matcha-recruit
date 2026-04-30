@@ -385,6 +385,59 @@ class LocationAnalysis(BaseModel):
 
 
 # ===========================================
+# Risk Insights Models (cross-tier — works for both Cap and full Matcha)
+# ===========================================
+
+class RiskMatrixCell(BaseModel):
+    """One cell in the location × incident_type risk matrix."""
+    incident_type: str
+    count: int
+    severity_score: float       # AVG severity weighted critical=4..low=1
+    baseline_rate: float        # company-wide rate of this type per location-day
+    location_rate: float        # this location's rate of this type per location-day
+    deviation_ratio: float      # location_rate / baseline_rate (1.0 = at baseline)
+    flagged: bool               # deviation_ratio >= 2.0 AND count >= 3
+
+
+class RiskMatrixRow(BaseModel):
+    """One location row in the risk matrix."""
+    location_id: Optional[UUID] = None  # null for the synthesized Unassigned bucket
+    location_name: str
+    total_incidents: int
+    cells: list[RiskMatrixCell]
+
+
+class RiskMatrixResponse(BaseModel):
+    """SQL-driven Risk Matrix — locations × incident_type."""
+    period_days: int
+    generated_at: str
+    company_total: int
+    location_count: int
+    rows: list[RiskMatrixRow]
+
+
+class RiskTheme(BaseModel):
+    """One Gemini-detected pattern across recent incidents."""
+    label: str
+    severity: str                       # 'low' | 'medium' | 'high' | 'critical'
+    location_id: Optional[UUID] = None  # null if cross-location
+    location_name: Optional[str] = None
+    incident_count: int
+    evidence_incident_ids: list[UUID]
+    insight: str
+    recommendation: str
+
+
+class RiskInsightsResponse(BaseModel):
+    """Gemini-driven AI Themes — recurring patterns in the recent corpus."""
+    period_days: int
+    generated_at: str
+    location_id: Optional[UUID] = None  # echo of filter
+    themes: list[RiskTheme]
+    from_cache: bool = False
+
+
+# ===========================================
 # Audit Log Models
 # ===========================================
 

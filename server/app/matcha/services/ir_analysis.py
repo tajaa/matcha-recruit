@@ -155,6 +155,32 @@ def _validate_policy_mapping(result: dict) -> Optional[str]:
     return None
 
 
+def _validate_risk_themes(result: dict) -> Optional[str]:
+    """Validate risk-themes response. Returns error message or None."""
+    themes = result.get("themes")
+    if not isinstance(themes, list):
+        return "Invalid themes: must be a list"
+
+    for i, theme in enumerate(themes):
+        if not isinstance(theme, dict):
+            return f"themes[{i}] must be an object"
+        if not theme.get("label"):
+            return f"themes[{i}] missing required field: label"
+        if theme.get("severity") not in VALID_SEVERITIES:
+            return f"themes[{i}] invalid severity: {theme.get('severity')}. Must be one of: {VALID_SEVERITIES}"
+        if not isinstance(theme.get("incident_count"), int) or theme["incident_count"] < 1:
+            return f"themes[{i}] incident_count must be a positive integer"
+        evidence = theme.get("evidence_incident_ids")
+        if not isinstance(evidence, list) or len(evidence) == 0:
+            return f"themes[{i}] evidence_incident_ids must be a non-empty list"
+        if not theme.get("insight"):
+            return f"themes[{i}] missing required field: insight"
+        if not theme.get("recommendation"):
+            return f"themes[{i}] missing required field: recommendation"
+
+    return None
+
+
 # ===========================================
 # Prompts
 # ===========================================
@@ -450,6 +476,54 @@ Return ONLY a JSON object with this structure:
 }}
 
 If no policies match the incident, return matches as an empty array and no_matching_policies as true."""
+
+
+RISK_THEMES_PROMPT = """You are an HR risk analyst. Scan the provided corpus of recent incident reports for recurring patterns and emerging themes that an operator should act on.
+
+LOOK FOR:
+- **Recurring infraction patterns**: insubordination, attendance, tardiness, repeated policy violations
+- **Training / competence gaps**: mistakes, guest concerns, "unsure how to", procedure not followed correctly
+- **Safety hotspots**: one location dominating injury/property/near-miss incidents
+- **Management or morale signals**: multiple incidents involving the same supervisor, repeat reporters, escalating severity at one site
+- **Equipment / process failures**: same equipment cited, same process step failing repeatedly
+
+COMPANY CONTEXT:
+{company_context}
+
+LOCATIONS REGISTRY:
+{locations_registry}
+
+EMPLOYEES REGISTRY (when available — names involved in incidents):
+{employees_registry}
+
+INCIDENT CORPUS (most recent first, capped):
+{incident_corpus}
+
+TASK:
+1. Identify themes (recurring patterns) supported by **3 or more** incidents from the corpus. Skip noise — single occurrences are not themes.
+2. For each theme, name the supporting incident_ids (1–5 representative ones drawn ONLY from the corpus above).
+3. If a theme is location-specific, set location_id to that location's id from the registry; if cross-location, set location_id to null.
+4. Choose severity from low / medium / high / critical based on stakes (low = informational, critical = imminent harm or compliance risk).
+5. Write a short insight paragraph (1–2 sentences) explaining why this matters.
+6. Write a short recommendation (1 sentence) on what to do.
+7. Cap the response at 8 themes. Surface the most actionable.
+
+Return ONLY a JSON object with this structure:
+{{
+    "themes": [
+        {{
+            "label": "Insubordination cluster at one location",
+            "severity": "high",
+            "location_id": "uuid-from-registry-or-null",
+            "incident_count": 5,
+            "evidence_incident_ids": ["uuid-1", "uuid-2", "uuid-3"],
+            "insight": "Five behavioral incidents at this site involve the same shift, suggesting either a morale issue or weak supervisory follow-through.",
+            "recommendation": "Review shift schedules and conduct 1:1 coaching with the involved supervisor."
+        }}
+    ]
+}}
+
+If no patterns reach the 3-incident threshold, return {{ "themes": [] }}."""
 
 
 class IRAnalyzer:
@@ -829,6 +903,96 @@ class IRAnalyzer:
         result["matches"] = sorted(result.get("matches", []), key=lambda m: m.get("confidence", 0), reverse=True)[:5]
         result["generated_at"] = datetime.now(timezone.utc).isoformat()
         return result
+
+    async def detect_risk_themes(
+        self,
+        incidents: list[dict],
+        location_lookup: dict,
+        employee_lookup: Optional[dict] = None,
+        company_context: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """
+        Scan a corpus of incidents for recurring patterns and themes.
+
+        Args:
+            incidents: list of dicts with at least id, occurred_at, incident_type,
+                severity, location_id, description, optional root_cause,
+                witnesses, involved_employee_ids, er_case_id.
+            location_lookup: {location_id_str: human-readable label}
+            employee_lookup: optional {employee_id_str: name}
+            company_context: optional one-line description for the company.
+
+        Returns:
+            {"themes": [...], "generated_at": iso}. Themes capped at 8 by prompt.
+            Filters out themes whose evidence ids are not in the supplied corpus
+            (Gemini sometimes hallucinates ids).
+        """
+        valid_incident_ids = {str(inc["id"]) for inc in incidents}
+        valid_location_ids = set(location_lookup.keys())
+
+        locations_registry = "\n".join(
+            f"- {lid}: {label}" for lid, label in sorted(location_lookup.items())
+        ) or "No locations registered."
+
+        if employee_lookup:
+            employees_registry = "\n".join(
+                f"- {eid}: {name}" for eid, name in sorted(employee_lookup.items())
+            )
+        else:
+            employees_registry = "Not provided (Cap tier or employees feature disabled)."
+
+        def _format_incident(inc: dict) -> str:
+            occurred = inc.get("occurred_at")
+            occurred_str = occurred.isoformat() if hasattr(occurred, "isoformat") else (occurred or "unknown")
+            loc_label = location_lookup.get(str(inc.get("location_id") or ""), "Unassigned")
+            involved_ids = inc.get("involved_employee_ids") or []
+            involved_names = [
+                (employee_lookup or {}).get(str(eid), str(eid)[:8]) for eid in involved_ids
+            ] if employee_lookup else []
+            witness_names = []
+            witnesses = inc.get("witnesses")
+            if isinstance(witnesses, list):
+                witness_names = [w.get("name") for w in witnesses if isinstance(w, dict) and w.get("name")]
+            er_flag = " [linked to ER case]" if inc.get("er_case_id") else ""
+            return (
+                f"- id={inc['id']} | type={inc.get('incident_type')} | severity={inc.get('severity')} | "
+                f"location={loc_label} | occurred={occurred_str}{er_flag}\n"
+                f"  description: {(inc.get('description') or '').strip()[:400]}\n"
+                + (f"  involved: {', '.join(involved_names)}\n" if involved_names else "")
+                + (f"  witnesses: {', '.join(witness_names)}\n" if witness_names else "")
+                + (f"  root_cause: {(inc.get('root_cause') or '').strip()[:200]}\n" if inc.get("root_cause") else "")
+            ).rstrip()
+
+        incident_corpus = "\n".join(_format_incident(inc) for inc in incidents) or "No incidents in window."
+
+        def build_prompt(feedback: Optional[str] = None) -> str:
+            prompt = RISK_THEMES_PROMPT.format(
+                company_context=company_context or "Not specified.",
+                locations_registry=locations_registry,
+                employees_registry=employees_registry,
+                incident_corpus=incident_corpus,
+            )
+            if feedback:
+                prompt += f"\n\n{feedback}"
+            return prompt
+
+        # Let IRAnalysisError propagate — caller distinguishes a legitimate
+        # "no themes found" from a Gemini outage so it can skip caching the
+        # empty result for 24h.
+        result = await self._call_with_retry(build_prompt, _validate_risk_themes, label="risk_themes")
+
+        cleaned: list[dict] = []
+        for theme in result.get("themes", []):
+            evidence = [eid for eid in theme.get("evidence_incident_ids", []) if eid in valid_incident_ids]
+            if len(evidence) < 1:
+                continue
+            theme["evidence_incident_ids"] = evidence[:5]
+            loc_id = theme.get("location_id")
+            if loc_id and loc_id not in valid_location_ids:
+                theme["location_id"] = None
+            cleaned.append(theme)
+
+        return {"themes": cleaned[:8], "generated_at": datetime.now(timezone.utc).isoformat()}
 
 
 def get_ir_analyzer() -> IRAnalyzer:

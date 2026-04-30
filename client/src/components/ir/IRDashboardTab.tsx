@@ -15,11 +15,11 @@ export function IRDashboardTab({ incidents, summary, onNavigate }: Props) {
   const [locations, setLocations] = useState<IRLocationData[]>([])
 
   useEffect(() => {
-    api.get<{ interval: string; data: IRTrendPoint[] }>('/ir/incidents/analytics/trends?interval=weekly&days=90')
+    api.get<{ period: string; data: IRTrendPoint[] }>('/ir/incidents/analytics/trends?period=weekly&days=90')
       .then((res) => setTrends(res.data))
       .catch(() => setTrends([]))
-    api.get<{ locations: IRLocationData[] }>('/ir/incidents/analytics/locations?limit=5')
-      .then((res) => setLocations(res.locations ?? []))
+    api.get<{ hotspots: IRLocationData[] }>('/ir/incidents/analytics/locations?limit=5')
+      .then((res) => setLocations(res.hotspots ?? []))
       .catch(() => setLocations([]))
   }, [])
 

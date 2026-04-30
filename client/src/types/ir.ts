@@ -236,6 +236,52 @@ export type IRTrendPoint = { date: string; count: number }
 export type IRTrendsData = { interval: string; data: IRTrendPoint[] }
 export type IRLocationData = { location: string; count: number; severity_breakdown: Record<string, number> }
 
+// ── Risk Insights (cross-tier: Cap + full Matcha) ──
+
+export type IRRiskMatrixCell = {
+  incident_type: IRIncidentType
+  count: number
+  severity_score: number
+  baseline_rate: number
+  location_rate: number
+  deviation_ratio: number
+  flagged: boolean
+}
+
+export type IRRiskMatrixRow = {
+  location_id: string | null  // null = synthesized "Unassigned (legacy)" bucket
+  location_name: string
+  total_incidents: number
+  cells: IRRiskMatrixCell[]
+}
+
+export type IRRiskMatrix = {
+  period_days: number
+  generated_at: string
+  company_total: number
+  location_count: number
+  rows: IRRiskMatrixRow[]
+}
+
+export type IRRiskTheme = {
+  label: string
+  severity: IRSeverity
+  location_id: string | null
+  location_name: string | null
+  incident_count: number
+  evidence_incident_ids: string[]
+  insight: string
+  recommendation: string
+}
+
+export type IRRiskInsights = {
+  period_days: number
+  generated_at: string
+  location_id: string | null
+  themes: IRRiskTheme[]
+  from_cache: boolean
+}
+
 // ── Investigation interviews ──
 
 export type InvestigationInterview = {
