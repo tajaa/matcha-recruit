@@ -48,7 +48,7 @@ function employeeName(e: EmployeeRow | undefined, fallbackId: string): string {
 
 export default function Discipline() {
   const navigate = useNavigate()
-  const [statusFilter, setStatusFilter] = useState<DisciplineStatus | ''>('active')
+  const [statusFilter, setStatusFilter] = useState<DisciplineStatus | ''>('')
   const [search, setSearch] = useState('')
   const [showIssue, setShowIssue] = useState(false)
   const [employees, setEmployees] = useState<Record<string, EmployeeRow>>({})
