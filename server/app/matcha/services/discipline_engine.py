@@ -388,8 +388,8 @@ async def issue_discipline_with_supersede(
                 )
                 VALUES (
                     $1, $2, $3, $4, $5, $6, $7, $8,
-                    'draft', $9::jsonb, $10, $11, $12,
-                    ($4::date)::timestamptz + ($12 || ' months')::interval,
+                    'draft', $9::jsonb, $10, $11, $12::int,
+                    ($4::date)::timestamptz + make_interval(months => $12::int),
                     $13, $14, $15, 'pending'
                 )
                 RETURNING id, employee_id, company_id, discipline_type, issued_date,
