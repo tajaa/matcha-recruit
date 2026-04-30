@@ -699,8 +699,11 @@ struct ProjectDetailView: View {
     }
 
     private func export(format: String) {
+        let pid = viewModel.project?.id ?? "<nil>"
+        print("[Export] start format=\(format) project=\(pid)")
         Task { @MainActor in
             let result = await viewModel.exportProject(format: format)
+            print("[Export] response format=\(format) bytes=\(result?.count ?? -1) error=\(viewModel.errorMessage ?? "nil")")
             // Defer alert + save panel onto the next runloop tick so any
             // in-flight Menu / sheet has had a chance to dismiss; without
             // this the modal silently fails to present and the user sees

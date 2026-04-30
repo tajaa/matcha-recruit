@@ -879,6 +879,27 @@ class MatchaWorkService {
             case dueDate = "due_date"
             case assignedTo = "assigned_to"
         }
+
+        /// Custom encode — emit only the fields that were actually set.
+        /// Default Codable serializes nil as JSON `null`, and the server
+        /// route treats any present key (including nulls) as a patch
+        /// instruction; that meant a single-field toggle (e.g.
+        /// `{status: "completed"}`) was being sent as
+        /// `{title: null, board_column: null, status: "completed", ...}`,
+        /// the route then ran every branch, and the board_column
+        /// validator rejected `None` with a 400 — the kanban toggle
+        /// silently failed and the optimistic UI snapped back on
+        /// reload.
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encodeIfPresent(title, forKey: .title)
+            try c.encodeIfPresent(description, forKey: .description)
+            try c.encodeIfPresent(boardColumn, forKey: .boardColumn)
+            try c.encodeIfPresent(priority, forKey: .priority)
+            try c.encodeIfPresent(status, forKey: .status)
+            try c.encodeIfPresent(dueDate, forKey: .dueDate)
+            try c.encodeIfPresent(assignedTo, forKey: .assignedTo)
+        }
     }
 
     func updateProjectTask(

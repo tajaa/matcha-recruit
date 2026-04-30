@@ -189,6 +189,10 @@ class APIClient {
         }
         var urlRequest = URLRequest(url: url)
         urlRequest.httpMethod = method
+        // Binary endpoints (PDF, DOCX, signed-PDF download) should bypass
+        // URLCache. Without this, an earlier 500 response can be cached
+        // and subsequent retries return stale empty/error bodies.
+        urlRequest.cachePolicy = .reloadIgnoringLocalCacheData
         if let token = accessToken {
             urlRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
