@@ -1,7 +1,7 @@
 """Pydantic models for IR (Incident Report) module."""
 
 from datetime import datetime, date
-from typing import Optional, Literal, Any
+from typing import Optional, Literal, Any, Union
 from uuid import UUID
 from pydantic import BaseModel, Field
 
@@ -69,17 +69,28 @@ class NearMissData(BaseModel):
 # ===========================================
 
 class IRIncidentCreate(BaseModel):
-    """Request model for creating a new incident report."""
-    title: str = Field(..., min_length=1, max_length=255)
+    """Request model for creating a new incident report.
+
+    The slim submit form only collects: reporter name, free-text date,
+    location, description, witnesses, and recommended next steps. Title,
+    incident_type, and severity are inferred server-side (defaulted at
+    insert; auto-classified by IRAnalyzer in a background task).
+    """
+    title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
-    incident_type: IRIncidentType
-    severity: IRSeverity = "medium"
-    occurred_at: datetime
+    incident_type: Optional[IRIncidentType] = None
+    severity: Optional[IRSeverity] = "medium"
+    # Free text accepted from the submit form ("yesterday at 3pm"); the
+    # route handler parses with dateutil.parser and falls back to NOW().
+    occurred_at: Union[datetime, str]
     location: Optional[str] = Field(None, max_length=255)
     reported_by_name: str = Field(..., min_length=1, max_length=255)
     reported_by_email: Optional[str] = None
     witnesses: list[Witness] = []
     category_data: Optional[dict[str, Any]] = None
+    # User-entered "Recommended next steps" lands in the corrective_actions
+    # column so it shows up in the existing IR detail view immediately.
+    corrective_actions: Optional[str] = None
     # Accepts either employee UUIDs or HR-internal UIDs (badge / employee
     # numbers). UIDs get resolved server-side via employees.external_uid
     # before persisting; the column itself stores UUIDs only.

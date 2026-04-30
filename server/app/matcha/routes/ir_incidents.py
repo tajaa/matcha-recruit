@@ -175,6 +175,127 @@ def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _parse_occurred_at(value) -> datetime:
+    """Coerce IR submit `occurred_at` to a naive UTC datetime.
+
+    Accepts a real datetime (from rich clients / admin tooling) or a free
+    text string from the slim submit form ("yesterday at 3pm", "May 1 4pm").
+    Falls back to NOW() on parse failure rather than 400'ing — incident
+    capture should never block on a date typo.
+    """
+    if isinstance(value, datetime):
+        if value.tzinfo:
+            return value.astimezone(timezone.utc).replace(tzinfo=None)
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return _utc_now_naive()
+        try:
+            from dateutil import parser as _date_parser
+            parsed = _date_parser.parse(text, fuzzy=True)
+            if parsed.tzinfo:
+                parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+            return parsed
+        except (ValueError, OverflowError, TypeError):
+            return _utc_now_naive()
+    return _utc_now_naive()
+
+
+async def _auto_classify_incident_task(
+    incident_id: str,
+    *,
+    user_passed_type: bool,
+    user_passed_severity: bool,
+):
+    """Best-effort AI auto-categorization triggered after IR submit.
+
+    Runs categorize + severity in the background. Updates the row only
+    when the corresponding field was inserted with the system default
+    (so an explicit API caller passing `incident_type='safety'` is never
+    overridden). Caches both analyses to ir_incident_analysis so the
+    detail-view panels open without re-calling Gemini.
+
+    Any failure is logged and swallowed — never re-raised.
+    """
+    try:
+        from ..services.ir_analysis import get_ir_analyzer, IRAnalysisError
+    except Exception:  # pragma: no cover - import problems shouldn't crash submit
+        logger.exception("[IR] Unable to import IRAnalyzer for auto-classify")
+        return
+
+    try:
+        async with get_connection() as conn:
+            row = await conn.fetchrow(
+                """
+                SELECT id, title, description, location, reported_by_name,
+                       incident_type, severity, category_data
+                FROM ir_incidents WHERE id = $1
+                """,
+                incident_id,
+            )
+        if not row:
+            return
+
+        analyzer = get_ir_analyzer()
+
+        new_type: Optional[str] = None
+        try:
+            cat = await analyzer.categorize_incident(
+                title=row["title"] or "",
+                description=row["description"] or "",
+                location=row["location"],
+                reported_by=row["reported_by_name"],
+            )
+            async with get_connection() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                    VALUES ($1, 'categorization', $2)
+                    """,
+                    incident_id,
+                    json.dumps(cat),
+                )
+                if not user_passed_type and cat.get("suggested_type"):
+                    new_type = cat["suggested_type"]
+                    await conn.execute(
+                        "UPDATE ir_incidents SET incident_type = $1, updated_at = NOW() WHERE id = $2 AND incident_type = 'other'",
+                        new_type,
+                        incident_id,
+                    )
+        except IRAnalysisError as e:
+            logger.warning(f"[IR] auto-categorize failed for {incident_id}: {e}")
+
+        try:
+            sev = await analyzer.assess_severity(
+                title=row["title"] or "",
+                description=row["description"] or "",
+                incident_type=new_type or row["incident_type"] or "other",
+                location=row["location"],
+                category_data=_safe_json_loads(row["category_data"]) if row.get("category_data") else None,
+            )
+            async with get_connection() as conn:
+                await conn.execute(
+                    """
+                    INSERT INTO ir_incident_analysis (incident_id, analysis_type, analysis_data)
+                    VALUES ($1, 'severity', $2)
+                    """,
+                    incident_id,
+                    json.dumps(sev),
+                )
+                if not user_passed_severity and sev.get("suggested_severity"):
+                    await conn.execute(
+                        "UPDATE ir_incidents SET severity = $1, updated_at = NOW() WHERE id = $2 AND severity = 'medium'",
+                        sev["suggested_severity"],
+                        incident_id,
+                    )
+        except IRAnalysisError as e:
+            logger.warning(f"[IR] auto-severity failed for {incident_id}: {e}")
+
+    except Exception:
+        logger.exception(f"[IR] auto-classify task crashed for {incident_id}")
+
+
 async def _get_company_admin_contacts(company_id: str) -> tuple[str, list[dict[str, str]]]:
     """Return company display name and company-admin/client email recipients."""
     async with get_connection() as conn:
@@ -364,10 +485,30 @@ async def create_incident(
         # Clients are always scoped to their own company.
         effective_company_id = str(scoped_company_id) if scoped_company_id else None
 
-    # Ensure occurred_at is naive UTC for TIMESTAMP column
-    occurred_at = incident.occurred_at
-    if occurred_at.tzinfo:
-        occurred_at = occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
+    # The slim submit form sends free-text dates ("yesterday at 3pm"); the
+    # rich admin path still sends ISO datetimes. Helper handles both and
+    # falls back to NOW() on parse failure.
+    occurred_at = _parse_occurred_at(incident.occurred_at)
+
+    # Track whether the caller explicitly set type/severity so the
+    # background classifier knows whether to override.
+    user_passed_type = incident.incident_type is not None
+    user_passed_severity = (
+        incident.severity is not None and incident.severity != "medium"
+    )
+
+    effective_type = incident.incident_type or "other"
+    effective_severity = incident.severity or "medium"
+
+    # Title derives from the description if the caller didn't provide one
+    # (the slim form drops the Title field entirely).
+    raw_title = (incident.title or "").strip()
+    if not raw_title:
+        body = (incident.description or "Incident").strip()
+        # First line, capped at 80 chars, falls back to "Incident" for empty.
+        first_line = body.splitlines()[0] if body else "Incident"
+        raw_title = first_line[:80].strip() or "Incident"
+    effective_title = raw_title
 
     # Client-submitted incidents must be tied to one of the company's
     # business_locations. Admins are allowed to create cross-tenant or
@@ -406,16 +547,16 @@ async def create_incident(
                 incident_number, title, description, incident_type, severity,
                 occurred_at, location, reported_by_name, reported_by_email,
                 witnesses, category_data, involved_employee_ids,
-                company_id, location_id, created_by
+                company_id, location_id, created_by, corrective_actions
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             RETURNING *
             """,
             incident_number,
-            incident.title,
+            effective_title,
             incident.description,
-            incident.incident_type,
-            incident.severity,
+            effective_type,
+            effective_severity,
             occurred_at,
             incident.location,
             incident.reported_by_name,
@@ -426,6 +567,7 @@ async def create_incident(
             effective_company_id,
             str(incident.location_id) if incident.location_id else None,
             str(current_user.id),
+            (incident.corrective_actions or None),
         )
 
         # Fetch company/location names for response
@@ -460,7 +602,7 @@ async def create_incident(
             "incident_created",
             "incident",
             str(row["id"]),
-            {"title": incident.title, "type": incident.incident_type},
+            {"title": effective_title, "type": effective_type},
             request.client.host if request.client else None,
         )
 
@@ -485,6 +627,14 @@ async def create_incident(
                 previous_status=None,
                 location_name=location_name or row.get("location"),
                 occurred_at=row.get("occurred_at"),
+            )
+            # Auto-classify incident_type + severity from the description.
+            # Best-effort; the task swallows any failure so submit never blocks.
+            background_tasks.add_task(
+                _auto_classify_incident_task,
+                str(row["id"]),
+                user_passed_type=user_passed_type,
+                user_passed_severity=user_passed_severity,
             )
             background_tasks.add_task(
                 _auto_map_policy_violations,

@@ -43,17 +43,24 @@ export type IRIncident = {
   updated_at: string
 }
 
+// The submit form is now slim — only the fields the reporter actually
+// fills land in this payload. Everything else is inferred server-side
+// (title from description, incident_type + severity by IRAnalyzer in a
+// background task). `occurred_at` accepts free text ("yesterday at 3pm")
+// and the backend parses it with dateutil.
 export type IRIncidentCreate = {
-  title: string
+  title?: string
   description?: string | null
-  incident_type: IRIncidentType
+  incident_type?: IRIncidentType
   severity?: IRSeverity
   occurred_at: string
   location?: string | null
+  location_id?: string | null
   reported_by_name: string
   reported_by_email?: string | null
   witnesses?: IRWitness[]
   category_data?: Record<string, unknown> | null
+  corrective_actions?: string | null
 }
 
 export type IRDocument = {
