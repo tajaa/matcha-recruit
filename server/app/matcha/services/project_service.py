@@ -330,19 +330,7 @@ async def list_projects(
         query = f"""
             SELECT p.*,
                    rc.name AS hiring_client_name,
-                   (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count,
-                   (
-                       SELECT COALESCE(jsonb_agg(jsonb_build_object(
-                           'user_id', u.id,
-                           'name', COALESCE(NULLIF(TRIM(BOTH ' ' FROM COALESCE(u.name, '')), ''), u.email),
-                           'email', u.email,
-                           'avatar_url', u.avatar_url,
-                           'role', pc.role
-                       ) ORDER BY pc.role DESC, u.email), '[]'::jsonb)
-                       FROM mw_project_collaborators pc
-                       JOIN users u ON u.id = pc.user_id
-                       WHERE pc.project_id = p.id AND pc.status = 'active'
-                   ) AS collaborators_json
+                   (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
                    {role_subquery}
             FROM mw_projects p
             LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
@@ -350,6 +338,42 @@ async def list_projects(
             ORDER BY p.updated_at DESC
         """
         rows = await conn.fetch(query, *args)
+
+        # Second pass: load active collaborators for collab-typed projects
+        # in one follow-up query so the main list query stays simple. Best
+        # effort — if this lookup fails, projects still render without
+        # the collaborator pile.
+        collabs_by_project: dict[str, list[dict]] = {}
+        try:
+            collab_project_ids = [
+                r["id"] for r in rows
+                if (r["project_type"] if "project_type" in r.keys() else None) == "collab"
+            ]
+            if collab_project_ids:
+                pc_rows = await conn.fetch(
+                    """
+                    SELECT pc.project_id, pc.user_id, pc.role,
+                           COALESCE(NULLIF(BTRIM(COALESCE(u.name, '')), ''), u.email) AS name,
+                           u.email, u.avatar_url
+                    FROM mw_project_collaborators pc
+                    JOIN users u ON u.id = pc.user_id
+                    WHERE pc.project_id = ANY($1::uuid[]) AND pc.status = 'active'
+                    ORDER BY pc.role DESC, u.email
+                    """,
+                    collab_project_ids,
+                )
+                for cr in pc_rows:
+                    pid = str(cr["project_id"])
+                    collabs_by_project.setdefault(pid, []).append({
+                        "user_id": str(cr["user_id"]),
+                        "name": cr["name"],
+                        "email": cr["email"],
+                        "avatar_url": cr["avatar_url"],
+                        "role": cr["role"],
+                    })
+        except Exception as exc:
+            logger.warning("list_projects collaborators lookup failed: %s", exc)
+
     results = []
     for r in rows:
         p = _parse_project(r)
@@ -357,17 +381,9 @@ async def list_projects(
             p["collaborator_role"] = r["collaborator_role"]
         if "hiring_client_name" in r.keys():
             p["hiring_client_name"] = r["hiring_client_name"]
-        if "collaborators_json" in r.keys():
-            raw = r["collaborators_json"]
-            if isinstance(raw, str):
-                try:
-                    p["collaborators"] = json.loads(raw)
-                except (json.JSONDecodeError, ValueError):
-                    p["collaborators"] = []
-            elif isinstance(raw, list):
-                p["collaborators"] = raw
-            else:
-                p["collaborators"] = []
+        pid = str(p.get("id"))
+        if pid in collabs_by_project:
+            p["collaborators"] = collabs_by_project[pid]
         results.append(p)
     return results
 
