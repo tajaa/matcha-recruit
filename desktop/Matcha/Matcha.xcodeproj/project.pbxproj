@@ -49,6 +49,7 @@
 		DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */; };
 		DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */; };
 		DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770005 /* ChannelDetailView.swift */; };
+		DD00EE11FF22334455660D11 /* InviteToChannelSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */; };
 		E5454454BDC033D4A00E1FFC /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15F1E6446AC5C08F85073A51 /* APIClient.swift */; };
 		E6875027B0F5CBDE47D488EF /* Color+Extensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD198140CC378D9E843FA827 /* Color+Extensions.swift */; };
 		E8EB21EC67FE2F741A8AEA6A /* MessageBubbleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AE423DAF2E806EE77E7FB4D /* MessageBubbleView.swift */; };
@@ -114,6 +115,7 @@
 		DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsWebSocket.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsSidebarView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770005 /* ChannelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDetailView.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToChannelSheet.swift; sourceTree = "<group>"; };
 		E2B3C4D5F6071829A0B1C2D3 /* UsageSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UsageSummaryView.swift; sourceTree = "<group>"; };
 		EE11FF2233445566BB000001 /* RecruitingPipelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecruitingPipelineView.swift; sourceTree = "<group>"; };
 		F88AB428B69CD0DC86AF1AA9 /* ThreadDetailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadDetailViewModel.swift; sourceTree = "<group>"; };
@@ -313,6 +315,7 @@
 			children = (
 				DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */,
 				DD00EE11FF22334455770005 /* ChannelDetailView.swift */,
+				DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */,
 			);
 			path = Channels;
 			sourceTree = "<group>";
@@ -439,6 +442,7 @@
 				DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */,
 				DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */,
 				DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */,
+				DD00EE11FF22334455660D11 /* InviteToChannelSheet.swift in Sources */,
 				EE11FF2233445566AA000001 /* RecruitingPipelineView.swift in Sources */,
 				CC01AA22BB33CC44DD550001 /* ConsultationListView.swift in Sources */,
 				CC01AA22BB33CC44DD550002 /* NewConsultationSheet.swift in Sources */,

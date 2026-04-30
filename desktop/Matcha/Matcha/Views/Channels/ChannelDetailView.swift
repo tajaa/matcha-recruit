@@ -29,6 +29,8 @@ struct ChannelDetailView: View {
     @State private var replyingTo: ChannelMessage? = nil
     @State private var hoveredMessageId: String? = nil
     @State private var lastTypingSentAt: Date = .distantPast
+    @State private var showInviteSheet = false
+    @State private var inviteToast: String?
 
     private let ws = ChannelsWebSocket.shared
     private let senderColumnWidth: CGFloat = 160
@@ -78,6 +80,15 @@ struct ChannelDetailView: View {
             ws.leaveRoom(channelId: channelId)
             ws.clearCallbacksIfRoomMatches(channelId)
         }
+        .sheet(isPresented: $showInviteSheet) {
+            InviteToChannelSheet(
+                channelId: channelId,
+                channelName: channel?.name ?? "channel"
+            ) { addedCount in
+                inviteToast = "Invited \(addedCount) member\(addedCount == 1 ? "" : "s")"
+                Task { await loadChannel() }
+            }
+        }
     }
 
     // MARK: - Header
@@ -109,6 +120,21 @@ struct ChannelDetailView: View {
                             .font(.system(size: 10))
                             .foregroundColor(.white.opacity(0.4))
                     }
+                    Button {
+                        showInviteSheet = true
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "person.badge.plus").font(.system(size: 10))
+                            Text("Invite").font(.system(size: 10, weight: .medium))
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.matcha600.opacity(0.2))
+                        .foregroundColor(Color.matcha500)
+                        .cornerRadius(4)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Invite users to this channel")
                 }
             }
             if let desc = channel?.description, !desc.isEmpty {

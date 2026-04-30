@@ -140,10 +140,16 @@ struct ThreadListView: View {
                 Spacer()
             } else {
                 List(viewModel.filteredThreads, selection: $appState.selectedThreadId) { thread in
-                    ThreadRowView(thread: thread, onDelete: {
-                        threadToDelete = thread
-                        showDeleteConfirm = true
-                    })
+                    ThreadRowView(
+                        thread: thread,
+                        onDelete: {
+                            threadToDelete = thread
+                            showDeleteConfirm = true
+                        },
+                        onTogglePin: {
+                            Task { await viewModel.togglePin(thread: thread) }
+                        }
+                    )
                     .tag(thread.id)
                     .contextMenu {
                         Button(thread.isPinned ? "Unpin" : "Pin") {
@@ -235,27 +241,39 @@ extension Notification.Name {
 struct ThreadRowView: View {
     let thread: MWThread
     let onDelete: () -> Void
+    var onTogglePin: (() -> Void)? = nil
     @State private var isHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top) {
+                if thread.isPinned {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.matcha500)
+                }
                 Text(thread.title)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundColor(.white)
                     .lineLimit(1)
                 Spacer()
                 if isHovered {
+                    Button {
+                        onTogglePin?()
+                    } label: {
+                        Image(systemName: thread.isPinned ? "star.fill" : "star")
+                            .font(.system(size: 11))
+                            .foregroundColor(thread.isPinned ? .matcha500 : .secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help(thread.isPinned ? "Unstar" : "Star")
                     Button(action: onDelete) {
                         Image(systemName: "trash")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                } else if thread.isPinned {
-                    Image(systemName: "pin.fill")
-                        .font(.system(size: 9))
-                        .foregroundColor(.matcha500)
+                    .help("Delete")
                 }
             }
             HStack(spacing: 4) {

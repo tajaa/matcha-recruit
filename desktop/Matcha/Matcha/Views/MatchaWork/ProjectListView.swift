@@ -102,10 +102,27 @@ struct ProjectListView: View {
                     }
                 )) { project in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(project.title)
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            if project.isPinned ?? false {
+                                Image(systemName: "star.fill")
+                                    .font(.system(size: 9))
+                                    .foregroundColor(.matcha500)
+                            }
+                            Text(project.title)
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                            Spacer()
+                            Button {
+                                Task { await togglePin(project: project) }
+                            } label: {
+                                Image(systemName: (project.isPinned ?? false) ? "star.fill" : "star")
+                                    .font(.system(size: 11))
+                                    .foregroundColor((project.isPinned ?? false) ? .matcha500 : .secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help((project.isPinned ?? false) ? "Unstar" : "Star")
+                        }
                         HStack(spacing: 4) {
                             if let type = project.projectType {
                                 Text(type == "blog" ? "blog" : type)
@@ -124,6 +141,10 @@ struct ProjectListView: View {
                                     .padding(.vertical, 1)
                                     .background(Color.purple.opacity(0.12))
                                     .cornerRadius(3)
+                            }
+                            if project.projectType == "collab",
+                               let collabs = project.collaborators, !collabs.isEmpty {
+                                CollaboratorAvatarStack(collaborators: collabs)
                             }
                             if project.projectType == "blog" {
                                 let blogStatus = (project.projectData?["status"]?.value as? String) ?? "draft"
@@ -153,6 +174,9 @@ struct ProjectListView: View {
                     .padding(.vertical, 2)
                     .tag(project.id)
                     .contextMenu {
+                        Button((project.isPinned ?? false) ? "Unstar" : "Star") {
+                            Task { await togglePin(project: project) }
+                        }
                         Button("Archive") {
                             Task {
                                 try? await MatchaWorkService.shared.archiveProject(id: project.id)
@@ -180,10 +204,30 @@ struct ProjectListView: View {
     private func load() async {
         do {
             let p = try await MatchaWorkService.shared.listProjects()
+            // Filter out consultations (their own sidebar section), then sort
+            // pinned projects above unpinned. Within each bucket the original
+            // server order (created_at DESC) is preserved.
             let filtered = p.filter { $0.projectType != "consultation" }
-            await MainActor.run { projects = filtered; isLoading = false }
+            let sorted = filtered.enumerated().sorted { lhs, rhs in
+                let lp = lhs.element.isPinned ?? false
+                let rp = rhs.element.isPinned ?? false
+                if lp != rp { return lp && !rp }
+                return lhs.offset < rhs.offset
+            }.map { $0.element }
+            await MainActor.run { projects = sorted; isLoading = false }
         } catch {
             await MainActor.run { isLoading = false }
+        }
+    }
+
+    private func togglePin(project: MWProject) async {
+        let nextPinned = !(project.isPinned ?? false)
+        do {
+            _ = try await MatchaWorkService.shared.updateProjectMeta(id: project.id, isPinned: nextPinned)
+            await load()
+        } catch {
+            // Best-effort; surface as a console log only
+            print("[ProjectListView] togglePin failed: \(error)")
         }
     }
 
@@ -229,6 +273,51 @@ struct ProjectListView: View {
         case "collab": return "Collab"
         case "discipline": return "Disciplinary Action"
         default: return type.capitalized
+        }
+    }
+}
+
+/// Compact avatar pile shown on a collab project row in the sidebar so the
+/// user can see at a glance who's in the project. Caps at 4 avatars + a "+N"
+/// counter; tooltip lists the full set.
+struct CollaboratorAvatarStack: View {
+    let collaborators: [MWProjectCollaborator]
+    private let maxVisible = 4
+
+    var body: some View {
+        let visible = Array(collaborators.prefix(maxVisible))
+        let overflow = collaborators.count - visible.count
+
+        HStack(spacing: -6) {
+            ForEach(visible) { c in
+                avatar(for: c)
+                    .help("\(c.name)\(c.role == "owner" ? " (owner)" : "")")
+            }
+            if overflow > 0 {
+                ZStack {
+                    Circle()
+                        .fill(Color.zinc800)
+                        .frame(width: 18, height: 18)
+                        .overlay(Circle().stroke(Color.appBackground, lineWidth: 1.5))
+                    Text("+\(overflow)")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundColor(.secondary)
+                }
+                .help(collaborators.suffix(overflow).map { $0.name }.joined(separator: ", "))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func avatar(for c: MWProjectCollaborator) -> some View {
+        ZStack {
+            Circle()
+                .fill(Color.matcha500.opacity(0.4))
+                .frame(width: 18, height: 18)
+                .overlay(Circle().stroke(Color.appBackground, lineWidth: 1.5))
+            Text(String(c.name.prefix(1)).uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .foregroundColor(.white)
         }
     }
 }

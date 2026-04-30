@@ -74,6 +74,51 @@ class ChannelsService {
         return try await client.request(method: "POST", path: basePath, body: body)
     }
 
+    // MARK: - Invitations
+
+    struct InvitableUser: Codable, Identifiable {
+        let id: String
+        let email: String
+        let name: String
+        let role: String
+        let avatarUrl: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, email, name, role
+            case avatarUrl = "avatar_url"
+        }
+    }
+
+    func searchInvitableUsers(query: String, channelId: String? = nil) async throws -> [InvitableUser] {
+        var path = "\(basePath)/invitable-users"
+        var params: [String] = []
+        if !query.isEmpty {
+            let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+            params.append("q=\(encoded)")
+        }
+        if let cid = channelId {
+            params.append("channel_id=\(cid)")
+        }
+        if !params.isEmpty { path += "?" + params.joined(separator: "&") }
+        return try await client.request(method: "GET", path: path)
+    }
+
+    struct AddMembersRequest: Encodable {
+        let userIds: [String]
+        enum CodingKeys: String, CodingKey { case userIds = "user_ids" }
+    }
+
+    struct AddMembersResponse: Decodable {
+        let added: [String]?
+        let rejected: [String]?
+        let already_member: [String]?
+    }
+
+    func addMembers(channelId: String, userIds: [String]) async throws -> AddMembersResponse {
+        let body = AddMembersRequest(userIds: userIds)
+        return try await client.request(method: "POST", path: "\(basePath)/\(channelId)/members", body: body)
+    }
+
     // MARK: - Connections
 
     func listConnections() async throws -> [UserConnection] {
