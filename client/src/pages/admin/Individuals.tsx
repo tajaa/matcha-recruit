@@ -14,6 +14,7 @@ interface IndividualUser {
   subscription_token_limit: number
   subscription_tokens_remaining: number
   has_active_subscription: boolean
+  beta_features?: Record<string, boolean>
 }
 
 function formatTokens(n: number): string {
@@ -44,12 +45,27 @@ export default function Individuals() {
   const [inviting, setInviting] = useState(false)
   const [copied, setCopied] = useState(false)
 
-  useEffect(() => {
+  function fetchUsers() {
     api.get<IndividualUser[]>('/matcha-work/billing/admin/individuals')
       .then(setUsers)
       .catch(() => {})
       .finally(() => setLoading(false))
-  }, [])
+  }
+
+  useEffect(() => { fetchUsers() }, [])
+
+  async function toggleBetaFlag(userId: string, flag: string, value: boolean) {
+    setUsers(prev => prev.map(u =>
+      u.user_id === userId
+        ? { ...u, beta_features: { ...u.beta_features, [flag]: value } }
+        : u
+    ))
+    try {
+      await api.patch(`/admin/users/${userId}/beta-flags`, { [flag]: value })
+    } finally {
+      fetchUsers()
+    }
+  }
 
   async function handleCreateInvite() {
     if (!inviteEmail.trim()) return
@@ -159,13 +175,15 @@ export default function Individuals() {
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Tokens Used</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Token Limit</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400">Remaining</th>
+              <th className="text-center px-4 py-2.5 font-medium text-zinc-400">Beta Lite</th>
+              <th className="text-center px-4 py-2.5 font-medium text-zinc-400">Beta Full</th>
               <th className="text-left px-4 py-2.5 font-medium text-zinc-400 w-32">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-zinc-500">
+                <td colSpan={9} className="px-4 py-8 text-center text-zinc-500">
                   {search ? 'No users match your search.' : 'No individual users yet.'}
                 </td>
               </tr>
@@ -197,6 +215,22 @@ export default function Individuals() {
                     <span className={low ? 'text-red-400 font-medium' : 'text-zinc-400'}>
                       {formatTokens(u.free_tokens_remaining)}
                     </span>
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      checked={!!u.beta_features?.matcha_work_beta_lite}
+                      onChange={(e) => toggleBetaFlag(u.user_id, 'matcha_work_beta_lite', e.target.checked)}
+                      className="accent-emerald-500 w-3.5 h-3.5 cursor-pointer"
+                    />
+                  </td>
+                  <td className="px-4 py-3 text-center">
+                    <input
+                      type="checkbox"
+                      checked={!!u.beta_features?.matcha_work_beta_full}
+                      onChange={(e) => toggleBetaFlag(u.user_id, 'matcha_work_beta_full', e.target.checked)}
+                      className="accent-emerald-500 w-3.5 h-3.5 cursor-pointer"
+                    />
                   </td>
                   <td className="px-4 py-3">
                     <button

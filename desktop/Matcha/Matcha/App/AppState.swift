@@ -14,7 +14,15 @@ class AppState {
     var unreadInboxCount: Int = 0
     var notificationsUnreadCount: Int = 0
     var isPlusActive: Bool = false
+    var betaFeatures: [String: Bool] = [:]
     var isSceneActive: Bool = true
+
+    var mwBetaLite: Bool {
+        betaFeatures["matcha_work_beta_lite"] == true || betaFeatures["matcha_work_beta_full"] == true
+    }
+    var mwBetaFull: Bool {
+        betaFeatures["matcha_work_beta_full"] == true
+    }
     /// Bumped whenever a channel is created/joined/left so observing views
     /// reload their lists. Pairs with the existing `.mwChannelCreated`
     /// NotificationCenter signal — belt-and-suspenders for SwiftUI view
@@ -46,6 +54,14 @@ class AppState {
         startInboxPolling()
         startNotificationPolling()
         Task { await refreshSubscription() }
+        Task { await refreshBetaFeatures() }
+    }
+
+    @MainActor
+    func refreshBetaFeatures() async {
+        if let me = try? await AuthService.shared.fetchMe() {
+            betaFeatures = me.user.betaFeatures ?? [:]
+        }
     }
 
     @MainActor
@@ -78,6 +94,7 @@ class AppState {
         notificationPollTask?.cancel()
         notificationPollTask = nil
         notificationsUnreadCount = 0
+        betaFeatures = [:]
         MatchaWorkService.shared.updateCacheScope(nil)
         APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)
@@ -102,6 +119,7 @@ class AppState {
             return
         }
         await refreshSubscription()
+        await refreshBetaFeatures()
         // Nudge the channels socket to reconnect if it dropped.
         ChannelsWebSocket.shared.connect()
         // Best-effort heartbeat so presence flips green immediately.

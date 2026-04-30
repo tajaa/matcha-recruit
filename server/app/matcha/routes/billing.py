@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
@@ -302,6 +303,7 @@ class IndividualUserSummary(BaseModel):
     subscription_token_limit: int = 0
     subscription_tokens_remaining: int = 0
     has_active_subscription: bool = False
+    beta_features: dict = {}
 
 
 @admin_router.get("/admin/individuals")
@@ -314,6 +316,7 @@ async def admin_list_individual_users(
             """
             SELECT u.id AS user_id, u.email, u.created_at,
                    c.id AS company_id, c.name,
+                   COALESCE(u.beta_features, '{}'::jsonb) AS beta_features,
                    COALESCE(t.free_tokens_used, 0) AS free_tokens_used,
                    COALESCE(t.free_token_limit, 0) AS free_token_limit,
                    COALESCE(t.subscription_tokens_used, 0) AS subscription_tokens_used,
@@ -333,6 +336,7 @@ async def admin_list_individual_users(
             name=r["name"],
             company_id=r["company_id"],
             created_at=r["created_at"],
+            beta_features=json.loads(r["beta_features"]) if isinstance(r["beta_features"], str) else dict(r["beta_features"]),
             free_tokens_used=r["free_tokens_used"],
             free_token_limit=r["free_token_limit"],
             free_tokens_remaining=max(0, r["free_token_limit"] - r["free_tokens_used"]),

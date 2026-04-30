@@ -950,6 +950,29 @@ async def toggle_company_feature(company_id: UUID, request: FeatureToggleRequest
         return {"enabled_features": features}
 
 
+@router.patch("/users/{user_id}/beta-flags", dependencies=[Depends(require_admin)])
+async def patch_user_beta_flags(user_id: UUID, body: Dict[str, Any] = Body(...)):
+    """Set matcha_work_beta_lite / matcha_work_beta_full flags on a user."""
+    allowed = {"matcha_work_beta_lite", "matcha_work_beta_full"}
+    patch = {k: v for k, v in body.items() if k in allowed and isinstance(v, bool)}
+    if not patch:
+        raise HTTPException(status_code=400, detail="No valid beta flag keys provided")
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            UPDATE users
+            SET beta_features = COALESCE(beta_features, '{}'::jsonb) || $1::jsonb
+            WHERE id = $2
+            RETURNING beta_features
+            """,
+            json.dumps(patch),
+            user_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"beta_features": dict(row["beta_features"])}
+
+
 @router.post("/companies/{company_id}/credits")
 async def adjust_company_credits(
     company_id: UUID,

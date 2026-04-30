@@ -43,9 +43,11 @@ struct MeResponse: Codable {
         let email: String
         let role: String
         let avatarUrl: String?
+        let betaFeatures: [String: Bool]?
         enum CodingKeys: String, CodingKey {
             case id, email, role
             case avatarUrl = "avatar_url"
+            case betaFeatures = "beta_features"
         }
     }
     struct Profile: Codable {

@@ -1959,7 +1959,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                 current_user.id
             )
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded")), "beta_features": dict(current_user.beta_features)},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),
@@ -2046,7 +2046,7 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                         onboarding_needed["integrations"] = True
 
             return {
-                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded"))},
+                "user": {"id": str(current_user.id), "email": current_user.email, "role": current_user.role, "avatar_url": _avatar, "work_onboarded": bool(current_user.beta_features.get("work_onboarded")), "beta_features": dict(current_user.beta_features)},
                 "profile": {
                     "id": str(profile["id"]),
                     "user_id": str(profile["user_id"]),

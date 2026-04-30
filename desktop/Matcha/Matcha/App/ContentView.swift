@@ -64,7 +64,7 @@ struct ContentView: View {
 
                         Divider().opacity(0.2)
 
-                        if consultationsFeatureEnabled {
+                        if appState.mwBetaFull && consultationsFeatureEnabled {
                             sidebarSection(
                                 title: "Consultations",
                                 icon: "person.crop.rectangle.stack",
@@ -89,6 +89,7 @@ struct ContentView: View {
                             Divider().opacity(0.2)
                         }
 
+                        if appState.mwBetaLite {
                         sidebarSection(
                             title: "Projects",
                             icon: "folder",
@@ -184,6 +185,7 @@ struct ContentView: View {
                         }
 
                         Divider().opacity(0.2)
+                        } // end mwBetaLite
 
                         sidebarSection(
                             title: "Threads",
