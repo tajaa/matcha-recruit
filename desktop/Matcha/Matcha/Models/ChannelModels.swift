@@ -80,6 +80,8 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
     var reactions: [ChannelReaction]
     let createdAt: String
     let editedAt: String?
+    var deletedAt: String?
+    var deletedBy: String?
 
     enum CodingKeys: String, CodingKey {
         case id, content, attachments, reactions
@@ -91,6 +93,8 @@ struct ChannelMessage: Codable, Identifiable, Hashable {
         case replyPreview = "reply_preview"
         case createdAt = "created_at"
         case editedAt = "edited_at"
+        case deletedAt = "deleted_at"
+        case deletedBy = "deleted_by"
     }
 
     init(id: String, channelId: String, senderId: String, senderName: String,

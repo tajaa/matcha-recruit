@@ -425,6 +425,39 @@ async def channel_websocket(
                                 "created_at": row["created_at"].isoformat(),
                                 "edited_at": None,
                             })
+
+                            # In-app notifications for non-sender members
+                            try:
+                                from ...matcha.services import notification_service as _notif_svc
+                                _ch_name = await conn.fetchval(
+                                    "SELECT name FROM channels WHERE id = $1", ch_uuid
+                                )
+                                _members = await conn.fetch(
+                                    """
+                                    SELECT cm.user_id, COALESCE(c.company_id, e.org_id) AS company_id
+                                    FROM channel_members cm
+                                    JOIN users u ON u.id = cm.user_id
+                                    LEFT JOIN clients c ON c.user_id = u.id
+                                    LEFT JOIN employees e ON e.user_id = u.id
+                                    WHERE cm.channel_id = $1 AND cm.user_id != $2
+                                      AND cm.removed_for_inactivity IS NOT TRUE
+                                    """,
+                                    ch_uuid, user.id,
+                                )
+                                _preview = (row["content"] or "")[:80]
+                                import asyncio as _aio
+                                for _m in _members:
+                                    if _m["company_id"]:
+                                        _aio.create_task(_notif_svc.create_notification(
+                                            user_id=_m["user_id"],
+                                            company_id=_m["company_id"],
+                                            type="channel_message",
+                                            title=f"#{_ch_name}",
+                                            body=f"{user.name}: {_preview}",
+                                            link="/work",
+                                        ))
+                            except Exception:
+                                pass
                         else:
                             await websocket.send_json({
                                 "type": "error",

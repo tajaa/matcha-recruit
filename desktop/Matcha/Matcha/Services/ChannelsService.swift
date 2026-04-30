@@ -220,4 +220,8 @@ class ChannelsService {
         )
         return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
+
+    func deleteMessage(channelId: String, messageId: String) async throws {
+        _ = try await client.requestData(method: "DELETE", path: "\(basePath)/\(channelId)/messages/\(messageId)")
+    }
 }

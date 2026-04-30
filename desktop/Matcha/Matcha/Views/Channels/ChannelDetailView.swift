@@ -160,12 +160,14 @@ struct ChannelDetailView: View {
                         messageRow(msg).id(msg.id)
                     }
                     if !typingUsers.isEmpty {
-                        HStack(spacing: 0) {
+                        HStack(alignment: .center, spacing: 6) {
                             Spacer().frame(width: senderColumnWidth + 16)
-                            Text("\(typingUsers.values.sorted().joined(separator: ", ")) typing…")
+                            TypingBubbleView()
+                            Text(typingUsers.values.sorted().joined(separator: ", "))
                                 .font(.system(size: 10))
                                 .foregroundColor(.white.opacity(0.35))
                         }
+                        .transition(.opacity)
                     }
                 }
                 .padding(.vertical, 14)
@@ -273,7 +275,12 @@ struct ChannelDetailView: View {
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                     }
-                    if !msg.content.isEmpty {
+                    if msg.deletedAt != nil {
+                        Text("message deleted")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .italic()
+                    } else if !msg.content.isEmpty {
                         Text(msg.content)
                             .font(.system(size: 13))
                             .foregroundColor(.primary.opacity(0.9))
@@ -281,7 +288,7 @@ struct ChannelDetailView: View {
                             .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    if !msg.attachments.isEmpty {
+                    if msg.deletedAt == nil && !msg.attachments.isEmpty {
                         attachmentList(msg.attachments)
                     }
 
@@ -327,7 +334,7 @@ struct ChannelDetailView: View {
         )
         .onHover { hovering in hoveredMessageId = hovering ? msg.id : nil }
         .overlay(alignment: .topTrailing) {
-            if hoveredMessageId == msg.id {
+            if hoveredMessageId == msg.id && msg.deletedAt == nil {
                 HStack(spacing: 2) {
                     Button { replyingTo = msg } label: {
                         Image(systemName: "arrowshape.turn.up.left")
@@ -352,6 +359,7 @@ struct ChannelDetailView: View {
                     }
                 }
                 .padding(4)
+                .onHover { if $0 { hoveredMessageId = msg.id } }
             }
         }
         .contentShape(Rectangle())
@@ -378,6 +386,31 @@ struct ChannelDetailView: View {
                 }
             } label: {
                 Label("React", systemImage: "face.smiling")
+            }
+
+            if msg.senderId == appState.currentUser?.id {
+                Divider()
+                Button(role: .destructive) {
+                    deleteMessage(msg)
+                } label: {
+                    Label("Delete message", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    private func deleteMessage(_ msg: ChannelMessage) {
+        Task {
+            do {
+                try await ChannelsService.shared.deleteMessage(channelId: channelId, messageId: msg.id)
+                await MainActor.run {
+                    if let idx = messages.firstIndex(where: { $0.id == msg.id }) {
+                        messages[idx].deletedAt = ISO8601DateFormatter().string(from: Date())
+                        messages[idx].deletedBy = appState.currentUser?.id ?? ""
+                    }
+                }
+            } catch {
+                errorMessage = "Delete failed: \(error.localizedDescription)"
             }
         }
     }
@@ -779,6 +812,12 @@ struct ChannelDetailView: View {
                 typingUsers.removeValue(forKey: userId)
             }
         }
+        ws.onMessageDeleted = { messageId, deletedBy in
+            if let idx = messages.firstIndex(where: { $0.id == messageId }) {
+                messages[idx].deletedAt = ISO8601DateFormatter().string(from: Date())
+                messages[idx].deletedBy = deletedBy
+            }
+        }
         ws.onReactionUpdate = { messageId, reactions in
             if let idx = messages.firstIndex(where: { $0.id == messageId }) {
                 messages[idx].reactions = reactions
@@ -803,5 +842,39 @@ struct ChannelDetailView: View {
         let display = DateFormatter()
         display.dateFormat = "HH:mm"
         return display.string(from: date)
+    }
+}
+
+// MARK: - Typing bubble
+
+private struct TypingBubbleView: View {
+    @State private var phase: Int = 0
+
+    private let dotSize: CGFloat = 5
+    private let dotColor = Color.white.opacity(0.4)
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .fill(dotColor)
+                    .frame(width: dotSize, height: dotSize)
+                    .scaleEffect(phase == i ? 1.4 : 0.8)
+                    .animation(
+                        .easeInOut(duration: 0.4)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(i) * 0.15),
+                        value: phase
+                    )
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
+        .background(Color.white.opacity(0.07))
+        .cornerRadius(10)
+        .onAppear {
+            phase = 0
+            withAnimation { phase = 2 }
+        }
     }
 }
