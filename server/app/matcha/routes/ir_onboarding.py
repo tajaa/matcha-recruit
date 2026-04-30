@@ -166,9 +166,12 @@ async def create_ir_location(
     same table so any later upgrade flips a flag and the data carries
     over without migration.
 
-    Idempotent on the existing UNIQUE (company_id, lower(city), upper(state))
-    constraint — re-submitting the same city/state from the wizard reactivates
-    rather than duplicating.
+    Plain INSERT — multi-store tenants (e.g. two clinics in same city)
+    need distinct rows. The unique index on (company, lower(city),
+    upper(state)) is partial to source='employee_derived' rows only,
+    so compliance's auto-derive idempotency holds while manual rows
+    can repeat. Re-activating an old row is the management page's job
+    via PATCH, not an upsert here.
     """
     company_id = await get_client_company_id(current_user)
     if company_id is None:
@@ -181,12 +184,6 @@ async def create_ir_location(
                 company_id, name, address, city, state, zipcode, is_active
             )
             VALUES ($1, $2, $3, $4, $5, $6, true)
-            ON CONFLICT (company_id, lower(city), upper(state)) DO UPDATE
-                SET name = COALESCE(EXCLUDED.name, business_locations.name),
-                    address = COALESCE(EXCLUDED.address, business_locations.address),
-                    zipcode = COALESCE(EXCLUDED.zipcode, business_locations.zipcode),
-                    is_active = true,
-                    updated_at = NOW()
             RETURNING id, name, address, city, state, zipcode, is_active
             """,
             company_id,

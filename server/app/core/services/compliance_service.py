@@ -4035,7 +4035,7 @@ async def ensure_location_for_employee(
         INSERT INTO business_locations
             (company_id, name, address, city, state, county, zipcode, source, coverage_status)
         VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8)
-        ON CONFLICT (company_id, LOWER(city), UPPER(state)) DO UPDATE
+        ON CONFLICT (company_id, LOWER(city), UPPER(state)) WHERE source = 'employee_derived' DO UPDATE
             SET is_active = true, updated_at = NOW(),
                 zipcode = CASE WHEN business_locations.zipcode = '' OR business_locations.zipcode IS NULL
                                THEN EXCLUDED.zipcode ELSE business_locations.zipcode END
