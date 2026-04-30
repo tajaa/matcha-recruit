@@ -3103,11 +3103,16 @@ async def update_project_endpoint(
     """
     from ..services import project_service as proj_svc
     from ..services import recruiting_client_service as rc_svc
-    await _verify_project_access(project_id, current_user)
+    project, _role = await _verify_project_access(project_id, current_user)
 
-    # Per-user pin handoff (legacy API compat)
+    # Per-user pin handoff (legacy API compat). Don't write to the global
+    # is_pinned column anymore — pin lives in mw_project_pins per caller.
     if "is_pinned" in body:
-        await proj_svc.set_project_pin(current_user.id, project_id, bool(body.pop("is_pinned")))
+        new_pinned = bool(body.pop("is_pinned"))
+        await proj_svc.set_project_pin(current_user.id, project_id, new_pinned)
+        # Reflect the new pin state on the project we already loaded so a
+        # pin-only request still returns a coherent response.
+        project["is_pinned"] = new_pinned
 
     if "hiring_client_id" in body and body["hiring_client_id"] is not None:
         company_id = await get_client_company_id(current_user)
@@ -3119,10 +3124,11 @@ async def update_project_endpoint(
             raise HTTPException(status_code=400, detail="Hiring client does not belong to this workspace")
 
     if not body:
-        # Pin-only request — return the latest project shape via the GET path
-        # so the response stays consistent with the legacy contract.
-        company_id = await get_client_company_id(current_user)
-        return await proj_svc.get_project(project_id, company_id, user_id=current_user.id)
+        # Pin-only request — return the project shape we already loaded
+        # via _verify_project_access. Avoids a second DB roundtrip and
+        # works for cross-tenant collaborators (whose project doesn't
+        # match the caller's company_id and would 404 via get_project).
+        return project
     return await proj_svc.update_project(project_id, body)
 
 

@@ -36,22 +36,16 @@ def upgrade():
         ON mw_project_pins(user_id, created_at DESC)
     """)
 
-    # Backfill: project owner gets a row for any project where the legacy
-    # global flag is set, plus every active collaborator gets a row for
-    # those same projects so nobody loses an existing star.
+    # Backfill: only the project's creator gets a row for any project
+    # where the legacy global flag is set. Backfilling every active
+    # collaborator would re-create the shared-pin behaviour we're trying
+    # to leave behind — collaborators never explicitly starred those
+    # projects, the global flag just leaked. They can re-star themselves.
     op.execute("""
         INSERT INTO mw_project_pins (user_id, project_id)
         SELECT p.created_by, p.id
         FROM mw_projects p
         WHERE p.is_pinned = TRUE
-        ON CONFLICT (user_id, project_id) DO NOTHING
-    """)
-    op.execute("""
-        INSERT INTO mw_project_pins (user_id, project_id)
-        SELECT pc.user_id, pc.project_id
-        FROM mw_project_collaborators pc
-        JOIN mw_projects p ON p.id = pc.project_id
-        WHERE p.is_pinned = TRUE AND pc.status = 'active'
         ON CONFLICT (user_id, project_id) DO NOTHING
     """)
 
