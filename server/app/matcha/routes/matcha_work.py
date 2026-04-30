@@ -5642,6 +5642,25 @@ async def sync_project_interviews(
     return {"updated": updated}
 
 
+def _render_inline_md(text: str) -> str:
+    """Inline-only markdown matching SwiftUI inlineOnlyPreservingWhitespace.
+
+    Converts **bold**, *italic*, `code` but leaves block structure (lists,
+    headings, checkboxes) as literal text so the PDF matches the desktop preview.
+    """
+    import re as _re_i, html as _html_i
+    out = []
+    for line in text.split('\n'):
+        s = _html_i.escape(line)
+        s = _re_i.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', s)
+        s = _re_i.sub(r'__(.+?)__', r'<strong>\1</strong>', s)
+        s = _re_i.sub(r'\*([^*\n]+?)\*', r'<em>\1</em>', s)
+        s = _re_i.sub(r'(?<!\w)_([^_\n]+?)_(?!\w)', r'<em>\1</em>', s)
+        s = _re_i.sub(r'`([^`\n]+?)`', r'<code>\1</code>', s)
+        out.append(s)
+    return '<br>'.join(out)
+
+
 async def _render_project_pdf(project: dict) -> bytes:
     """Render a project's title + sections to PDF bytes.
 
@@ -5687,11 +5706,7 @@ async def _render_project_pdf(project: dict) -> bytes:
         if content.lstrip().startswith("<"):
             content_html = content
         else:
-            try:
-                import markdown as _md
-                content_html = _md.markdown(content, extensions=["tables", "fenced_code", "nl2br"])
-            except ImportError:
-                content_html = f"<p>{_html.escape(content)}</p>"
+            content_html = f"<div>{_render_inline_md(content)}</div>"
         sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
 
     body_html = "\n".join(sections_html)
@@ -5707,9 +5722,7 @@ async def _render_project_pdf(project: dict) -> bytes:
   .section-num {{ color: #22c55e; font-weight: 700; }}
   img {{ max-width: 100%; height: auto; page-break-inside: avoid; margin: 12px 0; border-radius: 4px; }}
   .section-body {{ margin-bottom: 16px; }}
-  .section-body p {{ margin: 6px 0; color: #334155; }}
-  .section-body ul, .section-body ol {{ margin: 6px 0; padding-left: 22px; color: #334155; }}
-  .section-body li {{ margin: 3px 0; }}
+  .section-body div {{ color: #334155; line-height: 1.7; }}
   .section-body strong {{ color: #0f172a; }}
   pre {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px; font-size: 9pt; white-space: pre-wrap; overflow-wrap: break-word; }}
   code {{ background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 9pt; color: #b45309; }}
@@ -5838,11 +5851,7 @@ async def export_project_endpoint(
             if content.lstrip().startswith("<"):
                 content_html = content
             else:
-                try:
-                    import markdown as _md
-                    content_html = _md.markdown(content, extensions=["tables", "fenced_code", "nl2br"])
-                except ImportError:
-                    content_html = f"<p>{_html.escape(content)}</p>"
+                content_html = f"<div>{_render_inline_md(content)}</div>"
             sections_html.append(f"{heading}\n<div class='section-body'>{content_html}</div>")
 
         body_html = "\n".join(sections_html)
@@ -5858,9 +5867,7 @@ async def export_project_endpoint(
   .section-num {{ color: #22c55e; font-weight: 700; }}
   img {{ max-width: 100%; height: auto; page-break-inside: avoid; margin: 12px 0; border-radius: 4px; }}
   .section-body {{ margin-bottom: 16px; }}
-  .section-body p {{ margin: 6px 0; color: #334155; }}
-  .section-body ul, .section-body ol {{ margin: 6px 0; padding-left: 22px; color: #334155; }}
-  .section-body li {{ margin: 3px 0; }}
+  .section-body div {{ color: #334155; line-height: 1.7; }}
   .section-body strong {{ color: #0f172a; }}
   pre {{ background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px; font-size: 9pt; white-space: pre-wrap; overflow-wrap: break-word; }}
   code {{ background: #f1f5f9; padding: 1px 5px; border-radius: 3px; font-size: 9pt; color: #b45309; }}
