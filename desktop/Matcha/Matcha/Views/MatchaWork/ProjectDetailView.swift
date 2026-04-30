@@ -40,6 +40,8 @@ struct ProjectDetailView: View {
     @State private var showRenameAlert = false
     @State private var renameDraft = ""
     @State private var standardMode: StandardProjectMode = .edit
+    @State private var collabDiscussionChannelId: String?
+    @State private var collabChannelLoadError: String?
     @AppStorage("mw-chat-theme") private var lightMode = false
     @AppStorage("mw-model") private var selectedModelId = "flash"
 
@@ -238,11 +240,7 @@ struct ProjectDetailView: View {
 
             switch collabPanel {
             case .chat:
-                if viewModel.activeChatId != nil {
-                    ChatPanelView(viewModel: chatVM, lightMode: lightMode, selectedModel: selectedModelValue)
-                } else {
-                    chatLoadingView
-                }
+                collabChatView
             case .kanban:
                 KanbanBoardView(viewModel: viewModel)
             case .files:
@@ -254,13 +252,63 @@ struct ProjectDetailView: View {
             }
         }
         .background(Color.appBackground)
-        .task {
-            // Auto-create the project chat once when the layout first appears so
-            // the Chat tab works immediately. Idempotent — guarded on
-            // activeChatId / errorMessage so retries don't double-fire.
-            if viewModel.activeChatId == nil && viewModel.errorMessage == nil {
-                await viewModel.createChat(title: nil)
+        .task(id: viewModel.project?.id) {
+            // Lazy-create the per-project discussion channel for the
+            // collaborator-to-collaborator chat. Idempotent server-side.
+            await ensureCollabDiscussionChannel()
+        }
+    }
+
+    @ViewBuilder
+    private var collabChatView: some View {
+        if let channelId = collabDiscussionChannelId {
+            ChannelDetailView(channelId: channelId)
+        } else if let err = collabChannelLoadError {
+            VStack(spacing: 12) {
+                Spacer()
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28))
+                    .foregroundColor(.red)
+                Text("Couldn't open collab chat")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                Text(err)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button("Retry") {
+                    collabChannelLoadError = nil
+                    Task { await ensureCollabDiscussionChannel() }
+                }
+                .buttonStyle(.bordered)
+                Spacer()
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.appBackground)
+        } else {
+            VStack(spacing: 10) {
+                Spacer()
+                ProgressView().tint(.secondary)
+                Text("Setting up the collab channel…")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.appBackground)
+        }
+    }
+
+    private func ensureCollabDiscussionChannel() async {
+        guard let pid = viewModel.project?.id,
+              viewModel.project?.projectType == "collab" else { return }
+        if collabDiscussionChannelId != nil { return }
+        do {
+            let id = try await MatchaWorkService.shared.ensureProjectDiscussionChannel(projectId: pid)
+            await MainActor.run { collabDiscussionChannelId = id }
+        } catch {
+            await MainActor.run { collabChannelLoadError = error.localizedDescription }
         }
     }
 

@@ -4646,6 +4646,35 @@ async def save_diagram(
 # ── Project collaborator endpoints ──
 
 
+@router.post("/projects/{project_id}/discussion-channel")
+async def ensure_project_discussion_channel(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Get or create the private channel for a collab project's discussion.
+
+    Idempotent. The channel is shared by all active collaborators and is
+    the recommended chat surface for the collab project type. Returns
+    `{ "channel_id": "<uuid>" }` for collab projects, or 404 for any
+    other project type.
+    """
+    from ..services import project_service as proj_svc
+
+    company_id = await get_client_company_id(current_user)
+    async with get_connection() as conn:
+        owner_row = await conn.fetchrow(
+            "SELECT company_id FROM mw_projects WHERE id = $1",
+            project_id,
+        )
+    if not owner_row or owner_row["company_id"] != company_id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    channel_id = await proj_svc.ensure_discussion_channel(project_id, current_user.id)
+    if channel_id is None:
+        raise HTTPException(status_code=400, detail="Discussion channels are only available for collab projects")
+    return {"channel_id": str(channel_id)}
+
+
 @router.get("/projects/{project_id}/collaborators")
 async def list_project_collaborators(
     project_id: UUID,

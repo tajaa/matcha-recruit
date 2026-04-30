@@ -12,6 +12,9 @@ struct ContentView: View {
     @AppStorage("mw-sidebar-consultations-open") private var consultationsSectionOpen = false
     @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = true
     @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = true
+    /// Off by default — only consulting users see the Consultations section.
+    /// Toggle on from ProfileSheet → "Show Consultations" to surface it.
+    @AppStorage("mw-feature-consultations-enabled") private var consultationsFeatureEnabled = false
     @State private var showNewConsultation = false
     @State private var showNewBlog = false
     @State private var pendingConnectionsCount = 0
@@ -61,28 +64,30 @@ struct ContentView: View {
 
                         Divider().opacity(0.2)
 
-                        sidebarSection(
-                            title: "Consultations",
-                            icon: "person.crop.rectangle.stack",
-                            isOpen: $consultationsSectionOpen,
-                            trailing: {
-                                Button { showNewConsultation = true } label: {
-                                    Image(systemName: "plus")
-                                        .font(.system(size: 10, weight: .semibold))
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 18, height: 18)
-                                        .background(Color.zinc800)
-                                        .cornerRadius(4)
+                        if consultationsFeatureEnabled {
+                            sidebarSection(
+                                title: "Consultations",
+                                icon: "person.crop.rectangle.stack",
+                                isOpen: $consultationsSectionOpen,
+                                trailing: {
+                                    Button { showNewConsultation = true } label: {
+                                        Image(systemName: "plus")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(.secondary)
+                                            .frame(width: 18, height: 18)
+                                            .background(Color.zinc800)
+                                            .cornerRadius(4)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("New consultation")
                                 }
-                                .buttonStyle(.plain)
-                                .help("New consultation")
+                            ) {
+                                ConsultationListView(showHeader: false)
+                                    .frame(height: 240)
                             }
-                        ) {
-                            ConsultationListView(showHeader: false)
-                                .frame(height: 240)
-                        }
 
-                        Divider().opacity(0.2)
+                            Divider().opacity(0.2)
+                        }
 
                         sidebarSection(
                             title: "Projects",

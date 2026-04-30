@@ -15,6 +15,8 @@ struct ProfileSheet: View {
     @State private var isUploadingAvatar = false
     @State private var errorMessage: String?
 
+    @AppStorage("mw-feature-consultations-enabled") private var consultationsFeatureEnabled = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("profile")
@@ -46,6 +48,27 @@ struct ProfileSheet: View {
                 Text(errorMessage)
                     .font(.system(size: 10))
                     .foregroundColor(.red.opacity(0.8))
+            }
+
+            Divider().opacity(0.2)
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("preferences")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.white.opacity(0.4))
+                    .textCase(.uppercase)
+                Toggle(isOn: $consultationsFeatureEnabled) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Show Consultations section")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.85))
+                        Text("Adds a sidebar section for consulting engagements.")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.4))
+                    }
+                }
+                .toggleStyle(.switch)
+                .controlSize(.small)
             }
 
             HStack {

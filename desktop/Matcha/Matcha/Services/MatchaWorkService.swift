@@ -382,6 +382,17 @@ class MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/presence/online")
     }
 
+    // MARK: - Collab Discussion Channel
+
+    func ensureProjectDiscussionChannel(projectId: String) async throws -> String {
+        struct Res: Codable { let channel_id: String }
+        let res: Res = try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(projectId)/discussion-channel"
+        )
+        return res.channel_id
+    }
+
     // MARK: - Notifications
 
     func fetchNotifications(unreadOnly: Bool = false, limit: Int = 30) async throws -> [MWAppNotification] {

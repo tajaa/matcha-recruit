@@ -1314,6 +1314,94 @@ async def list_collaborators(project_id: UUID) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def ensure_discussion_channel(project_id: UUID, current_user_id: UUID) -> Optional[UUID]:
+    """Get or create a private channel for a collab project's discussion.
+
+    The channel id is stored at `project_data.discussion_channel_id`. All
+    active collaborators are added as channel members on creation.
+    Idempotent — returns the existing channel id if already linked.
+    """
+    async with get_connection() as conn:
+        async with conn.transaction():
+            project = await conn.fetchrow(
+                "SELECT id, company_id, title, project_type, project_data FROM mw_projects WHERE id = $1 FOR UPDATE",
+                project_id,
+            )
+            if not project:
+                return None
+            if project["project_type"] != "collab":
+                return None
+
+            data = project["project_data"]
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data or "{}")
+                except (json.JSONDecodeError, ValueError):
+                    data = {}
+            data = data or {}
+
+            existing_id = data.get("discussion_channel_id")
+            if existing_id:
+                return UUID(existing_id) if isinstance(existing_id, str) else existing_id
+
+            company_id = project["company_id"]
+            title = (project["title"] or "Project").strip() or "Project"
+
+            base_slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:60] or "project"
+            slug = f"proj-{base_slug}"
+            suffix = 0
+            while await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM channels WHERE company_id = $1 AND slug = $2)",
+                company_id, slug,
+            ):
+                suffix += 1
+                slug = f"proj-{base_slug}-{suffix}"
+
+            channel = await conn.fetchrow(
+                """
+                INSERT INTO channels (company_id, name, slug, description, created_by, visibility,
+                    is_paid, currency, inactivity_warning_days)
+                VALUES ($1, $2, $3, $4, $5, 'private', FALSE, 'usd', 3)
+                RETURNING id
+                """,
+                company_id,
+                title,
+                slug,
+                f"Discussion channel for collab project: {title}",
+                current_user_id,
+            )
+            channel_id = channel["id"]
+
+            await conn.execute(
+                "INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at) VALUES ($1, $2, 'owner', NOW())",
+                channel_id, current_user_id,
+            )
+
+            collab_rows = await conn.fetch(
+                """
+                SELECT user_id FROM mw_project_collaborators
+                WHERE project_id = $1 AND status = 'active' AND user_id != $2
+                """,
+                project_id, current_user_id,
+            )
+            for row in collab_rows:
+                await conn.execute(
+                    """
+                    INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+                    VALUES ($1, $2, 'member', NOW())
+                    ON CONFLICT (channel_id, user_id) DO NOTHING
+                    """,
+                    channel_id, row["user_id"],
+                )
+
+            data["discussion_channel_id"] = str(channel_id)
+            await conn.execute(
+                "UPDATE mw_projects SET project_data = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(data), project_id,
+            )
+            return channel_id
+
+
 async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) -> list[dict]:
     """Add a user as a collaborator. Returns updated collaborator list."""
     async with get_connection() as conn:
@@ -1349,6 +1437,35 @@ async def add_collaborator(project_id: UUID, user_id: UUID, invited_by: UUID) ->
         await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, invited_by)
         await conn.execute("INSERT INTO inbox_participants (conversation_id, user_id) VALUES ($1, $2)", conv_id, user_id)
         await conn.execute("INSERT INTO inbox_messages (conversation_id, sender_id, content) VALUES ($1, $2, $3)", conv_id, invited_by, msg_content)
+
+        # If the project already has a discussion channel, auto-add the new
+        # collaborator. The channel is the chat surface for collab projects.
+        proj_data_row = await conn.fetchrow(
+            "SELECT project_type, project_data FROM mw_projects WHERE id = $1",
+            project_id,
+        )
+        if proj_data_row and proj_data_row["project_type"] == "collab":
+            data = proj_data_row["project_data"]
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data or "{}")
+                except (json.JSONDecodeError, ValueError):
+                    data = {}
+            data = data or {}
+            chan_id = data.get("discussion_channel_id")
+            if chan_id:
+                try:
+                    await conn.execute(
+                        """
+                        INSERT INTO channel_members (channel_id, user_id, role, last_contributed_at)
+                        VALUES ($1, $2, 'member', NOW())
+                        ON CONFLICT (channel_id, user_id) DO NOTHING
+                        """,
+                        UUID(chan_id) if isinstance(chan_id, str) else chan_id,
+                        user_id,
+                    )
+                except Exception as exc:
+                    logger.warning("ensure collab channel member failed: %s", exc)
 
     return await list_collaborators(project_id)
 
