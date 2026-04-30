@@ -1,19 +1,27 @@
 import type { MeClientProfile } from '../types/dashboard'
 
 /**
- * True when the company is a self-serve Matcha IR free-beta tenant.
+ * True when the company is on a self-serve IR tier (free beta or paid Lite).
  *
- * Both signals must match: signup_source pins the path the company
- * came in through (so a partially-provisioned bespoke customer with
- * only `incidents` enabled doesn't fall into the slim layout), and
- * enabled_features.incidents confirms the IR feature is actually on.
+ * Accepts both signup_source='ir_only_self_serve' (free IR beta) and
+ * 'matcha_lite' (paid, headcount-based). Both route to IrSidebar once
+ * the incidents feature is on. enabled_features.incidents must be true
+ * so a matcha_lite company that hasn't completed payment doesn't land here.
  */
 export function isIrOnlyTier(profile: MeClientProfile | null | undefined): boolean {
   if (!profile) return false
-  return (
-    profile.signup_source === 'ir_only_self_serve' &&
-    !!profile.enabled_features?.incidents
-  )
+  const src = profile.signup_source
+  if (src !== 'ir_only_self_serve' && src !== 'matcha_lite') return false
+  return !!profile.enabled_features?.incidents
+}
+
+/**
+ * True for a matcha_lite company that registered but hasn't completed
+ * the Stripe checkout yet (incidents feature is still false).
+ */
+export function isMatchaLitePending(profile: MeClientProfile | null | undefined): boolean {
+  if (!profile) return false
+  return profile.signup_source === 'matcha_lite' && !profile.enabled_features?.incidents
 }
 
 /**

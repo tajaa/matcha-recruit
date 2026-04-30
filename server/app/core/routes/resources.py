@@ -247,6 +247,74 @@ async def create_ir_upgrade_checkout(
 
 
 # ---------------------------------------------------------------------------
+# Matcha Lite — headcount-based subscription checkout
+# ---------------------------------------------------------------------------
+
+
+class LiteCheckoutRequest(BaseModel):
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
+
+
+@router.post("/checkout/lite", response_model=UpgradeCheckoutResponse)
+async def create_lite_checkout(
+    body: LiteCheckoutRequest,
+    current_user: CurrentUser = Depends(require_client),
+):
+    """Open a Stripe subscription checkout for Matcha Lite.
+
+    Pricing: $100/month per 10 employees (ceiling), read from the headcount stored
+    at registration time. Headcount > 300 is rejected — must contact sales.
+    The webhook activates incidents + employees + discipline on successful payment.
+    Only callable by matcha_lite companies.
+    """
+    from ..services.stripe_service import StripeService, StripeServiceError
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="No company associated with this account")
+
+    async with get_connection() as conn:
+        row = await conn.fetchrow(
+            """
+            SELECT c.signup_source, COALESCE(chp.headcount, 0) AS headcount
+            FROM companies c
+            LEFT JOIN company_handbook_profiles chp ON chp.company_id = c.id
+            WHERE c.id = $1
+            """,
+            company_id,
+        )
+
+    if not row or row["signup_source"] != "matcha_lite":
+        raise HTTPException(status_code=403, detail="This endpoint is only available for Matcha Lite accounts")
+
+    headcount = int(row["headcount"])
+    if headcount < 1:
+        raise HTTPException(status_code=400, detail="Company headcount not set — please contact support")
+    if headcount > 300:
+        raise HTTPException(status_code=400, detail="Headcount over 300 — please contact us for pricing")
+
+    stripe_service = StripeService()
+    try:
+        session = await stripe_service.create_matcha_lite_checkout(
+            company_id=company_id,
+            headcount=headcount,
+            success_url=body.success_url,
+            cancel_url=body.cancel_url,
+        )
+    except StripeServiceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    stripe_session_id = str(getattr(session, "id", "") or "")
+    checkout_url = str(getattr(session, "url", "") or "")
+    if not stripe_session_id or not checkout_url:
+        raise HTTPException(status_code=502, detail="Stripe checkout did not return expected fields")
+
+    logger.info("Lite checkout opened: company=%s headcount=%d session=%s", company_id, headcount, stripe_session_id)
+    return UpgradeCheckoutResponse(checkout_url=checkout_url, stripe_session_id=stripe_session_id)
+
+
+# ---------------------------------------------------------------------------
 # Upgrade Inquiry — in-app contact form for Cap → Matcha Platform upgrade.
 # Records a lead_captures row + emails sales (best-effort).
 # ---------------------------------------------------------------------------

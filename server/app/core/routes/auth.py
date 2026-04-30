@@ -1542,6 +1542,13 @@ async def register_business(request: BusinessRegister):
             # queue. Other tier values fall through to standard behavior.
             is_ir_only = request.tier == "ir_only"
             is_resources_free = request.tier == "resources_free"
+            is_matcha_lite = request.tier == "matcha_lite"
+
+            if is_matcha_lite and request.headcount > 300:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Headcount over 300 — please contact us for pricing at matcha.work",
+                )
 
             if is_ir_only:
                 company_status = "approved"
@@ -1569,6 +1576,14 @@ async def register_business(request: BusinessRegister):
                 signup_source = "resources_free"
                 rf_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 enabled_features_json = json.dumps(rf_features)
+            elif is_matcha_lite:
+                # Matcha Lite: approved account created immediately, but all
+                # features stay off until the Stripe checkout completes. The
+                # webhook flips incidents + employees + discipline once paid.
+                company_status = "approved"
+                signup_source = "matcha_lite"
+                lite_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
+                enabled_features_json = json.dumps(lite_features)
             else:
                 company_status = "approved" if (invitation or referring_broker_id) else "pending"
                 if invitation:
@@ -1980,9 +1995,11 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                        COALESCE(comp.is_personal, false) as is_personal,
                        comp.signup_source,
                        comp.ir_onboarding_completed_at,
-                       c.name, c.phone, c.job_title, c.created_at
+                       c.name, c.phone, c.job_title, c.created_at,
+                       COALESCE(chp.headcount, 0) as headcount
                 FROM clients c
                 JOIN companies comp ON c.company_id = comp.id
+                LEFT JOIN company_handbook_profiles chp ON chp.company_id = comp.id
                 WHERE c.user_id = $1
                 """,
                 current_user.id,
@@ -2068,7 +2085,8 @@ async def get_current_user_profile(token_payload: TokenPayload = Depends(get_tok
                     "phone": profile["phone"],
                     "job_title": profile["job_title"],
                     "email": current_user.email,
-                    "created_at": profile["created_at"].isoformat()
+                    "created_at": profile["created_at"].isoformat(),
+                    "headcount": int(profile["headcount"]) if "headcount" in profile.keys() else 0,
                 } if profile else None,
                 "onboarding_needed": onboarding_needed,
                 "visible_features": visible_features,

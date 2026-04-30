@@ -7,6 +7,7 @@ import AppLayout from './layouts/AppLayout'
 import AdminSidebar from './components/AdminSidebar'
 import TenantSidebar from './components/TenantSidebar'
 import IrSignup from './pages/auth/IrSignup'
+import MatchaLiteSignup from './pages/auth/MatchaLiteSignup'
 import ResourcesSignup from './pages/auth/ResourcesSignup'
 import RequireBusinessAccount from './components/auth/RequireBusinessAccount'
 import IrOnboardingWizard from './features/ir-onboarding/IrOnboardingWizard'
@@ -160,6 +161,7 @@ export default function App() {
         <Route path="clients/:companyId" element={<BrokerClientDetail />} />
       </Route>
       <Route path="/ir/signup" element={<IrSignup />} />
+      <Route path="/lite/signup" element={<MatchaLiteSignup />} />
       <Route path="/ir/onboarding" element={<IrOnboardingWizard />} />
       <Route path="/report/:token" element={<AnonymousReport />} />
       <Route path="/app" element={<AppLayout sidebar={<TenantSidebar />} />}>

@@ -337,6 +337,7 @@ export interface MeClientProfile {
   job_title: string | null
   email: string
   created_at: string
+  headcount?: number
 }
 
 export interface MeResponse {

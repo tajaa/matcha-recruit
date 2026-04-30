@@ -145,6 +145,53 @@ async def stripe_webhook(request: Request):
                 except Exception as exc:
                     logger.error("Failed to fulfill IR upgrade for %s: %s", company_id_str, exc)
 
+        elif session_mode == "subscription" and meta.get("type") == "matcha_lite":
+            # ── Matcha Lite signup payment ─────────────────────────────────
+            company_id_str = meta.get("company_id") or ""
+            stripe_sub_id = str(event_object.get("subscription") or "")
+            stripe_customer_id = str(event_object.get("customer") or "")
+            if company_id_str:
+                try:
+                    import json as _json
+                    from ...database import get_connection as _gc
+                    company_id = UUID(company_id_str)
+                    async with _gc() as conn:
+                        existing = await conn.fetchval(
+                            "SELECT enabled_features FROM companies WHERE id = $1",
+                            company_id,
+                        )
+                        features = existing if isinstance(existing, dict) else (
+                            _json.loads(existing) if existing else {}
+                        )
+                        features["incidents"] = True
+                        features["employees"] = True
+                        features["discipline"] = True
+                        await conn.execute(
+                            """
+                            UPDATE companies
+                            SET enabled_features = $1::jsonb
+                            WHERE id = $2
+                            """,
+                            _json.dumps(features),
+                            company_id,
+                        )
+                    # Record subscription so cancellation handler can find it
+                    if stripe_sub_id:
+                        await billing_service.upsert_subscription(
+                            company_id=company_id,
+                            stripe_subscription_id=stripe_sub_id,
+                            stripe_customer_id=stripe_customer_id,
+                            pack_id="matcha_lite",
+                            credits_per_cycle=0,
+                            amount_cents=0,
+                        )
+                    logger.info(
+                        "Matcha Lite activated: company=%s sub=%s",
+                        company_id_str, stripe_sub_id,
+                    )
+                except Exception as exc:
+                    logger.error("Failed to activate Matcha Lite for %s: %s", company_id_str, exc)
+
         elif session_mode == "subscription" and is_channel_event:
             # ── Channel subscription checkout ────────────────────────────
             channel_id_str = meta.get("channel_id") or ""
@@ -378,5 +425,27 @@ async def stripe_webhook(request: Request):
                 if sub and sub["pack_id"] == token_budget_service.SUBSCRIPTION_PACK_ID:
                     await token_budget_service.cancel_subscription_budget(sub["company_id"])
                     logger.info("Token budget zeroed for company %s", sub["company_id"])
+                elif sub and sub["pack_id"] == "matcha_lite":
+                    try:
+                        import json as _json
+                        from ...database import get_connection as _gc
+                        async with _gc() as conn:
+                            existing = await conn.fetchval(
+                                "SELECT enabled_features FROM companies WHERE id = $1",
+                                sub["company_id"],
+                            )
+                            features = existing if isinstance(existing, dict) else (
+                                _json.loads(existing) if existing else {}
+                            )
+                            features["incidents"] = False
+                            features["employees"] = False
+                            features["discipline"] = False
+                            await conn.execute(
+                                "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
+                                _json.dumps(features), sub["company_id"],
+                            )
+                        logger.info("Matcha Lite deactivated for company %s", sub["company_id"])
+                    except Exception as exc:
+                        logger.error("Failed to deactivate Matcha Lite for %s: %s", sub["company_id"], exc)
 
     return {"received": True}
