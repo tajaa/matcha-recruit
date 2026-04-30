@@ -1,4 +1,6 @@
 import Foundation
+import AppKit
+import UniformTypeIdentifiers
 
 @Observable
 class ProjectDetailViewModel {
@@ -626,3 +628,36 @@ class ProjectDetailViewModel {
         }
     }
 }
+
+// MARK: - Export save panel (free function so ProjectDetailView.swift stays short)
+
+@MainActor
+func presentExportSavePanel(data: Data, format: String, title: String) {
+    let panel = NSSavePanel()
+    panel.nameFieldStringValue = "\(title).\(format)"
+    switch format {
+    case "pdf":
+        panel.allowedContentTypes = [.pdf]
+    case "docx":
+        if let t = UTType(filenameExtension: "docx") { panel.allowedContentTypes = [t] }
+    case "md":
+        if let t = UTType(filenameExtension: "md") { panel.allowedContentTypes = [t] }
+    default:
+        break
+    }
+    Task {
+        let response: NSApplication.ModalResponse
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            response = await panel.beginSheetModal(for: window)
+        } else {
+            response = await panel.begin()
+        }
+        guard response == .OK, let url = panel.url else { return }
+        do {
+            try data.write(to: url)
+        } catch {
+            print("[Export] write failed: \(error)")
+        }
+    }
+}
+

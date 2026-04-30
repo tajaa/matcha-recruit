@@ -4,76 +4,56 @@ import AppKit
 struct ProjectListView: View {
     @Environment(AppState.self) private var appState
     var showHeader: Bool = true
+
     @State private var projects: [MWProject] = []
     @State private var isLoading = true
     @State private var isCreating = false
     @State private var showTypePicker = false
     @State private var showNewBlog = false
 
+    @AppStorage("mw-sidebar-proj-blogs-open")      private var blogsOpen      = true
+    @AppStorage("mw-sidebar-proj-collabs-open")    private var collabsOpen    = true
+    @AppStorage("mw-sidebar-proj-discipline-open") private var disciplineOpen = true
+    @AppStorage("mw-sidebar-proj-general-open")    private var generalOpen    = true
+
+    // MARK: - Grouping
+
+    private var blogs: [MWProject] {
+        projects.filter { $0.projectType == "blog" }.pinnedFirst()
+    }
+    private var collabs: [MWProject] {
+        projects.filter {
+            $0.projectType == "collab" || $0.collaboratorRole == "collaborator"
+        }.pinnedFirst()
+    }
+    private var discipline: [MWProject] {
+        projects.filter { $0.projectType == "discipline" }.pinnedFirst()
+    }
+    private var general: [MWProject] {
+        let excluded: Set<String> = ["blog", "collab", "discipline"]
+        return projects.filter { p in
+            let t = p.projectType ?? "general"
+            return !excluded.contains(t) && p.collaboratorRole != "collaborator"
+        }.pinnedFirst()
+    }
+
+    private var selectionBinding: Binding<String?> {
+        Binding(
+            get: { appState.selectedProjectId },
+            set: {
+                appState.selectedProjectId = $0
+                appState.selectedThreadId = nil
+                appState.showSkills = false
+            }
+        )
+    }
+
+    // MARK: - Body
+
     var body: some View {
         VStack(spacing: 0) {
             if showHeader {
-                HStack {
-                    Text("Projects")
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Button { showTypePicker = true } label: {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.secondary)
-                            .frame(width: 24, height: 24)
-                            .background(Color.zinc800)
-                            .cornerRadius(6)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(isCreating)
-                    .popover(isPresented: $showTypePicker) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("New Project").font(.system(size: 12, weight: .semibold)).foregroundColor(.secondary)
-                                .padding(.bottom, 4)
-                            ForEach(["general", "presentation", "recruiting", "collab", "discipline"], id: \.self) { type in
-                                Button {
-                                    showTypePicker = false
-                                    createProject(type: type)
-                                } label: {
-                                    HStack {
-                                        Image(systemName: iconForType(type))
-                                            .font(.system(size: 11))
-                                            .frame(width: 16)
-                                        Text(labelForType(type))
-                                            .font(.system(size: 12))
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(.vertical, 4)
-                                }
-                                .buttonStyle(.plain)
-                                .foregroundColor(.white)
-                            }
-                            Button {
-                                showTypePicker = false
-                                showNewBlog = true
-                            } label: {
-                                HStack {
-                                    Image(systemName: "doc.richtext")
-                                        .font(.system(size: 11))
-                                        .frame(width: 16)
-                                    Text("Blog Post")
-                                        .font(.system(size: 12))
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundColor(.white)
-                        }
-                        .padding(12)
-                        .frame(width: 180)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-
+                headerView
                 Divider().opacity(0.3)
             }
 
@@ -93,98 +73,41 @@ struct ProjectListView: View {
                 }
                 Spacer()
             } else {
-                List(projects, selection: Binding(
-                    get: { appState.selectedProjectId },
-                    set: {
-                        appState.selectedProjectId = $0
-                        appState.selectedThreadId = nil
-                        appState.showSkills = false
-                    }
-                )) { project in
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(spacing: 4) {
-                            if project.isPinned ?? false {
-                                Image(systemName: "star.fill")
-                                    .font(.system(size: 9))
-                                    .foregroundColor(.matcha500)
+                List(selection: selectionBinding) {
+                    if !blogs.isEmpty {
+                        Section(isExpanded: $blogsOpen) {
+                            ForEach(blogs) { p in
+                                blogRow(p).tag(p.id)
                             }
-                            Text(project.title)
-                                .font(.system(size: 13, weight: .medium))
-                                .foregroundColor(.white)
-                                .lineLimit(1)
-                            Spacer()
-                            Button {
-                                Task { await togglePin(project: project) }
-                            } label: {
-                                Image(systemName: (project.isPinned ?? false) ? "star.fill" : "star")
-                                    .font(.system(size: 11))
-                                    .foregroundColor((project.isPinned ?? false) ? .matcha500 : .secondary)
-                            }
-                            .buttonStyle(.plain)
-                            .help((project.isPinned ?? false) ? "Unstar" : "Star")
-                        }
-                        HStack(spacing: 4) {
-                            if let type = project.projectType {
-                                Text(type == "blog" ? "blog" : type)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(.matcha500)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.matcha500.opacity(0.12))
-                                    .cornerRadius(3)
-                            }
-                            if project.collaboratorRole == "collaborator" {
-                                Text("Collab")
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(.purple)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(Color.purple.opacity(0.12))
-                                    .cornerRadius(3)
-                            }
-                            if project.projectType == "collab",
-                               let collabs = project.collaborators {
-                                let others = collabs.filter { $0.userId != appState.currentUser?.id }
-                                if !others.isEmpty {
-                                    CollaboratorRowSummary(others: others)
-                                }
-                            }
-                            if project.projectType == "blog" {
-                                let blogStatus = (project.projectData?["status"]?.value as? String) ?? "draft"
-                                let statusColor: Color = blogStatus == "published" ? .green : blogStatus == "scheduled" ? .orange : .secondary
-                                Text(blogStatus)
-                                    .font(.system(size: 9, weight: .medium))
-                                    .foregroundColor(statusColor)
-                                    .padding(.horizontal, 4)
-                                    .padding(.vertical, 1)
-                                    .background(statusColor.opacity(0.12))
-                                    .cornerRadius(3)
-                                let wc = (project.projectData?["word_count"]?.value as? Int) ?? 0
-                                if wc > 0 {
-                                    Text("\(wc) words")
-                                        .font(.system(size: 10))
-                                        .foregroundColor(.secondary)
-                                }
-                            } else {
-                                let sCount = project.sections?.count ?? 0
-                                let cCount = project.chatCount ?? 0
-                                Text("\(sCount) section\(sCount == 1 ? "" : "s") · \(cCount) chat\(cCount == 1 ? "" : "s")")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
+                        } header: {
+                            sectionHeader("Blogs", icon: "doc.richtext", count: blogs.count)
                         }
                     }
-                    .padding(.vertical, 2)
-                    .tag(project.id)
-                    .contextMenu {
-                        Button((project.isPinned ?? false) ? "Unstar" : "Star") {
-                            Task { await togglePin(project: project) }
-                        }
-                        Button("Archive") {
-                            Task {
-                                try? await MatchaWorkService.shared.archiveProject(id: project.id)
-                                await load()
+                    if !collabs.isEmpty {
+                        Section(isExpanded: $collabsOpen) {
+                            ForEach(collabs) { p in
+                                collabRow(p).tag(p.id)
                             }
+                        } header: {
+                            sectionHeader("Collabs", icon: "person.2", count: collabs.count)
+                        }
+                    }
+                    if !discipline.isEmpty {
+                        Section(isExpanded: $disciplineOpen) {
+                            ForEach(discipline) { p in
+                                genericRow(p, subtitle: sectionSubtitle(p)).tag(p.id)
+                            }
+                        } header: {
+                            sectionHeader("Discipline", icon: "exclamationmark.shield", count: discipline.count)
+                        }
+                    }
+                    if !general.isEmpty {
+                        Section(isExpanded: $generalOpen) {
+                            ForEach(general) { p in
+                                genericRow(p, subtitle: sectionSubtitle(p)).tag(p.id)
+                            }
+                        } header: {
+                            sectionHeader("Projects", icon: "folder", count: general.count)
                         }
                     }
                 }
@@ -195,8 +118,6 @@ struct ProjectListView: View {
         .background(Color.appBackground)
         .task(id: appState.projectsListGeneration) { await load() }
         .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
-            // Project metadata (e.g. title) changed elsewhere — invalidate the
-            // service-level list cache so the next load() returns fresh data.
             MatchaWorkService.shared.invalidateProjectLists()
             Task { await load() }
         }
@@ -210,20 +131,201 @@ struct ProjectListView: View {
         }
     }
 
+    // MARK: - Header
+
+    private var headerView: some View {
+        HStack {
+            Text("Projects")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary)
+            Spacer()
+            Button { showTypePicker = true } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.secondary)
+                    .frame(width: 24, height: 24)
+                    .background(Color.zinc800)
+                    .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .disabled(isCreating)
+            .popover(isPresented: $showTypePicker) { newProjectMenu }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+    }
+
+    private var newProjectMenu: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("New Project")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+                .padding(.bottom, 4)
+            ForEach(["general", "presentation", "recruiting", "collab", "discipline"], id: \.self) { type in
+                Button {
+                    showTypePicker = false
+                    createProject(type: type)
+                } label: {
+                    HStack {
+                        Image(systemName: iconForType(type))
+                            .font(.system(size: 11))
+                            .frame(width: 16)
+                        Text(labelForType(type))
+                            .font(.system(size: 12))
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.white)
+            }
+            Button {
+                showTypePicker = false
+                showNewBlog = true
+            } label: {
+                HStack {
+                    Image(systemName: "doc.richtext")
+                        .font(.system(size: 11))
+                        .frame(width: 16)
+                    Text("Blog Post")
+                        .font(.system(size: 12))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.white)
+        }
+        .padding(12)
+        .frame(width: 180)
+    }
+
+    // MARK: - Section header
+
+    private func sectionHeader(_ label: String, icon: String, count: Int) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.secondary)
+            Text(label)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.secondary)
+            Spacer()
+            Text("\(count)")
+                .font(.system(size: 9, weight: .medium))
+                .foregroundColor(.secondary.opacity(0.6))
+        }
+    }
+
+    // MARK: - Row builders
+
+    @ViewBuilder
+    private func blogRow(_ p: MWProject) -> some View {
+        let status = (p.projectData?["status"]?.value as? String) ?? "draft"
+        let statusColor: Color = status == "published" ? .green : status == "scheduled" ? .orange : .secondary
+        let wc = (p.projectData?["word_count"]?.value as? Int) ?? 0
+
+        rowShell(p) {
+            HStack(spacing: 4) {
+                Text(status)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(statusColor)
+                    .padding(.horizontal, 4).padding(.vertical, 1)
+                    .background(statusColor.opacity(0.12))
+                    .cornerRadius(3)
+                if wc > 0 {
+                    Text("\(wc) words")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func collabRow(_ p: MWProject) -> some View {
+        rowShell(p) {
+            HStack(spacing: 4) {
+                if p.collaboratorRole == "collaborator" {
+                    Text("shared")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(.purple)
+                        .padding(.horizontal, 4).padding(.vertical, 1)
+                        .background(Color.purple.opacity(0.12))
+                        .cornerRadius(3)
+                }
+                if let collabs = p.collaborators {
+                    let others = collabs.filter { $0.userId != appState.currentUser?.id }
+                    if !others.isEmpty {
+                        CollaboratorRowSummary(others: others)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func genericRow(_ p: MWProject, subtitle: String) -> some View {
+        rowShell(p) {
+            Text(subtitle)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func rowShell<Sub: View>(_ p: MWProject, @ViewBuilder subtitle: () -> Sub) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 4) {
+                if p.isPinned ?? false {
+                    Image(systemName: "star.fill")
+                        .font(.system(size: 9))
+                        .foregroundColor(.matcha500)
+                }
+                Text(p.title)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                Spacer()
+                Button {
+                    Task { await togglePin(project: p) }
+                } label: {
+                    Image(systemName: (p.isPinned ?? false) ? "star.fill" : "star")
+                        .font(.system(size: 11))
+                        .foregroundColor((p.isPinned ?? false) ? .matcha500 : .secondary)
+                }
+                .buttonStyle(.plain)
+                .help((p.isPinned ?? false) ? "Unstar" : "Star")
+            }
+            subtitle()
+        }
+        .padding(.vertical, 2)
+        .contextMenu {
+            Button((p.isPinned ?? false) ? "Unstar" : "Star") {
+                Task { await togglePin(project: p) }
+            }
+            Button("Archive") {
+                Task {
+                    try? await MatchaWorkService.shared.archiveProject(id: p.id)
+                    await load()
+                }
+            }
+        }
+    }
+
+    private func sectionSubtitle(_ p: MWProject) -> String {
+        let s = p.sections?.count ?? 0
+        let c = p.chatCount ?? 0
+        return "\(s) section\(s == 1 ? "" : "s") · \(c) chat\(c == 1 ? "" : "s")"
+    }
+
+    // MARK: - Data
+
     private func load() async {
         do {
             let p = try await MatchaWorkService.shared.listProjects()
-            // Filter out consultations (their own sidebar section), then sort
-            // pinned projects above unpinned. Within each bucket the original
-            // server order (created_at DESC) is preserved.
             let filtered = p.filter { $0.projectType != "consultation" }
-            let sorted = filtered.enumerated().sorted { lhs, rhs in
-                let lp = lhs.element.isPinned ?? false
-                let rp = rhs.element.isPinned ?? false
-                if lp != rp { return lp && !rp }
-                return lhs.offset < rhs.offset
-            }.map { $0.element }
-            await MainActor.run { projects = sorted; isLoading = false }
+            await MainActor.run { projects = filtered; isLoading = false }
         } catch {
             await MainActor.run { isLoading = false }
         }
@@ -235,7 +337,6 @@ struct ProjectListView: View {
             _ = try await MatchaWorkService.shared.setProjectPinned(id: project.id, pinned: nextPinned)
             await load()
         } catch {
-            // Best-effort; surface as a console log only
             print("[ProjectListView] togglePin failed: \(error)")
         }
     }
@@ -253,7 +354,6 @@ struct ProjectListView: View {
                     isCreating = false
                 }
             } catch {
-                print("[ProjectListView] create failed: \(error)")
                 await MainActor.run {
                     isCreating = false
                     let alert = NSAlert()
@@ -286,10 +386,21 @@ struct ProjectListView: View {
     }
 }
 
-/// Inline collaborator summary on a collab project row in the sidebar: shows
-/// the first name(s) of up to 2 collaborators with a "+N" suffix. Tooltip
-/// lists the full set. Self is filtered out by the caller, so the user sees
-/// "with Alice, Bob" rather than their own name.
+// MARK: - Array helper
+
+private extension Array where Element == MWProject {
+    func pinnedFirst() -> [MWProject] {
+        enumerated().sorted { lhs, rhs in
+            let lp = lhs.element.isPinned ?? false
+            let rp = rhs.element.isPinned ?? false
+            if lp != rp { return lp && !rp }
+            return lhs.offset < rhs.offset
+        }.map { $0.element }
+    }
+}
+
+// MARK: - Collaborator summary
+
 struct CollaboratorRowSummary: View {
     let others: [MWProjectCollaborator]
     private let maxNames = 2
@@ -299,10 +410,7 @@ struct CollaboratorRowSummary: View {
         let names = visible.map { firstName($0.name) }
         let overflow = others.count - visible.count
         let joined = names.joined(separator: ", ")
-        if overflow > 0 {
-            return "\(joined) +\(overflow)"
-        }
-        return joined
+        return overflow > 0 ? "\(joined) +\(overflow)" : joined
     }
 
     private var tooltip: String {
@@ -321,15 +429,13 @@ struct CollaboratorRowSummary: View {
                 .foregroundColor(.secondary)
                 .lineLimit(1)
         }
-        .padding(.horizontal, 5)
-        .padding(.vertical, 1)
+        .padding(.horizontal, 5).padding(.vertical, 1)
         .background(Color.matcha500.opacity(0.08))
         .cornerRadius(3)
         .help(tooltip)
     }
 
     private func firstName(_ full: String) -> String {
-        let parts = full.split(separator: " ")
-        return parts.first.map(String.init) ?? full
+        String(full.split(separator: " ").first ?? Substring(full))
     }
 }

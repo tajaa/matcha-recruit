@@ -47,6 +47,7 @@
 		DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770001 /* ChannelModels.swift */; };
 		DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770002 /* ChannelsService.swift */; };
 		DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */; };
+		DD00EE11FF22334455660099 /* ChannelNotificationManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */; };
 		DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */; };
 		DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770005 /* ChannelDetailView.swift */; };
 		DD00EE11FF22334455660D11 /* InviteToChannelSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */; };
@@ -113,6 +114,7 @@
 		DD00EE11FF22334455770001 /* ChannelModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelModels.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770002 /* ChannelsService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsService.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsWebSocket.swift; sourceTree = "<group>"; };
+		DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelNotificationManager.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770004 /* ChannelsSidebarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelsSidebarView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770005 /* ChannelDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChannelDetailView.swift; sourceTree = "<group>"; };
 		DD00EE11FF22334455770D11 /* InviteToChannelSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InviteToChannelSheet.swift; sourceTree = "<group>"; };
@@ -187,6 +189,7 @@
 				AA11BB22CC33DD44EE660008 /* InboxService.swift */,
 				DD00EE11FF22334455770002 /* ChannelsService.swift */,
 				DD00EE11FF22334455770003 /* ChannelsWebSocket.swift */,
+				DD00EE11FF22334455770099 /* ChannelNotificationManager.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -440,6 +443,7 @@
 				DD00EE11FF22334455660001 /* ChannelModels.swift in Sources */,
 				DD00EE11FF22334455660002 /* ChannelsService.swift in Sources */,
 				DD00EE11FF22334455660003 /* ChannelsWebSocket.swift in Sources */,
+				DD00EE11FF22334455660099 /* ChannelNotificationManager.swift in Sources */,
 				DD00EE11FF22334455660004 /* ChannelsSidebarView.swift in Sources */,
 				DD00EE11FF22334455660005 /* ChannelDetailView.swift in Sources */,
 				DD00EE11FF22334455660D11 /* InviteToChannelSheet.swift in Sources */,

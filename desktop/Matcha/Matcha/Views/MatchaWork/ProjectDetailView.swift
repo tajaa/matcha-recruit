@@ -704,14 +704,11 @@ struct ProjectDetailView: View {
         Task { @MainActor in
             let result = await viewModel.exportProject(format: format)
             print("[Export] response format=\(format) bytes=\(result?.count ?? -1) error=\(viewModel.errorMessage ?? "nil")")
-            // Defer alert + save panel onto the next runloop tick so any
-            // in-flight Menu / sheet has had a chance to dismiss; without
-            // this the modal silently fails to present and the user sees
-            // "nothing happened" on a server error.
+            // Defer onto the next runloop tick so the menu/popover has finished
+            // dismissing before we present the save panel or alert modal.
             DispatchQueue.main.async {
                 guard let data = result, !data.isEmpty else {
-                    let msg = viewModel.errorMessage
-                        ?? "Export returned no data."
+                    let msg = viewModel.errorMessage ?? "Export returned no data."
                     print("[Export] \(format) failed: \(msg)")
                     let alert = NSAlert()
                     alert.messageText = "Export failed"
@@ -720,39 +717,8 @@ struct ProjectDetailView: View {
                     alert.runModal()
                     return
                 }
-                presentSavePanel(data: data, format: format)
+                presentExportSavePanel(data: data, format: format, title: viewModel.project?.title ?? "project")
             }
-        }
-    }
-
-    @MainActor
-    private func presentSavePanel(data: Data, format: String) {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = "\(viewModel.project?.title ?? "project").\(format)"
-        // allowedContentTypes pins the save dialog to the correct extension
-        // and makes sure the file is written with it even if the user edits
-        // the name field without the extension.
-        switch format {
-        case "pdf": panel.allowedContentTypes = [.pdf]
-        case "docx":
-            if let t = UTType(filenameExtension: "docx") { panel.allowedContentTypes = [t] }
-        case "md":
-            if let t = UTType(filenameExtension: "md") { panel.allowedContentTypes = [t] }
-        default: break
-        }
-        let window = NSApp.keyWindow ?? NSApp.mainWindow
-        let handler: (NSApplication.ModalResponse) -> Void = { response in
-            guard response == .OK, let url = panel.url else { return }
-            do {
-                try data.write(to: url)
-            } catch {
-                print("[Export] write failed: \(error)")
-            }
-        }
-        if let window {
-            panel.beginSheetModal(for: window, completionHandler: handler)
-        } else {
-            panel.begin(completionHandler: handler)
         }
     }
 }
