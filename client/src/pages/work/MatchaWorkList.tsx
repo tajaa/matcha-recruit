@@ -354,7 +354,7 @@ export default function MatchaWorkList() {
                 { type: 'general' as const, icon: FileText, label: 'Research / Report', desc: 'Build documents and plans from chat' },
                 { type: 'presentation' as const, icon: Presentation, label: 'Presentation', desc: 'Create slide decks and pitch materials' },
                 { type: 'recruiting' as const, icon: Users, label: 'Job Posting', desc: 'Recruiting pipeline with resumes and interviews' },
-                { type: 'discipline' as const, icon: ShieldAlert, label: 'Disciplinary Action', desc: 'Draft, sign, and close a written warning' },
+                { type: 'discipline' as const, icon: ShieldAlert, label: 'Performance Action', desc: 'Draft, sign, and close a written warning' },
               ].map((opt) => (
                 <button
                   key={opt.type}

@@ -57,11 +57,11 @@ export default function DisciplineSettings() {
     <div className="space-y-6 p-6">
       <Button variant="ghost" onClick={() => navigate('/app/discipline')}>
         <ArrowLeft className="w-4 h-4" />
-        <span className="ml-2">Back to discipline</span>
+        <span className="ml-2">Back to performance action</span>
       </Button>
 
       <div>
-        <h1 className="text-2xl font-semibold text-zinc-100">Discipline policy mapping</h1>
+        <h1 className="text-2xl font-semibold text-zinc-100">Performance action policy mapping</h1>
         <p className="text-sm text-zinc-500 mt-1">
           Per-company config that powers the escalation engine. Lookback values control how
           long an active warning remains in effect before auto-expiring.

@@ -7,7 +7,7 @@ import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
   { to: '/app/employees', icon: Users, label: 'Employees' },
-  { to: '/app/discipline', icon: Gavel, label: 'Discipline', feature: 'discipline' },
+  { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
   { to: '/app/company', icon: Building2, label: 'Company' },
 ]
 

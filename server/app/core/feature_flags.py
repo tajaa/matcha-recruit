@@ -14,7 +14,7 @@ DEFAULT_COMPANY_FEATURES: dict[str, bool] = {
     "hris_import": False,
     "paid_channel_creator": False,
     "channel_job_postings": False,
-    "discipline": False,
+    "discipline": True,
 }
 
 

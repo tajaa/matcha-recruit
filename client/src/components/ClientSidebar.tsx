@@ -17,7 +17,7 @@ const nav: (NavItem | NavGroup)[] = [
       { to: '/app/employees', icon: Users, label: 'Employees' },
       { to: '/app/onboarding', icon: ClipboardCheck, label: 'Onboarding' },
       { to: '/app/accommodations', icon: Accessibility, label: 'Accommodations' },
-      { to: '/app/discipline', icon: Gavel, label: 'Discipline', feature: 'discipline' },
+      { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
     ],
   },
   {

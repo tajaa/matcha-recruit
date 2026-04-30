@@ -19,6 +19,7 @@ const FEATURE_LABELS: Record<string, string> = {
   i9: 'I-9 Verification',
   cobra: 'COBRA',
   separation_agreements: 'Separation Agreements',
+  discipline: 'Performance Action',
   inventory: 'Inventory',
 }
 

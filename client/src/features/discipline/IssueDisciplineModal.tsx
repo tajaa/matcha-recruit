@@ -150,14 +150,14 @@ export default function IssueDisciplineModal({
       onClose()
       navigate(`/app/discipline/${record.id}`)
     } catch (e) {
-      setFormError(e instanceof Error ? e.message : 'Failed to issue discipline record')
+      setFormError(e instanceof Error ? e.message : 'Failed to issue performance action record')
     } finally {
       setSubmitting(false)
     }
   }
 
   return (
-    <Modal open={open} onClose={onClose} title="Issue Discipline" width="lg">
+    <Modal open={open} onClose={onClose} title="Issue Performance Action" width="lg">
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-3">
           <Select

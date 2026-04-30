@@ -89,7 +89,7 @@ export default function DisciplineDetail() {
     <div className="space-y-6 p-6">
       <Button variant="ghost" onClick={() => navigate('/app/discipline')}>
         <ArrowLeft className="w-4 h-4" />
-        <span className="ml-2">Back to discipline</span>
+        <span className="ml-2">Back to performance action</span>
       </Button>
 
       <div className="flex items-start justify-between gap-4">

@@ -175,9 +175,9 @@ export default function App() {
         <Route path="escalated-queries" element={<EscalatedQueries />} />
         <Route path="accommodations" element={<FeatureGate feature="accommodations" label="Accommodations"><Accommodations /></FeatureGate>} />
         <Route path="accommodations/:caseId" element={<FeatureGate feature="accommodations" label="Accommodations"><AccommodationDetail /></FeatureGate>} />
-        <Route path="discipline" element={<FeatureGate feature="discipline" label="Discipline"><Discipline /></FeatureGate>} />
-        <Route path="discipline/:recordId" element={<FeatureGate feature="discipline" label="Discipline"><DisciplineDetail /></FeatureGate>} />
-        <Route path="discipline-settings" element={<FeatureGate feature="discipline" label="Discipline"><DisciplineSettings /></FeatureGate>} />
+        <Route path="discipline" element={<FeatureGate feature="discipline" label="Performance Action"><Discipline /></FeatureGate>} />
+        <Route path="discipline/:recordId" element={<FeatureGate feature="discipline" label="Performance Action"><DisciplineDetail /></FeatureGate>} />
+        <Route path="discipline-settings" element={<FeatureGate feature="discipline" label="Performance Action"><DisciplineSettings /></FeatureGate>} />
         <Route path="policies" element={<FeatureGate feature="policies" label="Policies"><Policies /></FeatureGate>} />
         <Route path="handbooks" element={<FeatureGate feature="handbooks" label="Handbooks"><Handbooks /></FeatureGate>} />
         <Route path="handbook/new" element={<FeatureGate feature="handbooks" label="Handbooks"><HandbookForm /></FeatureGate>} />
