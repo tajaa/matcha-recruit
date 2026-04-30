@@ -4657,17 +4657,36 @@ async def ensure_project_discussion_channel(
     the recommended chat surface for the collab project type. Returns
     `{ "channel_id": "<uuid>" }` for collab projects, or 404 for any
     other project type.
+
+    Authorisation: the caller is allowed if they own the project's
+    company OR are an active collaborator. This mirrors the visibility
+    rule used by list_projects.
     """
     from ..services import project_service as proj_svc
 
     company_id = await get_client_company_id(current_user)
     async with get_connection() as conn:
-        owner_row = await conn.fetchrow(
+        proj = await conn.fetchrow(
             "SELECT company_id FROM mw_projects WHERE id = $1",
             project_id,
         )
-    if not owner_row or owner_row["company_id"] != company_id:
-        raise HTTPException(status_code=404, detail="Project not found")
+        if not proj:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        is_owner_tenant = company_id is not None and proj["company_id"] == company_id
+        is_collaborator = False
+        if not is_owner_tenant:
+            is_collaborator = bool(await conn.fetchval(
+                """
+                SELECT EXISTS(
+                    SELECT 1 FROM mw_project_collaborators
+                    WHERE project_id = $1 AND user_id = $2 AND status = 'active'
+                )
+                """,
+                project_id, current_user.id,
+            ))
+        if not is_owner_tenant and not is_collaborator:
+            raise HTTPException(status_code=404, detail="Project not found")
 
     channel_id = await proj_svc.ensure_discussion_channel(project_id, current_user.id)
     if channel_id is None:
