@@ -815,7 +815,7 @@ class MatchaWorkService {
 
     func searchInvitableUsers(query: String) async throws -> [MWAdminSearchUser] {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
-        return try await client.request(method: "GET", path: "/api/channels/invitable-users?q=\(encoded)")
+        return try await client.request(method: "GET", path: "/channels/invitable-users?q=\(encoded)")
     }
 
     // MARK: - Project-scoped kanban tasks (collab projects)
