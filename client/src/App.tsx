@@ -53,6 +53,7 @@ import Compliance from './pages/app/Compliance'
 import EmployeeDetail from './pages/app/EmployeeDetail'
 import IRList from './pages/app/IRList'
 import IRDetail from './pages/app/IRDetail'
+import Locations from './pages/app/Locations'
 import Handbooks from './pages/app/Handbooks'
 import HandbookDetail from './pages/app/HandbookDetail'
 import HandbookForm from './pages/app/HandbookForm'
@@ -172,6 +173,7 @@ export default function App() {
         <Route path="compliance" element={<FeatureGate feature="compliance" label="Compliance"><Compliance /></FeatureGate>} />
         <Route path="ir" element={<IRList />} />
         <Route path="ir/:incidentId" element={<IRDetail />} />
+        <Route path="locations" element={<FeatureGate feature="incidents" label="Locations"><Locations /></FeatureGate>} />
         <Route path="escalated-queries" element={<EscalatedQueries />} />
         <Route path="accommodations" element={<FeatureGate feature="accommodations" label="Accommodations"><Accommodations /></FeatureGate>} />
         <Route path="accommodations/:caseId" element={<FeatureGate feature="accommodations" label="Accommodations"><AccommodationDetail /></FeatureGate>} />

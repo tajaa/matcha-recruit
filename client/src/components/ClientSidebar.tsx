@@ -1,7 +1,7 @@
 import {
   LayoutDashboard, Users, Shield, FileText, ClipboardCheck, Scale,
   AlertTriangle, BookOpen, BarChart2, Sparkles, Building2, Accessibility,
-  BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel,
+  BadgeCheck, MessageSquareWarning, Mail, Bell, Gavel, MapPin,
 } from 'lucide-react'
 import SidebarShell from './SidebarShell'
 import type { NavGroup, NavItem } from './SidebarShell'
@@ -41,6 +41,7 @@ const nav: (NavItem | NavGroup)[] = [
     label: 'Safety',
     items: [
       { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
+      { to: '/app/locations', icon: MapPin, label: 'Locations', feature: 'incidents' },
       { to: '/app/er-copilot', icon: Scale, label: 'ER Copilot' },
       { to: '/app/risk-assessment', icon: BarChart2, label: 'Risk Assessment' },
     ],

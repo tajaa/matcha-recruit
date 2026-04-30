@@ -369,7 +369,34 @@ async def create_incident(
     if occurred_at.tzinfo:
         occurred_at = occurred_at.astimezone(timezone.utc).replace(tzinfo=None)
 
+    # Client-submitted incidents must be tied to one of the company's
+    # business_locations. Admins are allowed to create cross-tenant or
+    # legacy-style incidents without a location_id (e.g. backfills).
+    if current_user.role != "admin":
+        if not incident.location_id:
+            raise HTTPException(
+                status_code=400,
+                detail="A location is required. Add one in Settings → Locations.",
+            )
+        if not effective_company_id:
+            raise HTTPException(status_code=400, detail="No company associated with this account")
+
     async with get_connection() as conn:
+        if incident.location_id and effective_company_id:
+            owns_location = await conn.fetchval(
+                """
+                SELECT 1 FROM business_locations
+                 WHERE id = $1 AND company_id = $2 AND is_active = true
+                """,
+                str(incident.location_id),
+                effective_company_id,
+            )
+            if not owns_location:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Selected location does not belong to your company",
+                )
+
         resolved_employee_ids = await _resolve_employee_refs(
             conn, incident.involved_employee_ids, effective_company_id
         )

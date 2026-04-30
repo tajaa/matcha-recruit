@@ -1,15 +1,24 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { api } from '../../api/client'
 import { Button, Input, Modal, Select, Textarea } from '../ui'
 import type { IRIncident, IRIncidentType, IRWitness } from '../../types/ir'
 import { INCIDENT_TYPE_OPTIONS, SEVERITY_OPTIONS } from '../../types/ir'
+
+type LocationRow = {
+  id: string
+  name: string | null
+  city: string
+  state: string
+  is_active: boolean
+}
 
 const EMPTY_FORM = {
   incident_type: 'safety' as IRIncidentType,
   title: '',
   description: '',
   severity: 'medium',
-  location: '',
+  location_id: '',
   date_occurred: '',
   reported_by_name: '',
   reported_by_email: '',
@@ -27,6 +36,13 @@ const EMPTY_FORM = {
   hazard_identified: '',
 }
 
+function locationLabel(loc: LocationRow): string {
+  const name = (loc.name || '').trim()
+  const place = [loc.city, loc.state].filter(Boolean).join(', ')
+  if (name && place) return `${name} — ${place}`
+  return name || place || loc.id.slice(0, 8)
+}
+
 type Props = {
   open: boolean
   onClose: () => void
@@ -37,9 +53,38 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [witnesses, setWitnesses] = useState<{ name: string; contact: string }[]>([])
   const [saving, setSaving] = useState(false)
+  const [locations, setLocations] = useState<LocationRow[] | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    api.get<LocationRow[]>('/ir-onboarding/locations')
+      .then((rows) => {
+        if (cancelled) return
+        const active = (rows || []).filter((r) => r.is_active)
+        setLocations(active)
+        // Auto-pick the only location so the user can't accidentally submit
+        // an incident with no location attached.
+        if (active.length === 1) {
+          setForm((f) => (f.location_id ? f : { ...f, location_id: active[0].id }))
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLocations([])
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [open])
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
+    setSubmitError(null)
+    if (!form.location_id) {
+      setSubmitError('Pick a location for this incident.')
+      return
+    }
     setSaving(true)
     try {
       const categoryData: Record<string, unknown> = {}
@@ -65,12 +110,16 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
         .filter((w) => w.name.trim())
         .map((w) => ({ name: w.name.trim(), contact: w.contact.trim() || null }))
 
+      const selectedLocation = (locations || []).find((l) => l.id === form.location_id)
       const created = await api.post<IRIncident>('/ir/incidents', {
         incident_type: form.incident_type,
         title: form.title,
         description: form.description || null,
         severity: form.severity,
-        location: form.location || null,
+        location_id: form.location_id,
+        // Mirror to the legacy free-text column so older list views and
+        // OSHA exports that still read `location` keep showing something.
+        location: selectedLocation ? locationLabel(selectedLocation) : null,
         occurred_at: form.date_occurred ? new Date(form.date_occurred).toISOString() : new Date().toISOString(),
         reported_by_name: form.reported_by_name || 'Unknown',
         reported_by_email: form.reported_by_email || null,
@@ -80,6 +129,9 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
       setForm(EMPTY_FORM)
       setWitnesses([])
       onCreated(created)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to submit incident'
+      setSubmitError(msg)
     } finally {
       setSaving(false)
     }
@@ -114,12 +166,31 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
             value={form.severity}
             onChange={(e) => setForm({ ...form, severity: e.target.value })}
           />
-          <Input
-            label="Location"
-            value={form.location}
-            onChange={(e) => setForm({ ...form, location: e.target.value })}
-            placeholder="Where did it occur?"
-          />
+          {locations === null ? (
+            <Input label="Location" value="Loading..." onChange={() => undefined} disabled />
+          ) : locations.length === 0 ? (
+            <div>
+              <span className="text-xs text-zinc-400 uppercase tracking-wide">Location</span>
+              <div className="mt-1 text-sm text-zinc-300 bg-zinc-900 border border-zinc-800 rounded px-3 py-2">
+                No locations yet.{' '}
+                <Link to="/app/locations" className="text-emerald-400 hover:text-emerald-300 underline">
+                  Add one
+                </Link>{' '}
+                before submitting an incident.
+              </div>
+            </div>
+          ) : (
+            <Select
+              label="Location"
+              required
+              options={[
+                { value: '', label: 'Select location...' },
+                ...locations.map((l) => ({ value: l.id, label: locationLabel(l) })),
+              ]}
+              value={form.location_id}
+              onChange={(e) => setForm({ ...form, location_id: e.target.value })}
+            />
+          )}
         </div>
         <Input
           label="Date & Time Occurred"
@@ -202,9 +273,10 @@ export function IRCreateIncidentModal({ open, onClose, onCreated }: Props) {
           ))}
         </div>
 
+        {submitError && <p className="text-sm text-red-400">{submitError}</p>}
         <div className="flex justify-end gap-2 pt-2">
           <Button variant="ghost" type="button" onClick={onClose}>Cancel</Button>
-          <Button type="submit" disabled={saving}>{saving ? 'Submitting...' : 'Submit Report'}</Button>
+          <Button type="submit" disabled={saving || !form.location_id}>{saving ? 'Submitting...' : 'Submit Report'}</Button>
         </div>
       </form>
     </Modal>
