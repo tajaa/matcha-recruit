@@ -143,8 +143,11 @@ struct ProjectListView: View {
                                     .cornerRadius(3)
                             }
                             if project.projectType == "collab",
-                               let collabs = project.collaborators, !collabs.isEmpty {
-                                CollaboratorAvatarStack(collaborators: collabs)
+                               let collabs = project.collaborators {
+                                let others = collabs.filter { $0.userId != appState.currentUser?.id }
+                                if !others.isEmpty {
+                                    CollaboratorRowSummary(others: others)
+                                }
                             }
                             if project.projectType == "blog" {
                                 let blogStatus = (project.projectData?["status"]?.value as? String) ?? "draft"
@@ -277,47 +280,50 @@ struct ProjectListView: View {
     }
 }
 
-/// Compact avatar pile shown on a collab project row in the sidebar so the
-/// user can see at a glance who's in the project. Caps at 4 avatars + a "+N"
-/// counter; tooltip lists the full set.
-struct CollaboratorAvatarStack: View {
-    let collaborators: [MWProjectCollaborator]
-    private let maxVisible = 4
+/// Inline collaborator summary on a collab project row in the sidebar: shows
+/// the first name(s) of up to 2 collaborators with a "+N" suffix. Tooltip
+/// lists the full set. Self is filtered out by the caller, so the user sees
+/// "with Alice, Bob" rather than their own name.
+struct CollaboratorRowSummary: View {
+    let others: [MWProjectCollaborator]
+    private let maxNames = 2
 
-    var body: some View {
-        let visible = Array(collaborators.prefix(maxVisible))
-        let overflow = collaborators.count - visible.count
-
-        HStack(spacing: -6) {
-            ForEach(visible) { c in
-                avatar(for: c)
-                    .help("\(c.name)\(c.role == "owner" ? " (owner)" : "")")
-            }
-            if overflow > 0 {
-                ZStack {
-                    Circle()
-                        .fill(Color.zinc800)
-                        .frame(width: 18, height: 18)
-                        .overlay(Circle().stroke(Color.appBackground, lineWidth: 1.5))
-                    Text("+\(overflow)")
-                        .font(.system(size: 8, weight: .semibold))
-                        .foregroundColor(.secondary)
-                }
-                .help(collaborators.suffix(overflow).map { $0.name }.joined(separator: ", "))
-            }
+    private var displayText: String {
+        let visible = Array(others.prefix(maxNames))
+        let names = visible.map { firstName($0.name) }
+        let overflow = others.count - visible.count
+        let joined = names.joined(separator: ", ")
+        if overflow > 0 {
+            return "\(joined) +\(overflow)"
         }
+        return joined
     }
 
-    @ViewBuilder
-    private func avatar(for c: MWProjectCollaborator) -> some View {
-        ZStack {
-            Circle()
-                .fill(Color.matcha500.opacity(0.4))
-                .frame(width: 18, height: 18)
-                .overlay(Circle().stroke(Color.appBackground, lineWidth: 1.5))
-            Text(String(c.name.prefix(1)).uppercased())
-                .font(.system(size: 8, weight: .bold))
-                .foregroundColor(.white)
+    private var tooltip: String {
+        others.map { c in
+            c.role == "owner" ? "\(c.name) (owner)" : c.name
+        }.joined(separator: ", ")
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 8))
+                .foregroundColor(.secondary)
+            Text(displayText)
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
         }
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(Color.matcha500.opacity(0.08))
+        .cornerRadius(3)
+        .help(tooltip)
+    }
+
+    private func firstName(_ full: String) -> String {
+        let parts = full.split(separator: " ")
+        return parts.first.map(String.init) ?? full
     }
 }

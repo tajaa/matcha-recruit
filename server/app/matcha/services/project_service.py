@@ -330,7 +330,19 @@ async def list_projects(
         query = f"""
             SELECT p.*,
                    rc.name AS hiring_client_name,
-                   (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
+                   (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count,
+                   (
+                       SELECT COALESCE(jsonb_agg(jsonb_build_object(
+                           'user_id', u.id,
+                           'name', COALESCE(NULLIF(TRIM(BOTH ' ' FROM COALESCE(u.name, '')), ''), u.email),
+                           'email', u.email,
+                           'avatar_url', u.avatar_url,
+                           'role', pc.role
+                       ) ORDER BY pc.role DESC, u.email), '[]'::jsonb)
+                       FROM mw_project_collaborators pc
+                       JOIN users u ON u.id = pc.user_id
+                       WHERE pc.project_id = p.id AND pc.status = 'active'
+                   ) AS collaborators_json
                    {role_subquery}
             FROM mw_projects p
             LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
@@ -345,6 +357,17 @@ async def list_projects(
             p["collaborator_role"] = r["collaborator_role"]
         if "hiring_client_name" in r.keys():
             p["hiring_client_name"] = r["hiring_client_name"]
+        if "collaborators_json" in r.keys():
+            raw = r["collaborators_json"]
+            if isinstance(raw, str):
+                try:
+                    p["collaborators"] = json.loads(raw)
+                except (json.JSONDecodeError, ValueError):
+                    p["collaborators"] = []
+            elif isinstance(raw, list):
+                p["collaborators"] = raw
+            else:
+                p["collaborators"] = []
         results.append(p)
     return results
 
