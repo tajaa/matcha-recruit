@@ -3,10 +3,11 @@ import AppKit
 import UniformTypeIdentifiers
 
 enum CollabRightPanel: String, CaseIterable, Identifiable {
-    case kanban, files, sections, overview
+    case chat, kanban, files, sections, overview
     var id: String { rawValue }
     var label: String {
         switch self {
+        case .chat: return "Chat"
         case .kanban: return "Kanban"
         case .files: return "Files"
         case .sections: return "Sections"
@@ -34,7 +35,7 @@ struct ProjectDetailView: View {
     @State private var newSectionTitle = ""
     @State private var showCollaborators = false
     @State private var showExportMenu = false
-    @State private var collabPanel: CollabRightPanel = .kanban
+    @State private var collabPanel: CollabRightPanel = .chat
     @State private var showCompleteConfirm = false
     @State private var showRenameAlert = false
     @State private var renameDraft = ""
@@ -223,75 +224,78 @@ struct ProjectDetailView: View {
     }
 
     private var collabLayout: some View {
-        HSplitView {
-            if viewModel.activeChatId != nil {
-                ChatPanelView(viewModel: chatVM, lightMode: lightMode, selectedModel: selectedModelValue)
-                    .frame(minWidth: 340)
-            } else {
-                VStack(spacing: 12) {
-                    Spacer()
-                    if let err = viewModel.errorMessage {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 28))
-                            .foregroundColor(.red)
-                        Text("Couldn't start chat")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.white)
-                        Text(err)
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 24)
-                        Button("Retry") {
-                            Task {
-                                viewModel.errorMessage = nil
-                                await viewModel.createChat(title: nil)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                    } else {
-                        ProgressView().tint(.secondary)
-                        Text("Starting chat…")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
+        VStack(spacing: 0) {
+            Picker("", selection: $collabPanel) {
+                ForEach(CollabRightPanel.allCases) { p in
+                    Text(p.label).tag(p)
                 }
-                .frame(minWidth: 340)
-                .background(Color.appBackground)
-                .task {
-                    if viewModel.activeChatId == nil && viewModel.errorMessage == nil {
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+
+            Divider().opacity(0.3)
+
+            switch collabPanel {
+            case .chat:
+                if viewModel.activeChatId != nil {
+                    ChatPanelView(viewModel: chatVM, lightMode: lightMode, selectedModel: selectedModelValue)
+                } else {
+                    chatLoadingView
+                }
+            case .kanban:
+                KanbanBoardView(viewModel: viewModel)
+            case .files:
+                ProjectFilesView(viewModel: viewModel)
+            case .sections:
+                collabSections
+            case .overview:
+                collabOverview
+            }
+        }
+        .background(Color.appBackground)
+        .task {
+            // Auto-create the project chat once when the layout first appears so
+            // the Chat tab works immediately. Idempotent — guarded on
+            // activeChatId / errorMessage so retries don't double-fire.
+            if viewModel.activeChatId == nil && viewModel.errorMessage == nil {
+                await viewModel.createChat(title: nil)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var chatLoadingView: some View {
+        VStack(spacing: 12) {
+            Spacer()
+            if let err = viewModel.errorMessage {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 28))
+                    .foregroundColor(.red)
+                Text("Couldn't start chat")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.white)
+                Text(err)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button("Retry") {
+                    Task {
+                        viewModel.errorMessage = nil
                         await viewModel.createChat(title: nil)
                     }
                 }
+                .buttonStyle(.bordered)
+            } else {
+                ProgressView().tint(.secondary)
+                Text("Starting chat…")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
             }
-
-            VStack(spacing: 0) {
-                Picker("", selection: $collabPanel) {
-                    ForEach(CollabRightPanel.allCases) { p in
-                        Text(p.label).tag(p)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-
-                Divider().opacity(0.3)
-
-                switch collabPanel {
-                case .kanban:
-                    KanbanBoardView(viewModel: viewModel)
-                case .files:
-                    ProjectFilesView(viewModel: viewModel)
-                case .sections:
-                    collabSections
-                case .overview:
-                    collabOverview
-                }
-            }
-            .frame(minWidth: 440)
-            .background(Color.appBackground)
+            Spacer()
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.appBackground)
     }
 

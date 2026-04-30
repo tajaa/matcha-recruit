@@ -9,7 +9,7 @@ struct ContentView: View {
     @State private var upgradeError: String?
     @State private var showProfile = false
     @AppStorage("mw-sidebar-channels-open") private var channelsSectionOpen = true
-    @AppStorage("mw-sidebar-consultations-open") private var consultationsSectionOpen = true
+    @AppStorage("mw-sidebar-consultations-open") private var consultationsSectionOpen = false
     @AppStorage("mw-sidebar-projects-open") private var projectsSectionOpen = true
     @AppStorage("mw-sidebar-threads-open") private var threadsSectionOpen = true
     @State private var showNewConsultation = false
@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var showProjectTypePicker = false
     @State private var isCreatingProject = false
     @State private var projectCreateError: String?
+    @State private var showNotifications = false
 
     private struct GlassWindowModifier: ViewModifier {
         func body(content: Content) -> some View {
@@ -325,6 +326,32 @@ struct ContentView: View {
             ToolbarItem(placement: .status) {
                 if let user = appState.currentUser {
                     HStack(spacing: 10) {
+                        Button {
+                            showNotifications.toggle()
+                        } label: {
+                            ZStack(alignment: .topTrailing) {
+                                Image(systemName: "bell")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(.white.opacity(0.7))
+                                if appState.notificationsUnreadCount > 0 {
+                                    Text(appState.notificationsUnreadCount > 9 ? "9+" : "\(appState.notificationsUnreadCount)")
+                                        .font(.system(size: 8, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 3)
+                                        .padding(.vertical, 1)
+                                        .background(Color.red)
+                                        .clipShape(Capsule())
+                                        .offset(x: 6, y: -5)
+                                }
+                            }
+                            .frame(width: 22, height: 16)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Notifications")
+                        .popover(isPresented: $showNotifications) {
+                            NotificationsPopoverView()
+                                .environment(appState)
+                        }
                         Button {
                             showProfile = true
                         } label: {

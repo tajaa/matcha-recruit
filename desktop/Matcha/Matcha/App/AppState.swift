@@ -12,6 +12,7 @@ class AppState {
     var showPeople: Bool = false
     var onlineUsers: [MWOnlineUser] = []
     var unreadInboxCount: Int = 0
+    var notificationsUnreadCount: Int = 0
     var isPlusActive: Bool = false
     var isSceneActive: Bool = true
     /// Bumped whenever a channel is created/joined/left so observing views
@@ -22,6 +23,7 @@ class AppState {
     var projectsListGeneration: Int = 0
     private var heartbeatTask: Task<Void, Never>?
     private var inboxPollTask: Task<Void, Never>?
+    private var notificationPollTask: Task<Void, Never>?
 
     init() {
         APIClient.shared.onUnauthorized = { [weak self] in
@@ -42,6 +44,7 @@ class AppState {
         MatchaWorkService.shared.updateCacheScope(user.id)
         startPresenceHeartbeat()
         startInboxPolling()
+        startNotificationPolling()
         Task { await refreshSubscription() }
     }
 
@@ -72,6 +75,9 @@ class AppState {
         heartbeatTask = nil
         inboxPollTask?.cancel()
         inboxPollTask = nil
+        notificationPollTask?.cancel()
+        notificationPollTask = nil
+        notificationsUnreadCount = 0
         MatchaWorkService.shared.updateCacheScope(nil)
         APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)
@@ -115,6 +121,31 @@ class AppState {
                 }
                 try? await Task.sleep(for: .seconds(60))
             }
+        }
+    }
+
+    private func startNotificationPolling() {
+        notificationPollTask?.cancel()
+        notificationPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let active = await MainActor.run { self?.isSceneActive ?? false }
+                if active {
+                    if let count = try? await MatchaWorkService.shared.fetchNotificationsUnreadCount() {
+                        await MainActor.run { self?.notificationsUnreadCount = count }
+                    }
+                }
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
+    }
+
+    /// Force a refetch of the unread count — used by the notifications popover
+    /// after a mark-read or mark-all-read action so the badge updates without
+    /// waiting for the next poll tick.
+    @MainActor
+    func refreshNotificationsCount() async {
+        if let count = try? await MatchaWorkService.shared.fetchNotificationsUnreadCount() {
+            notificationsUnreadCount = count
         }
     }
 

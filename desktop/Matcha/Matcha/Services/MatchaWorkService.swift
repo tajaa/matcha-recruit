@@ -382,6 +382,34 @@ class MatchaWorkService {
         try await client.request(method: "GET", path: "\(basePath)/presence/online")
     }
 
+    // MARK: - Notifications
+
+    func fetchNotifications(unreadOnly: Bool = false, limit: Int = 30) async throws -> [MWAppNotification] {
+        struct Res: Codable { let notifications: [MWAppNotification] }
+        let path = "\(basePath)/notifications?limit=\(limit)&unread_only=\(unreadOnly)"
+        let res: Res = try await client.request(method: "GET", path: path)
+        return res.notifications
+    }
+
+    func fetchNotificationsUnreadCount() async throws -> Int {
+        struct Res: Codable { let unread_count: Int }
+        let res: Res = try await client.request(method: "GET", path: "\(basePath)/notifications/unread-count")
+        return res.unread_count
+    }
+
+    func markNotificationsRead(ids: [String]) async throws {
+        struct Body: Encodable { let notification_ids: [String] }
+        _ = try await client.requestData(
+            method: "POST",
+            path: "\(basePath)/notifications/mark-read",
+            body: Body(notification_ids: ids)
+        )
+    }
+
+    func markAllNotificationsRead() async throws {
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/notifications/mark-all-read")
+    }
+
     // MARK: - Review Requests
 
     func sendReviewRequests(
