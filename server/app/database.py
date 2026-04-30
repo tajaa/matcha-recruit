@@ -5025,6 +5025,20 @@ async def init_db():
         """)
         await conn.execute("CREATE INDEX IF NOT EXISTS idx_mw_project_files_project_id ON mw_project_files(project_id)")
 
+        # Per-user project pin (independent across collaborators)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS mw_project_pins (
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                project_id UUID NOT NULL REFERENCES mw_projects(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (user_id, project_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_mw_project_pins_user
+            ON mw_project_pins(user_id, created_at DESC)
+        """)
+
         # Training compliance tables
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS training_requirements (

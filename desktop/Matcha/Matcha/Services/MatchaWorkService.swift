@@ -663,6 +663,19 @@ class MatchaWorkService {
     }
 
     @discardableResult
+    func setProjectPinned(id: String, pinned: Bool) async throws -> Bool {
+        struct Body: Codable { let is_pinned: Bool }
+        struct Res: Codable { let is_pinned: Bool }
+        let res: Res = try await client.request(
+            method: "POST",
+            path: "\(basePath)/projects/\(id)/pin",
+            body: Body(is_pinned: pinned),
+        )
+        invalidateProjectLists()
+        return res.is_pinned
+    }
+
+    @discardableResult
     func updateProjectMeta(id: String, title: String? = nil, isPinned: Bool? = nil, status: String? = nil) async throws -> MWProject {
         defer { invalidateProjectLists() }
         struct Body: Codable { let title: String?; let isPinned: Bool?; let status: String?

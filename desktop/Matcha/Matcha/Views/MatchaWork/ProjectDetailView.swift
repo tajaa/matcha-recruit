@@ -700,46 +700,56 @@ struct ProjectDetailView: View {
 
     private func export(format: String) {
         Task { @MainActor in
-            guard let data = await viewModel.exportProject(format: format) else {
-                // exportProject sets viewModel.errorMessage on failure; surface
-                // it as an alert so the user sees why nothing happened instead
-                // of a silent no-op.
-                if let msg = viewModel.errorMessage {
+            let result = await viewModel.exportProject(format: format)
+            // Defer alert + save panel onto the next runloop tick so any
+            // in-flight Menu / sheet has had a chance to dismiss; without
+            // this the modal silently fails to present and the user sees
+            // "nothing happened" on a server error.
+            DispatchQueue.main.async {
+                guard let data = result, !data.isEmpty else {
+                    let msg = viewModel.errorMessage
+                        ?? "Export returned no data."
+                    print("[Export] \(format) failed: \(msg)")
                     let alert = NSAlert()
                     alert.messageText = "Export failed"
                     alert.informativeText = msg
                     alert.alertStyle = .warning
                     alert.runModal()
+                    return
                 }
-                return
+                presentSavePanel(data: data, format: format)
             }
-            let panel = NSSavePanel()
-            panel.nameFieldStringValue = "\(viewModel.project?.title ?? "project").\(format)"
-            // allowedContentTypes pins the save dialog to the correct extension
-            // and makes sure the file is written with it even if the user edits
-            // the name field without the extension.
-            switch format {
-            case "pdf": panel.allowedContentTypes = [.pdf]
-            case "docx":
-                if let t = UTType(filenameExtension: "docx") { panel.allowedContentTypes = [t] }
-            case "md":
-                if let t = UTType(filenameExtension: "md") { panel.allowedContentTypes = [t] }
-            default: break
+        }
+    }
+
+    @MainActor
+    private func presentSavePanel(data: Data, format: String) {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = "\(viewModel.project?.title ?? "project").\(format)"
+        // allowedContentTypes pins the save dialog to the correct extension
+        // and makes sure the file is written with it even if the user edits
+        // the name field without the extension.
+        switch format {
+        case "pdf": panel.allowedContentTypes = [.pdf]
+        case "docx":
+            if let t = UTType(filenameExtension: "docx") { panel.allowedContentTypes = [t] }
+        case "md":
+            if let t = UTType(filenameExtension: "md") { panel.allowedContentTypes = [t] }
+        default: break
+        }
+        let window = NSApp.keyWindow ?? NSApp.mainWindow
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            do {
+                try data.write(to: url)
+            } catch {
+                print("[Export] write failed: \(error)")
             }
-            let window = NSApp.keyWindow ?? NSApp.mainWindow
-            let handler: (NSApplication.ModalResponse) -> Void = { response in
-                guard response == .OK, let url = panel.url else { return }
-                do {
-                    try data.write(to: url)
-                } catch {
-                    print("[Export] write failed: \(error)")
-                }
-            }
-            if let window {
-                panel.beginSheetModal(for: window, completionHandler: handler)
-            } else {
-                panel.begin(completionHandler: handler)
-            }
+        }
+        if let window {
+            panel.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            panel.begin(completionHandler: handler)
         }
     }
 }

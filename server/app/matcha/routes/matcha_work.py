@@ -3095,10 +3095,20 @@ async def update_project_endpoint(
     body: dict,
     current_user: CurrentUser = Depends(require_admin_or_client),
 ):
-    """Update project title, pin, status, or hiring client."""
+    """Update project title, status, or hiring client.
+
+    Pin is per-user: a stray `is_pinned` in the body is intercepted and
+    routed through the per-user pin store so existing clients keep
+    working without flipping the global flag for everyone else.
+    """
     from ..services import project_service as proj_svc
     from ..services import recruiting_client_service as rc_svc
     await _verify_project_access(project_id, current_user)
+
+    # Per-user pin handoff (legacy API compat)
+    if "is_pinned" in body:
+        await proj_svc.set_project_pin(current_user.id, project_id, bool(body.pop("is_pinned")))
+
     if "hiring_client_id" in body and body["hiring_client_id"] is not None:
         company_id = await get_client_company_id(current_user)
         try:
@@ -3107,7 +3117,27 @@ async def update_project_endpoint(
             raise HTTPException(status_code=400, detail="Invalid hiring_client_id")
         if company_id is None or not await rc_svc.get_client(body["hiring_client_id"], company_id):
             raise HTTPException(status_code=400, detail="Hiring client does not belong to this workspace")
+
+    if not body:
+        # Pin-only request — return the latest project shape via the GET path
+        # so the response stays consistent with the legacy contract.
+        company_id = await get_client_company_id(current_user)
+        return await proj_svc.get_project(project_id, company_id, user_id=current_user.id)
     return await proj_svc.update_project(project_id, body)
+
+
+@router.post("/projects/{project_id}/pin")
+async def set_project_pin_endpoint(
+    project_id: UUID,
+    body: dict,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Set the per-user star/pin on a project. Body: `{is_pinned: bool}`."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    pinned = bool(body.get("is_pinned", True))
+    await proj_svc.set_project_pin(current_user.id, project_id, pinned)
+    return {"is_pinned": pinned}
 
 
 @router.delete("/projects/{project_id}")
@@ -5692,8 +5722,14 @@ async def _render_project_pdf(project: dict) -> bytes:
 
     try:
         from weasyprint import HTML
-    except ImportError:
-        raise HTTPException(status_code=500, detail="PDF generation not available")
+    except ImportError as ie:
+        # Surface the real installation hint instead of an opaque 500 so
+        # the desktop alert tells the operator what to do.
+        logger.error("weasyprint import failed: %s", ie)
+        raise HTTPException(
+            status_code=501,
+            detail="PDF generation not available — install weasyprint on the server (`pip install weasyprint`).",
+        )
 
     try:
         return await asyncio.wait_for(

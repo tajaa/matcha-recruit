@@ -277,13 +277,18 @@ async def get_project(project_id: UUID, company_id: UUID, user_id: UUID | None =
         project["chats"] = [dict(c) for c in chats]
         project["chat_count"] = len(chats)
 
-        # Resolve collaborator role for the requesting user
+        # Resolve collaborator role + per-user pin for the requesting user
         if user_id:
             collab = await conn.fetchrow(
                 "SELECT role FROM mw_project_collaborators WHERE project_id = $1 AND user_id = $2 AND status = 'active'",
                 project_id, user_id,
             )
             project["collaborator_role"] = collab["role"] if collab else None
+            user_pinned = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM mw_project_pins WHERE user_id = $1 AND project_id = $2)",
+                user_id, project_id,
+            )
+            project["is_pinned"] = bool(user_pinned)
         elif project.get("created_by") is not None:
             # Default: project creator is the owner
             project["collaborator_role"] = "owner"
@@ -324,14 +329,19 @@ async def list_projects(
         # To get the collaborator_role for the user without breaking the query with parameterized joins,
         # we can just select it via a subquery in the SELECT clause if user_id is provided.
         role_subquery = ""
+        pin_subquery = ""
         if user_id:
-            role_subquery = f", (SELECT role FROM mw_project_collaborators WHERE project_id = p.id AND user_id = ${1 if not company_id else 2} AND status = 'active' LIMIT 1) AS collaborator_role"
+            user_arg_idx = 1 if not company_id else 2
+            role_subquery = f", (SELECT role FROM mw_project_collaborators WHERE project_id = p.id AND user_id = ${user_arg_idx} AND status = 'active' LIMIT 1) AS collaborator_role"
+            # Per-user pin overrides the legacy global mw_projects.is_pinned.
+            pin_subquery = f", EXISTS(SELECT 1 FROM mw_project_pins WHERE user_id = ${user_arg_idx} AND project_id = p.id) AS user_pinned"
 
         query = f"""
             SELECT p.*,
                    rc.name AS hiring_client_name,
                    (SELECT COUNT(*) FROM mw_threads WHERE project_id = p.id) as chat_count
                    {role_subquery}
+                   {pin_subquery}
             FROM mw_projects p
             LEFT JOIN recruiting_clients rc ON rc.id = p.hiring_client_id
             {where_clause}
@@ -381,6 +391,9 @@ async def list_projects(
             p["collaborator_role"] = r["collaborator_role"]
         if "hiring_client_name" in r.keys():
             p["hiring_client_name"] = r["hiring_client_name"]
+        # Per-user pin overrides the global is_pinned column when caller is known.
+        if "user_pinned" in r.keys():
+            p["is_pinned"] = bool(r["user_pinned"])
         pid = str(p.get("id"))
         if pid in collabs_by_project:
             p["collaborators"] = collabs_by_project[pid]
@@ -395,7 +408,11 @@ async def update_project(project_id: UUID, updates: dict) -> dict:
                 "SELECT title, project_type, project_data FROM mw_projects WHERE id = $1 FOR UPDATE",
                 project_id,
             )
-            allowed = {"title", "is_pinned", "status", "hiring_client_id"}
+            # Note: is_pinned is intentionally NOT in this set — pin is now
+            # per-user via mw_project_pins. The route intercepts is_pinned
+            # before calling this service. The global column on mw_projects
+            # is kept for backfill/legacy reads only.
+            allowed = {"title", "status", "hiring_client_id"}
             sets = []
             vals = []
             idx = 1
@@ -1328,6 +1345,31 @@ async def list_collaborators(project_id: UUID) -> list[dict]:
             project_id,
         )
     return [dict(r) for r in rows]
+
+
+async def set_project_pin(user_id: UUID, project_id: UUID, pinned: bool) -> bool:
+    """Toggle a per-user star/pin on a project. Returns the new state.
+
+    The pin is stored in `mw_project_pins(user_id, project_id)`. Anyone
+    can pin a project they can already see (caller-side authorisation
+    happens in the route).
+    """
+    async with get_connection() as conn:
+        if pinned:
+            await conn.execute(
+                """
+                INSERT INTO mw_project_pins (user_id, project_id)
+                VALUES ($1, $2)
+                ON CONFLICT (user_id, project_id) DO NOTHING
+                """,
+                user_id, project_id,
+            )
+        else:
+            await conn.execute(
+                "DELETE FROM mw_project_pins WHERE user_id = $1 AND project_id = $2",
+                user_id, project_id,
+            )
+    return pinned
 
 
 async def ensure_discussion_channel(project_id: UUID, current_user_id: UUID) -> Optional[UUID]:

@@ -194,6 +194,12 @@ struct ProjectListView: View {
         }
         .background(Color.appBackground)
         .task(id: appState.projectsListGeneration) { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
+            // Project metadata (e.g. title) changed elsewhere — invalidate the
+            // service-level list cache so the next load() returns fresh data.
+            MatchaWorkService.shared.invalidateProjectLists()
+            Task { await load() }
+        }
         .sheet(isPresented: $showNewBlog) {
             NewBlogSheet { proj in
                 projects.insert(proj, at: 0)
@@ -226,7 +232,7 @@ struct ProjectListView: View {
     private func togglePin(project: MWProject) async {
         let nextPinned = !(project.isPinned ?? false)
         do {
-            _ = try await MatchaWorkService.shared.updateProjectMeta(id: project.id, isPinned: nextPinned)
+            _ = try await MatchaWorkService.shared.setProjectPinned(id: project.id, pinned: nextPinned)
             await load()
         } catch {
             // Best-effort; surface as a console log only
