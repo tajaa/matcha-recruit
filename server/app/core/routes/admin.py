@@ -7248,6 +7248,10 @@ async def trigger_scheduler(task_key: str):
         from ...workers.tasks.risk_assessment import enqueue_scheduled_risk_assessments
         enqueue_scheduled_risk_assessments.delay()
         return {"status": "triggered", "task_key": task_key, "message": "Risk assessment enqueued"}
+    elif task_key == "auto_archive":
+        from ...workers.tasks.auto_archive import run_auto_archive
+        run_auto_archive.delay()
+        return {"status": "triggered", "task_key": task_key, "message": "Auto-archive enqueued"}
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unknown task key: {task_key}")
 

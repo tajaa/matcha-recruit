@@ -3671,6 +3671,14 @@ async def init_db():
             ON CONFLICT (task_key) DO NOTHING
         """)
 
+        # Add scheduler setting for auto-archive
+        await conn.execute("""
+            INSERT INTO scheduler_settings (task_key, display_name, description, enabled, max_per_cycle)
+            VALUES ('auto_archive', 'Auto-Archive',
+                    'Archives threads and projects idle for 7+ days with no star/pin.', false, 10000)
+            ON CONFLICT (task_key) DO NOTHING
+        """)
+
         # ===========================================
         # Compliance Poster Tables
         # ===========================================

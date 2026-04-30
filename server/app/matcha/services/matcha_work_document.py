@@ -1264,6 +1264,10 @@ async def add_message(
             version_created,
             json.dumps(metadata) if metadata else None,
         )
+        await conn.execute(
+            "UPDATE mw_threads SET updated_at = NOW() WHERE id = $1",
+            thread_id,
+        )
         return dict(row)
 
 
