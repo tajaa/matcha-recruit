@@ -62,5 +62,9 @@ export function useMe() {
 
   const isPersonal = !!me?.profile?.is_personal
 
-  return { me, loading, hasFeature, isHealthcare, isPersonal, refresh }
+  const bf = me?.user?.beta_features ?? {}
+  const mwBetaLite = bf['matcha_work_beta_lite'] === true || bf['matcha_work_beta_full'] === true
+  const mwBetaFull = bf['matcha_work_beta_full'] === true
+
+  return { me, loading, hasFeature, isHealthcare, isPersonal, mwBetaLite, mwBetaFull, refresh }
 }

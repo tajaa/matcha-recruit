@@ -316,6 +316,7 @@ export interface MeUser {
   role: string
   avatar_url?: string | null
   work_onboarded?: boolean
+  beta_features?: Record<string, boolean>
 }
 
 export interface MeClientProfile {

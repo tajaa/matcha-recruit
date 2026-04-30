@@ -22,7 +22,7 @@ type RenameItem = { type: 'channel' | 'project' | 'thread'; id: string; name: st
 export default function WorkSidebar({ open, onToggle }: Props) {
   const navigate = useNavigate()
   const location = useLocation()
-  const { me, isPersonal } = useMe()
+  const { me, isPersonal, mwBetaLite } = useMe()
   const canCreateChannel = ['client', 'admin', 'individual'].includes(me?.user?.role ?? '')
 
   const [channels, setChannels] = useState<ChannelSummary[]>([])
@@ -210,13 +210,15 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           )}
         </button>
 
-        <button
-          onClick={() => { onToggle(); setProjectsOpen(true) }}
-          className={`p-2 rounded-lg transition-colors ${location.pathname.includes('/projects/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
-          title="Projects"
-        >
-          <FolderOpen size={16} />
-        </button>
+        {mwBetaLite && (
+          <button
+            onClick={() => { onToggle(); setProjectsOpen(true) }}
+            className={`p-2 rounded-lg transition-colors ${location.pathname.includes('/projects/') ? 'bg-zinc-800 text-white' : 'text-zinc-500 hover:text-white hover:bg-zinc-800/50'}`}
+            title="Projects"
+          >
+            <FolderOpen size={16} />
+          </button>
+        )}
 
         <button
           onClick={() => { onToggle(); setThreadsOpen(true) }}
@@ -392,7 +394,7 @@ export default function WorkSidebar({ open, onToggle }: Props) {
           </div>
 
           {/* Projects */}
-          <div className="mt-1">
+          {mwBetaLite && <div className="mt-1">
             <button
               onClick={() => setProjectsOpen(!projectsOpen)}
               className="flex items-center justify-between w-full px-2.5 py-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500 hover:text-zinc-400 transition-colors"
@@ -478,6 +480,8 @@ export default function WorkSidebar({ open, onToggle }: Props) {
               </div>
             )}
           </div>
+
+          } {/* end mwBetaLite Projects */}
 
           {/* Threads */}
           <div className="mt-1">
