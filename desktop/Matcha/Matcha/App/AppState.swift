@@ -55,6 +55,15 @@ class AppState {
         startNotificationPolling()
         Task { await refreshSubscription() }
         Task { await refreshBetaFeatures() }
+        ChannelNotificationManager.shared.requestPermission()
+        ChannelsWebSocket.shared.onMessageGlobal = { [weak self] msg in
+            guard let self, !self.isSceneActive else { return }
+            ChannelNotificationManager.shared.post(
+                senderName: msg.senderName,
+                content: msg.content,
+                channelName: ChannelsWebSocket.shared.currentRoomName
+            )
+        }
     }
 
     @MainActor
@@ -95,6 +104,7 @@ class AppState {
         notificationPollTask = nil
         notificationsUnreadCount = 0
         betaFeatures = [:]
+        ChannelsWebSocket.shared.onMessageGlobal = nil
         MatchaWorkService.shared.updateCacheScope(nil)
         APIClient.shared.accessToken = nil
         KeychainHelper.delete(key: KeychainHelper.Keys.accessToken)

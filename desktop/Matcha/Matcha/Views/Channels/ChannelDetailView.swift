@@ -744,6 +744,7 @@ struct ChannelDetailView: View {
         do {
             let detail = try await ChannelsService.shared.getChannel(id: channelId)
             channel = detail
+            ws.setCurrentRoomName(detail.name)
             messages = detail.messages
             isLoading = false
         } catch {

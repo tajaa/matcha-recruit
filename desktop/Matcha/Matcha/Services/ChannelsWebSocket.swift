@@ -14,6 +14,10 @@ final class ChannelsWebSocket: NSObject {
     private var reconnectDelay: Double = 3.0
 
     var onMessage: ((ChannelMessage) -> Void)?
+    /// Fires for every inbound message regardless of which view owns `onMessage`.
+    /// Set once by AppState for background notifications; never cleared by channel views.
+    var onMessageGlobal: ((ChannelMessage) -> Void)?
+    var currentRoomName: String?
     var onOnlineUsers: (([ChannelOnlineUser]) -> Void)?
     var onUserJoined: ((ChannelOnlineUser) -> Void)?
     var onUserLeft: ((ChannelOnlineUser) -> Void)?
@@ -57,12 +61,17 @@ final class ChannelsWebSocket: NSObject {
         currentRoom = nil
     }
 
-    func joinRoom(channelId: String) {
+    func joinRoom(channelId: String, channelName: String? = nil) {
         if let prior = currentRoom, prior != channelId {
             send(["type": "leave_room", "channel_id": prior])
         }
         currentRoom = channelId
+        if let channelName { currentRoomName = channelName }
         send(["type": "join_room", "channel_id": channelId])
+    }
+
+    func setCurrentRoomName(_ name: String?) {
+        currentRoomName = name
     }
 
     func clearCallbacks() {
@@ -162,6 +171,7 @@ final class ChannelsWebSocket: NSObject {
                let msgData = try? JSONSerialization.data(withJSONObject: msgDict),
                let msg = try? JSONDecoder().decode(ChannelMessage.self, from: msgData) {
                 onMessage?(msg)
+                onMessageGlobal?(msg)
             }
         case "online_users":
             if let users = obj["users"] as? [[String: Any]] {
