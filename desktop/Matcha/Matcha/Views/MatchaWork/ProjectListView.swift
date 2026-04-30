@@ -15,23 +15,27 @@ struct ProjectListView: View {
     @AppStorage("mw-sidebar-proj-collabs-open")    private var collabsOpen    = true
     @AppStorage("mw-sidebar-proj-discipline-open") private var disciplineOpen = true
     @AppStorage("mw-sidebar-proj-general-open")    private var generalOpen    = true
+    @AppStorage("mw-sidebar-proj-archived-open")   private var archivedOpen   = false
 
     // MARK: - Grouping
 
+    private var activeProjects: [MWProject] { projects.filter { $0.status != "archived" } }
+    private var archivedProjects: [MWProject] { projects.filter { $0.status == "archived" }.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") } }
+
     private var blogs: [MWProject] {
-        projects.filter { $0.projectType == "blog" }.pinnedFirst()
+        activeProjects.filter { $0.projectType == "blog" }.pinnedFirst()
     }
     private var collabs: [MWProject] {
-        projects.filter {
+        activeProjects.filter {
             $0.projectType == "collab" || $0.collaboratorRole == "collaborator"
         }.pinnedFirst()
     }
     private var discipline: [MWProject] {
-        projects.filter { $0.projectType == "discipline" }.pinnedFirst()
+        activeProjects.filter { $0.projectType == "discipline" }.pinnedFirst()
     }
     private var general: [MWProject] {
         let excluded: Set<String> = ["blog", "collab", "discipline"]
-        return projects.filter { p in
+        return activeProjects.filter { p in
             let t = p.projectType ?? "general"
             return !excluded.contains(t) && p.collaboratorRole != "collaborator"
         }.pinnedFirst()
@@ -108,6 +112,15 @@ struct ProjectListView: View {
                             }
                         } header: {
                             sectionHeader("Projects", icon: "folder", count: general.count)
+                        }
+                    }
+                    if !archivedProjects.isEmpty {
+                        Section(isExpanded: $archivedOpen) {
+                            ForEach(archivedProjects) { p in
+                                archivedRow(p).tag(p.id)
+                            }
+                        } header: {
+                            sectionHeader("Archived", icon: "archivebox", count: archivedProjects.count)
                         }
                     }
                 }
@@ -270,6 +283,28 @@ struct ProjectListView: View {
             Text(subtitle)
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func archivedRow(_ p: MWProject) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(p.title)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+            Text(sectionSubtitle(p))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary.opacity(0.6))
+        }
+        .padding(.vertical, 2)
+        .contextMenu {
+            Button("Unarchive") {
+                Task {
+                    try? await MatchaWorkService.shared.unarchiveProject(id: p.id)
+                    await load()
+                }
+            }
         }
     }
 

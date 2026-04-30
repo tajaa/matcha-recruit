@@ -34,6 +34,7 @@ celery_app = Celery(
         "app.workers.tasks.healthcare_research",
         "app.workers.tasks.research_browse",
         "app.workers.tasks.discipline_expiry",
+        "app.workers.tasks.auto_archive",
     ],
 )
 
@@ -179,6 +180,13 @@ def on_worker_ready(**kwargs):
         run_discipline_expiry.delay()
     else:
         print("[Worker] Discipline expiry scheduler is disabled, skipping.")
+
+    from app.workers.tasks.auto_archive import run_auto_archive
+
+    if _is_scheduler_enabled("auto_archive"):
+        run_auto_archive.delay()
+    else:
+        print("[Worker] Auto-archive scheduler is disabled, skipping.")
 
 
 # ── Server error reporter integration ───────────────────────────────────────

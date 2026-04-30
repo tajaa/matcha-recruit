@@ -92,4 +92,13 @@ class ThreadListViewModel {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
     }
+
+    func unarchiveThread(thread: MWThread) async {
+        do {
+            try await service.unarchiveThread(id: thread.id)
+            await loadThreads()
+        } catch {
+            await MainActor.run { errorMessage = error.localizedDescription }
+        }
+    }
 }

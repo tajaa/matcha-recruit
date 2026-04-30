@@ -155,7 +155,11 @@ struct ThreadListView: View {
                         Button(thread.isPinned ? "Unpin" : "Pin") {
                             Task { await viewModel.togglePin(thread: thread) }
                         }
-                        if thread.status != "archived" {
+                        if thread.status == "archived" {
+                            Button("Unarchive") {
+                                Task { await viewModel.unarchiveThread(thread: thread) }
+                            }
+                        } else {
                             Button("Archive") {
                                 Task { await viewModel.archiveThread(thread: thread) }
                             }

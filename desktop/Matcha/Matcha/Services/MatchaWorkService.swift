@@ -294,6 +294,12 @@ class MatchaWorkService {
         invalidateThreadLists()
     }
 
+    func unarchiveThread(id: String) async throws {
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/threads/\(id)/unarchive")
+        invalidateThread(threadId: id)
+        invalidateThreadLists()
+    }
+
     // MARK: - Resume / Inventory File Upload (multipart)
 
     func uploadFiles(
@@ -686,6 +692,11 @@ class MatchaWorkService {
 
     func archiveProject(id: String) async throws {
         _ = try await client.requestData(method: "DELETE", path: "\(basePath)/projects/\(id)")
+        invalidateProjectLists()
+    }
+
+    func unarchiveProject(id: String) async throws {
+        _ = try await client.requestData(method: "POST", path: "\(basePath)/projects/\(id)/unarchive")
         invalidateProjectLists()
     }
 

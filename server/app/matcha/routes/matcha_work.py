@@ -3158,6 +3158,18 @@ async def archive_project_endpoint(
     return {"status": "archived"}
 
 
+@router.post("/projects/{project_id}/unarchive")
+async def unarchive_project_endpoint(
+    project_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Restore an archived project to active status."""
+    from ..services import project_service as proj_svc
+    await _verify_project_access(project_id, current_user)
+    await proj_svc.unarchive_project(project_id)
+    return {"status": "active"}
+
+
 # ── Consultation endpoints (project_type == 'consultation') ──
 
 
@@ -7772,6 +7784,34 @@ async def archive_thread(
     if result == "UPDATE 0":
         raise HTTPException(status_code=404, detail="Thread not found")
     await doc_svc.sync_element_record(thread_id)
+
+
+@router.post("/threads/{thread_id}/unarchive", status_code=200)
+async def unarchive_thread(
+    thread_id: UUID,
+    current_user: CurrentUser = Depends(require_admin_or_client),
+):
+    """Restore an archived thread to active status."""
+    from ...database import get_connection
+
+    company_id = await get_client_company_id(current_user)
+    if company_id is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    async with get_connection() as conn:
+        result = await conn.execute(
+            """
+            UPDATE mw_threads
+            SET status='active', updated_at=NOW()
+            WHERE id=$1 AND company_id=$2 AND status='archived'
+            """,
+            thread_id,
+            company_id,
+        )
+    if result == "UPDATE 0":
+        raise HTTPException(status_code=404, detail="Thread not found")
+    await doc_svc.sync_element_record(thread_id)
+    return {"status": "active"}
 
 
 @router.get(

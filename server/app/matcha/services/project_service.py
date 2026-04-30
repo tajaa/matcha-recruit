@@ -498,6 +498,14 @@ async def archive_project(project_id: UUID):
         )
 
 
+async def unarchive_project(project_id: UUID):
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE mw_projects SET status = 'active', updated_at = NOW() WHERE id = $1 AND status = 'archived'",
+            project_id,
+        )
+
+
 # ── Section operations ──
 #
 # All mutating section ops go through `_mutate_sections`: acquire row lock,
