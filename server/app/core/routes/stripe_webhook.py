@@ -166,7 +166,6 @@ async def stripe_webhook(request: Request):
                             _json.loads(existing) if existing else {}
                         )
                         features["incidents"] = True
-                        features["employees"] = True
                         await conn.execute(
                             """
                             UPDATE companies
@@ -439,8 +438,6 @@ async def stripe_webhook(request: Request):
                                 _json.loads(existing) if existing else {}
                             )
                             features["incidents"] = False
-                            features["employees"] = False
-                            features["discipline"] = False
                             await conn.execute(
                                 "UPDATE companies SET enabled_features = $1::jsonb WHERE id = $2",
                                 _json.dumps(features), sub["company_id"],

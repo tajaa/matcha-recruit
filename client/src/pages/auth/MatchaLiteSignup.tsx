@@ -93,7 +93,7 @@ export default function MatchaLiteSignup() {
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold text-zinc-100 mb-2">Matcha Lite</h1>
           <p className="text-sm text-zinc-400">
-            Incident reporting, employee management &amp; HR resources.
+            Incident reporting &amp; HR resources.
           </p>
         </div>
 

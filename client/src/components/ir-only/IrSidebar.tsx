@@ -6,17 +6,17 @@ import { useSidebarBadges } from '../../hooks/useSidebarBadges'
 
 const nav: (NavItem | NavGroup)[] = [
   { to: '/app/ir', icon: AlertTriangle, label: 'Incidents' },
-  { to: '/app/employees', icon: Users, label: 'Employees' },
+  { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
   { to: '/app/locations', icon: MapPin, label: 'Locations' },
   { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
   { to: '/app/company', icon: Building2, label: 'Company' },
 ]
 
 /**
- * Slim sidebar for Matcha Cap self-serve tenants (signup_source =
- * ir_only_self_serve). Bundle: Incidents + Employees + Discipline +
- * Company. No compliance, policies, ER Copilot, or Matcha Work links —
- * only what the Cap subscription includes.
+ * Slim sidebar for Matcha Cap / Matcha Lite tenants. ir_only_self_serve
+ * gets Incidents + Employees + Discipline + Company. matcha_lite gets a
+ * narrower Incidents + Locations + Company set since Employees and
+ * Discipline aren't in the bundle. Per-item feature gates handle both.
  */
 export default function IrSidebar() {
   const { me, loading, hasFeature } = useMe()
