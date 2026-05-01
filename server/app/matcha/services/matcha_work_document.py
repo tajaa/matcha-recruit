@@ -26,9 +26,14 @@ EMAIL_REGEX = re.compile(r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
 VALID_REVIEW_REQUEST_STATUSES = {"pending", "sent", "failed", "submitted"}
 MATCHA_WORK_STORAGE_ROOT = "matcha-work"
 
-# TTL cache for company profiles — avoids re-fetching on every message
-_company_profile_cache: dict[str, tuple[float, dict]] = {}
+# TTL+LRU cache for company profiles — avoids re-fetching on every message.
+# Bounded size prevents unbounded growth on a long-running server. cachetools
+# evicts oldest entries when full and drops expired entries on access.
+from cachetools import TTLCache  # noqa: E402
+
 _PROFILE_CACHE_TTL = 300  # 5 minutes
+_PROFILE_CACHE_MAX = 1000  # caps memory at ~companies × profile size
+_company_profile_cache: TTLCache = TTLCache(maxsize=_PROFILE_CACHE_MAX, ttl=_PROFILE_CACHE_TTL)
 
 
 def _should_enforce_company_scoped_matcha_work_storage() -> bool:
@@ -656,10 +661,9 @@ def invalidate_company_profile_cache(company_id: UUID) -> None:
 async def get_company_profile_for_ai(company_id: UUID) -> dict:
     """Fetch the company profile fields relevant to AI context."""
     key = str(company_id)
-    now = time.monotonic()
     cached = _company_profile_cache.get(key)
-    if cached and (now - cached[0]) < _PROFILE_CACHE_TTL:
-        return dict(cached[1])  # return a copy so callers can't corrupt cache
+    if cached is not None:
+        return dict(cached)  # return a copy so callers can't corrupt cache
 
     async with get_connection() as conn:
         row = await conn.fetchrow(
@@ -675,7 +679,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
             company_id,
         )
         if row is None:
-            _company_profile_cache[key] = (now, {})
+            _company_profile_cache[key] = {}
             return {}
         profile = {k: v for k, v in dict(row).items() if v is not None}
 
@@ -687,11 +691,11 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
         ]
     except Exception:
         logger.warning("Failed to load compliance locations for Matcha Work AI context", exc_info=True)
-        _company_profile_cache[key] = (now, profile)
+        _company_profile_cache[key] = profile
         return profile
 
     if not locations:
-        _company_profile_cache[key] = (now, profile)
+        _company_profile_cache[key] = profile
         return profile
 
     def _location_label(loc: dict) -> str:
@@ -726,7 +730,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
             )
     except Exception:
         logger.warning("Failed to load compliance requirements for Matcha Work AI context", exc_info=True)
-        _company_profile_cache[key] = (now, profile)
+        _company_profile_cache[key] = profile
         return profile
 
     # Group requirements by location
@@ -759,7 +763,7 @@ async def get_company_profile_for_ai(company_id: UUID) -> dict:
     if location_lines:
         profile["jurisdiction_requirements_summary"] = "\n".join(location_lines)
 
-    _company_profile_cache[key] = (now, profile)
+    _company_profile_cache[key] = profile
     return profile
 
 

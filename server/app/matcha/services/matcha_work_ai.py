@@ -104,10 +104,15 @@ async def fetch_image_parts_for_messages(msg_dicts: list[dict]) -> None:
         msg.setdefault("image_parts", []).append(result)
 
 # ── Gemini Context Cache Registry ──
-# Maps (company_id + prompt_hash + model) → (cache_name, model, expires_at)
-_cache_registry: dict[str, tuple[str, str, datetime]] = {}
+# Maps (company_id + prompt_hash + model) → (cache_name, model). TTL+LRU
+# eviction prevents unbounded growth on a long-running server with many
+# tenants. Bounded to ~companies × prompt-variants × models.
+from cachetools import TTLCache  # noqa: E402
+
+_CACHE_TTL_SECONDS = 3600  # 1 hour — must match Gemini's cache TTL
+_CACHE_REGISTRY_MAX = 2000
+_cache_registry: TTLCache = TTLCache(maxsize=_CACHE_REGISTRY_MAX, ttl=_CACHE_TTL_SECONDS)
 _cache_unsupported_models: set[str] = set()  # models that don't support caching — skip silently
-_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 OFFER_LETTER_FIELDS = list(OfferLetterDocument.model_fields.keys())
 REVIEW_FIELDS = list(ReviewDocument.model_fields.keys())
@@ -938,34 +943,31 @@ class GeminiProvider(MatchaWorkAIProvider):
 
         Returns cache name if successful, None if caching isn't supported or fails.
         Works with any model — silently skips models that don't support caching.
+        TTLCache handles expiry + LRU eviction automatically.
         """
-        # Skip models we've already learned don't support caching
         if model in _cache_unsupported_models:
             return None
 
         prompt_hash = hashlib.md5(static_prompt.encode()).hexdigest()[:12]
         key = f"{company_id}:{prompt_hash}:{model}"
 
-        # Check existing cache
-        if key in _cache_registry:
-            name, cached_model, expires = _cache_registry[key]
-            if datetime.now(timezone.utc) < expires and cached_model == model:
+        cached = _cache_registry.get(key)
+        if cached is not None:
+            name, cached_model = cached
+            if cached_model == model:
                 return name
-            # Expired — remove
-            del _cache_registry[key]
 
         try:
-            cached = self.client.caches.create(
+            new_cache = self.client.caches.create(
                 model=model,
                 config=types.CreateCachedContentConfig(
                     system_instruction=static_prompt,
                     ttl=f"{_CACHE_TTL_SECONDS}s",
                 ),
             )
-            expires = datetime.now(timezone.utc) + timedelta(seconds=_CACHE_TTL_SECONDS)
-            _cache_registry[key] = (cached.name, model, expires)
-            logger.info("[cache] Created Gemini cache %s for company=%s model=%s", cached.name, company_id, model)
-            return cached.name
+            _cache_registry[key] = (new_cache.name, model)
+            logger.info("[cache] Created Gemini cache %s for company=%s model=%s", new_cache.name, company_id, model)
+            return new_cache.name
         except Exception as e:
             err_str = str(e).lower()
             if "not supported" in err_str or "not available" in err_str or "minimum" in err_str or "caching" in err_str:

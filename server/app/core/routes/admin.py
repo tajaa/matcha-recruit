@@ -624,6 +624,9 @@ async def update_business_registration(
                 detail="Business registration not found",
             )
 
+        from ...matcha.services.matcha_work_document import invalidate_company_profile_cache
+        invalidate_company_profile_cache(company_id)
+
         return BusinessRegistrationResponse(
             id=row["id"],
             company_name=row["company_name"],
@@ -8904,6 +8907,8 @@ async def update_company_admin(company_id: UUID, body: CompanyProfileUpdate):
         )
         if not row:
             raise HTTPException(status_code=404, detail="Company not found")
+    from ...matcha.services.matcha_work_document import invalidate_company_profile_cache
+    invalidate_company_profile_cache(company_id)
     return {"ok": True}
 
 
@@ -8917,6 +8922,8 @@ async def delete_company_admin(company_id: UUID):
         )
         if not row:
             raise HTTPException(status_code=404, detail="Company not found or already deleted")
+        from ...matcha.services.matcha_work_document import invalidate_company_profile_cache
+        invalidate_company_profile_cache(company_id)
     return {"ok": True}
 
 
