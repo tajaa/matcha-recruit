@@ -158,6 +158,7 @@ async def stripe_webhook(request: Request):
                     from ...database import get_connection as _gc
                     company_id = UUID(company_id_str)
                     owner = None
+                    just_activated = False
                     async with _gc() as conn:
                         existing = await conn.fetchval(
                             "SELECT enabled_features FROM companies WHERE id = $1",
@@ -166,6 +167,10 @@ async def stripe_webhook(request: Request):
                         features = existing if isinstance(existing, dict) else (
                             _json.loads(existing) if existing else {}
                         )
+                        # Track first-time activation so a Stripe retry
+                        # of the same checkout.session.completed event
+                        # doesn't send duplicate activation emails.
+                        just_activated = not bool(features.get("incidents"))
                         features["incidents"] = True
                         await conn.execute(
                             """
@@ -179,20 +184,21 @@ async def stripe_webhook(request: Request):
                         # Pull the owner's email + display name for the
                         # activation email below. Falls back to the email
                         # if the client.name is null.
-                        owner = await conn.fetchrow(
-                            """
-                            SELECT u.email,
-                                   COALESCE(c.name, u.email) AS name,
-                                   comp.name AS company_name
-                            FROM companies comp
-                            JOIN clients c ON c.company_id = comp.id
-                            JOIN users u ON u.id = c.user_id
-                            WHERE comp.id = $1
-                            ORDER BY c.created_at ASC
-                            LIMIT 1
-                            """,
-                            company_id,
-                        )
+                        if just_activated:
+                            owner = await conn.fetchrow(
+                                """
+                                SELECT u.email,
+                                       COALESCE(c.name, u.email) AS name,
+                                       comp.name AS company_name
+                                FROM companies comp
+                                JOIN clients c ON c.company_id = comp.id
+                                JOIN users u ON u.id = c.user_id
+                                WHERE comp.id = $1
+                                ORDER BY c.created_at ASC
+                                LIMIT 1
+                                """,
+                                company_id,
+                            )
                     # Record subscription so cancellation handler can find it
                     if stripe_sub_id:
                         await billing_service.upsert_subscription(
