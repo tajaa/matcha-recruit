@@ -78,6 +78,7 @@ import BrokerDashboard from './pages/broker/BrokerDashboard'
 import BrokerClients from './pages/broker/BrokerClients'
 import BrokerSettings from './pages/broker/BrokerSettings'
 import BrokerClientDetail from './pages/broker/BrokerClientDetail'
+import BrokerReferralLinks from './pages/broker/BrokerReferralLinks'
 import ERExportDownload from './pages/shared/ERExportDownload'
 import CandidateInterview from './pages/shared/CandidateInterview'
 import SSOCallback from './pages/SSOCallback'
@@ -158,6 +159,7 @@ export default function App() {
       <Route path="/broker" element={<AppLayout sidebar={<BrokerSidebar />} />}>
         <Route index element={<BrokerDashboard />} />
         <Route path="clients" element={<BrokerClients />} />
+        <Route path="referrals" element={<BrokerReferralLinks />} />
         <Route path="settings" element={<BrokerSettings />} />
         <Route path="clients/:companyId" element={<BrokerClientDetail />} />
       </Route>

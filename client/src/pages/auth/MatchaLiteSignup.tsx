@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { invalidateMeCache } from '../../hooks/useMe'
 
@@ -9,6 +10,8 @@ function litePriceDollars(headcount: number): number {
 }
 
 export default function MatchaLiteSignup() {
+  const [searchParams] = useSearchParams()
+  const brokerRef = searchParams.get('ref')
   const [companyName, setCompanyName] = useState('')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -47,6 +50,7 @@ export default function MatchaLiteSignup() {
           email: email.trim().toLowerCase(),
           password,
           headcount: hc,
+          ...(brokerRef ? { lite_broker_token: brokerRef } : {}),
         }),
       })
       const regData = await regRes.json()

@@ -98,6 +98,26 @@ export interface BrokerClientSetupsResponse {
   expired_count: number
 }
 
+// --- Lite referral tokens ---
+
+export interface BrokerLiteReferralToken {
+  id: string
+  broker_id: string
+  token: string
+  label: string | null
+  created_at: string
+  expires_at: string | null
+  is_active: boolean
+  use_count: number
+  last_used_at: string | null
+  referral_url: string
+}
+
+export interface BrokerLiteReferralTokenListResponse {
+  tokens: BrokerLiteReferralToken[]
+  total: number
+}
+
 // --- Per-client detail ---
 
 export interface BrokerClientCompany {

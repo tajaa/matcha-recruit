@@ -4,6 +4,8 @@ import type {
   BrokerHandbookCoverage,
   BrokerBatchCreateResponse,
   BrokerClientDetailResponse,
+  BrokerLiteReferralToken,
+  BrokerLiteReferralTokenListResponse,
 } from '../types/broker'
 
 export function fetchBrokerPortfolio() {
@@ -20,4 +22,19 @@ export function createBatchClientSetups(clients: any[]) {
 
 export function fetchBrokerClientDetail(companyId: string) {
   return api.get<BrokerClientDetailResponse>(`/brokers/companies/${companyId}`)
+}
+
+export function fetchLiteReferralTokens() {
+  return api.get<BrokerLiteReferralTokenListResponse>('/brokers/lite-referral-tokens')
+}
+
+export function createLiteReferralToken(label?: string, expiresDays?: number) {
+  return api.post<BrokerLiteReferralToken>('/brokers/lite-referral-tokens', {
+    label: label || undefined,
+    expires_days: expiresDays || undefined,
+  })
+}
+
+export function deactivateLiteReferralToken(tokenId: string) {
+  return api.delete<{ status: string }>(`/brokers/lite-referral-tokens/${tokenId}`)
 }

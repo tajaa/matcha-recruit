@@ -1537,6 +1537,23 @@ async def register_business(request: BusinessRegister):
                 if broker_row:
                     referring_broker_id = broker_row["id"]
 
+            # Resolve Lite referral token — non-blocking if invalid/expired
+            if request.lite_broker_token and request.tier == "matcha_lite" and referring_broker_id is None:
+                lite_ref_row = await conn.fetchrow(
+                    """
+                    UPDATE broker_lite_referral_tokens
+                    SET use_count    = use_count + 1,
+                        last_used_at = NOW()
+                    WHERE token     = $1
+                      AND is_active  = true
+                      AND (expires_at IS NULL OR expires_at > NOW())
+                    RETURNING broker_id
+                    """,
+                    request.lite_broker_token.strip(),
+                )
+                if lite_ref_row:
+                    referring_broker_id = lite_ref_row["broker_id"]
+
             # IR-only self-serve signup auto-approves and narrows the
             # feature set to incidents only. Bypasses the bespoke pending
             # queue. Other tier values fall through to standard behavior.

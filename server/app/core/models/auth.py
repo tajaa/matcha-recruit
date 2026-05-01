@@ -107,6 +107,8 @@ class BusinessRegister(BaseModel):
     invite_token: Optional[str] = None
     # Broker referral slug from ?via= link
     broker_ref: Optional[str] = None
+    # Broker Lite referral token from ?ref= link on /lite/signup
+    lite_broker_token: Optional[str] = None
 
     # Self-serve product tier. "ir_only" = Matcha IR free-beta signup
     # (auto-approve, only `incidents` feature on, slim IR layout).
