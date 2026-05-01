@@ -46,33 +46,46 @@ const CALCS: CalcCard[] = [
   },
 ]
 
+function mkT(embedded?: boolean) {
+  return embedded ? {
+    ink: '#e4e4e7', bg: 'transparent', muted: '#71717a',
+    line: '#3f3f46', display: 'inherit',
+    iconBg: '#27272a',
+  } : {
+    ink: INK, bg: BG, muted: MUTED,
+    line: LINE, display: DISPLAY,
+    iconBg: 'rgba(15,15,15,0.05)',
+  }
+}
+
 export default function Calculators({ embedded }: { embedded?: boolean }) {
   const [showPricing, setShowPricing] = useState(false)
   const root = embedded ? '/app/resources' : '/resources'
+  const t = mkT(embedded)
 
   useEffect(() => {
     document.title = 'HR Calculators — Matcha'
   }, [])
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+    <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
-        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>
+      <main className={embedded ? 'pt-0 pb-8 max-w-[1100px]' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
+        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
           <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
-          <span style={{ color: INK }}>Calculators</span>
+          <span style={{ color: t.ink }}>Calculators</span>
         </nav>
 
         <header className="mb-14 max-w-2xl">
           <h1
             className="text-5xl sm:text-6xl tracking-tight"
-            style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             HR Calculators
           </h1>
-          <p className="mt-4 text-base" style={{ color: MUTED }}>
+          <p className="mt-4 text-base" style={{ color: t.muted }}>
             Quick, no-login math for the numbers you need most — accruals,
             turnover cost, overtime, total comp.
           </p>
@@ -84,21 +97,21 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
             const Card = (
               <article
                 className="p-6 rounded-2xl flex flex-col h-full"
-                style={{ border: `1px solid ${LINE}`, opacity: live ? 1 : 0.6 }}
+                style={{ border: `1px solid ${t.line}`, opacity: live ? 1 : 0.6 }}
               >
                 <div className="flex items-start justify-between mb-4">
                   <div
                     className="w-10 h-10 rounded-lg flex items-center justify-center"
-                    style={{ backgroundColor: 'rgba(15,15,15,0.05)' }}
+                    style={{ backgroundColor: t.iconBg }}
                   >
-                    <Calculator className="w-5 h-5" style={{ color: INK }} />
+                    <Calculator className="w-5 h-5" style={{ color: t.ink }} />
                   </div>
                   {live ? (
-                    <ArrowUpRight className="w-4 h-4" style={{ color: MUTED }} />
+                    <ArrowUpRight className="w-4 h-4" style={{ color: t.muted }} />
                   ) : (
                     <span
                       className="text-[10px] tracking-wider px-2 py-1 rounded"
-                      style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                      style={{ border: `1px solid ${t.line}`, color: t.muted }}
                     >
                       COMING SOON
                     </span>
@@ -106,11 +119,11 @@ export default function Calculators({ embedded }: { embedded?: boolean }) {
                 </div>
                 <h3
                   className="text-xl mb-2"
-                  style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
+                  style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
                 >
                   {c.title}
                 </h3>
-                <p className="text-sm" style={{ color: MUTED }}>
+                <p className="text-sm" style={{ color: t.muted }}>
                   {c.description}
                 </p>
               </article>

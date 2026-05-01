@@ -32,6 +32,20 @@ function toHours(value: number, unit: 'days' | 'hours', hoursPerDay: number): nu
   return unit === 'days' ? value * hoursPerDay : value
 }
 
+function mkT(embedded?: boolean) {
+  return embedded ? {
+    ink: '#e4e4e7', bg: 'transparent', muted: '#71717a',
+    line: '#3f3f46', display: 'inherit',
+    cardBg: '#18181b',
+    btnPrimary: { backgroundColor: '#15803d', color: '#fff' } as React.CSSProperties,
+  } : {
+    ink: INK, bg: BG, muted: MUTED,
+    line: LINE, display: DISPLAY,
+    cardBg: 'rgba(15,15,15,0.03)',
+    btnPrimary: { backgroundColor: INK, color: BG } as React.CSSProperties,
+  }
+}
+
 export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
   const [annual, setAnnual] = useState(15)
   const [unit, setUnit] = useState<'days' | 'hours'>('days')
@@ -63,28 +77,29 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
   }, [annual, unit, hoursPerDay, hoursPerWeek, frequency, tenureMonths])
 
   const root = embedded ? '/app/resources' : '/resources'
+  const t = mkT(embedded)
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+    <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
-        <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: MUTED }}>
+      <main className={embedded ? 'pt-0 pb-8 max-w-[1100px]' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
+        <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
           <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
           <Link to={`${root}/calculators`} className="hover:opacity-60">Calculators</Link>
           <ChevronRight className="w-3 h-3" />
-          <span style={{ color: INK }}>PTO Accrual</span>
+          <span style={{ color: t.ink }}>PTO Accrual</span>
         </nav>
 
         <header className="mb-10 max-w-2xl">
           <h1
             className="text-4xl sm:text-5xl tracking-tight"
-            style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             PTO Accrual Calculator
           </h1>
-          <p className="mt-4 text-base" style={{ color: MUTED }}>
+          <p className="mt-4 text-base" style={{ color: t.muted }}>
             Convert annual PTO into per-pay-period accruals, hourly rates,
             and projected balances by tenure.
           </p>
@@ -93,17 +108,17 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <section
             className="p-6 rounded-2xl"
-            style={{ border: `1px solid ${LINE}` }}
+            style={{ border: `1px solid ${t.line}` }}
           >
             <h2
               className="text-xl mb-6"
-              style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
+              style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
             >
               Inputs
             </h2>
             <div className="flex flex-col gap-5">
               <div>
-                <label className="block text-xs mb-2" style={{ color: MUTED }}>Annual PTO</label>
+                <label className="block text-xs mb-2" style={{ color: t.muted }}>Annual PTO</label>
                 <div className="flex gap-2">
                   <input
                     type="number"
@@ -111,13 +126,13 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
                     value={annual}
                     onChange={e => setAnnual(Number(e.target.value))}
                     className="flex-1 px-4 h-11 rounded-lg text-sm outline-none"
-                    style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+                    style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                   />
                   <select
                     value={unit}
                     onChange={e => setUnit(e.target.value as 'days' | 'hours')}
                     className="px-3 h-11 rounded-lg text-sm outline-none"
-                    style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+                    style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                   >
                     <option value="days">days</option>
                     <option value="hours">hours</option>
@@ -125,7 +140,7 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
                 </div>
               </div>
               <div>
-                <label className="block text-xs mb-2" style={{ color: MUTED }}>Standard hours per day</label>
+                <label className="block text-xs mb-2" style={{ color: t.muted }}>Standard hours per day</label>
                 <input
                   type="number"
                   min={1}
@@ -133,11 +148,11 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
                   value={hoursPerDay}
                   onChange={e => setHoursPerDay(Number(e.target.value))}
                   className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+                  style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                 />
               </div>
               <div>
-                <label className="block text-xs mb-2" style={{ color: MUTED }}>Hours worked per week</label>
+                <label className="block text-xs mb-2" style={{ color: t.muted }}>Hours worked per week</label>
                 <input
                   type="number"
                   min={0}
@@ -145,16 +160,16 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
                   value={hoursPerWeek}
                   onChange={e => setHoursPerWeek(Number(e.target.value))}
                   className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+                  style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                 />
               </div>
               <div>
-                <label className="block text-xs mb-2" style={{ color: MUTED }}>Pay frequency</label>
+                <label className="block text-xs mb-2" style={{ color: t.muted }}>Pay frequency</label>
                 <select
                   value={frequency}
                   onChange={e => setFrequency(e.target.value as Frequency)}
                   className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+                  style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                 >
                   {(Object.keys(FREQ_LABEL) as Frequency[]).map(f => (
                     <option key={f} value={f}>{FREQ_LABEL[f]}</option>
@@ -162,7 +177,7 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
                 </select>
               </div>
               <div>
-                <label className="block text-xs mb-2" style={{ color: MUTED }}>Project balance after (months)</label>
+                <label className="block text-xs mb-2" style={{ color: t.muted }}>Project balance after (months)</label>
                 <input
                   type="number"
                   min={0}
@@ -170,38 +185,39 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
                   value={tenureMonths}
                   onChange={e => setTenureMonths(Number(e.target.value))}
                   className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-                  style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+                  style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
                 />
               </div>
             </div>
           </section>
 
           <section className="flex flex-col gap-4">
-            <ResultBox label="Per pay period" value={`${result.accrualPerPeriod.toFixed(2)} hrs`} sub={`${(result.accrualPerPeriod / hoursPerDay).toFixed(2)} days`} />
-            <ResultBox label="Per hour worked" value={`${result.accrualPerHourWorked.toFixed(4)} hrs`} sub="multiply by hours worked in period" />
-            <ResultBox label="Per month" value={`${result.monthlyAccrual.toFixed(2)} hrs`} sub={`${(result.monthlyAccrual / hoursPerDay).toFixed(2)} days`} />
+            <ResultBox t={t} label="Per pay period" value={`${result.accrualPerPeriod.toFixed(2)} hrs`} sub={`${(result.accrualPerPeriod / hoursPerDay).toFixed(2)} days`} />
+            <ResultBox t={t} label="Per hour worked" value={`${result.accrualPerHourWorked.toFixed(4)} hrs`} sub="multiply by hours worked in period" />
+            <ResultBox t={t} label="Per month" value={`${result.monthlyAccrual.toFixed(2)} hrs`} sub={`${(result.monthlyAccrual / hoursPerDay).toFixed(2)} days`} />
             <ResultBox
+              t={t}
               label={`Projected balance at ${tenureMonths} months`}
               value={`${result.projectedHours.toFixed(1)} hrs`}
               sub={`${result.projectedDays.toFixed(1)} days (assumes no use, no cap)`}
             />
-            <p className="text-xs mt-2" style={{ color: MUTED }}>
+            <p className="text-xs mt-2" style={{ color: t.muted }}>
               Heads-up: many states (CA, CO, MA, IL, NE, ND) treat accrued
               PTO as wages, banning use-it-or-lose-it forfeiture and
               requiring payout at separation. Caps must be reasonable.
-              See your state's <Link to="/resources/states" style={{ color: INK }}>compliance guide</Link>.
+              See your state's <Link to={`${root}/states`} style={{ color: t.ink }}>compliance guide</Link>.
             </p>
           </section>
         </div>
 
         <section
           className="mt-16 p-8 rounded-2xl"
-          style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(15,15,15,0.03)' }}
+          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
-          <h2 className="text-2xl mb-3" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+          <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
             Run accruals on autopilot
           </h2>
-          <p className="text-sm mb-6 max-w-2xl" style={{ color: MUTED }}>
+          <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
             Matcha tracks accruals per employee, per state, with
             tenure tiers, caps, carryover rules, and payout-on-separation
             built in.
@@ -209,7 +225,7 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
           <button
             onClick={() => setShowPricing(true)}
             className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-            style={{ backgroundColor: INK, color: BG }}
+            style={t.btnPrimary}
           >
             See Matcha →
           </button>
@@ -222,15 +238,15 @@ export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
   )
 }
 
-function ResultBox({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function ResultBox({ t, label, value, sub }: { t: ReturnType<typeof mkT>; label: string; value: string; sub?: string }) {
   return (
     <div
       className="p-5 rounded-xl"
-      style={{ border: `1px solid ${LINE}` }}
+      style={{ border: `1px solid ${t.line}` }}
     >
-      <div className="text-xs mb-1" style={{ color: MUTED }}>{label}</div>
-      <div className="text-2xl" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>{value}</div>
-      {sub && <div className="text-xs mt-1" style={{ color: MUTED }}>{sub}</div>}
+      <div className="text-xs mb-1" style={{ color: t.muted }}>{label}</div>
+      <div className="text-2xl" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>{value}</div>
+      {sub && <div className="text-xs mt-1" style={{ color: t.muted }}>{sub}</div>}
     </div>
   )
 }

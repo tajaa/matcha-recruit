@@ -222,6 +222,8 @@ struct ChannelsSidebarView: View {
             channels = list.sorted {
                 ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "")
             }
+            // Subscribe to all member channels so background messages arrive.
+            ChannelsWebSocket.shared.joinBackgroundRooms(list.map { (id: $0.id, name: $0.name) })
             // API returned fresh unread counts — local overrides are now stale.
             appState.channelUnreadOverrides = [:]
             isLoading = false

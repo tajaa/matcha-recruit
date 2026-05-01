@@ -51,6 +51,26 @@ const SEVERITY_COLOR: Record<Finding['severity'], string> = {
   low: '#5a8c5a',
 }
 
+function mkT(embedded?: boolean) {
+  return embedded ? {
+    ink: '#e4e4e7', bg: 'transparent', muted: '#71717a',
+    line: '#3f3f46', display: 'inherit',
+    cardBg: '#18181b',
+    progressBg: '#27272a',
+    btnPrimary: { backgroundColor: '#15803d', color: '#fff' } as React.CSSProperties,
+    btnSecondary: { border: '1px solid #3f3f46', color: '#e4e4e7' } as React.CSSProperties,
+    selectedBtn: { backgroundColor: '#15803d', color: '#fff', border: '1px solid #15803d' } as React.CSSProperties,
+  } : {
+    ink: INK, bg: BG, muted: MUTED,
+    line: LINE, display: DISPLAY,
+    cardBg: 'rgba(15,15,15,0.03)',
+    progressBg: 'rgba(15,15,15,0.08)',
+    btnPrimary: { backgroundColor: INK, color: BG } as React.CSSProperties,
+    btnSecondary: { border: `1px solid ${LINE}`, color: INK } as React.CSSProperties,
+    selectedBtn: { backgroundColor: INK, color: BG, border: `1px solid ${INK}` } as React.CSSProperties,
+  }
+}
+
 export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
   const [step, setStep] = useState<Step>('intro')
   const [stateSlug, setStateSlug] = useState('')
@@ -60,7 +80,6 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
   const [questionIdx, setQuestionIdx] = useState(0)
   const [showPricing, setShowPricing] = useState(false)
 
-  // Email-me-a-copy (post-results) — user is signed in, so server uses their email.
   const [emailing, setEmailing] = useState(false)
   const [emailDone, setEmailDone] = useState(false)
   const [emailError, setEmailError] = useState<string | null>(null)
@@ -72,6 +91,8 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
   const findings = useMemo(() => (step === 'results' ? computeFindings(answers) : []), [step, answers])
   const score = useMemo(() => (step === 'results' ? computeScore(answers) : null), [step, answers])
   const allAnswered = QUESTIONS.every(q => answers[q.id])
+
+  const t = mkT(embedded)
 
   const setAnswer = (id: string, a: AuditAnswer) => {
     setAnswers(prev => ({ ...prev, [id]: a }))
@@ -104,20 +125,21 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
   const root = embedded ? '/app/resources' : '/resources'
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+    <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[820px] mx-auto px-6 sm:px-10`}>
-        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>
+      <main className={`${embedded ? 'pt-6 pb-8' : 'pt-28 pb-20'} max-w-[820px] mx-auto px-6 sm:px-10`}>
+        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
           <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
-          <span style={{ color: INK }}>Compliance Audit</span>
+          <span style={{ color: t.ink }}>Compliance Audit</span>
         </nav>
 
-        {step === 'intro' && <Intro onStart={() => setStep('context')} />}
+        {step === 'intro' && <Intro t={t} onStart={() => setStep('context')} />}
 
         {step === 'context' && (
           <Context
+            t={t}
             stateSlug={stateSlug}
             setStateSlug={setStateSlug}
             headcount={headcount}
@@ -131,6 +153,7 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
 
         {step === 'questions' && (
           <Questions
+            t={t}
             idx={questionIdx}
             setIdx={setQuestionIdx}
             answers={answers}
@@ -142,9 +165,11 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
 
         {step === 'results' && score && (
           <Results
+            t={t}
             score={score.score}
             findings={findings}
             stateSlug={stateSlug}
+            root={root}
             emailing={emailing}
             emailError={emailError}
             emailDone={emailDone}
@@ -167,17 +192,17 @@ export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
   )
 }
 
-function Intro({ onStart }: { onStart: () => void }) {
+function Intro({ t, onStart }: { t: ReturnType<typeof mkT>; onStart: () => void }) {
   return (
     <>
       <header className="mb-10">
         <h1
           className="text-5xl sm:text-6xl tracking-tight"
-          style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+          style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
         >
           12-Question HR Compliance Audit
         </h1>
-        <p className="mt-4 text-base" style={{ color: MUTED }}>
+        <p className="mt-4 text-base" style={{ color: t.muted }}>
           A 3-minute self-audit covering the highest-cost compliance
           areas: posters, handbooks, I-9s, classification, leave,
           harassment, records, terminations, background checks, pay
@@ -194,10 +219,10 @@ function Intro({ onStart }: { onStart: () => void }) {
           <div
             key={s.l}
             className="p-5 rounded-xl text-center"
-            style={{ border: `1px solid ${LINE}` }}
+            style={{ border: `1px solid ${t.line}` }}
           >
-            <div className="text-3xl mb-1" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>{s.n}</div>
-            <div className="text-xs" style={{ color: MUTED }}>{s.l}</div>
+            <div className="text-3xl mb-1" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>{s.n}</div>
+            <div className="text-xs" style={{ color: t.muted }}>{s.l}</div>
           </div>
         ))}
       </div>
@@ -205,12 +230,12 @@ function Intro({ onStart }: { onStart: () => void }) {
       <button
         onClick={onStart}
         className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 h-12 rounded-full text-sm font-medium"
-        style={{ backgroundColor: INK, color: BG }}
+        style={t.btnPrimary}
       >
         Start the audit <ArrowRight className="w-4 h-4" />
       </button>
 
-      <p className="text-xs mt-6" style={{ color: MUTED }}>
+      <p className="text-xs mt-6" style={{ color: t.muted }}>
         Responses stay in your browser. Email yourself the gap report
         from the results screen. Informational only — not legal advice.
       </p>
@@ -219,31 +244,33 @@ function Intro({ onStart }: { onStart: () => void }) {
 }
 
 function Context(props: {
+  t: ReturnType<typeof mkT>
   stateSlug: string; setStateSlug: (s: string) => void
   headcount: number | ''; setHeadcount: (n: number | '') => void
   industry: string; setIndustry: (s: string) => void
   onBack: () => void; onNext: () => void
 }) {
+  const { t } = props
   return (
     <>
       <header className="mb-8">
-        <p className="text-xs uppercase tracking-wider mb-2" style={{ color: MUTED }}>Step 1 of 2</p>
-        <h2 className="text-3xl" style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}>
+        <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>Step 1 of 2</p>
+        <h2 className="text-3xl" style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}>
           Tell us about your business
         </h2>
-        <p className="mt-2 text-sm" style={{ color: MUTED }}>
+        <p className="mt-2 text-sm" style={{ color: t.muted }}>
           Used to tailor your gap report. Not stored unless you email yourself the results.
         </p>
       </header>
 
       <div className="flex flex-col gap-5 mb-10">
         <div>
-          <label className="block text-xs mb-2" style={{ color: MUTED }}>Primary state</label>
+          <label className="block text-xs mb-2" style={{ color: t.muted }}>Primary state</label>
           <select
             value={props.stateSlug}
             onChange={e => props.setStateSlug(e.target.value)}
             className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-            style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+            style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
           >
             <option value="">— Select state —</option>
             {STATES_50.map(s => (
@@ -252,23 +279,23 @@ function Context(props: {
           </select>
         </div>
         <div>
-          <label className="block text-xs mb-2" style={{ color: MUTED }}>Headcount (US employees)</label>
+          <label className="block text-xs mb-2" style={{ color: t.muted }}>Headcount (US employees)</label>
           <input
             type="number"
             min={1}
             value={props.headcount}
             onChange={e => props.setHeadcount(e.target.value ? Number(e.target.value) : '')}
             className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-            style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+            style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
           />
         </div>
         <div>
-          <label className="block text-xs mb-2" style={{ color: MUTED }}>Industry</label>
+          <label className="block text-xs mb-2" style={{ color: t.muted }}>Industry</label>
           <select
             value={props.industry}
             onChange={e => props.setIndustry(e.target.value)}
             className="w-full px-4 h-11 rounded-lg text-sm outline-none"
-            style={{ backgroundColor: 'transparent', border: `1px solid ${LINE}`, color: INK }}
+            style={{ backgroundColor: 'transparent', border: `1px solid ${t.line}`, color: t.ink }}
           >
             {INDUSTRIES.map(i => <option key={i} value={i}>{i}</option>)}
           </select>
@@ -279,14 +306,14 @@ function Context(props: {
         <button
           onClick={props.onBack}
           className="inline-flex items-center gap-2 text-sm transition-opacity hover:opacity-60"
-          style={{ color: INK }}
+          style={{ color: t.ink }}
         >
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <button
           onClick={props.onNext}
           className="inline-flex items-center gap-2 px-6 h-11 rounded-full text-sm font-medium"
-          style={{ backgroundColor: INK, color: BG }}
+          style={t.btnPrimary}
         >
           Continue <ArrowRight className="w-4 h-4" />
         </button>
@@ -296,47 +323,49 @@ function Context(props: {
 }
 
 function Questions(props: {
+  t: ReturnType<typeof mkT>
   idx: number; setIdx: (n: number) => void
   answers: Record<string, AuditAnswer>
   setAnswer: (id: string, a: AuditAnswer) => void
   onFinish: () => void
   allAnswered: boolean
 }) {
+  const { t } = props
   const q = QUESTIONS[props.idx]
   const progress = ((props.idx + 1) / QUESTIONS.length) * 100
 
   return (
     <>
       <div className="mb-8">
-        <p className="text-xs uppercase tracking-wider mb-2" style={{ color: MUTED }}>
+        <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>
           Step 2 of 2 &middot; Question {props.idx + 1} of {QUESTIONS.length}
         </p>
         <div
           className="h-1 rounded-full overflow-hidden"
-          style={{ backgroundColor: 'rgba(15,15,15,0.08)' }}
+          style={{ backgroundColor: t.progressBg }}
         >
           <div
             className="h-full transition-all"
-            style={{ width: `${progress}%`, backgroundColor: INK }}
+            style={{ width: `${progress}%`, backgroundColor: t.ink }}
           />
         </div>
       </div>
 
       <article
         className="p-8 rounded-2xl mb-8"
-        style={{ border: `1px solid ${LINE}` }}
+        style={{ border: `1px solid ${t.line}` }}
       >
-        <p className="text-xs uppercase tracking-wider mb-3" style={{ color: MUTED }}>
+        <p className="text-xs uppercase tracking-wider mb-3" style={{ color: t.muted }}>
           {q.category}
         </p>
         <h2
           className="text-2xl mb-4"
-          style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK, lineHeight: 1.3 }}
+          style={{ fontFamily: t.display, fontWeight: 500, color: t.ink, lineHeight: 1.3 }}
         >
           {q.question}
         </h2>
         {q.helper && (
-          <p className="text-sm mb-6" style={{ color: MUTED }}>{q.helper}</p>
+          <p className="text-sm mb-6" style={{ color: t.muted }}>{q.helper}</p>
         )}
 
         <div className="grid grid-cols-3 gap-3">
@@ -347,11 +376,7 @@ function Questions(props: {
                 key={a}
                 onClick={() => props.setAnswer(q.id, a)}
                 className="h-12 rounded-lg text-sm font-medium capitalize transition-colors"
-                style={{
-                  backgroundColor: selected ? INK : 'transparent',
-                  color: selected ? BG : INK,
-                  border: `1px solid ${selected ? INK : LINE}`,
-                }}
+                style={selected ? t.selectedBtn : { backgroundColor: 'transparent', color: t.ink, border: `1px solid ${t.line}` }}
               >
                 {a}
               </button>
@@ -365,7 +390,7 @@ function Questions(props: {
           onClick={() => props.setIdx(Math.max(0, props.idx - 1))}
           disabled={props.idx === 0}
           className="inline-flex items-center gap-2 text-sm transition-opacity hover:opacity-60 disabled:opacity-30"
-          style={{ color: INK }}
+          style={{ color: t.ink }}
         >
           <ArrowLeft className="w-4 h-4" /> Previous
         </button>
@@ -375,7 +400,7 @@ function Questions(props: {
             onClick={props.onFinish}
             disabled={!props.allAnswered}
             className="inline-flex items-center gap-2 px-6 h-11 rounded-full text-sm font-medium disabled:opacity-50"
-            style={{ backgroundColor: INK, color: BG }}
+            style={t.btnPrimary}
           >
             See my report <ArrowRight className="w-4 h-4" />
           </button>
@@ -383,7 +408,7 @@ function Questions(props: {
           <button
             onClick={() => props.setIdx(Math.min(QUESTIONS.length - 1, props.idx + 1))}
             className="inline-flex items-center gap-2 text-sm transition-opacity hover:opacity-60"
-            style={{ color: INK }}
+            style={{ color: t.ink }}
           >
             Next <ArrowRight className="w-4 h-4" />
           </button>
@@ -394,14 +419,17 @@ function Questions(props: {
 }
 
 function Results(props: {
+  t: ReturnType<typeof mkT>
   score: number
   findings: Finding[]
   stateSlug: string
+  root: string
   emailing: boolean; emailError: string | null; emailDone: boolean
   onEmail: () => void
   onRestart: () => void
   onSeePricing: () => void
 }) {
+  const { t } = props
   const grade =
     props.score >= 90 ? 'A — Strong'
     : props.score >= 75 ? 'B — Solid, gaps to close'
@@ -420,29 +448,29 @@ function Results(props: {
   return (
     <>
       <header className="mb-10">
-        <p className="text-xs uppercase tracking-wider mb-2" style={{ color: MUTED }}>Your Gap Report</p>
+        <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>Your Gap Report</p>
         <h2
           className="text-4xl sm:text-5xl tracking-tight"
-          style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+          style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
         >
           Compliance score: {props.score}/100
         </h2>
-        <p className="mt-3 text-lg" style={{ color: gradeColor, fontFamily: DISPLAY }}>
+        <p className="mt-3 text-lg" style={{ color: gradeColor, fontFamily: t.display }}>
           {grade}
         </p>
       </header>
 
       <div className="grid grid-cols-3 gap-3 mb-10">
-        <ScoreBox label="High severity" n={high.length} color="#c1543a" />
-        <ScoreBox label="Medium" n={med.length} color="#c19f3a" />
-        <ScoreBox label="Low / clear" n={low.length || (QUESTIONS.length - props.findings.length)} color="#5a8c5a" />
+        <ScoreBox t={t} label="High severity" n={high.length} color="#c1543a" />
+        <ScoreBox t={t} label="Medium" n={med.length} color="#c19f3a" />
+        <ScoreBox t={t} label="Low / clear" n={low.length || (QUESTIONS.length - props.findings.length)} color="#5a8c5a" />
       </div>
 
       {props.findings.length > 0 ? (
         <section className="mb-12">
           <h3
             className="text-2xl mb-6"
-            style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
+            style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
           >
             Flagged Gaps ({props.findings.length})
           </h3>
@@ -452,13 +480,13 @@ function Results(props: {
                 key={f.id}
                 className="p-5 rounded-xl"
                 style={{
-                  border: `1px solid ${LINE}`,
+                  border: `1px solid ${t.line}`,
                   backgroundColor: SEVERITY_BG[f.severity],
                   borderLeft: `3px solid ${SEVERITY_COLOR[f.severity]}`,
                 }}
               >
                 <div className="flex items-baseline justify-between mb-2 flex-wrap gap-2">
-                  <h4 className="text-base" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+                  <h4 className="text-base" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
                     {f.title}
                   </h4>
                   <span
@@ -468,10 +496,10 @@ function Results(props: {
                     {f.severity}
                   </span>
                 </div>
-                <p className="text-xs uppercase tracking-wider mb-2" style={{ color: MUTED }}>
+                <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>
                   {f.category}
                 </p>
-                <p className="text-sm" style={{ color: INK, opacity: 0.85, lineHeight: 1.6 }}>
+                <p className="text-sm" style={{ color: t.ink, opacity: 0.85, lineHeight: 1.6 }}>
                   {f.detail}
                 </p>
               </article>
@@ -481,12 +509,12 @@ function Results(props: {
       ) : (
         <section
           className="mb-12 p-8 rounded-xl text-center"
-          style={{ border: `1px solid ${LINE}`, backgroundColor: SEVERITY_BG.low }}
+          style={{ border: `1px solid ${t.line}`, backgroundColor: SEVERITY_BG.low }}
         >
-          <h3 className="text-xl" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+          <h3 className="text-xl" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
             No gaps flagged.
           </h3>
-          <p className="mt-2 text-sm" style={{ color: MUTED }}>
+          <p className="mt-2 text-sm" style={{ color: t.muted }}>
             Strong compliance posture. Re-run quarterly as laws change.
           </p>
         </section>
@@ -494,12 +522,12 @@ function Results(props: {
 
       <section
         className="p-6 rounded-2xl mb-8"
-        style={{ border: `1px solid ${LINE}` }}
+        style={{ border: `1px solid ${t.line}` }}
       >
-        <h3 className="text-xl mb-2" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+        <h3 className="text-xl mb-2" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
           Email yourself a copy
         </h3>
-        <p className="text-sm mb-5" style={{ color: MUTED }}>
+        <p className="text-sm mb-5" style={{ color: t.muted }}>
           We'll send the full gap report to your account email so you can
           share with your team or revisit later.
         </p>
@@ -512,7 +540,7 @@ function Results(props: {
             onClick={props.onEmail}
             disabled={props.emailing}
             className="inline-flex items-center justify-center gap-2 px-5 h-11 rounded-full text-sm font-medium disabled:opacity-50"
-            style={{ backgroundColor: INK, color: BG }}
+            style={t.btnPrimary}
           >
             <Mail className="w-4 h-4" />
             {props.emailing ? 'Sending…' : 'Email me a copy'}
@@ -525,12 +553,12 @@ function Results(props: {
 
       <section
         className="p-8 rounded-2xl mb-8"
-        style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(15,15,15,0.03)' }}
+        style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
       >
-        <h3 className="text-2xl mb-3" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+        <h3 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
           Close these gaps with Matcha
         </h3>
-        <p className="text-sm mb-6 max-w-2xl" style={{ color: MUTED }}>
+        <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
           Matcha generates the missing policies, tracks every state and
           local rule, and re-runs your audit automatically as laws change
           — so the score above doesn't quietly slip.
@@ -539,15 +567,15 @@ function Results(props: {
           <button
             onClick={props.onSeePricing}
             className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-            style={{ backgroundColor: INK, color: BG }}
+            style={t.btnPrimary}
           >
             See Matcha →
           </button>
           {props.stateSlug && (
             <Link
-              to={`/resources/states/${props.stateSlug}`}
+              to={`${props.root}/states/${props.stateSlug}`}
               className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-              style={{ border: `1px solid ${LINE}`, color: INK }}
+              style={t.btnSecondary}
             >
               View {props.stateSlug.replace(/-/g, ' ')} requirements
             </Link>
@@ -555,14 +583,14 @@ function Results(props: {
           <button
             onClick={props.onRestart}
             className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-            style={{ border: `1px solid ${LINE}`, color: INK }}
+            style={t.btnSecondary}
           >
             Restart audit
           </button>
         </div>
       </section>
 
-      <p className="text-xs" style={{ color: MUTED }}>
+      <p className="text-xs" style={{ color: t.muted }}>
         This audit is informational only and not legal advice. Consult
         employment counsel for your specific situation.
       </p>
@@ -570,19 +598,19 @@ function Results(props: {
   )
 }
 
-function ScoreBox({ label, n, color }: { label: string; n: number; color: string }) {
+function ScoreBox({ t, label, n, color }: { t: ReturnType<typeof mkT>; label: string; n: number; color: string }) {
   return (
     <div
       className="p-5 rounded-xl text-center"
-      style={{ border: `1px solid ${LINE}` }}
+      style={{ border: `1px solid ${t.line}` }}
     >
       <div
         className="text-4xl mb-1"
-        style={{ fontFamily: DISPLAY, fontWeight: 500, color }}
+        style={{ fontFamily: t.display, fontWeight: 500, color }}
       >
         {n}
       </div>
-      <div className="text-xs" style={{ color: MUTED }}>{label}</div>
+      <div className="text-xs" style={{ color: t.muted }}>{label}</div>
     </div>
   )
 }

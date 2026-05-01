@@ -9,6 +9,8 @@ final class ChannelsWebSocket: NSObject {
     private var isConnecting = false
     private(set) var isConnected = false
     private var currentRoom: String?
+    private var backgroundRoomIds: Set<String> = []
+    private var roomNames: [String: String] = [:]
     private var pingTask: Task<Void, Never>?
     private var reconnectTask: Task<Void, Never>?
     private var reconnectDelay: Double = 3.0
@@ -60,15 +62,36 @@ final class ChannelsWebSocket: NSObject {
         isConnected = false
         isConnecting = false
         currentRoom = nil
+        backgroundRoomIds = []
+        roomNames = [:]
     }
 
     func joinRoom(channelId: String, channelName: String? = nil) {
-        if let prior = currentRoom, prior != channelId {
-            send(["type": "leave_room", "channel_id": prior])
-        }
+        // Don't leave prior room — keep all subscribed for background notifications.
         currentRoom = channelId
-        if let channelName { currentRoomName = channelName }
-        send(["type": "join_room", "channel_id": channelId])
+        if let channelName {
+            currentRoomName = channelName
+            roomNames[channelId] = channelName
+        }
+        if !backgroundRoomIds.contains(channelId) {
+            send(["type": "join_room", "channel_id": channelId])
+            backgroundRoomIds.insert(channelId)
+        }
+    }
+
+    /// Subscribe to multiple channels for background message delivery.
+    /// Call after fetching the channel list so notifications arrive for all channels.
+    func joinBackgroundRooms(_ channels: [(id: String, name: String)]) {
+        for ch in channels {
+            roomNames[ch.id] = ch.name
+            guard !backgroundRoomIds.contains(ch.id) else { continue }
+            send(["type": "join_room", "channel_id": ch.id])
+            backgroundRoomIds.insert(ch.id)
+        }
+    }
+
+    func roomName(for channelId: String) -> String? {
+        roomNames[channelId]
     }
 
     func setCurrentRoomName(_ name: String?) {
@@ -239,13 +262,23 @@ final class ChannelsWebSocket: NSObject {
         let delay = reconnectDelay
         reconnectDelay = min(reconnectDelay * 2, 60)
         let room = currentRoom
+        let bgRooms = backgroundRoomIds
+        let names = roomNames
+        // Clear tracking so reconnect re-subscribes from scratch
+        backgroundRoomIds = []
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
             guard let self else { return }
             await MainActor.run {
                 self.reconnectTask = nil
+                self.roomNames = names
                 self.connect()
                 if let room { self.joinRoom(channelId: room) }
+                let activeSet: Set<String> = room.map { Set([$0]) } ?? []
+                let remaining = bgRooms.subtracting(activeSet)
+                self.joinBackgroundRooms(remaining.compactMap { id in
+                    names[id].map { (id: id, name: $0) }
+                })
             }
         }
     }

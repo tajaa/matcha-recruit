@@ -73,7 +73,7 @@ class AppState {
                 ChannelNotificationManager.shared.post(
                     senderName: msg.senderName,
                     content: msg.content,
-                    channelName: ChannelsWebSocket.shared.currentRoomName
+                    channelName: ChannelsWebSocket.shared.roomName(for: msg.channelId)
                 )
             }
         }

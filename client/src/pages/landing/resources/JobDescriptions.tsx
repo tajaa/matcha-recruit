@@ -13,11 +13,28 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
+function mkT(embedded?: boolean) {
+  return embedded ? {
+    ink: '#e4e4e7', bg: 'transparent', muted: '#71717a',
+    line: '#3f3f46', display: 'inherit',
+    cardBg: '#18181b',
+    chipActiveBg: '#27272a', chipActiveColor: '#e4e4e7', chipActiveBorder: '#3f3f46',
+    btnPrimary: { backgroundColor: '#15803d', color: '#fff' } as React.CSSProperties,
+  } : {
+    ink: INK, bg: BG, muted: MUTED,
+    line: LINE, display: DISPLAY,
+    cardBg: 'rgba(15,15,15,0.03)',
+    chipActiveBg: INK, chipActiveColor: BG, chipActiveBorder: INK,
+    btnPrimary: { backgroundColor: INK, color: BG } as React.CSSProperties,
+  }
+}
+
 export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
   const [showPricing, setShowPricing] = useState(false)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Industry | 'all'>('all')
   const root = embedded ? '/app/resources' : '/resources'
+  const t = mkT(embedded)
 
   useEffect(() => {
     document.title = 'Job Descriptions Library — Matcha'
@@ -43,26 +60,26 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
   }, [filtered])
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+    <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
-        <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: MUTED }}>
+      <main className={embedded ? 'pt-0 pb-8 max-w-[1100px]' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
+        <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: t.muted }}>
           <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
           <Link to={`${root}/templates`} className="hover:opacity-60">Templates</Link>
           <ChevronRight className="w-3 h-3" />
-          <span style={{ color: INK }}>Job Descriptions Library</span>
+          <span style={{ color: t.ink }}>Job Descriptions Library</span>
         </nav>
 
         <header className="mb-10 max-w-2xl">
           <h1
             className="text-5xl sm:text-6xl tracking-tight"
-            style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             Job Descriptions Library
           </h1>
-          <p className="mt-4 text-base" style={{ color: MUTED }}>
+          <p className="mt-4 text-base" style={{ color: t.muted }}>
             {JOB_DESCRIPTIONS.length} ready-to-edit job descriptions across
             {' '}{INDUSTRIES.length} industries. Pick the role you need —
             no bulk download, no fluff.
@@ -72,28 +89,28 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
         <div className="mb-6">
           <div
             className="flex items-center gap-3 px-4 h-12 rounded-full max-w-md"
-            style={{ border: `1px solid ${LINE}` }}
+            style={{ border: `1px solid ${t.line}` }}
           >
-            <Search className="w-4 h-4" style={{ color: MUTED }} />
+            <Search className="w-4 h-4" style={{ color: t.muted }} />
             <input
               type="text"
               placeholder="Search roles (nurse, line cook, recruiter…)"
               value={query}
               onChange={e => setQuery(e.target.value)}
               className="flex-1 bg-transparent outline-none text-sm"
-              style={{ color: INK }}
+              style={{ color: t.ink }}
             />
           </div>
         </div>
 
         <div className="flex flex-wrap gap-2 mb-10">
-          <FilterChip active={filter === 'all'} onClick={() => setFilter('all')}>
+          <FilterChip t={t} active={filter === 'all'} onClick={() => setFilter('all')}>
             All ({JOB_DESCRIPTIONS.length})
           </FilterChip>
           {INDUSTRIES.map(ind => {
             const count = JOB_DESCRIPTIONS.filter(j => j.industry === ind).length
             return (
-              <FilterChip key={ind} active={filter === ind} onClick={() => setFilter(ind)}>
+              <FilterChip t={t} key={ind} active={filter === ind} onClick={() => setFilter(ind)}>
                 {ind} ({count})
               </FilterChip>
             )
@@ -101,7 +118,7 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
         </div>
 
         {grouped.size === 0 ? (
-          <p style={{ color: MUTED }}>No roles match "{query}".</p>
+          <p style={{ color: t.muted }}>No roles match "{query}".</p>
         ) : (
           <div className="flex flex-col gap-10">
             {Array.from(grouped.entries()).map(([industry, jobs]) => (
@@ -109,35 +126,35 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
                 <h2
                   className="text-2xl mb-4 pb-2"
                   style={{
-                    fontFamily: DISPLAY, color: INK, fontWeight: 500,
-                    borderBottom: `1px solid ${LINE}`,
+                    fontFamily: t.display, color: t.ink, fontWeight: 500,
+                    borderBottom: `1px solid ${t.line}`,
                   }}
                 >
-                  {industry} <span style={{ color: MUTED, fontSize: '0.875rem', fontWeight: 400 }}>({jobs.length})</span>
+                  {industry} <span style={{ color: t.muted, fontSize: '0.875rem', fontWeight: 400 }}>({jobs.length})</span>
                 </h2>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {jobs.map(j => (
                     <article
                       key={j.slug}
                       className="p-4 rounded-xl flex flex-col"
-                      style={{ border: `1px solid ${LINE}` }}
+                      style={{ border: `1px solid ${t.line}` }}
                     >
                       <div className="flex items-start gap-3 mb-2">
-                        <FileText className="w-4 h-4 mt-1 flex-shrink-0" style={{ color: INK }} />
+                        <FileText className="w-4 h-4 mt-1 flex-shrink-0" style={{ color: t.ink }} />
                         <h3
                           className="text-base flex-1"
-                          style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
+                          style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
                         >
                           {j.title}
                         </h3>
                       </div>
-                      <p className="text-xs mb-4 ml-7" style={{ color: MUTED }}>
+                      <p className="text-xs mb-4 ml-7" style={{ color: t.muted }}>
                         {j.description}
                       </p>
                       <div className="ml-7 flex items-center justify-between gap-2">
                         <span
                           className="text-[10px] tracking-wider px-2 py-1 rounded"
-                          style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                          style={{ border: `1px solid ${t.line}`, color: t.muted }}
                         >
                           COMING SOON
                         </span>
@@ -152,12 +169,12 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
 
         <section
           className="mt-20 p-8 rounded-2xl"
-          style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(15,15,15,0.03)' }}
+          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
-          <h2 className="text-2xl mb-3" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+          <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
             Need a custom job description?
           </h2>
-          <p className="text-sm mb-6 max-w-2xl" style={{ color: MUTED }}>
+          <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
             Matcha generates job descriptions tailored to your business —
             specific responsibilities, comp range, BFOQ-safe requirements,
             and DEI-reviewed language.
@@ -165,7 +182,7 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
           <button
             onClick={() => setShowPricing(true)}
             className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-            style={{ backgroundColor: INK, color: BG }}
+            style={t.btnPrimary}
           >
             See Matcha →
           </button>
@@ -178,15 +195,15 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
   )
 }
 
-function FilterChip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function FilterChip({ t, active, onClick, children }: { t: ReturnType<typeof mkT>; active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       onClick={onClick}
       className="text-xs px-3 h-8 rounded-full transition-opacity hover:opacity-80"
       style={{
-        backgroundColor: active ? INK : 'transparent',
-        color: active ? BG : INK,
-        border: `1px solid ${active ? INK : LINE}`,
+        backgroundColor: active ? t.chipActiveBg : 'transparent',
+        color: active ? t.chipActiveColor : t.ink,
+        border: `1px solid ${active ? t.chipActiveBorder : t.line}`,
       }}
     >
       {children}

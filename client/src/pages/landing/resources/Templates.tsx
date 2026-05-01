@@ -57,11 +57,24 @@ function formatFor(path: string): string {
   return FORMAT_LABEL[ext] ?? ext.replace('.', '').toUpperCase()
 }
 
+function mkT(embedded?: boolean) {
+  return embedded ? {
+    ink: '#e4e4e7', bg: 'transparent', muted: '#71717a',
+    line: '#3f3f46', display: 'inherit',
+    cardBg: '#18181b', iconBg: '#27272a',
+  } : {
+    ink: INK, bg: BG, muted: MUTED,
+    line: LINE, display: DISPLAY,
+    cardBg: 'rgba(15,15,15,0.03)', iconBg: 'rgba(15,15,15,0.05)',
+  }
+}
+
 export default function Templates({ embedded }: { embedded?: boolean }) {
   const [assets, setAssets] = useState<Asset[]>([])
   const [loading, setLoading] = useState(true)
   const [showPricing, setShowPricing] = useState(false)
   const root = embedded ? '/app/resources' : '/resources'
+  const t = mkT(embedded)
 
   useEffect(() => {
     api.get<AssetList>('/resources/assets')
@@ -79,24 +92,24 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
   }
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+    <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
-        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>
+      <main className={embedded ? 'pt-0 pb-8 max-w-[1100px]' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
+        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
           <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
-          <span style={{ color: INK }}>Templates</span>
+          <span style={{ color: t.ink }}>Templates</span>
         </nav>
 
         <header className="mb-14 max-w-2xl">
           <h1
             className="text-5xl sm:text-6xl tracking-tight"
-            style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             HR Templates
           </h1>
-          <p className="mt-4 text-base" style={{ color: MUTED }}>
+          <p className="mt-4 text-base" style={{ color: t.muted }}>
             Free, editable templates for the documents HR teams use most.
             Drop in your details, send, file. Reviewed against current employment-law guidance.
           </p>
@@ -106,26 +119,26 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
         <Link
           to={`${root}/templates/job-descriptions`}
           className="block mb-6 p-6 rounded-2xl transition-opacity hover:opacity-80"
-          style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(15,15,15,0.03)' }}
+          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="text-xs uppercase tracking-wider mb-2" style={{ color: MUTED }}>Library</p>
-              <h2 className="text-2xl mb-1" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+              <p className="text-xs uppercase tracking-wider mb-2" style={{ color: t.muted }}>Library</p>
+              <h2 className="text-2xl mb-1" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
                 Job Descriptions Library
               </h2>
-              <p className="text-sm" style={{ color: MUTED }}>
+              <p className="text-sm" style={{ color: t.muted }}>
                 Browse 50+ ready-to-edit job descriptions across hospitality,
                 healthcare, retail, corporate, and more. Pick the one you
                 need — no bulk download.
               </p>
             </div>
-            <ArrowUpRight className="w-5 h-5 mt-1 flex-shrink-0" style={{ color: INK }} />
+            <ArrowUpRight className="w-5 h-5 mt-1 flex-shrink-0" style={{ color: t.ink }} />
           </div>
         </Link>
 
         {loading ? (
-          <p style={{ color: MUTED }}>Loading templates…</p>
+          <p style={{ color: t.muted }}>Loading templates…</p>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {assets.map(asset => {
@@ -134,27 +147,27 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                 <article
                   key={asset.slug}
                   className="p-6 rounded-2xl flex flex-col"
-                  style={{ border: `1px solid ${LINE}`, opacity: available ? 1 : 0.92 }}
+                  style={{ border: `1px solid ${t.line}`, opacity: available ? 1 : 0.92 }}
                 >
                   <div className="flex items-start justify-between mb-4">
                     <div
                       className="w-10 h-10 rounded-lg flex items-center justify-center"
-                      style={{ backgroundColor: 'rgba(15,15,15,0.05)' }}
+                      style={{ backgroundColor: t.iconBg }}
                     >
-                      <FileText className="w-5 h-5" style={{ color: INK }} />
+                      <FileText className="w-5 h-5" style={{ color: t.ink }} />
                     </div>
                     <div className="flex items-center gap-2">
                       {!available && (
                         <span
                           className="text-[10px] tracking-wider px-2 py-1 rounded"
-                          style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                          style={{ border: `1px solid ${t.line}`, color: t.muted }}
                         >
                           COMING SOON
                         </span>
                       )}
                       <span
                         className="text-[10px] tracking-wider px-2 py-1 rounded"
-                        style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                        style={{ border: `1px solid ${t.line}`, color: t.muted }}
                       >
                         {formatFor(asset.path)}
                       </span>
@@ -163,11 +176,11 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
 
                   <h3
                     className="text-lg mb-2"
-                    style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
+                    style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
                   >
                     {asset.name}
                   </h3>
-                  <p className="text-sm mb-6 flex-1" style={{ color: MUTED }}>
+                  <p className="text-sm mb-6 flex-1" style={{ color: t.muted }}>
                     {TEMPLATE_DESCRIPTIONS[asset.slug] ?? ''}
                   </p>
 
@@ -175,7 +188,11 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
                     onClick={() => handleDownload(asset)}
                     disabled={!available}
                     className="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-full text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-60"
-                    style={{
+                    style={embedded ? {
+                      backgroundColor: available ? '#15803d' : 'transparent',
+                      color: available ? '#fff' : t.ink,
+                      border: available ? 'none' : `1px solid ${t.line}`,
+                    } : {
                       backgroundColor: available ? INK : 'transparent',
                       color: available ? BG : INK,
                       border: available ? 'none' : `1px solid ${LINE}`,
@@ -201,12 +218,12 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
 
         <section
           className="mt-20 p-8 rounded-2xl"
-          style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(15,15,15,0.03)' }}
+          style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
-          <h2 className="text-2xl mb-3" style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}>
+          <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
             Need state-specific versions?
           </h2>
-          <p className="text-sm mb-6 max-w-2xl" style={{ color: MUTED }}>
+          <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
             Matcha generates templates tailored to your state's wage, leave,
             and termination rules — pulled from a live compliance database
             covering all 50 states. Plus handbooks, policies, and offer letters
@@ -215,7 +232,7 @@ export default function Templates({ embedded }: { embedded?: boolean }) {
           <button
             onClick={() => setShowPricing(true)}
             className="inline-flex items-center justify-center px-5 h-10 rounded-full text-sm font-medium"
-            style={{ backgroundColor: INK, color: BG }}
+            style={embedded ? { backgroundColor: '#15803d', color: '#fff' } : { backgroundColor: INK, color: BG }}
           >
             See how Matcha works →
           </button>

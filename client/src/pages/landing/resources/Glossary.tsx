@@ -20,10 +20,23 @@ function firstLetter(t: GlossaryTerm): string {
   return /[A-Z]/.test(c) ? c : '#'
 }
 
+function mkT(embedded?: boolean) {
+  return embedded ? {
+    ink: '#e4e4e7', bg: 'transparent', muted: '#71717a',
+    line: '#3f3f46', display: 'inherit',
+    btnPrimary: { backgroundColor: '#15803d', color: '#fff' } as React.CSSProperties,
+  } : {
+    ink: INK, bg: BG, muted: MUTED,
+    line: LINE, display: DISPLAY,
+    btnPrimary: { backgroundColor: INK, color: BG } as React.CSSProperties,
+  }
+}
+
 export default function Glossary({ embedded }: { embedded?: boolean }) {
   const [showPricing, setShowPricing] = useState(false)
   const [query, setQuery] = useState('')
   const root = embedded ? '/app/resources' : '/resources'
+  const t = mkT(embedded)
 
   useEffect(() => {
     document.title = 'HR Glossary — Matcha'
@@ -48,9 +61,9 @@ export default function Glossary({ embedded }: { embedded?: boolean }) {
 
   const grouped = useMemo(() => {
     const m: Record<string, GlossaryTerm[]> = {}
-    for (const t of filtered) {
-      const k = firstLetter(t)
-      ;(m[k] ??= []).push(t)
+    for (const term of filtered) {
+      const k = firstLetter(term)
+      ;(m[k] ??= []).push(term)
     }
     return m
   }, [filtered])
@@ -58,24 +71,24 @@ export default function Glossary({ embedded }: { embedded?: boolean }) {
   const presentLetters = ALPHA.filter(l => grouped[l]?.length)
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+    <div style={embedded ? { color: t.ink } : { backgroundColor: t.bg, color: t.ink, minHeight: '100vh' }}>
       {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
-        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>
+      <main className={embedded ? 'pt-0 pb-8 max-w-[1100px]' : 'pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10'}>
+        <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: t.muted }}>
           <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
-          <span style={{ color: INK }}>Glossary</span>
+          <span style={{ color: t.ink }}>Glossary</span>
         </nav>
 
         <header className="mb-10 max-w-2xl">
           <h1
             className="text-5xl sm:text-6xl tracking-tight"
-            style={{ fontFamily: DISPLAY, fontWeight: 500, color: INK }}
+            style={{ fontFamily: t.display, fontWeight: 500, color: t.ink }}
           >
             HR Glossary
           </h1>
-          <p className="mt-4 text-base" style={{ color: MUTED }}>
+          <p className="mt-4 text-base" style={{ color: t.muted }}>
             Plain-English definitions for the alphabet soup of employment law,
             agencies, and HR concepts. {GLOSSARY.length}+ terms and growing.
           </p>
@@ -84,16 +97,16 @@ export default function Glossary({ embedded }: { embedded?: boolean }) {
         <div className="mb-10">
           <div
             className="flex items-center gap-3 px-4 h-12 rounded-full max-w-md"
-            style={{ border: `1px solid ${LINE}` }}
+            style={{ border: `1px solid ${t.line}` }}
           >
-            <Search className="w-4 h-4" style={{ color: MUTED }} />
+            <Search className="w-4 h-4" style={{ color: t.muted }} />
             <input
               type="text"
               placeholder="Search terms (FLSA, COBRA, retaliation…)"
               value={query}
               onChange={e => setQuery(e.target.value)}
               className="flex-1 bg-transparent outline-none text-sm"
-              style={{ color: INK }}
+              style={{ color: t.ink }}
             />
           </div>
         </div>
@@ -106,7 +119,7 @@ export default function Glossary({ embedded }: { embedded?: boolean }) {
                 key={letter}
                 href={`#letter-${letter}`}
                 className="w-8 h-8 inline-flex items-center justify-center text-sm rounded transition-opacity hover:opacity-60"
-                style={{ color: INK, border: `1px solid ${LINE}` }}
+                style={{ color: t.ink, border: `1px solid ${t.line}` }}
               >
                 {letter}
               </a>
@@ -114,7 +127,7 @@ export default function Glossary({ embedded }: { embedded?: boolean }) {
               <span
                 key={letter}
                 className="w-8 h-8 inline-flex items-center justify-center text-sm rounded"
-                style={{ color: 'rgba(0,0,0,0.2)' }}
+                style={{ color: embedded ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.2)' }}
               >
                 {letter}
               </span>
@@ -123,45 +136,45 @@ export default function Glossary({ embedded }: { embedded?: boolean }) {
         </div>
 
         {presentLetters.length === 0 ? (
-          <p style={{ color: MUTED }}>No terms match "{query}".</p>
+          <p style={{ color: t.muted }}>No terms match "{query}".</p>
         ) : (
           presentLetters.map(letter => (
             <section key={letter} id={`letter-${letter}`} className="mb-12 scroll-mt-28">
               <h2
                 className="text-3xl mb-6"
-                style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
+                style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
               >
                 {letter}
               </h2>
               <div className="flex flex-col gap-3">
-                {grouped[letter].map(t => (
+                {grouped[letter].map(term => (
                   <Link
-                    key={t.slug}
-                    to={`${root}/glossary/${t.slug}`}
+                    key={term.slug}
+                    to={`${root}/glossary/${term.slug}`}
                     className="block p-5 rounded-xl transition-opacity hover:opacity-80"
-                    style={{ border: `1px solid ${LINE}` }}
+                    style={{ border: `1px solid ${t.line}` }}
                   >
                     <div className="flex items-baseline gap-3 mb-1 flex-wrap">
                       <h3
                         className="text-lg"
-                        style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
+                        style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
                       >
-                        {t.abbreviation ?? t.term}
+                        {term.abbreviation ?? term.term}
                       </h3>
-                      {t.abbreviation && (
-                        <span className="text-sm" style={{ color: MUTED }}>
-                          {t.term}
+                      {term.abbreviation && (
+                        <span className="text-sm" style={{ color: t.muted }}>
+                          {term.term}
                         </span>
                       )}
                       <span
                         className="text-[10px] tracking-wider px-2 py-1 rounded ml-auto"
-                        style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                        style={{ border: `1px solid ${t.line}`, color: t.muted }}
                       >
-                        {CATEGORIES_LABEL[t.category]}
+                        {CATEGORIES_LABEL[term.category]}
                       </span>
                     </div>
-                    <p className="text-sm" style={{ color: MUTED }}>
-                      {t.short}
+                    <p className="text-sm" style={{ color: t.muted }}>
+                      {term.short}
                     </p>
                   </Link>
                 ))}
