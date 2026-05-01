@@ -1513,21 +1513,37 @@ COMPACTION_PROMPT = (
 
 COMPACTION_MODEL = "gemini-2.0-flash"
 COMPACTION_THRESHOLD = 30
+# Cap how many "older" messages we feed into one compaction call. Without this,
+# a thread with 5000 messages would send all 4985 older ones to the summarizer
+# every refresh cycle, blowing up cost + latency + hitting input limits.
+COMPACTION_INPUT_MESSAGE_CAP = 200
 
 
 async def compact_conversation(
     messages: list[dict],
     client: genai.Client,
+    prior_summary: Optional[str] = None,
 ) -> Optional[str]:
-    """Summarize older messages into a short context block using a fast model."""
+    """Summarize older messages into a short context block using a fast model.
+
+    If prior_summary is provided, the new summary builds on it iteratively so
+    older context is preserved without re-summarizing the entire history each
+    cycle. Older raw messages are also capped at COMPACTION_INPUT_MESSAGE_CAP
+    to bound cost and latency on long threads.
+    """
     if len(messages) < COMPACTION_THRESHOLD:
         return None
 
-    # Summarize all but the most recent 15 messages
-    older = messages[:-15]
+    # Summarize all but the most recent 15 messages, capped to avoid blowup
+    older = messages[:-15][-COMPACTION_INPUT_MESSAGE_CAP:]
     conversation_text = "\n".join(
         f"{m['role'].upper()}: {m['content']}" for m in older
     )
+    if prior_summary:
+        conversation_text = (
+            f"PRIOR SUMMARY (preserve key facts from this):\n{prior_summary}\n\n"
+            f"NEW MESSAGES:\n{conversation_text}"
+        )
 
     try:
         response = await asyncio.wait_for(

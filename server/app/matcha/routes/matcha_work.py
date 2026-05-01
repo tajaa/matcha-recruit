@@ -7124,9 +7124,11 @@ async def _maybe_compact(thread_id: UUID, ai_provider, summary_at_count: int | N
         # Skip if summary is recent enough
         if summary_at_count is not None and (msg_count - summary_at_count) < _COMPACTION_REFRESH_INTERVAL:
             return
-        all_messages = await doc_svc.get_thread_messages(thread_id)
+        # Window of 15 + older cap of 200 = 215 max messages needed
+        all_messages = await doc_svc.get_thread_messages(thread_id, limit=215)
         msg_dicts = [{"role": m["role"], "content": m["content"]} for m in all_messages]
-        summary = await compact_conversation(msg_dicts, ai_provider.client)
+        prior_summary, _ = await doc_svc.get_context_summary(thread_id)
+        summary = await compact_conversation(msg_dicts, ai_provider.client, prior_summary=prior_summary)
         if summary:
             await doc_svc.save_context_summary(thread_id, summary, msg_count)
             logger.info("Compacted conversation for thread %s (%d messages)", thread_id, msg_count)

@@ -14,9 +14,16 @@ struct ChatPanelView: View {
     @State private var isDragOver = false
     @State private var uploadProgress: String? = nil
 
+    // Matches server-side `SendMessageRequest.content` Field(max_length=4000)
+    private static let messageCharLimit = 4000
+    private var trimmedInputCount: Int {
+        inputText.trimmingCharacters(in: .whitespacesAndNewlines).count
+    }
+    private var isOverLimit: Bool { trimmedInputCount > Self.messageCharLimit }
+
     private func send() {
         let content = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !content.isEmpty, !viewModel.isStreaming else { return }
+        guard !content.isEmpty, !viewModel.isStreaming, !isOverLimit else { return }
         inputText = ""
         Task { await viewModel.sendMessage(content: content, model: selectedModel) }
     }
@@ -337,6 +344,12 @@ struct ChatPanelView: View {
                 .foregroundColor(.white)
                 .lineLimit(1...6)
                 .padding(.vertical, 8)
+                .onChange(of: inputText) { _, newValue in
+                    // Hard cap: trim past the limit so paste-bombs can't bypass send-disable
+                    if newValue.count > Self.messageCharLimit {
+                        inputText = String(newValue.prefix(Self.messageCharLimit))
+                    }
+                }
                 .onKeyPress(keys: [.return], phases: .down) { press in
                     if press.modifiers.contains(.shift) {
                         inputText += "\n"
@@ -346,16 +359,23 @@ struct ChatPanelView: View {
                     return .handled
                 }
 
+            if trimmedInputCount > Self.messageCharLimit - 500 {
+                Text("\(trimmedInputCount)/\(Self.messageCharLimit)")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(isOverLimit ? .red : .secondary)
+                    .help("Messages are capped at \(Self.messageCharLimit) characters")
+            }
+
             Button { send() } label: {
                 Image(systemName: "arrow.up.circle.fill")
                     .font(.system(size: 28))
                     .foregroundColor(
-                        inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isOverLimit
                         ? .secondary : .matcha500
                     )
             }
             .buttonStyle(.plain)
-            .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isStreaming)
+            .disabled(inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || viewModel.isStreaming || isOverLimit)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
