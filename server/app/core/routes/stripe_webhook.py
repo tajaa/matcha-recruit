@@ -8,12 +8,45 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request, status
 
 from ..services.stripe_service import StripeService, StripeServiceError
+from ...database import get_connection
 from ...matcha.services import billing_service
 from ...matcha.services import token_budget_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["stripe-webhooks"])
+
+
+async def _claim_event(event_id: str, event_type: str) -> bool:
+    """Record the event ID in stripe_webhook_events. Returns True if this
+    is the first time we've seen this event, False if it's a retry that
+    we already processed.
+
+    Stripe retries webhook events on transient failures (or any non-2xx
+    response). Without dedupe, a retried event would re-execute every
+    side effect (feature flips, emails, subscription upserts). The unique
+    primary key on event_id makes the INSERT idempotent — a duplicate
+    raises and we return False without throwing.
+    """
+    try:
+        async with get_connection() as conn:
+            inserted = await conn.fetchval(
+                """
+                INSERT INTO stripe_webhook_events (event_id, event_type)
+                VALUES ($1, $2)
+                ON CONFLICT (event_id) DO NOTHING
+                RETURNING event_id
+                """,
+                event_id,
+                event_type,
+            )
+        return inserted is not None
+    except Exception as exc:
+        # If the dedupe table itself is broken (e.g. migration not yet
+        # applied), don't 500 the webhook — log and process anyway.
+        # Worst case: a retry processes twice, same as today.
+        logger.warning("stripe_webhook_events insert failed: %s", exc)
+        return True
 
 
 @router.post("/webhooks/stripe")
@@ -34,8 +67,15 @@ async def stripe_webhook(request: Request):
 
     # stripe-python v15 uses typed objects — convert to plain dicts for compat
     event_type = str(getattr(event, "type", None) or "")
+    event_id = str(getattr(event, "id", "") or "")
     _raw_obj = getattr(getattr(event, "data", None), "object", None)
     event_object = (_raw_obj.to_dict() if hasattr(_raw_obj, "to_dict") else {}) if _raw_obj is not None else {}
+
+    # Top-level dedupe — if Stripe retries this event, ack with 200 so
+    # they stop retrying, but skip all side effects.
+    if event_id and not await _claim_event(event_id, event_type):
+        logger.info("Stripe event %s (%s) already processed, skipping", event_id, event_type)
+        return {"status": "duplicate", "event_id": event_id}
 
     # ── Route channel-specific events via metadata ─────────────────────────
     meta = event_object.get("metadata") or {}
