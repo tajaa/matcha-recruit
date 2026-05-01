@@ -157,6 +157,7 @@ async def stripe_webhook(request: Request):
                     import json as _json
                     from ...database import get_connection as _gc
                     company_id = UUID(company_id_str)
+                    owner = None
                     async with _gc() as conn:
                         existing = await conn.fetchval(
                             "SELECT enabled_features FROM companies WHERE id = $1",
@@ -175,6 +176,23 @@ async def stripe_webhook(request: Request):
                             _json.dumps(features),
                             company_id,
                         )
+                        # Pull the owner's email + display name for the
+                        # activation email below. Falls back to the email
+                        # if the client.name is null.
+                        owner = await conn.fetchrow(
+                            """
+                            SELECT u.email,
+                                   COALESCE(c.name, u.email) AS name,
+                                   comp.name AS company_name
+                            FROM companies comp
+                            JOIN clients c ON c.company_id = comp.id
+                            JOIN users u ON u.id = c.user_id
+                            WHERE comp.id = $1
+                            ORDER BY c.created_at ASC
+                            LIMIT 1
+                            """,
+                            company_id,
+                        )
                     # Record subscription so cancellation handler can find it
                     if stripe_sub_id:
                         await billing_service.upsert_subscription(
@@ -185,6 +203,21 @@ async def stripe_webhook(request: Request):
                             credits_per_cycle=0,
                             amount_cents=0,
                         )
+                    # Best-effort activation email — never let a flaky
+                    # email service 500 the webhook (Stripe will retry).
+                    if owner:
+                        try:
+                            from ..services.email import get_email_service
+                            await get_email_service().send_lite_subscription_active_email(
+                                to_email=owner["email"],
+                                to_name=owner["name"],
+                                company_name=owner["company_name"],
+                            )
+                        except Exception as email_exc:
+                            logger.warning(
+                                "Lite activation email failed for %s: %s",
+                                company_id_str, email_exc,
+                            )
                     logger.info(
                         "Matcha Lite activated: company=%s sub=%s",
                         company_id_str, stripe_sub_id,

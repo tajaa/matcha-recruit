@@ -1596,16 +1596,22 @@ async def register_business(request: BusinessRegister):
                 rf_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 enabled_features_json = json.dumps(rf_features)
             elif is_matcha_lite:
-                # Matcha Lite is a paid bundle — IR + Resources. Enables
-                # incidents up front so the IR sidebar works immediately
-                # after Stripe checkout's success_url returns, without
-                # racing the webhook. customer.subscription.deleted flips
-                # it back off on cancellation. The IR system runs
-                # standalone — no employees feature dependency.
+                # Matcha Lite is a paid bundle — IR + Resources.
+                # Broker-pays signups skip Stripe entirely → enable
+                # incidents immediately. Business-pays signups must
+                # complete Stripe checkout first; the webhook flips
+                # `incidents=true` on `checkout.session.completed`.
+                # Until then, isMatchaLitePending() routes the user
+                # to MatchaLitePendingSidebar with a Subscribe CTA
+                # so they can resume checkout.
+                # customer.subscription.deleted flips it back off on
+                # cancellation. The IR system runs standalone — no
+                # employees feature dependency.
                 company_status = "approved"
                 signup_source = "matcha_lite"
                 lite_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
-                lite_features["incidents"] = True
+                if lite_broker_pays:
+                    lite_features["incidents"] = True
                 enabled_features_json = json.dumps(lite_features)
             else:
                 company_status = "approved" if (invitation or referring_broker_id) else "pending"
@@ -1702,7 +1708,25 @@ async def register_business(request: BusinessRegister):
 
             # Send appropriate email
             email_service = get_email_service()
-            if is_ir_only or is_resources_free or invitation or referring_broker_id:
+            if is_matcha_lite:
+                if lite_broker_pays:
+                    # Broker covers the bill — account is fully active.
+                    await email_service.send_business_approved_email(
+                        to_email=user["email"],
+                        to_name=request.name,
+                        company_name=request.company_name,
+                    )
+                else:
+                    # Business pays via Stripe — features stay off until
+                    # the webhook confirms payment. Different email so
+                    # the user knows what's still required.
+                    await email_service.send_lite_payment_pending_email(
+                        to_email=user["email"],
+                        to_name=request.name,
+                        company_name=request.company_name,
+                        headcount=request.headcount,
+                    )
+            elif is_ir_only or is_resources_free or invitation or referring_broker_id:
                 await email_service.send_business_approved_email(
                     to_email=user["email"],
                     to_name=request.name,
@@ -1715,7 +1739,15 @@ async def register_business(request: BusinessRegister):
                     company_name=request.company_name
                 )
 
-            if is_ir_only:
+            if is_matcha_lite and lite_broker_pays:
+                next_route = "/ir/onboarding"
+                msg = "Welcome to Matcha Lite. Let's set up your team."
+            elif is_matcha_lite:
+                # Client SPA chains the Stripe call directly; this hint is
+                # for any caller that doesn't (e.g. broker portal preview).
+                next_route = "/checkout/lite"
+                msg = "Account created. Complete payment to activate Matcha Lite."
+            elif is_ir_only:
                 next_route = "/ir/onboarding"
                 msg = "Welcome to Matcha IR. Let's set up your team."
             elif is_resources_free:

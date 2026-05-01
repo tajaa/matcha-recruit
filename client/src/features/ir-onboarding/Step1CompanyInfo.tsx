@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Loader2, X } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlertCircle, Loader2, X } from 'lucide-react'
 import { api } from '../../api/client'
 
 type LocationRow = {
@@ -22,6 +22,10 @@ export default function Step1CompanyInfo({ onDone }: { onDone: () => void }) {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
+  // Brief lockout after a successful add to prevent double-submits
+  // (a likely cause of "second one not saved" reports — fast double-click
+  // on Add fired two POSTs but only one persisted before the form reset).
+  const submitLockRef = useRef(false)
 
   async function refresh() {
     try {
@@ -41,6 +45,8 @@ export default function Step1CompanyInfo({ onDone }: { onDone: () => void }) {
   async function handleAdd(e: React.FormEvent) {
     e.preventDefault()
     if (!city || !state || !zipcode) return
+    if (submitLockRef.current) return
+    submitLockRef.current = true
     setSubmitting(true)
     setError(null)
     try {
@@ -63,6 +69,8 @@ export default function Step1CompanyInfo({ onDone }: { onDone: () => void }) {
       setError(err instanceof Error ? err.message : 'Failed to save location')
     } finally {
       setSubmitting(false)
+      // Brief debounce so a fast second click doesn't reach the network.
+      setTimeout(() => { submitLockRef.current = false }, 500)
     }
   }
 
@@ -95,6 +103,21 @@ export default function Step1CompanyInfo({ onDone }: { onDone: () => void }) {
           Add every site, store, or facility you operate.
         </p>
       </div>
+
+      {error && (
+        <div className="flex items-start gap-2 bg-red-950/40 border border-red-900 text-red-300 rounded px-3 py-2.5">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <div className="flex-1 text-sm">{error}</div>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="text-red-400 hover:text-red-200"
+            aria-label="Dismiss"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {locations.length > 0 && (
         <ul className="space-y-2">
@@ -131,7 +154,6 @@ export default function Step1CompanyInfo({ onDone }: { onDone: () => void }) {
           <Field label="State" value={state} onChange={setState} maxLength={2} />
           <Field label="ZIP" value={zipcode} onChange={setZipcode} />
         </div>
-        {error && <p className="text-sm text-red-400">{error}</p>}
         <button
           type="submit"
           disabled={submitting || !city || !state || !zipcode}
@@ -141,14 +163,19 @@ export default function Step1CompanyInfo({ onDone }: { onDone: () => void }) {
         </button>
       </form>
 
-      <button
-        type="button"
-        onClick={onDone}
-        disabled={locations.length === 0}
-        className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white font-medium px-5 py-2 rounded transition-colors"
-      >
-        Continue
-      </button>
+      <div className="space-y-1.5">
+        <button
+          type="button"
+          onClick={onDone}
+          disabled={locations.length === 0}
+          className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white font-medium px-5 py-2 rounded transition-colors"
+        >
+          Continue
+        </button>
+        <p className="text-xs text-zinc-500">
+          One location is enough to get started — you can add more later from Company Settings.
+        </p>
+      </div>
     </div>
   )
 }

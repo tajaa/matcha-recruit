@@ -2323,6 +2323,190 @@ Welcome to Matcha! We're excited to have you on board.
         _subject = f"Welcome to Matcha! {company_name} is Approved"
         return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
 
+    async def send_lite_payment_pending_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+        headcount: int,
+    ) -> bool:
+        """Sent at registration time for business-pays Matcha Lite signups.
+
+        The account exists but Matcha Lite features are gated until the
+        Stripe subscription completes. CTA points back at the app where
+        MatchaLitePendingSidebar surfaces the resume-checkout button.
+        """
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping email send")
+            return False
+
+        import math
+        price_dollars = math.ceil(max(headcount, 1) / 10) * 100
+        app_base_url = self.settings.app_base_url
+        dashboard_url = f"{app_base_url}/app"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #d7ba7d; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .status-card {{ background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%); border-radius: 12px; padding: 30px; margin: 20px 0; text-align: center; border-left: 4px solid #d7ba7d; }}
+        .status-icon {{ font-size: 48px; margin-bottom: 10px; }}
+        .company-name {{ font-size: 24px; font-weight: 700; color: #111; margin-bottom: 8px; }}
+        .price {{ font-size: 18px; color: #92400e; margin-top: 8px; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 20px 0; font-size: 16px; }}
+        .btn:hover {{ background: #16a34a; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>Your account for <strong>{company_name}</strong> is created. One last step: complete your subscription to activate Matcha Lite.</p>
+
+            <div class="status-card">
+                <div class="status-icon">⏳</div>
+                <div class="company-name">{company_name}</div>
+                <p style="color: #92400e; margin: 0;">Payment required</p>
+                <p class="price">${price_dollars}/month for {headcount} employee{'s' if headcount != 1 else ''}</p>
+            </div>
+
+            <p>Sign in and click <strong>Subscribe</strong> in the sidebar to finish checkout. Your incident reporting, HR resources, and compliance tools unlock the moment payment clears.</p>
+
+            <p style="text-align: center;">
+                <a href="{dashboard_url}" class="btn">Complete subscription</a>
+            </p>
+
+            <p style="font-size: 13px; color: #6b7280;">If you signed up by mistake, no action is required — the account stays inactive until paid.</p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Your account for {company_name} is created. One last step: complete your subscription to activate Matcha Lite.
+
+Pricing: ${price_dollars}/month for {headcount} employee{'s' if headcount != 1 else ''}.
+
+Sign in and click Subscribe in the sidebar to finish checkout:
+{dashboard_url}
+
+Your incident reporting, HR resources, and compliance tools unlock the moment payment clears.
+
+If you signed up by mistake, no action is required.
+
+- Matcha
+"""
+
+        _subject = f"Complete your Matcha Lite subscription — {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
+
+    async def send_lite_subscription_active_email(
+        self,
+        to_email: str,
+        to_name: str,
+        company_name: str,
+    ) -> bool:
+        """Sent by the Stripe webhook when checkout.session.completed fires
+        for a Matcha Lite subscription. Confirms activation and points back
+        to the dashboard."""
+        if not self.is_configured():
+            logger.warning("Gmail not configured, skipping email send")
+            return False
+
+        app_base_url = self.settings.app_base_url
+        dashboard_url = f"{app_base_url}/app"
+
+        html_content = f"""
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ text-align: center; padding: 20px 0; border-bottom: 2px solid #22c55e; }}
+        .logo {{ color: #22c55e; font-size: 24px; font-weight: bold; letter-spacing: 2px; }}
+        .content {{ padding: 30px 0; }}
+        .status-card {{ background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%); border-radius: 12px; padding: 30px; margin: 20px 0; text-align: center; border-left: 4px solid #22c55e; }}
+        .status-icon {{ font-size: 48px; margin-bottom: 10px; }}
+        .company-name {{ font-size: 24px; font-weight: 700; color: #111; margin-bottom: 8px; }}
+        .btn {{ display: inline-block; background: #22c55e; color: white; padding: 16px 32px; text-decoration: none; border-radius: 8px; font-weight: 600; margin: 20px 0; font-size: 16px; }}
+        .footer {{ text-align: center; padding-top: 20px; border-top: 1px solid #e5e7eb; color: #6b7280; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="logo">MATCHA</div>
+        </div>
+        <div class="content">
+            <p>Hi {to_name},</p>
+
+            <p>Payment confirmed. Matcha Lite is active for <strong>{company_name}</strong>.</p>
+
+            <div class="status-card">
+                <div class="status-icon">✅</div>
+                <div class="company-name">{company_name}</div>
+                <p style="color: #166534; margin: 0;">Matcha Lite Active</p>
+            </div>
+
+            <p>You now have access to:</p>
+            <ul>
+                <li>Incident reporting + AI summaries</li>
+                <li>State-by-state HR compliance guides</li>
+                <li>Templates, calculators, and the compliance audit</li>
+            </ul>
+
+            <p style="text-align: center;">
+                <a href="{dashboard_url}" class="btn">Open Matcha Lite</a>
+            </p>
+
+            <p>Welcome aboard.</p>
+        </div>
+        <div class="footer">
+            <p>Sent via Matcha</p>
+        </div>
+    </div>
+</body>
+</html>
+"""
+
+        text_content = f"""
+Hi {to_name},
+
+Payment confirmed. Matcha Lite is active for {company_name}.
+
+You now have access to:
+- Incident reporting + AI summaries
+- State-by-state HR compliance guides
+- Templates, calculators, and the compliance audit
+
+Open Matcha Lite: {dashboard_url}
+
+Welcome aboard.
+
+- Matcha
+"""
+
+        _subject = f"Matcha Lite is active — {company_name}"
+        return await self._send_with_fallback(to_email, to_name, _subject, html_content, text_content)
+
     async def send_candidate_reach_out_email(
         self,
         to_email: str,
