@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import Landing from './pages/Landing'
 import MatchaWorkPage from './pages/landing/MatchaWorkPage'
+import MatchaLitePage from './pages/landing/MatchaLitePage'
 import ServicesPage from './pages/landing/ServicesPage'
 import Login from './pages/Login'
 import AppLayout from './layouts/AppLayout'
@@ -100,6 +101,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/matcha-work" element={<MatchaWorkPage />} />
+      <Route path="/matcha-lite" element={<MatchaLitePage />} />
       <Route path="/services" element={<ServicesPage />} />
       <Route path="/subscribe" element={<Subscribe />} />
       <Route path="/blog" element={<BlogIndex />} />

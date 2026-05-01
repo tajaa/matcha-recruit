@@ -83,9 +83,13 @@ export default function ResourcesHub() {
   const [showPricing, setShowPricing] = useState(false)
   const { me, loading } = useMe()
   const isSignedIn = !!me && me.user.role === 'client'
-  // While auth resolves, render gated cards as locked-but-pending — no badge yet.
-  // Avoids a brief LOCK flash for already-signed-in visitors.
-  const showLock = !loading && !isSignedIn
+  // While auth resolves, hide gated cards rather than flashing them then
+  // hiding them once `me` resolves. Show them once we know auth state.
+  const showGated = !loading && isSignedIn
+
+  // Guests only see ungated resources (glossary + blog). Signed-in clients
+  // see the full catalog.
+  const visible = CATEGORIES.filter(c => !c.gated || showGated)
 
   return (
     <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
@@ -102,9 +106,10 @@ export default function ResourcesHub() {
           <p className="mt-4 text-base" style={{ color: MUTED }}>
             Free templates, calculators, the compliance audit, and answers
             to the questions HR teams Google a hundred times a year.
-            {showLock && (
+            {!loading && !isSignedIn && (
               <>
-                {' '}A free business account unlocks everything beyond the glossary —{' '}
+                {' '}A free business account unlocks templates, calculators,
+                state guides, and the compliance audit —{' '}
                 <Link to="/auth/resources-signup" className="underline" style={{ color: INK }}>sign up</Link>.
               </>
             )}
@@ -112,33 +117,9 @@ export default function ResourcesHub() {
         </header>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {CATEGORIES.map(cat => {
+          {visible.map(cat => {
             const Icon = cat.icon
             const live = cat.status === 'live'
-            const locked = live && cat.gated && showLock
-            const target = locked
-              ? `/auth/resources-signup?next=${encodeURIComponent(cat.to)}`
-              : cat.to
-
-            const cornerBadge = !live ? (
-              <span
-                className="text-[10px] tracking-wider px-2 py-1 rounded"
-                style={{ border: `1px solid ${LINE}`, color: MUTED }}
-              >
-                COMING SOON
-              </span>
-            ) : locked ? (
-              <span
-                className="inline-flex items-center gap-1 text-[10px] tracking-wider px-2 py-1 rounded"
-                style={{ border: `1px solid ${LINE}`, color: MUTED }}
-              >
-                <Lock className="w-3 h-3" />
-                SIGN IN
-              </span>
-            ) : (
-              <ArrowUpRight className="w-4 h-4" style={{ color: MUTED }} />
-            )
-
             const Card = (
               <article
                 className="p-6 rounded-2xl flex flex-col h-full transition-opacity"
@@ -154,7 +135,16 @@ export default function ResourcesHub() {
                   >
                     <Icon className="w-5 h-5" style={{ color: INK }} />
                   </div>
-                  {cornerBadge}
+                  {!live ? (
+                    <span
+                      className="text-[10px] tracking-wider px-2 py-1 rounded"
+                      style={{ border: `1px solid ${LINE}`, color: MUTED }}
+                    >
+                      COMING SOON
+                    </span>
+                  ) : (
+                    <ArrowUpRight className="w-4 h-4" style={{ color: MUTED }} />
+                  )}
                 </div>
                 <h3
                   className="text-xl mb-2"
@@ -172,11 +162,43 @@ export default function ResourcesHub() {
               return <div key={cat.title}>{Card}</div>
             }
             return (
-              <Link key={cat.title} to={target} className="block hover:opacity-80 transition-opacity">
+              <Link key={cat.title} to={cat.to} className="block hover:opacity-80 transition-opacity">
                 {Card}
               </Link>
             )
           })}
+
+          {!loading && !isSignedIn && (
+            <Link
+              to="/auth/resources-signup"
+              className="block hover:opacity-80 transition-opacity"
+            >
+              <article
+                className="p-6 rounded-2xl flex flex-col h-full"
+                style={{ border: `1px dashed ${LINE}`, backgroundColor: 'rgba(15,15,15,0.02)' }}
+              >
+                <div className="flex items-start justify-between mb-4">
+                  <div
+                    className="w-10 h-10 rounded-lg flex items-center justify-center"
+                    style={{ backgroundColor: 'rgba(15,15,15,0.05)' }}
+                  >
+                    <Lock className="w-5 h-5" style={{ color: INK }} />
+                  </div>
+                  <ArrowUpRight className="w-4 h-4" style={{ color: MUTED }} />
+                </div>
+                <h3
+                  className="text-xl mb-2"
+                  style={{ fontFamily: DISPLAY, color: INK, fontWeight: 500 }}
+                >
+                  Unlock the full library
+                </h3>
+                <p className="text-sm" style={{ color: MUTED }}>
+                  Templates, calculators, state guides, and the compliance
+                  audit are gated to free business accounts. Takes 30 seconds.
+                </p>
+              </article>
+            </Link>
+          )}
         </div>
       </main>
 

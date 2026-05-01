@@ -406,6 +406,128 @@ async def submit_upgrade_inquiry(
 
 
 # ---------------------------------------------------------------------------
+# Matcha Lite waitlist — fully public capture. No auth.
+# ---------------------------------------------------------------------------
+
+
+class LiteWaitlistRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    name: Optional[str] = Field(default=None, max_length=255)
+    company_name: Optional[str] = Field(default=None, max_length=255)
+    headcount: Optional[int] = Field(default=None, ge=1, le=100_000)
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class LiteWaitlistResponse(BaseModel):
+    ok: bool
+
+
+@router.post("/waitlist/lite", response_model=LiteWaitlistResponse)
+async def join_lite_waitlist(body: LiteWaitlistRequest):
+    """Public Matcha Lite waitlist capture. Writes to lead_captures and
+    fires a best-effort sales notification email."""
+    import re as _re
+    email = body.email.strip().lower()
+    if not _re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    note_blob = body.note or ""
+    if body.company_name:
+        note_blob = f"company: {body.company_name}\n" + note_blob
+    if body.headcount:
+        note_blob = f"headcount: {body.headcount}\n" + note_blob
+
+    async with get_connection() as conn:
+        # De-dupe: don't insert a second row for the same email + slug
+        # within 24h. Avoids spamming sales on accidental double-submits
+        # while still allowing repeated interest later.
+        existing = await conn.fetchval(
+            """
+            SELECT 1 FROM lead_captures
+            WHERE email = $1
+              AND asset_slug = 'matcha_lite_waitlist'
+              AND created_at > NOW() - INTERVAL '24 hours'
+            LIMIT 1
+            """,
+            email,
+        )
+        if not existing:
+            await conn.execute(
+                """
+                INSERT INTO lead_captures (email, name, asset_slug, source)
+                VALUES ($1, $2, 'matcha_lite_waitlist', $3)
+                """,
+                email,
+                body.name,
+                note_blob[:100] if note_blob else "matcha_lite_landing",
+            )
+
+    try:
+        from ..services.email import get_email_service
+        email_svc = get_email_service()
+        if not email_svc.is_configured():
+            return LiteWaitlistResponse(ok=True)
+
+        # Confirmation to the user — only on the first signup in 24h to
+        # avoid double-sending on accidental re-submits.
+        if not existing:
+            display_name = body.name.strip() if body.name else None
+            greeting = f"Hi {_html.escape(display_name)}," if display_name else "Hi there,"
+            user_html = f"""
+                <p>{greeting}</p>
+                <p>You're on the Matcha Lite waitlist. We'll email you the
+                moment Lite opens up — no other emails, no newsletter, just
+                that one ping.</p>
+                <p>In the meantime, the public glossary and blog are open
+                if you want to poke around: <a href="https://hey-matcha.com/resources">hey-matcha.com/resources</a></p>
+                <p>— The Matcha team</p>
+            """
+            user_text = (
+                f"{'Hi ' + display_name + ',' if display_name else 'Hi there,'}\n\n"
+                "You're on the Matcha Lite waitlist. We'll email you the moment Lite opens up.\n\n"
+                "In the meantime: https://hey-matcha.com/resources\n\n"
+                "— The Matcha team"
+            )
+            await email_svc.send_email(
+                to_email=email,
+                to_name=display_name,
+                subject="You're on the Matcha Lite waitlist",
+                html_content=user_html,
+                text_content=user_text,
+            )
+
+        # Sales notification — fire on every submit, even repeat ones,
+        # so sales sees re-engagement signals.
+        sales_email = os.getenv("SALES_INQUIRY_EMAIL")
+        if sales_email:
+            safe_email = _html.escape(email)
+            safe_name = _html.escape(body.name or "(no name)")
+            safe_company = _html.escape(body.company_name or "(none)")
+            safe_headcount = _html.escape(str(body.headcount) if body.headcount else "(none)")
+            safe_note = _html.escape(body.note or "(none)")
+            repeat_marker = " (repeat within 24h)" if existing else ""
+            sales_html = (
+                f"<h3>Matcha Lite waitlist signup{repeat_marker}</h3>"
+                f"<p><strong>Email:</strong> {safe_email}</p>"
+                f"<p><strong>Name:</strong> {safe_name}</p>"
+                f"<p><strong>Company:</strong> {safe_company}</p>"
+                f"<p><strong>Headcount:</strong> {safe_headcount}</p>"
+                "<p><strong>Note:</strong></p>"
+                f"<pre>{safe_note}</pre>"
+            )
+            await email_svc.send_email(
+                to_email=sales_email,
+                to_name="Matcha Sales",
+                subject=f"New Matcha Lite waitlist signup{repeat_marker}",
+                html_content=sales_html,
+            )
+    except Exception as exc:
+        logger.warning("Lite waitlist email failed: %s", exc)
+
+    return LiteWaitlistResponse(ok=True)
+
+
+# ---------------------------------------------------------------------------
 # State Compliance Guides — public surface over jurisdictions data.
 # ---------------------------------------------------------------------------
 
