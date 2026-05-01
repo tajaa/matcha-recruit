@@ -11,6 +11,14 @@ struct ProjectListView: View {
     @State private var showTypePicker = false
     @State private var showNewBlog = false
 
+    // Memoized groupings — recomputed only when `projects` changes, not on
+    // every selection-driven body redraw.
+    @State private var blogs: [MWProject] = []
+    @State private var collabs: [MWProject] = []
+    @State private var discipline: [MWProject] = []
+    @State private var general: [MWProject] = []
+    @State private var archivedProjects: [MWProject] = []
+
     @AppStorage("mw-sidebar-proj-blogs-open")      private var blogsOpen      = true
     @AppStorage("mw-sidebar-proj-collabs-open")    private var collabsOpen    = true
     @AppStorage("mw-sidebar-proj-discipline-open") private var disciplineOpen = true
@@ -19,26 +27,21 @@ struct ProjectListView: View {
 
     // MARK: - Grouping
 
-    private var activeProjects: [MWProject] { projects.filter { $0.status != "archived" } }
-    private var archivedProjects: [MWProject] { projects.filter { $0.status == "archived" }.sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") } }
-
-    private var blogs: [MWProject] {
-        activeProjects.filter { $0.projectType == "blog" }.pinnedFirst()
-    }
-    private var collabs: [MWProject] {
-        activeProjects.filter {
+    private func recomputeGroups() {
+        let active = projects.filter { $0.status != "archived" }
+        blogs = active.filter { $0.projectType == "blog" }.pinnedFirst()
+        collabs = active.filter {
             $0.projectType == "collab" || $0.collaboratorRole == "collaborator"
         }.pinnedFirst()
-    }
-    private var discipline: [MWProject] {
-        activeProjects.filter { $0.projectType == "discipline" }.pinnedFirst()
-    }
-    private var general: [MWProject] {
+        discipline = active.filter { $0.projectType == "discipline" }.pinnedFirst()
         let excluded: Set<String> = ["blog", "collab", "discipline"]
-        return activeProjects.filter { p in
+        general = active.filter { p in
             let t = p.projectType ?? "general"
             return !excluded.contains(t) && p.collaboratorRole != "collaborator"
         }.pinnedFirst()
+        archivedProjects = projects
+            .filter { $0.status == "archived" }
+            .sorted { ($0.updatedAt ?? "") > ($1.updatedAt ?? "") }
     }
 
     private var selectionBinding: Binding<String?> {
@@ -137,6 +140,7 @@ struct ProjectListView: View {
         .sheet(isPresented: $showNewBlog) {
             NewBlogSheet { proj in
                 projects.insert(proj, at: 0)
+                recomputeGroups()
                 appState.selectedProjectId = proj.id
                 appState.selectedThreadId = nil
                 appState.projectsListGeneration &+= 1
@@ -360,7 +364,11 @@ struct ProjectListView: View {
         do {
             let p = try await MatchaWorkService.shared.listProjects()
             let filtered = p.filter { $0.projectType != "consultation" }
-            await MainActor.run { projects = filtered; isLoading = false }
+            await MainActor.run {
+                projects = filtered
+                recomputeGroups()
+                isLoading = false
+            }
         } catch {
             await MainActor.run { isLoading = false }
         }
@@ -383,6 +391,7 @@ struct ProjectListView: View {
                 let proj = try await MatchaWorkService.shared.createProject(title: "New Project", projectType: type)
                 await MainActor.run {
                     projects.insert(proj, at: 0)
+                    recomputeGroups()
                     appState.selectedProjectId = proj.id
                     appState.selectedThreadId = nil
                     appState.projectsListGeneration &+= 1

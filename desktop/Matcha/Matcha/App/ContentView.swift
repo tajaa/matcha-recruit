@@ -314,6 +314,14 @@ struct ContentView: View {
             ProfileSheet()
                 .environment(appState)
         }
+        .alert("Enable notifications?", isPresented: $appState.showNotificationReprompt) {
+            Button("Open Settings") {
+                ChannelNotificationManager.shared.openSystemNotificationSettings()
+            }
+            Button("Not now", role: .cancel) { }
+        } message: {
+            Text("Notifications are off. Turn them on in System Settings → Notifications → Matcha so you don't miss channel mentions and inbox messages.")
+        }
         .sheet(isPresented: $showCreateChannel) {
             CreateChannelSheet { newChannel in
                 appState.selectedThreadId = nil

@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 @Observable
 class AppState {
@@ -16,6 +17,11 @@ class AppState {
     var isPlusActive: Bool = false
     var betaFeatures: [String: Bool] = [:]
     var isSceneActive: Bool = true
+    /// True when notifications were previously denied — drives the in-app
+    /// alert that asks the user to re-enable them via System Settings.
+    /// macOS won't re-show the system dialog after the user denies once,
+    /// so we surface our own prompt on every app activate.
+    var showNotificationReprompt: Bool = false
 
     var mwBetaLite: Bool {
         betaFeatures["matcha_work_beta_lite"] == true || betaFeatures["matcha_work_beta_full"] == true
@@ -152,6 +158,28 @@ class AppState {
         ChannelsWebSocket.shared.connect()
         // Best-effort heartbeat so presence flips green immediately.
         Task { try? await MatchaWorkService.shared.sendHeartbeat() }
+        // Kick the inbox + notification badges immediately on resume so users
+        // don't see stale counts while the 60s polling loop is mid-sleep.
+        Task { [weak self] in
+            if let count = try? await InboxService.shared.getUnreadCount() {
+                await MainActor.run { self?.unreadInboxCount = count }
+            }
+        }
+        Task { await refreshNotificationsCount() }
+        // Check notification permission. If denied, surface our own prompt
+        // (macOS only shows the system dialog once — denied users need to
+        // re-enable via System Settings). If notDetermined, trigger the
+        // OS dialog directly.
+        ChannelNotificationManager.shared.checkAuthorizationStatus { [weak self] status in
+            switch status {
+            case .notDetermined:
+                ChannelNotificationManager.shared.requestPermission()
+            case .denied:
+                self?.showNotificationReprompt = true
+            default:
+                break
+            }
+        }
     }
 
     private func startInboxPolling() {

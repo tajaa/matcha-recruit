@@ -164,8 +164,14 @@ class APIClient {
             throw APIError.httpError(httpResponse.statusCode, message)
         }
 
+        // Decode off MainActor — large thread/project payloads (hundreds of
+        // messages, KB of metadata) used to hold up the main thread when a
+        // VM `await`'d this function from MainActor context.
         do {
-            return try decoder.decode(T.self, from: data)
+            return try await Task.detached(priority: .userInitiated) {
+                let d = JSONDecoder()
+                return try d.decode(T.self, from: data)
+            }.value
         } catch {
             // Surface a snippet of the actual payload so "decoding error" is
             // actionable instead of opaque. Without this we get the generic

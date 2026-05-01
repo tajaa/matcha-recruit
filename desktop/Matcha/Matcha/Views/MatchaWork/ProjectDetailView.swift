@@ -42,6 +42,10 @@ struct ProjectDetailView: View {
     @State private var standardMode: StandardProjectMode = .edit
     @State private var collabDiscussionChannelId: String?
     @State private var collabChannelLoadError: String?
+    // Cancelable task handles so rapid project/thread switches don't queue
+    // up redundant fetches.
+    @State private var threadLoadTask: Task<Void, Never>?
+    @State private var refreshTask: Task<Void, Never>?
     @AppStorage("mw-chat-theme") private var lightMode = false
     @AppStorage("mw-model") private var selectedModelId = "flash"
 
@@ -83,22 +87,25 @@ struct ProjectDetailView: View {
             }
         }
         .task(id: projectId) {
+            // Don't fetch the thread inline here — onChange(activeChatId) below
+            // is the single source of truth and fires on initial nil→value.
+            // SwiftUI auto-cancels this .task block when projectId changes.
             await viewModel.loadProject(id: projectId)
-            if let chatId = viewModel.activeChatId {
-                await chatVM.loadThread(id: chatId)
-            }
         }
         .onChange(of: viewModel.activeChatId) {
+            threadLoadTask?.cancel()
             if let chatId = viewModel.activeChatId {
-                Task { await chatVM.loadThread(id: chatId) }
+                threadLoadTask = Task { await chatVM.loadThread(id: chatId) }
             }
         }
         // Chat streams mutate project data (sections for blog, posting for
         // recruiting, consultation fields, etc.) via server-side directives.
         // Refetch the project when a stream completes so the panel reflects
         // the new state without requiring the user to navigate away and back.
+        // Cancel any in-flight refresh so rapid stream-end events coalesce.
         .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
-            Task { await viewModel.refreshProject() }
+            refreshTask?.cancel()
+            refreshTask = Task { await viewModel.refreshProject() }
         }
         .toolbar {
             ToolbarItem(placement: .navigation) {

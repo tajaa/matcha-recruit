@@ -14,26 +14,10 @@ struct MarkdownPreviewView: View {
                     .padding(.bottom, 4)
 
                 ForEach(sections) { section in
-                    VStack(alignment: .leading, spacing: 10) {
-                        if !section.title.isEmpty {
-                            Text(section.title)
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                        }
-                        if let content = section.content, !content.isEmpty {
-                            ForEach(Array(renderBlocks(for: content).enumerated()), id: \.offset) { _, block in
-                                renderBlock(block)
-                            }
-                        } else {
-                            Text("No content yet")
-                                .font(.system(size: 12))
-                                .foregroundColor(.secondary)
-                                .italic()
-                        }
-                    }
-                    if section.id != sections.last?.id {
-                        Divider().opacity(0.2)
-                    }
+                    SectionPreviewView(
+                        section: section,
+                        isLast: section.id == sections.last?.id
+                    )
                 }
             }
             .padding(24)
@@ -42,10 +26,55 @@ struct MarkdownPreviewView: View {
         }
         .background(Color(white: 0.08))
     }
+}
+
+// MARK: - Per-section view with cached block parse
+
+/// Each section parses its markdown content once per content change and caches
+/// the resulting blocks in @State, so unrelated state changes (selection,
+/// tab toggle) don't re-run the regex parser.
+private struct SectionPreviewView: View {
+    let section: MWProjectSection
+    let isLast: Bool
+    @State private var blocks: [RenderedBlock] = []
+    @State private var parsedFor: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if !section.title.isEmpty {
+                Text(section.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+            if let content = section.content, !content.isEmpty {
+                ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                    renderBlock(block)
+                }
+                .onAppear { parseIfNeeded(content) }
+                .onChange(of: section.content ?? "") { _, newValue in
+                    parseIfNeeded(newValue)
+                }
+            } else {
+                Text("No content yet")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .italic()
+            }
+        }
+        if !isLast {
+            Divider().opacity(0.2)
+        }
+    }
+
+    private func parseIfNeeded(_ content: String) {
+        guard parsedFor != content else { return }
+        blocks = renderBlocks(for: content)
+        parsedFor = content
+    }
 
     // MARK: - Block parsing
 
-    private enum RenderedBlock {
+    fileprivate enum RenderedBlock {
         case text(String, lineHeight: CGFloat)
         case image(alt: String, url: URL)
         case video(url: URL)

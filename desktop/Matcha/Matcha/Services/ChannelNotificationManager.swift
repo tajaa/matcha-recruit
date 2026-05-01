@@ -12,6 +12,28 @@ final class ChannelNotificationManager {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
+    /// Check the current notification authorization and call back on the main
+    /// thread with the status. Used by AppState on each scene activation to
+    /// decide whether to show the OS dialog (notDetermined) or our own
+    /// in-app re-prompt (denied — macOS won't re-show the OS dialog after
+    /// the user has denied once).
+    func checkAuthorizationStatus(_ completion: @escaping (UNAuthorizationStatus) -> Void) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            DispatchQueue.main.async {
+                completion(settings.authorizationStatus)
+            }
+        }
+    }
+
+    /// Open the macOS Notifications pane in System Settings. Used by the
+    /// re-prompt flow when the user has previously denied permission — the
+    /// only way to re-enable notifications is through Settings.
+    func openSystemNotificationSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.notifications") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
     var isEnabled: Bool {
         // Default true — treat missing key as enabled
         UserDefaults.standard.object(forKey: Self.enabledKey) == nil
