@@ -138,8 +138,10 @@ struct ChannelsSidebarView: View {
 
     private func row(for channel: ChannelSummary) -> some View {
         let selected = appState.selectedChannelId == channel.id
+        let unread = channel.unreadCount + (appState.channelUnreadOverrides[channel.id] ?? 0)
         return Button {
             appState.selectedChannelId = channel.id
+            appState.clearChannelUnread(channel.id)
             appState.selectedThreadId = nil
             appState.selectedProjectId = nil
             appState.showInbox = false
@@ -153,14 +155,17 @@ struct ChannelsSidebarView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(channel.name)
-                            .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                            .font(.system(size: 13, weight: (selected || unread > 0) ? .semibold : .regular))
                             .foregroundColor(selected ? .primary : .primary.opacity(0.9))
                             .lineLimit(1)
                         Spacer(minLength: 4)
-                        if channel.unreadCount > 0 {
-                            Circle()
-                                .fill(Color.matcha500)
-                                .frame(width: 7, height: 7)
+                        if unread > 0 {
+                            Text(unread > 99 ? "99+" : "\(unread)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.matcha500))
                         }
                     }
                     if let preview = channel.lastMessagePreview, !preview.isEmpty {
@@ -217,6 +222,8 @@ struct ChannelsSidebarView: View {
             channels = list.sorted {
                 ($0.lastMessageAt ?? "") > ($1.lastMessageAt ?? "")
             }
+            // API returned fresh unread counts — local overrides are now stale.
+            appState.channelUnreadOverrides = [:]
             isLoading = false
         } catch {
             errorMessage = error.localizedDescription

@@ -29,6 +29,8 @@ class AppState {
     /// hierarchies where `.onReceive` hasn't fired reliably.
     var channelsListGeneration: Int = 0
     var projectsListGeneration: Int = 0
+    /// Per-channel unread increments from WebSocket — cleared after API refresh or on channel open.
+    var channelUnreadOverrides: [String: Int] = [:]
     private var heartbeatTask: Task<Void, Never>?
     private var inboxPollTask: Task<Void, Never>?
     private var notificationPollTask: Task<Void, Never>?
@@ -57,13 +59,29 @@ class AppState {
         Task { await refreshBetaFeatures() }
         ChannelNotificationManager.shared.requestPermission()
         ChannelsWebSocket.shared.onMessageGlobal = { [weak self] msg in
-            guard let self, !self.isSceneActive else { return }
-            ChannelNotificationManager.shared.post(
-                senderName: msg.senderName,
-                content: msg.content,
-                channelName: ChannelsWebSocket.shared.currentRoomName
-            )
+            guard let self else { return }
+            // Ignore own messages
+            guard msg.senderId != self.currentUser?.id else { return }
+            let isCurrentChannel = self.selectedChannelId == msg.channelId
+            if !isCurrentChannel {
+                Task { @MainActor in
+                    self.channelUnreadOverrides[msg.channelId, default: 0] += 1
+                }
+                ChannelNotificationManager.shared.playInAppSound()
+            }
+            if !self.isSceneActive {
+                ChannelNotificationManager.shared.post(
+                    senderName: msg.senderName,
+                    content: msg.content,
+                    channelName: ChannelsWebSocket.shared.currentRoomName
+                )
+            }
         }
+    }
+
+    @MainActor
+    func clearChannelUnread(_ channelId: String) {
+        channelUnreadOverrides.removeValue(forKey: channelId)
     }
 
     @MainActor

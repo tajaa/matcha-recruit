@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import UserNotifications
 
@@ -16,6 +17,11 @@ final class ChannelNotificationManager {
         UserDefaults.standard.object(forKey: Self.enabledKey) == nil
             ? true
             : UserDefaults.standard.bool(forKey: Self.enabledKey)
+    }
+
+    func playInAppSound() {
+        guard isEnabled else { return }
+        (NSSound(named: "Tink") ?? NSSound(named: "Pop"))?.play()
     }
 
     func post(senderName: String, content: String, channelName: String?) {
