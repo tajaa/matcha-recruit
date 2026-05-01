@@ -32,7 +32,7 @@ function toHours(value: number, unit: 'days' | 'hours', hoursPerDay: number): nu
   return unit === 'days' ? value * hoursPerDay : value
 }
 
-export default function PtoAccrual() {
+export default function PtoAccrual({ embedded }: { embedded?: boolean }) {
   const [annual, setAnnual] = useState(15)
   const [unit, setUnit] = useState<'days' | 'hours'>('days')
   const [hoursPerDay, setHoursPerDay] = useState(8)
@@ -62,15 +62,17 @@ export default function PtoAccrual() {
     }
   }, [annual, unit, hoursPerDay, hoursPerWeek, frequency, tenureMonths])
 
-  return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+  const root = embedded ? '/app/resources' : '/resources'
 
-      <main className="pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10">
+  return (
+    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
+
+      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
         <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: MUTED }}>
-          <Link to="/resources" className="hover:opacity-60">Resources</Link>
+          <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
-          <Link to="/resources/calculators" className="hover:opacity-60">Calculators</Link>
+          <Link to={`${root}/calculators`} className="hover:opacity-60">Calculators</Link>
           <ChevronRight className="w-3 h-3" />
           <span style={{ color: INK }}>PTO Accrual</span>
         </nav>
@@ -214,7 +216,7 @@ export default function PtoAccrual() {
         </section>
       </main>
 
-      <MarketingFooter />
+      {!embedded && <MarketingFooter />}
       <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
     </div>
   )

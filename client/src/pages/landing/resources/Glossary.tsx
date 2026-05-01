@@ -20,9 +20,10 @@ function firstLetter(t: GlossaryTerm): string {
   return /[A-Z]/.test(c) ? c : '#'
 }
 
-export default function Glossary() {
+export default function Glossary({ embedded }: { embedded?: boolean }) {
   const [showPricing, setShowPricing] = useState(false)
   const [query, setQuery] = useState('')
+  const root = embedded ? '/app/resources' : '/resources'
 
   useEffect(() => {
     document.title = 'HR Glossary — Matcha'
@@ -57,12 +58,12 @@ export default function Glossary() {
   const presentLetters = ALPHA.filter(l => grouped[l]?.length)
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className="pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10">
+      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
         <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>
-          <Link to="/resources" className="hover:opacity-60">Resources</Link>
+          <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
           <span style={{ color: INK }}>Glossary</span>
         </nav>
@@ -136,7 +137,7 @@ export default function Glossary() {
                 {grouped[letter].map(t => (
                   <Link
                     key={t.slug}
-                    to={`/resources/glossary/${t.slug}`}
+                    to={`${root}/glossary/${t.slug}`}
                     className="block p-5 rounded-xl transition-opacity hover:opacity-80"
                     style={{ border: `1px solid ${LINE}` }}
                   >
@@ -170,7 +171,7 @@ export default function Glossary() {
         )}
       </main>
 
-      <MarketingFooter />
+      {!embedded && <MarketingFooter />}
       <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
     </div>
   )

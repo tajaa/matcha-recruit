@@ -51,7 +51,7 @@ const SEVERITY_COLOR: Record<Finding['severity'], string> = {
   low: '#5a8c5a',
 }
 
-export default function ComplianceAudit() {
+export default function ComplianceAudit({ embedded }: { embedded?: boolean }) {
   const [step, setStep] = useState<Step>('intro')
   const [stateSlug, setStateSlug] = useState('')
   const [headcount, setHeadcount] = useState<number | ''>('')
@@ -101,13 +101,15 @@ export default function ComplianceAudit() {
     }
   }
 
-  return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+  const root = embedded ? '/app/resources' : '/resources'
 
-      <main className="pt-28 pb-20 max-w-[820px] mx-auto px-6 sm:px-10">
+  return (
+    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
+
+      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[820px] mx-auto px-6 sm:px-10`}>
         <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>
-          <Link to="/resources" className="hover:opacity-60">Resources</Link>
+          <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
           <span style={{ color: INK }}>Compliance Audit</span>
         </nav>
@@ -159,7 +161,7 @@ export default function ComplianceAudit() {
         )}
       </main>
 
-      <MarketingFooter />
+      {!embedded && <MarketingFooter />}
       <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
     </div>
   )

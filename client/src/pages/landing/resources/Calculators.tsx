@@ -46,20 +46,21 @@ const CALCS: CalcCard[] = [
   },
 ]
 
-export default function Calculators() {
+export default function Calculators({ embedded }: { embedded?: boolean }) {
   const [showPricing, setShowPricing] = useState(false)
+  const root = embedded ? '/app/resources' : '/resources'
 
   useEffect(() => {
     document.title = 'HR Calculators — Matcha'
   }, [])
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className="pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10">
+      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
         <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>
-          <Link to="/resources" className="hover:opacity-60">Resources</Link>
+          <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
           <span style={{ color: INK }}>Calculators</span>
         </nav>
@@ -115,7 +116,7 @@ export default function Calculators() {
               </article>
             )
             return live ? (
-              <Link key={c.title} to={c.to} className="block hover:opacity-80 transition-opacity">
+              <Link key={c.title} to={embedded ? `/app${c.to}` : c.to} className="block hover:opacity-80 transition-opacity">
                 {Card}
               </Link>
             ) : (
@@ -125,7 +126,7 @@ export default function Calculators() {
         </div>
       </main>
 
-      <MarketingFooter />
+      {!embedded && <MarketingFooter />}
       <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
     </div>
   )

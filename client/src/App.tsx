@@ -191,6 +191,14 @@ export default function App() {
         <Route path="risk-assessment" element={<FeatureGate feature="risk_assessment" label="Risk Assessment"><RiskAssessment /></FeatureGate>} />
         <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />
+        <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
+        <Route path="resources/templates/job-descriptions" element={<RequireBusinessAccount><ResourcesJobDescriptions embedded /></RequireBusinessAccount>} />
+        <Route path="resources/calculators" element={<RequireBusinessAccount><ResourcesCalculators embedded /></RequireBusinessAccount>} />
+        <Route path="resources/calculators/pto-accrual" element={<RequireBusinessAccount><CalcPtoAccrual embedded /></RequireBusinessAccount>} />
+        <Route path="resources/calculators/turnover-cost" element={<RequireBusinessAccount><CalcTurnoverCost embedded /></RequireBusinessAccount>} />
+        <Route path="resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit embedded /></RequireBusinessAccount>} />
+        <Route path="resources/glossary" element={<ResourcesGlossary embedded />} />
+        <Route path="resources/glossary/:slug" element={<ResourcesGlossaryTerm embedded />} />
         <Route path="inbox" element={<Inbox />} />
         <Route path="notifications" element={<Notifications />} />
         <Route path="settings" element={<UserSettings />} />

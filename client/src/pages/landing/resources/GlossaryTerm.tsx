@@ -13,9 +13,10 @@ const MUTED = 'var(--color-ivory-muted)'
 const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
-export default function GlossaryTerm() {
+export default function GlossaryTerm({ embedded }: { embedded?: boolean }) {
   const { slug } = useParams<{ slug: string }>()
   const [showPricing, setShowPricing] = useState(false)
+  const root = embedded ? '/app/resources' : '/resources'
 
   const term = useMemo(() => GLOSSARY.find(t => t.slug === slug), [slug])
   const related = useMemo(
@@ -33,9 +34,9 @@ export default function GlossaryTerm() {
 
   if (!term) {
     return (
-      <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-        <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
-        <main className="pt-28 pb-20 max-w-[700px] mx-auto px-6 sm:px-10 text-center">
+      <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+        {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
+        <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[700px] mx-auto px-6 sm:px-10 text-center`}>
           <h1 className="text-3xl mb-4" style={{ fontFamily: DISPLAY, color: INK }}>
             Term not found
           </h1>
@@ -43,28 +44,28 @@ export default function GlossaryTerm() {
             We don't have a definition for "{slug}" yet.
           </p>
           <Link
-            to="/resources/glossary"
+            to={`${root}/glossary`}
             className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
             style={{ backgroundColor: INK, color: BG }}
           >
             Browse all terms
           </Link>
         </main>
-        <MarketingFooter />
+        {!embedded && <MarketingFooter />}
         <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
       </div>
     )
   }
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className="pt-28 pb-20 max-w-[760px] mx-auto px-6 sm:px-10">
+      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[760px] mx-auto px-6 sm:px-10`}>
         <nav className="flex items-center gap-2 text-xs mb-8 flex-wrap" style={{ color: MUTED }}>
-          <Link to="/resources" className="hover:opacity-60">Resources</Link>
+          <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
-          <Link to="/resources/glossary" className="hover:opacity-60">Glossary</Link>
+          <Link to={`${root}/glossary`} className="hover:opacity-60">Glossary</Link>
           <ChevronRight className="w-3 h-3" />
           <span style={{ color: INK }}>{term.abbreviation ?? term.term}</span>
         </nav>
@@ -113,7 +114,7 @@ export default function GlossaryTerm() {
               {related.map(r => (
                 <Link
                   key={r.slug}
-                  to={`/resources/glossary/${r.slug}`}
+                  to={`${root}/glossary/${r.slug}`}
                   className="p-4 rounded-xl block transition-opacity hover:opacity-80"
                   style={{ border: `1px solid ${LINE}` }}
                 >
@@ -154,7 +155,7 @@ export default function GlossaryTerm() {
         </section>
       </main>
 
-      <MarketingFooter />
+      {!embedded && <MarketingFooter />}
       <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
     </div>
   )

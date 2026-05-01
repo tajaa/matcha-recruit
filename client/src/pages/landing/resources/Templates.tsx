@@ -57,10 +57,11 @@ function formatFor(path: string): string {
   return FORMAT_LABEL[ext] ?? ext.replace('.', '').toUpperCase()
 }
 
-export default function Templates() {
+export default function Templates({ embedded }: { embedded?: boolean }) {
   const [assets, setAssets] = useState<Asset[]>([])
   const [loading, setLoading] = useState(true)
   const [showPricing, setShowPricing] = useState(false)
+  const root = embedded ? '/app/resources' : '/resources'
 
   useEffect(() => {
     api.get<AssetList>('/resources/assets')
@@ -78,12 +79,12 @@ export default function Templates() {
   }
 
   return (
-    <div style={{ backgroundColor: BG, color: INK, minHeight: '100vh' }}>
-      <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />
+    <div style={{ backgroundColor: BG, color: INK, minHeight: embedded ? undefined : '100vh' }}>
+      {!embedded && <MarketingNav onPricingClick={() => setShowPricing(true)} onDemoClick={() => setShowPricing(true)} />}
 
-      <main className="pt-28 pb-20 max-w-[1100px] mx-auto px-6 sm:px-10">
+      <main className={`${embedded ? 'pt-6' : 'pt-28'} pb-20 max-w-[1100px] mx-auto px-6 sm:px-10`}>
         <nav className="flex items-center gap-2 text-xs mb-8" style={{ color: MUTED }}>
-          <Link to="/resources" className="hover:opacity-60">Resources</Link>
+          <Link to={root} className="hover:opacity-60">Resources</Link>
           <ChevronRight className="w-3 h-3" />
           <span style={{ color: INK }}>Templates</span>
         </nav>
@@ -103,7 +104,7 @@ export default function Templates() {
 
         {/* Job Descriptions Library — separate browse page (50+ roles) */}
         <Link
-          to="/resources/templates/job-descriptions"
+          to={`${root}/templates/job-descriptions`}
           className="block mb-6 p-6 rounded-2xl transition-opacity hover:opacity-80"
           style={{ border: `1px solid ${LINE}`, backgroundColor: 'rgba(15,15,15,0.03)' }}
         >
@@ -221,7 +222,7 @@ export default function Templates() {
         </section>
       </main>
 
-      <MarketingFooter />
+      {!embedded && <MarketingFooter />}
 
       <PricingContactModal isOpen={showPricing} onClose={() => setShowPricing(false)} />
     </div>
