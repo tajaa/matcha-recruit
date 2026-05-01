@@ -32,8 +32,10 @@ async def stripe_webhook(request: Request):
     except StripeServiceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    event_type = str(event.get("type") or "")
-    event_object = event.get("data", {}).get("object", {})
+    # stripe-python v15 uses typed objects — convert to plain dicts for compat
+    event_type = str(getattr(event, "type", None) or "")
+    _raw_obj = getattr(getattr(event, "data", None), "object", None)
+    event_object = (_raw_obj.to_dict() if hasattr(_raw_obj, "to_dict") else {}) if _raw_obj is not None else {}
 
     # ── Route channel-specific events via metadata ─────────────────────────
     meta = event_object.get("metadata") or {}
