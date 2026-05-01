@@ -77,6 +77,7 @@ class BrokerClientSetupInviteRequest(BaseModel):
 class LiteReferralTokenCreateRequest(BaseModel):
     label: Optional[str] = Field(default=None, max_length=255)
     expires_days: Optional[int] = Field(default=None, ge=1, le=3650)
+    payer: str = Field(default="business", pattern="^(broker|business)$")
 
 
 class LiteReferralTokenResponse(BaseModel):
@@ -90,6 +91,7 @@ class LiteReferralTokenResponse(BaseModel):
     use_count: int
     last_used_at: Optional[str]
     referral_url: str
+    payer: str
 
 
 def _normalize_feature_toggles(features: Optional[dict[str, bool]]) -> dict[str, bool]:
@@ -1521,6 +1523,7 @@ def _fmt_token_row(row: dict, base_url: str) -> dict:
         "use_count": row["use_count"],
         "last_used_at": row["last_used_at"].isoformat() if row["last_used_at"] else None,
         "referral_url": f"{base_url.rstrip('/')}/lite/signup?ref={token}",
+        "payer": row.get("payer") or "business",
     }
 
 
@@ -1542,8 +1545,8 @@ async def create_lite_referral_token(
         row = await conn.fetchrow(
             """
             INSERT INTO broker_lite_referral_tokens
-                (broker_id, token, label, created_by, expires_at)
-            VALUES ($1, $2, $3, $4, $5)
+                (broker_id, token, label, created_by, expires_at, payer)
+            VALUES ($1, $2, $3, $4, $5, $6)
             RETURNING *
             """,
             broker_id,
@@ -1551,6 +1554,7 @@ async def create_lite_referral_token(
             request.label,
             current_user.id,
             expires_at,
+            request.payer,
         )
         base_url = get_settings().app_base_url
         return _fmt_token_row(dict(row), base_url)

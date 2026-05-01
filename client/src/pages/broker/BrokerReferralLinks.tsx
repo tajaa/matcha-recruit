@@ -39,6 +39,7 @@ export default function BrokerReferralLinks() {
 
   const [label, setLabel] = useState('')
   const [expiresDays, setExpiresDays] = useState('')
+  const [payer, setPayer] = useState<'business' | 'broker'>('business')
   const [creating, setCreating] = useState(false)
   const [createError, setCreateError] = useState<string | null>(null)
 
@@ -61,10 +62,11 @@ export default function BrokerReferralLinks() {
     setCreateError(null)
     try {
       const days = expiresDays ? parseInt(expiresDays, 10) : undefined
-      const token = await createLiteReferralToken(label.trim() || undefined, days)
+      const token = await createLiteReferralToken(label.trim() || undefined, days, payer)
       setTokens(prev => [token, ...prev])
       setLabel('')
       setExpiresDays('')
+      setPayer('business')
     } catch {
       setCreateError('Failed to generate link')
     } finally {
@@ -117,6 +119,28 @@ export default function BrokerReferralLinks() {
             Generate
           </button>
         </div>
+        <div className="flex flex-col gap-1.5">
+          <p className="text-xs text-zinc-500">Who pays for Matcha Lite?</p>
+          <div className="flex gap-2">
+            {(['business', 'broker'] as const).map(p => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPayer(p)}
+                className="px-3 h-8 rounded-lg text-xs font-medium transition-colors"
+                style={payer === p
+                  ? { backgroundColor: p === 'broker' ? '#15803d' : '#3f3f46', color: '#fff' }
+                  : { backgroundColor: 'transparent', border: '1px solid #3f3f46', color: '#71717a' }
+                }
+              >
+                {p === 'business' ? 'Business pays' : 'Broker pays'}
+              </button>
+            ))}
+          </div>
+          {payer === 'broker' && (
+            <p className="text-xs text-zinc-500">Customer skips Stripe checkout — billed to your broker contract.</p>
+          )}
+        </div>
         {createError && <p className="text-xs text-red-400">{createError}</p>}
       </form>
 
@@ -137,9 +161,20 @@ export default function BrokerReferralLinks() {
             <div key={t.id} className="p-4 border border-zinc-800 rounded-xl flex flex-col gap-3">
               <div className="flex items-start justify-between gap-3">
                 <div className="flex flex-col gap-1 min-w-0">
-                  <p className="text-sm font-medium text-zinc-200 truncate">
-                    {t.label || <span className="text-zinc-500 italic">Unlabeled</span>}
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium text-zinc-200 truncate">
+                      {t.label || <span className="text-zinc-500 italic">Unlabeled</span>}
+                    </p>
+                    <span
+                      className="shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium"
+                      style={t.payer === 'broker'
+                        ? { backgroundColor: 'rgba(21,128,61,0.15)', color: '#4ade80' }
+                        : { backgroundColor: '#27272a', color: '#71717a' }
+                      }
+                    >
+                      {t.payer === 'broker' ? 'Broker pays' : 'Business pays'}
+                    </span>
+                  </div>
                   <p className="text-xs text-zinc-500 truncate">{t.referral_url}</p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">

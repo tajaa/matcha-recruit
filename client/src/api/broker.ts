@@ -28,10 +28,11 @@ export function fetchLiteReferralTokens() {
   return api.get<BrokerLiteReferralTokenListResponse>('/brokers/lite-referral-tokens')
 }
 
-export function createLiteReferralToken(label?: string, expiresDays?: number) {
+export function createLiteReferralToken(label?: string, expiresDays?: number, payer: 'broker' | 'business' = 'business') {
   return api.post<BrokerLiteReferralToken>('/brokers/lite-referral-tokens', {
     label: label || undefined,
     expires_days: expiresDays || undefined,
+    payer,
   })
 }
 

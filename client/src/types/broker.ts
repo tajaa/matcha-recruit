@@ -111,6 +111,7 @@ export interface BrokerLiteReferralToken {
   use_count: number
   last_used_at: string | null
   referral_url: string
+  payer: 'broker' | 'business'
 }
 
 export interface BrokerLiteReferralTokenListResponse {

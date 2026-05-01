@@ -65,6 +65,12 @@ export default function MatchaLiteSignup() {
       localStorage.setItem('matcha_refresh_token', refreshToken)
       invalidateMeCache()
 
+      // Broker-pays tokens: account is already active, skip Stripe
+      if (regData.lite_broker_pays) {
+        window.location.href = '/ir/onboarding?lite=1'
+        return
+      }
+
       // Step 2: open Stripe checkout
       const checkoutRes = await fetch(`${BASE}/resources/checkout/lite`, {
         method: 'POST',
@@ -151,6 +157,8 @@ export default function MatchaLiteSignup() {
                 <Loader2 className="w-4 h-4 animate-spin" />
                 Setting up…
               </>
+            ) : brokerRef ? (
+              'Create account'
             ) : (
               'Create account & subscribe'
             )}
