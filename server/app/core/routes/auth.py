@@ -1577,12 +1577,19 @@ async def register_business(request: BusinessRegister):
                 rf_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
                 enabled_features_json = json.dumps(rf_features)
             elif is_matcha_lite:
-                # Matcha Lite: approved account created immediately, but all
-                # features stay off until the Stripe checkout completes. The
-                # webhook flips incidents + employees + discipline once paid.
+                # Matcha Lite is a paid bundle — IR + Discipline + Resources.
+                # The user is redirected to Stripe checkout immediately after
+                # this register call, so we enable the bundled features up
+                # front. The customer.subscription.deleted webhook flips
+                # incidents/employees/discipline back to False on cancellation,
+                # and Stripe's auto-expiry on unpaid checkout sessions handles
+                # users who bail at the payment screen.
                 company_status = "approved"
                 signup_source = "matcha_lite"
                 lite_features = {k: False for k in DEFAULT_COMPANY_FEATURES}
+                lite_features["incidents"] = True
+                lite_features["employees"] = True
+                lite_features["discipline"] = True
                 enabled_features_json = json.dumps(lite_features)
             else:
                 company_status = "approved" if (invitation or referring_broker_id) else "pending"
