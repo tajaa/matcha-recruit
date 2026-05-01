@@ -273,7 +273,9 @@ from .matcha.routes import matcha_router
 # Mount domain routers
 app.include_router(core_router, prefix="/api")
 app.include_router(matcha_router, prefix="/api")
-app.include_router(stripe_webhook_router)
+# Webhook router under /api so prod nginx proxy_pass /api/ → backend works.
+# Stripe dashboard endpoint must be https://hey-matcha.com/api/webhooks/stripe.
+app.include_router(stripe_webhook_router, prefix="/api")
 
 # WebSocket routes (separate prefix)
 app.include_router(chat_ws_router, prefix="/ws/chat", tags=["chat-websocket"])
