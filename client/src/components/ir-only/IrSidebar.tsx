@@ -1,4 +1,4 @@
-import { AlertTriangle, Users, Building2, Gavel, MapPin } from 'lucide-react'
+import { AlertTriangle, Users, Building2, Gavel, MapPin, BookOpen } from 'lucide-react'
 import SidebarShell from '../SidebarShell'
 import type { NavItem, NavGroup } from '../SidebarShell'
 import { useMe } from '../../hooks/useMe'
@@ -9,6 +9,7 @@ const nav: (NavItem | NavGroup)[] = [
   { to: '/app/employees', icon: Users, label: 'Employees', feature: 'employees' },
   { to: '/app/locations', icon: MapPin, label: 'Locations' },
   { to: '/app/discipline', icon: Gavel, label: 'Performance Action', feature: 'discipline' },
+  { to: '/app/resources', icon: BookOpen, label: 'Resources' },
   { to: '/app/company', icon: Building2, label: 'Company' },
 ]
 
