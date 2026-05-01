@@ -310,7 +310,7 @@ class StripeService:
 
         Pricing: $100/mo per 10 employees (ceil). 1–10 → $100, 11–20 → $200, …, 291–300 → $3,000.
         Headcount > 300 is rejected — must contact sales.
-        Webhook catches metadata.type == 'matcha_lite' and activates incidents+employees+discipline.
+        Webhook catches metadata.type == 'matcha_lite' and activates incidents+employees.
         """
         self._ensure_secret_key()
 
@@ -345,7 +345,7 @@ class StripeService:
                             "product_data": {
                                 "name": "Matcha Lite",
                                 "description": (
-                                    f"Incident reporting, employee management, discipline + HR resources "
+                                    f"Incident reporting, employee management + HR resources "
                                     f"({headcount} employee{'s' if headcount != 1 else ''}). Auto-renews monthly."
                                 ),
                             },

@@ -167,7 +167,6 @@ async def stripe_webhook(request: Request):
                         )
                         features["incidents"] = True
                         features["employees"] = True
-                        features["discipline"] = True
                         await conn.execute(
                             """
                             UPDATE companies
