@@ -9,6 +9,7 @@ import AdminSidebar from './components/AdminSidebar'
 import TenantSidebar from './components/TenantSidebar'
 import IrSignup from './pages/auth/IrSignup'
 import MatchaLiteSignup from './pages/auth/MatchaLiteSignup'
+import SignupPicker from './pages/auth/SignupPicker'
 import ResourcesSignup from './pages/auth/ResourcesSignup'
 import RequireBusinessAccount from './components/auth/RequireBusinessAccount'
 import IrOnboardingWizard from './features/ir-onboarding/IrOnboardingWizard'
@@ -36,6 +37,7 @@ import BlogPostPage from './pages/landing/BlogPost'
 import ResourcesHub from './pages/landing/ResourcesHub'
 import ResourcesTemplates from './pages/landing/resources/Templates'
 import ResourcesJobDescriptions from './pages/landing/resources/JobDescriptions'
+import JobDescriptionDetail from './pages/landing/resources/JobDescriptionDetail'
 import ResourcesGlossary from './pages/landing/resources/Glossary'
 import ResourcesGlossaryTerm from './pages/landing/resources/GlossaryTerm'
 import ResourcesStateGuides from './pages/landing/resources/StateGuides'
@@ -43,6 +45,8 @@ import ResourcesStateGuide from './pages/landing/resources/StateGuide'
 import ResourcesCalculators from './pages/landing/resources/Calculators'
 import CalcPtoAccrual from './pages/landing/resources/calculators/PtoAccrual'
 import CalcTurnoverCost from './pages/landing/resources/calculators/TurnoverCost'
+import CalcOvertime from './pages/landing/resources/calculators/Overtime'
+import CalcTotalComp from './pages/landing/resources/calculators/TotalComp'
 import ResourcesComplianceAudit from './pages/landing/resources/ComplianceAudit'
 import CategoryDetailPage from './pages/admin/CategoryDetailPage'
 import PolicyDetailPage from './pages/admin/PolicyDetailPage'
@@ -110,13 +114,17 @@ export default function App() {
       <Route path="/resources/glossary" element={<ResourcesGlossary />} />
       <Route path="/resources/glossary/:slug" element={<ResourcesGlossaryTerm />} />
       <Route path="/resources/templates" element={<RequireBusinessAccount><ResourcesTemplates /></RequireBusinessAccount>} />
-      <Route path="/resources/templates/job-descriptions" element={<RequireBusinessAccount><ResourcesJobDescriptions /></RequireBusinessAccount>} />
+      <Route path="/resources/templates/job-descriptions" element={<ResourcesJobDescriptions />} />
+      <Route path="/resources/templates/job-descriptions/:slug" element={<JobDescriptionDetail />} />
       <Route path="/resources/states" element={<RequireBusinessAccount><ResourcesStateGuides /></RequireBusinessAccount>} />
       <Route path="/resources/states/:slug" element={<RequireBusinessAccount><ResourcesStateGuide /></RequireBusinessAccount>} />
-      <Route path="/resources/calculators" element={<RequireBusinessAccount><ResourcesCalculators /></RequireBusinessAccount>} />
-      <Route path="/resources/calculators/pto-accrual" element={<RequireBusinessAccount><CalcPtoAccrual /></RequireBusinessAccount>} />
-      <Route path="/resources/calculators/turnover-cost" element={<RequireBusinessAccount><CalcTurnoverCost /></RequireBusinessAccount>} />
+      <Route path="/resources/calculators" element={<ResourcesCalculators />} />
+      <Route path="/resources/calculators/pto-accrual" element={<CalcPtoAccrual />} />
+      <Route path="/resources/calculators/turnover-cost" element={<CalcTurnoverCost />} />
+      <Route path="/resources/calculators/overtime" element={<CalcOvertime />} />
+      <Route path="/resources/calculators/total-comp" element={<CalcTotalComp />} />
       <Route path="/resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit /></RequireBusinessAccount>} />
+      <Route path="/signup" element={<SignupPicker />} />
       <Route path="/auth/resources-signup" element={<ResourcesSignup />} />
       <Route path="/login" element={<Login />} />
       <Route path="/sso/callback" element={<SSOCallback />} />
@@ -196,10 +204,13 @@ export default function App() {
         <Route path="credential-templates" element={<FeatureGate feature="credential_templates" label="Credential Templates"><CredentialTemplates /></FeatureGate>} />
         <Route path="resources" element={<AppResources />} />
         <Route path="resources/templates" element={<RequireBusinessAccount><ResourcesTemplates embedded /></RequireBusinessAccount>} />
-        <Route path="resources/templates/job-descriptions" element={<RequireBusinessAccount><ResourcesJobDescriptions embedded /></RequireBusinessAccount>} />
+        <Route path="resources/templates/job-descriptions" element={<ResourcesJobDescriptions embedded />} />
+        <Route path="resources/templates/job-descriptions/:slug" element={<JobDescriptionDetail embedded />} />
         <Route path="resources/calculators" element={<RequireBusinessAccount><ResourcesCalculators embedded /></RequireBusinessAccount>} />
         <Route path="resources/calculators/pto-accrual" element={<RequireBusinessAccount><CalcPtoAccrual embedded /></RequireBusinessAccount>} />
         <Route path="resources/calculators/turnover-cost" element={<RequireBusinessAccount><CalcTurnoverCost embedded /></RequireBusinessAccount>} />
+        <Route path="resources/calculators/overtime" element={<RequireBusinessAccount><CalcOvertime embedded /></RequireBusinessAccount>} />
+        <Route path="resources/calculators/total-comp" element={<RequireBusinessAccount><CalcTotalComp embedded /></RequireBusinessAccount>} />
         <Route path="resources/audit" element={<RequireBusinessAccount><ResourcesComplianceAudit embedded /></RequireBusinessAccount>} />
         <Route path="resources/glossary" element={<ResourcesGlossary embedded />} />
         <Route path="resources/glossary/:slug" element={<ResourcesGlossaryTerm embedded />} />

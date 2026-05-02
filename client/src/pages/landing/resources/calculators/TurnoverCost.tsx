@@ -207,13 +207,22 @@ export default function TurnoverCost({ embedded }: { embedded?: boolean }) {
             stay-interview workflows so you spot retention risk before it
             walks out the door.
           </p>
-          <button
-            onClick={() => setShowPricing(true)}
-            className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-            style={t.btnPrimary}
-          >
-            See Matcha →
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/auth/resources-signup"
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={t.btnPrimary}
+            >
+              Create free account →
+            </Link>
+            <button
+              onClick={() => setShowPricing(true)}
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={{ border: `1px solid ${t.line}`, color: t.ink }}
+            >
+              Talk to sales
+            </button>
+          </div>
         </section>
       </main>
 

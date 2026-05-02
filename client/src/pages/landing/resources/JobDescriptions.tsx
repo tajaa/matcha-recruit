@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ChevronRight, FileText, Search } from 'lucide-react'
+import { ChevronRight, Download, FileText, Search } from 'lucide-react'
 
 import MarketingNav from '../MarketingNav'
 import MarketingFooter from '../MarketingFooter'
 import { PricingContactModal } from '../../../components/PricingContactModal'
+import { useMe } from '../../../hooks/useMe'
 import { INDUSTRIES, JOB_DESCRIPTIONS, type Industry, type JobDescription } from './jobDescriptionsData'
 
 const INK = 'var(--color-ivory-ink)'
@@ -35,6 +36,18 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
   const [filter, setFilter] = useState<Industry | 'all'>('all')
   const root = embedded ? '/app/resources' : '/resources'
   const t = mkT(embedded)
+  const { me } = useMe()
+  const isLoggedIn = !!me?.user
+
+  function handleDownload(jd: JobDescription) {
+    if (!jd.downloadUrl) return
+    if (!isLoggedIn) {
+      const next = encodeURIComponent(`${root}/templates/job-descriptions/${jd.slug}`)
+      window.location.href = `/auth/resources-signup?next=${next}`
+      return
+    }
+    window.open(jd.downloadUrl, '_blank', 'noopener,noreferrer')
+  }
 
   useEffect(() => {
     document.title = 'Job Descriptions Library — Matcha'
@@ -141,23 +154,35 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
                     >
                       <div className="flex items-start gap-3 mb-2">
                         <FileText className="w-4 h-4 mt-1 flex-shrink-0" style={{ color: t.ink }} />
-                        <h3
-                          className="text-base flex-1"
+                        <Link
+                          to={`${root}/templates/job-descriptions/${j.slug}`}
+                          className="text-base flex-1 hover:opacity-70"
                           style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}
                         >
                           {j.title}
-                        </h3>
+                        </Link>
                       </div>
                       <p className="text-xs mb-4 ml-7" style={{ color: t.muted }}>
                         {j.description}
                       </p>
-                      <div className="ml-7 flex items-center justify-between gap-2">
-                        <span
-                          className="text-[10px] tracking-wider px-2 py-1 rounded"
+                      <div className="ml-7 flex items-center gap-2">
+                        <Link
+                          to={`${root}/templates/job-descriptions/${j.slug}`}
+                          className="text-xs px-3 h-7 rounded-full inline-flex items-center hover:opacity-80"
                           style={{ border: `1px solid ${t.line}`, color: t.muted }}
                         >
-                          COMING SOON
-                        </span>
+                          View
+                        </Link>
+                        {j.downloadUrl && (
+                          <button
+                            onClick={() => handleDownload(j)}
+                            className="inline-flex items-center gap-1 text-xs px-3 h-7 rounded-full hover:opacity-80"
+                            style={t.btnPrimary}
+                          >
+                            <Download className="w-3 h-3" />
+                            DOCX
+                          </button>
+                        )}
                       </div>
                     </article>
                   ))}
@@ -172,20 +197,28 @@ export default function JobDescriptions({ embedded }: { embedded?: boolean }) {
           style={{ border: `1px solid ${t.line}`, backgroundColor: t.cardBg }}
         >
           <h2 className="text-2xl mb-3" style={{ fontFamily: t.display, color: t.ink, fontWeight: 500 }}>
-            Need a custom job description?
+            Download all {JOB_DESCRIPTIONS.length} job descriptions
           </h2>
           <p className="text-sm mb-6 max-w-2xl" style={{ color: t.muted }}>
-            Matcha generates job descriptions tailored to your business —
-            specific responsibilities, comp range, BFOQ-safe requirements,
-            and DEI-reviewed language.
+            Free account unlocks DOCX downloads for every role in the library —
+            editable, compliant, and ready to post.
           </p>
-          <button
-            onClick={() => setShowPricing(true)}
-            className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-            style={t.btnPrimary}
-          >
-            See Matcha →
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/signup"
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={t.btnPrimary}
+            >
+              Create free account →
+            </Link>
+            <button
+              onClick={() => setShowPricing(true)}
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={{ border: `1px solid ${t.line}`, color: t.ink }}
+            >
+              Talk to sales
+            </button>
+          </div>
         </section>
       </main>
 

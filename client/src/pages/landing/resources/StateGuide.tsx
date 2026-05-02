@@ -218,20 +218,27 @@ export default function StateGuide() {
             headcount, and industry — see exactly what's missing.
           </p>
           <div className="flex flex-wrap gap-3">
-            <button
-              onClick={() => setShowPricing(true)}
+            <Link
+              to="/auth/resources-signup"
               className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
               style={{ backgroundColor: INK, color: BG }}
             >
-              See Matcha →
-            </button>
+              Create free account →
+            </Link>
             <Link
               to="/resources/audit"
               className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
               style={{ border: `1px solid ${LINE}`, color: INK }}
             >
-              Free 12-question audit
+              Free compliance audit
             </Link>
+            <button
+              onClick={() => setShowPricing(true)}
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={{ border: `1px solid ${LINE}`, color: INK, opacity: 0.7 }}
+            >
+              Talk to sales
+            </button>
           </div>
         </section>
       </main>

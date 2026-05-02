@@ -133,13 +133,22 @@ export default function StateGuides() {
             access to county and city-level data too — Berkeley, NYC, Chicago,
             and 70+ municipalities are already in the database.
           </p>
-          <button
-            onClick={() => setShowPricing(true)}
-            className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
-            style={{ backgroundColor: INK, color: BG }}
-          >
-            Get full coverage →
-          </button>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              to="/auth/resources-signup"
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={{ backgroundColor: INK, color: BG }}
+            >
+              Create free account →
+            </Link>
+            <button
+              onClick={() => setShowPricing(true)}
+              className="inline-flex items-center px-5 h-10 rounded-full text-sm font-medium"
+              style={{ border: `1px solid ${LINE}`, color: INK }}
+            >
+              Talk to sales
+            </button>
+          </div>
         </section>
       </main>
 

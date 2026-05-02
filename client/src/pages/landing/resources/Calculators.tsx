@@ -36,13 +36,13 @@ const CALCS: CalcCard[] = [
     to: '/resources/calculators/overtime',
     title: 'Overtime Calculator',
     description: 'FLSA + state overtime — daily and weekly thresholds, regular-rate calculations.',
-    status: 'soon',
+    status: 'live',
   },
   {
     to: '/resources/calculators/total-comp',
     title: 'Total Compensation Calculator',
     description: 'Base + bonus + benefits + employer taxes + equity. Build a clean total-comp number.',
-    status: 'soon',
+    status: 'live',
   },
 ]
 

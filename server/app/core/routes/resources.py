@@ -701,7 +701,7 @@ _MAX_SAMPLE_TITLES_PER_CATEGORY = 2
 
 @router.get("/state-guides/{slug}")
 async def get_state_guide(slug: str, current_user: CurrentUser = Depends(require_client)):
-    """Public state guide — TEASER ONLY.
+    """Authenticated state guide — full teaser for signed-in users.
 
     Intentionally limited: returns category list with counts and a small
     number of sample requirement titles per category. Full requirement
