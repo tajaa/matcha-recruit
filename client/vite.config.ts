@@ -41,6 +41,14 @@ export default defineConfig({
         target: backendTarget,
         changeOrigin: true,
       },
+      '/sitemap.xml': {
+        target: backendTarget,
+        changeOrigin: true,
+      },
+      '/robots.txt': {
+        target: backendTarget,
+        changeOrigin: true,
+      },
     },
   },
   esbuild: {

@@ -284,6 +284,10 @@ app.include_router(channels_ws_router, prefix="/ws/channels", tags=["channels-we
 from .matcha.routes.thread_ws import router as thread_ws_router
 app.include_router(thread_ws_router, prefix="/ws/threads", tags=["threads-websocket"])
 
+# SEO routes — served at root, no /api prefix (crawlers expect /sitemap.xml + /robots.txt)
+from .core.routes.sitemap import router as sitemap_router
+app.include_router(sitemap_router, tags=["seo"])
+
 
 # Serve locally-uploaded files (logos, resumes, etc.) when S3 is not configured
 _uploads_dir = os.path.join(os.path.dirname(__file__), "uploads")

@@ -8,10 +8,10 @@ const LINE = 'var(--color-ivory-line)'
 const DISPLAY = 'var(--font-display)'
 
 const FREE_FEATURES = [
-  '14 HR templates (DOCX download)',
-  '50+ job description templates',
+  '14 HR document templates (DOCX download)',
+  '62 job description templates (DOCX download)',
+  'State employment law guides (all 50 states)',
   'Compliance audit — emailed gap report',
-  'PTO, overtime & total comp calculators',
 ]
 
 const LITE_FEATURES = [
