@@ -240,6 +240,19 @@ struct ThreadListView: View {
 extension Notification.Name {
     static let mwCreateNewThread = Notification.Name("mwCreateNewThread")
     static let mwProjectDataChanged = Notification.Name("mwProjectDataChanged")
+    /// Fires immediately on a project title rename so the sidebar can patch
+    /// the row in place without waiting for the full project-list refetch
+    /// kicked off by `mwProjectDataChanged`. Object is `MWProjectTitlePatch`.
+    static let mwProjectTitlePatched = Notification.Name("mwProjectTitlePatched")
+    /// Toolbar "browse" action posts this so ProjectFilesView opens the
+    /// system file picker. Decoupled because the toolbar lives on the
+    /// project view, not inside the files panel.
+    static let mwCollabFilesBrowse = Notification.Name("mwCollabFilesBrowse")
+}
+
+struct MWProjectTitlePatch {
+    let id: String
+    let title: String
 }
 
 struct ThreadRowView: View {

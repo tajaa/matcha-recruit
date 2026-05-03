@@ -2,6 +2,13 @@ import Foundation
 import AppKit
 import UniformTypeIdentifiers
 
+struct CollabActivityItem: Identifiable, Hashable {
+    let id = UUID()
+    let icon: String
+    let text: String
+    let timestamp: Date
+}
+
 @Observable
 class ProjectDetailViewModel {
     var project: MWProject?
@@ -12,8 +19,22 @@ class ProjectDetailViewModel {
     var isLoadingTasks = false
     var files: [MWProjectFile] = []
     var isLoadingFiles = false
+    /// Per-session activity log surfaced in the collab Overview panel. Capped
+    /// at 20 entries; FIFO eviction. In-memory only — survives panel switches
+    /// but not project switches or app relaunches. Backend feed is a follow-up.
+    var recentActivity: [CollabActivityItem] = []
 
     private let service = MatchaWorkService.shared
+
+    func logActivity(_ icon: String, _ text: String) {
+        recentActivity.insert(
+            CollabActivityItem(icon: icon, text: text, timestamp: Date()),
+            at: 0
+        )
+        if recentActivity.count > 20 {
+            recentActivity.removeLast(recentActivity.count - 20)
+        }
+    }
 
     func loadProject(id: String) async {
         await MainActor.run { isLoading = true; errorMessage = nil }
@@ -29,6 +50,14 @@ class ProjectDetailViewModel {
                 // chat in the new project's editor.
                 activeChatId = proj.chats?.first?.id
                 isLoading = false
+            }
+            // Collab projects open into a 5-tab layout where the user often
+            // taps Kanban or Files seconds after landing. Kick off both fetches
+            // in parallel right now so the panels are populated before the
+            // user even clicks. Errors per-task surface via existing flows.
+            if proj.projectType == "collab" {
+                async let _ = loadTasks()
+                async let _ = loadFiles()
             }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription; isLoading = false }
@@ -53,7 +82,10 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         do {
             let updated = try await service.addProjectSection(projectId: pid, title: title)
-            await MainActor.run { project = updated }
+            await MainActor.run {
+                project = updated
+                logActivity("text.append", "added section “\(title)”")
+            }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -119,12 +151,34 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+        // Optimistic — patch the local detail title and tell the sidebar to
+        // patch its row in place. Server roundtrip happens after; on failure
+        // we revert and re-emit.
+        let previous = project?.title
+        await MainActor.run {
+            project?.title = trimmed
+            if let prev = previous, prev != trimmed {
+                logActivity("pencil", "renamed to “\(trimmed)”")
+            }
+        }
+        NotificationCenter.default.post(
+            name: .mwProjectTitlePatched,
+            object: MWProjectTitlePatch(id: pid, title: trimmed)
+        )
         do {
             let updated = try await service.updateProjectMeta(id: pid, title: trimmed)
             await MainActor.run { project = updated }
-            NotificationCenter.default.post(name: .mwProjectDataChanged, object: pid)
         } catch {
-            await MainActor.run { errorMessage = error.localizedDescription }
+            await MainActor.run {
+                if let previous { project?.title = previous }
+                errorMessage = error.localizedDescription
+            }
+            if let previous {
+                NotificationCenter.default.post(
+                    name: .mwProjectTitlePatched,
+                    object: MWProjectTitlePatch(id: pid, title: previous)
+                )
+            }
         }
     }
 
@@ -492,7 +546,10 @@ class ProjectDetailViewModel {
             let task = try await service.createProjectTask(
                 projectId: pid, title: title, boardColumn: column, priority: priority
             )
-            await MainActor.run { tasks.insert(task, at: 0) }
+            await MainActor.run {
+                tasks.insert(task, at: 0)
+                logActivity("plus.circle", "added task “\(title)”")
+            }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }
@@ -531,9 +588,15 @@ class ProjectDetailViewModel {
         guard let pid = project?.id else { return }
         guard let idx = tasks.firstIndex(where: { $0.id == id }) else { return }
         let newStatus = tasks[idx].status == "completed" ? "pending" : "completed"
+        let title = tasks[idx].title
         await MainActor.run {
             tasks[idx].status = newStatus
             tasks[idx].boardColumn = newStatus == "completed" ? "done" : "todo"
+            if newStatus == "completed" {
+                logActivity("checkmark.circle.fill", "completed “\(title)”")
+            } else {
+                logActivity("arrow.uturn.left", "reopened “\(title)”")
+            }
         }
         do {
             let updated = try await service.updateProjectTask(
@@ -578,11 +641,16 @@ class ProjectDetailViewModel {
 
     func markProjectComplete() async {
         guard let pid = project?.id else { return }
+        let previousStatus = project?.status
+        await MainActor.run { project?.status = "completed" }
         do {
             try await service.markProjectComplete(projectId: pid)
             await refreshProject()
         } catch {
-            await MainActor.run { errorMessage = error.localizedDescription }
+            await MainActor.run {
+                project?.status = previousStatus
+                errorMessage = error.localizedDescription
+            }
         }
     }
 
@@ -611,7 +679,10 @@ class ProjectDetailViewModel {
             let uploaded = try await service.uploadProjectFile(
                 projectId: pid, file: (data: data, filename: filename, mimeType: mimeType)
             )
-            await MainActor.run { files.insert(uploaded, at: 0) }
+            await MainActor.run {
+                files.insert(uploaded, at: 0)
+                logActivity("doc.fill", "uploaded \(filename)")
+            }
         } catch {
             await MainActor.run { errorMessage = error.localizedDescription }
         }

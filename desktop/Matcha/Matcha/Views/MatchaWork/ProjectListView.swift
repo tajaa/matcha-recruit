@@ -133,6 +133,13 @@ struct ProjectListView: View {
         }
         .background(Color.appBackground)
         .task(id: appState.projectsListGeneration) { await load() }
+        .onReceive(NotificationCenter.default.publisher(for: .mwProjectTitlePatched)) { note in
+            guard let patch = note.object as? MWProjectTitlePatch else { return }
+            if let i = projects.firstIndex(where: { $0.id == patch.id }) {
+                projects[i].title = patch.title
+                recomputeGroups()
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .mwProjectDataChanged)) { _ in
             MatchaWorkService.shared.invalidateProjectLists()
             Task { await load() }
@@ -343,6 +350,11 @@ struct ProjectListView: View {
             Button((p.isPinned ?? false) ? "Unstar" : "Star") {
                 Task { await togglePin(project: p) }
             }
+            Menu("Export") {
+                Button("PDF") { Task { await exportProject(p, format: "pdf") } }
+                Button("Markdown") { Task { await exportProject(p, format: "md") } }
+                Button("DOCX") { Task { await exportProject(p, format: "docx") } }
+            }
             Button("Archive") {
                 Task {
                     try? await MatchaWorkService.shared.archiveProject(id: p.id)
@@ -374,12 +386,42 @@ struct ProjectListView: View {
         }
     }
 
+    @MainActor
+    private func exportProject(_ project: MWProject, format: String) async {
+        do {
+            let data = try await MatchaWorkService.shared.exportProject(projectId: project.id, format: format)
+            guard !data.isEmpty else { return }
+            presentExportSavePanel(data: data, format: format, title: project.title)
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Export failed"
+            alert.informativeText = error.localizedDescription
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
+    }
+
     private func togglePin(project: MWProject) async {
         let nextPinned = !(project.isPinned ?? false)
+        // Optimistic — flip the local row first so the star updates within one
+        // frame. Re-group so pinned items resort. On failure, revert in place
+        // and surface a console log; full list refresh is overkill for a
+        // single boolean.
+        await MainActor.run {
+            if let i = projects.firstIndex(where: { $0.id == project.id }) {
+                projects[i].isPinned = nextPinned
+                recomputeGroups()
+            }
+        }
         do {
             _ = try await MatchaWorkService.shared.setProjectPinned(id: project.id, pinned: nextPinned)
-            await load()
         } catch {
+            await MainActor.run {
+                if let i = projects.firstIndex(where: { $0.id == project.id }) {
+                    projects[i].isPinned = !nextPinned
+                    recomputeGroups()
+                }
+            }
             print("[ProjectListView] togglePin failed: \(error)")
         }
     }

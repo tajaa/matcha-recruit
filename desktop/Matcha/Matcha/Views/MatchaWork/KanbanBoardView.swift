@@ -10,13 +10,18 @@ private let kanbanColumns: [(key: String, label: String)] = [
 struct KanbanBoardView: View {
     @Bindable var viewModel: ProjectDetailViewModel
     @State private var editingTask: MWProjectTask?
+    /// Inline-add: which column has its inline TextField visible. Set by the
+    /// `+` button on the column header; cleared by Esc / blur / submit.
+    @State private var inlineAddColumn: String?
+    @State private var inlineAddTitle: String = ""
+    @State private var hoveredEmptyColumn: String?
+    /// Legacy modal sheet still wired for keyboard-discoverability fallback;
+    /// inline path is the default.
     @State private var newTaskColumn: String?
     @State private var newTaskTitle: String = ""
 
     var body: some View {
         VStack(spacing: 0) {
-            headerBar
-            Divider().opacity(0.3)
             if viewModel.isLoadingTasks && viewModel.tasks.isEmpty {
                 Spacer()
                 ProgressView().tint(.secondary)
@@ -26,7 +31,16 @@ struct KanbanBoardView: View {
             }
         }
         .background(Color.appBackground)
-        .task { await viewModel.loadTasks() }
+        // Eager prefetch in `loadProject` usually means tasks are already
+        // here. Refresh in background on first appear without clobbering
+        // the visible list.
+        .task {
+            if viewModel.tasks.isEmpty {
+                await viewModel.loadTasks()
+            } else {
+                Task.detached { await viewModel.loadTasks() }
+            }
+        }
         .sheet(item: $editingTask) { task in
             TaskEditorSheet(task: task) { patch in
                 Task {
@@ -70,7 +84,6 @@ struct KanbanBoardView: View {
             HStack(alignment: .top, spacing: 10) {
                 ForEach(kanbanColumns, id: \.key) { col in
                     columnView(key: col.key, label: col.label)
-                        .frame(width: 220)
                 }
             }
             .padding(10)
@@ -79,6 +92,12 @@ struct KanbanBoardView: View {
 
     private func columnView(key: String, label: String) -> some View {
         let colTasks = viewModel.tasks.filter { $0.boardColumn == key }
+        let isEmpty = colTasks.isEmpty
+        let isInlineAdding = inlineAddColumn == key
+        let isHovered = hoveredEmptyColumn == key
+        // Empty columns shrink to ~110px so populated columns get the breathing
+        // room. Hovering or starting an inline-add expands them back to 220px.
+        let columnWidth: CGFloat = (isEmpty && !isInlineAdding && !isHovered) ? 110 : 220
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(label.uppercased())
@@ -93,16 +112,23 @@ struct KanbanBoardView: View {
                     .background(Color.zinc800)
                     .cornerRadius(4)
                 Spacer()
-                Button { newTaskColumn = key } label: {
+                Button {
+                    inlineAddColumn = key
+                    inlineAddTitle = ""
+                } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Add task")
+                .help("Add task (Enter to save, Esc to cancel)")
             }
             .padding(.horizontal, 8)
             .padding(.top, 6)
+
+            if isInlineAdding {
+                inlineAddRow(column: key)
+            }
 
             ScrollView {
                 LazyVStack(spacing: 6) {
@@ -120,12 +146,66 @@ struct KanbanBoardView: View {
             }
             .frame(maxHeight: .infinity)
         }
+        .frame(width: columnWidth)
+        .animation(.easeOut(duration: 0.15), value: columnWidth)
         .background(Color.zinc900.opacity(0.5))
         .cornerRadius(8)
+        .onHover { hovering in
+            // Only react when the column is empty — populated columns don't
+            // need to expand.
+            if isEmpty {
+                hoveredEmptyColumn = hovering ? key : (hoveredEmptyColumn == key ? nil : hoveredEmptyColumn)
+            }
+        }
         .dropDestination(for: String.self) { items, _ in
             guard let taskId = items.first else { return false }
             Task { await viewModel.moveTask(id: taskId, toColumn: key) }
             return true
+        }
+    }
+
+    private func inlineAddRow(column: String) -> some View {
+        HStack(spacing: 6) {
+            TextField("New task", text: $inlineAddTitle)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 6)
+                .background(Color.zinc800)
+                .cornerRadius(5)
+                .onSubmit { commitInlineAdd(column: column) }
+            Button {
+                commitInlineAdd(column: column)
+            } label: {
+                Image(systemName: "return")
+                    .font(.system(size: 9))
+                    .foregroundColor(.matcha500)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.return, modifiers: [])
+            .disabled(inlineAddTitle.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button {
+                inlineAddColumn = nil
+                inlineAddTitle = ""
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(.horizontal, 6)
+    }
+
+    private func commitInlineAdd(column: String) {
+        let trimmed = inlineAddTitle.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        Task {
+            await viewModel.addTask(title: trimmed, column: column)
+            inlineAddTitle = ""
+            // Keep the row open so the user can keep jotting; Esc to dismiss.
         }
     }
 

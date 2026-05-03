@@ -9,10 +9,16 @@ struct ProjectFilesView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            headerBar
-            Divider().opacity(0.3)
-            dropZone
-            Divider().opacity(0.3)
+            // Compact "drop here" strip — full dashed zone only when there are
+            // no files yet, otherwise it shrinks to a thin row and the file
+            // list itself accepts drops.
+            if viewModel.files.isEmpty {
+                dropZone
+                Divider().opacity(0.3)
+            } else {
+                compactDropStrip
+                Divider().opacity(0.2)
+            }
             if viewModel.isLoadingFiles && viewModel.files.isEmpty {
                 Spacer()
                 ProgressView().tint(.secondary)
@@ -25,10 +31,47 @@ struct ProjectFilesView: View {
                 Spacer()
             } else {
                 fileList
+                    .onDrop(of: [.fileURL], isTargeted: $isDragOver) { providers in
+                        handleDrop(providers)
+                        return true
+                    }
             }
         }
         .background(Color.appBackground)
-        .task { await viewModel.loadFiles() }
+        .task {
+            if viewModel.files.isEmpty {
+                await viewModel.loadFiles()
+            } else {
+                Task.detached { await viewModel.loadFiles() }
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .mwCollabFilesBrowse)) { _ in
+            browse()
+        }
+    }
+
+    private var compactDropStrip: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "square.and.arrow.up")
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+            if let name = uploadingName {
+                Text("Uploading \(name)…")
+                    .font(.system(size: 10))
+                    .foregroundColor(.matcha500)
+            } else {
+                Text("Drop files anywhere or")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Button("browse") { browse() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10))
+                    .foregroundColor(.matcha500)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     private var headerBar: some View {
