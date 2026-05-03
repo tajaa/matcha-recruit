@@ -32,6 +32,7 @@
 		AA11BB22CC33DD44EE550DBC /* NotificationsPopoverView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660DBC /* NotificationsPopoverView.swift */; };
 		AA11BB22CC33DD44EE550004 /* SectionEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */; };
 		AA11BB22CC33DD44EE550005 /* CollaboratorPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */; };
+		AA11BB22CC33DD44EE550099 /* CollabProjectWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */; };
 		AA11BB22CC33DD44EE550006 /* AgentPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */; };
 		AA11BB22CC33DD44EE550007 /* ComplianceDecisionTreeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */; };
 		AA11BB22CC33DD44EE550008 /* InboxService.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE660008 /* InboxService.swift */; };
@@ -97,6 +98,7 @@
 		AA11BB22CC33DD44EE660DBC /* NotificationsPopoverView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationsPopoverView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SectionEditorView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollaboratorPanelView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CollabProjectWizardView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPanelView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComplianceDecisionTreeView.swift; sourceTree = "<group>"; };
 		AA11BB22CC33DD44EE660008 /* InboxService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxService.swift; sourceTree = "<group>"; };
@@ -216,6 +218,7 @@
 				AA11BB22CC33DD44EE660DBC /* NotificationsPopoverView.swift */,
 				AA11BB22CC33DD44EE660004 /* SectionEditorView.swift */,
 				AA11BB22CC33DD44EE660005 /* CollaboratorPanelView.swift */,
+				AA11BB22CC33DD44EE660099 /* CollabProjectWizardView.swift */,
 				AA11BB22CC33DD44EE660006 /* AgentPanelView.swift */,
 				AA11BB22CC33DD44EE660007 /* ComplianceDecisionTreeView.swift */,
 				EE11FF2233445566BB000001 /* RecruitingPipelineView.swift */,
@@ -435,6 +438,7 @@
 				AA11BB22CC33DD44EE550DBC /* NotificationsPopoverView.swift in Sources */,
 				AA11BB22CC33DD44EE550004 /* SectionEditorView.swift in Sources */,
 				AA11BB22CC33DD44EE550005 /* CollaboratorPanelView.swift in Sources */,
+				AA11BB22CC33DD44EE550099 /* CollabProjectWizardView.swift in Sources */,
 				AA11BB22CC33DD44EE550006 /* AgentPanelView.swift in Sources */,
 				AA11BB22CC33DD44EE550007 /* ComplianceDecisionTreeView.swift in Sources */,
 				AA11BB22CC33DD44EE550008 /* InboxService.swift in Sources */,

@@ -24,6 +24,8 @@ class AppState {
     var showNotificationReprompt: Bool = false
     var showChannelAdminWizard: Bool = false
     var channelAdminWizardMode: ChannelAdminWizardMode = .create
+    var showCollabProjectWizard: Bool = false
+    var collabProjectWizardMode: CollabProjectWizardMode = .create
 
     var mwBetaLite: Bool {
         betaFeatures["matcha_work_beta_lite"] == true || betaFeatures["matcha_work_beta_full"] == true

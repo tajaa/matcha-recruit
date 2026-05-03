@@ -29,6 +29,7 @@ enum StandardProjectMode: String, CaseIterable, Identifiable {
 
 struct ProjectDetailView: View {
     let projectId: String
+    @Environment(AppState.self) private var appState
     @State private var viewModel = ProjectDetailViewModel()
     @State private var chatVM = ThreadDetailViewModel()
     @State private var editingSectionId: String?
@@ -176,6 +177,17 @@ struct ProjectDetailView: View {
                         CollaboratorPanelView(projectId: pid)
                             .frame(width: 300, height: 360)
                     }
+                }
+
+                if viewModel.project?.projectType == "collab",
+                   let pid = viewModel.project?.id {
+                    Button {
+                        appState.collabProjectWizardMode = .manage(projectId: pid)
+                        appState.showCollabProjectWizard = true
+                    } label: {
+                        Image(systemName: "questionmark.circle").font(.system(size: 13))
+                    }
+                    .help("Collab project guide")
                 }
 
                 if viewModel.project?.projectType == "collab" {

@@ -132,7 +132,12 @@ struct ContentView: View {
                                         ForEach(["general", "presentation", "recruiting", "collab"], id: \.self) { type in
                                             Button {
                                                 showProjectTypePicker = false
-                                                createProject(type: type)
+                                                if type == "collab" {
+                                                    appState.collabProjectWizardMode = .create
+                                                    appState.showCollabProjectWizard = true
+                                                } else {
+                                                    createProject(type: type)
+                                                }
                                             } label: {
                                                 HStack {
                                                     Image(systemName: iconForProjectType(type))
@@ -356,6 +361,11 @@ struct ContentView: View {
             UserDefaults.standard.set(true, forKey: "channel-admin-wizard-shown-v1")
         }) {
             ChannelAdminWizardView(mode: appState.channelAdminWizardMode)
+        }
+        .sheet(isPresented: $appState.showCollabProjectWizard, onDismiss: {
+            UserDefaults.standard.set(true, forKey: "collab-project-wizard-shown-v1")
+        }) {
+            CollabProjectWizardView(mode: appState.collabProjectWizardMode)
         }
         .sheet(isPresented: $showNewConsultation) {
             NewConsultationSheet { created in

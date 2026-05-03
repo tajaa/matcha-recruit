@@ -46,6 +46,14 @@ struct ChannelAdminWizardView: View {
         return role == "individual" || role == "admin"
     }
 
+    private var skipLabel: String {
+        switch step {
+        case 1: return "skip wizard"
+        case 4: return "close"
+        default: return mode.isManage ? "close" : "skip"
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             stepIndicator
@@ -391,13 +399,14 @@ struct ChannelAdminWizardView: View {
 
     private var footer: some View {
         HStack {
-            Button("close") {
+            Button(skipLabel) {
                 hasSeenWizard = true
                 dismiss()
             }
             .buttonStyle(.plain)
             .font(.system(size: 12))
             .foregroundColor(.white.opacity(0.5))
+            .keyboardShortcut(.escape, modifiers: [])
 
             Spacer()
 
